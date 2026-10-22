@@ -4,11 +4,13 @@ import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/sche
 
 import {
   FIRST_FRAME_CARD_SLOTS,
+  HELP_AREAS,
   KEEP_PAGES_IN_SPACES,
   MORNING_BRIEF,
   TOUR_ILLUSTRATION_KEYS,
   capabilityPrompts,
   firstFrameCardPrompts,
+  starterPrompts,
   visibleTourPrompts,
   type TourCapabilities,
 } from '@/components/tourPrompts.js';
@@ -102,5 +104,32 @@ describe('capabilityPrompts', () => {
 
     expect(illustrated.sort()).toEqual([...TOUR_ILLUSTRATION_KEYS].sort());
     expect(TOUR_ILLUSTRATION_KEYS).toHaveLength(12);
+  });
+});
+
+describe('starterPrompts', () => {
+  const ALL = { email: true, calendar: true, sandbox: true, maps: true };
+
+  it('offers nothing until an area is picked', () => {
+    expect(starterPrompts({ helpAreas: [], capabilities: ALL })).toEqual([]);
+  });
+
+  it('offers three starters at most, even from one area with more cards', () => {
+    const starters = starterPrompts({ helpAreas: ['focus'], capabilities: ALL });
+    expect(starters.map(item => item.label)).toEqual(HELP_AREAS.focus.cards.slice(0, 3).map(item => item.label));
+  });
+
+  it('takes its starters in turn from the picked areas, in the order picked', () => {
+    const [familyFirst, familySecond] = HELP_AREAS.family.cards;
+    const [focusFirst] = HELP_AREAS.focus.cards;
+    const labels = starterPrompts({ helpAreas: ['family', 'focus'], capabilities: ALL }).map(item => item.label);
+    expect(labels).toEqual([familyFirst?.label, focusFirst?.label, familySecond?.label]);
+  });
+
+  it('never offers the same starter twice', () => {
+    const keys = starterPrompts({ helpAreas: HELP_AREA_IDS as readonly HelpAreaId[], capabilities: ALL }).map(
+      item => item.key,
+    );
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

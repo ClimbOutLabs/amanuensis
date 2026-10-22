@@ -1,25 +1,37 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import { greetingFor } from '@/components/AmanTour.js';
-import { AmanWelcome, amanWelcomeHeading } from '@/components/AmanWelcome.js';
+import { TOUR_SUBLINE } from '@/components/AmanTour.js';
+import { AmanWelcome, AmanWelcomeFooter, amanWelcomeHeading } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { TOUR_HIDDEN_STORAGE_KEY } from '@/utils/tourDisplayPreference.js';
 
-const { composer, server } = vi.hoisted(() => {
-  const server: { grantedFeatures: string[]; sandboxEnabled: boolean; hasCatalog: boolean } = {
+const { composer, server, waiting } = vi.hoisted(() => {
+  const server: {
+    grantedFeatures: string[];
+    sandboxEnabled: boolean;
+    hasCatalog: boolean;
+    scheduleCount: number;
+  } = {
     grantedFeatures: [],
     sandboxEnabled: false,
     hasCatalog: true,
+    scheduleCount: 0,
   };
-  return { composer: { setText: vi.fn(), send: vi.fn() }, server };
+  const waiting: { count: number; firstId: string | null } = { count: 0, firstId: null };
+  return { composer: { setText: vi.fn(), send: vi.fn() }, server, waiting };
 });
 
 vi.mock('@assistant-ui/react', async importOriginal => ({
   ...(await importOriginal<typeof import('@assistant-ui/react')>()),
   useAui: () => ({ composer: () => composer }),
+}));
+
+vi.mock('@/components/AmanTourWaiting.js', () => ({
+  useTourWaiting: () => ({ count: waiting.count, firstId: waiting.firstId }),
 }));
 
 vi.mock('@/server/ServerContext.js', async importOriginal => ({
@@ -36,27 +48,38 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
           }),
         }
       : null,
+  useOptionalScheduleServer: () => ({
+    listSchedules: async () => ({ data: Array.from({ length: server.scheduleCount }, () => ({})) }),
+  }),
   useServerCapabilities: () => ({ sandbox: { enabled: server.sandboxEnabled } }),
 }));
 
 type RenderInput = {
   assistantName?: string | null;
   userName?: string | null;
+  helpAreas?: HelpAreaId[];
   setup?: AmanSetupState;
   heading?: string;
 };
 
-function renderWelcome(input: RenderInput = {}) {
+function renderHome(input: RenderInput = {}) {
   const api = {
     getProfile: async () => ({
       ...EMPTY_PERSONALIZATION_PROFILE,
       assistant_name: input.assistantName ?? null,
       user_name: input.userName ?? null,
+      help_areas: input.helpAreas ?? [],
     }),
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
-  const screenElement = <AmanWelcome heading={input.heading} />;
+  // The thread renders the footer after the composer, and only on an ordinary new chat.
+  const screenElement = (
+    <>
+      <AmanWelcome heading={input.heading} />
+      {input.heading === undefined ? <AmanWelcomeFooter /> : null}
+    </>
+  );
   return render(
     <PersonalizationProvider api={api}>
       {input.setup === undefined ? (
@@ -70,7 +93,7 @@ function renderWelcome(input: RenderInput = {}) {
 
 const dismissed = { dismissed: true, dismiss: () => {} };
 const notDismissed = { dismissed: false, dismiss: () => {} };
-/** The tour's greeting, which depends on the hour the test runs at. */
+const LIVE_SETUP: AmanSetupState = { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed };
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -79,90 +102,171 @@ beforeEach(() => {
   server.grantedFeatures = [];
   server.sandboxEnabled = false;
   server.hasCatalog = true;
+  server.scheduleCount = 0;
+  waiting.count = 0;
+  waiting.firstId = null;
 });
 
 afterEach(() => {
   window.localStorage.clear();
 });
 
-describe('AmanWelcome on an ordinary new chat', () => {
-  it('shows the tour in place of the plain greeting', async () => {
-    renderWelcome({ assistantName: 'Testinatrix' });
+describe('the home greeting', () => {
+  it('shows the greeting as the heading, with the underline accent and no eyebrow line', async () => {
+    const { container } = renderHome({ assistantName: 'Maya', userName: 'Priya', setup: LIVE_SETUP });
 
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /How can I help/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: /^Good (morning|afternoon|evening), Priya\.$/,
+    });
+    expect(heading.querySelector('.aui-underline')).not.toBeNull();
+    expect(container.textContent).not.toMatch(/chief of staff/i);
+  });
+
+  it('keeps one short line about the assistant for a first-run person, whose tour is not hidden yet', async () => {
+    renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
+
+    expect(await screen.findByText(TOUR_SUBLINE)).toBeInTheDocument();
+    expect(screen.getByTestId('aman-tour')).toBeInTheDocument();
+  });
+
+  it('drops that line once the owner has hidden the tour', async () => {
+    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
+    renderHome({ setup: LIVE_SETUP });
+
+    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
+    expect(screen.queryByText(TOUR_SUBLINE)).not.toBeInTheDocument();
   });
 
   it('keeps a heading the runtime passes in, such as an active agent name, on the plain screen', async () => {
-    renderWelcome({ assistantName: 'Testinatrix', heading: 'Repo Reviewer' });
+    renderHome({ assistantName: 'Maya', heading: 'Repo Reviewer' });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Hide the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your brief is ready/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the status line', () => {
+  it('reads nothing needs the person and nothing is scheduled when both counts are zero', async () => {
+    renderHome({ setup: LIVE_SETUP });
+
+    expect(await screen.findByText(/^Your brief is ready/)).toBeInTheDocument();
+    expect(screen.getByText(/^Nothing needs you/)).toBeInTheDocument();
+    expect(screen.getByText('Nothing runs on a schedule yet')).toBeInTheDocument();
   });
 
-  it('sends the brief ticket through the composer and then sends it', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
+  it('counts the approvals that wait on the person', async () => {
+    waiting.count = 2;
+    waiting.firstId = 'approval-1';
+    renderHome({ setup: LIVE_SETUP });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Your brief is ready/ }));
+    expect(await screen.findByText(/^2 things need you/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Nothing needs you/)).not.toBeInTheDocument();
+  });
+
+  it('counts the schedules the person has set up', async () => {
+    server.scheduleCount = 2;
+    renderHome({ setup: LIVE_SETUP });
+
+    expect(await screen.findByText('2 things run on a schedule')).toBeInTheDocument();
+  });
+
+  it('shows the status line once, with no cards repeating it', async () => {
+    const { container } = renderHome({ setup: LIVE_SETUP });
+    await screen.findByText(/^Your brief is ready/);
+
+    expect(container.textContent?.match(/Nothing needs you/g)).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Quietly watching' })).not.toBeInTheDocument();
+  });
+
+  it('sends the brief through the composer and then sends it', async () => {
+    renderHome({ setup: LIVE_SETUP });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the brief' }));
 
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
     expect(composer.send).toHaveBeenCalledTimes(1);
     expect(composer.setText.mock.invocationCallOrder[0]).toBeLessThan(composer.send.mock.invocationCallOrder[0] ?? 0);
   });
 
-  it('sends a capability chip through the composer', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Run things on a schedule' }));
-
-    expect(composer.setText).toHaveBeenCalledWith('Every weekday at 7:30, send me my morning brief.');
-    expect(composer.send).toHaveBeenCalledTimes(1);
-  });
-
-  it('hides the email and calendar prompts until Google grants them', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByTestId('aman-tour');
-
-    expect(screen.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
-  });
-
-  it('shows the capability tickets an instance has the capability for', async () => {
-    server.grantedFeatures = ['gmail_read', 'calendar_read'];
-    server.sandboxEnabled = true;
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-
-    expect(await screen.findByRole('button', { name: /Handle your email/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Keep pages in Spaces/ })).toBeInTheDocument();
-  });
-
-  it('hides the Google prompts when the host has no Google port at all', async () => {
-    server.hasCatalog = false;
-    server.sandboxEnabled = true;
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByTestId('aman-tour');
-
-    expect(screen.queryByRole('button', { name: /Handle your email/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Run things on a schedule/ })).toBeInTheDocument();
-  });
-
-  it('turns the cards off and says why when no model is set', async () => {
-    renderWelcome({
+  it('turns its links off and says why when no model is set', async () => {
+    renderHome({
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('button', { name: /Your brief is ready/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Open the brief' })).toBeDisabled();
     expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
   });
 });
 
-describe('the setup line in the tour', () => {
+describe('the starters and the tour below the composer', () => {
+  it('offers no starters until the person picks a help area', async () => {
+    renderHome({ setup: LIVE_SETUP });
+    await screen.findByTestId('aman-tour');
+
+    expect(screen.queryByRole('list', { name: 'Starter suggestions' })).not.toBeInTheDocument();
+  });
+
+  it('offers at most three starters from the picked area', async () => {
+    renderHome({ helpAreas: ['focus'], setup: LIVE_SETUP });
+
+    const starters = await screen.findByRole('list', { name: 'Starter suggestions' });
+    expect(within(starters).getAllByRole('button')).toHaveLength(3);
+  });
+
+  it('opens the tour the first time, with its chooser and cards', async () => {
+    renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
+
+    const tour = await screen.findByTestId('aman-tour');
+    expect(within(tour).getByRole('group', { name: 'What would help you most?' })).toBeInTheDocument();
+    expect(within(tour).getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+  });
+
+  it('hides the Google prompts until Google grants them', async () => {
+    renderHome({ setup: LIVE_SETUP });
+    await screen.findByTestId('aman-tour');
+
+    expect(screen.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
+  });
+
+  it('hides the tour for the owner and brings it back with Show the tour', async () => {
+    renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide the tour' }));
+
+    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the tour' }));
+
+    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
+    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
+  });
+
+  it('keeps the tour hidden on a later visit when the owner put it away', async () => {
+    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
+    renderHome({ setup: LIVE_SETUP });
+
+    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
+  });
+
+  it('shows the checklist on the plain screen while the tour is hidden', async () => {
+    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
+    renderHome({ setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed } });
+
+    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
+  });
+});
+
+describe('the setup line', () => {
   it('shows how many lines are set up, linking to the first open one', async () => {
-    renderWelcome({
+    renderHome({
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
@@ -170,58 +274,14 @@ describe('the setup line in the tour', () => {
     expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
   });
 
-  it('drops the line once every line is done', async () => {
-    renderWelcome({
-      userName: 'Sam',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: notDismissed },
-    });
-
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
-  });
-
-  it('asks for the name in that line once the owner has put the guide away', async () => {
-    renderWelcome({
+  it('asks for the name once the owner has put the guide away', async () => {
+    renderHome({
       userName: null,
       setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: dismissed, settingsHref: '/settings' },
     });
 
     expect(await screen.findByTestId('aman-name-prompt')).toHaveTextContent('Aman does not know your name yet.');
     expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
-  });
-});
-
-describe('hiding and bringing back the tour', () => {
-  it('hides the tour for the owner, shows the plain greeting, and brings the tour back on request', async () => {
-    const { unmount } = renderWelcome({
-      assistantName: 'Testinatrix',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
-    });
-    fireEvent.click(await screen.findByRole('button', { name: 'Hide the tour' }));
-
-    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
-    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('true');
-    unmount();
-
-    renderWelcome({
-      assistantName: 'Testinatrix',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
-    });
-    expect(await screen.findByRole('button', { name: 'Replay the tour' })).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Replay the tour' }));
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
-  });
-
-  it('keeps the plain greeting for a stored hide, and the checklist on the plain screen while it is open', async () => {
-    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
-    renderWelcome({ setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed } });
-
-    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
   });
 });
 
@@ -233,15 +293,12 @@ describe('amanWelcomeHeading', () => {
   });
 });
 
-describe('AmanWelcome assistant name', () => {
-  it('shows no Aman anywhere on the first frame once the owner names the assistant', async () => {
-    renderWelcome({
-      assistantName: 'Maya',
-      setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed },
-    });
+describe('the assistant name on the home', () => {
+  it('shows no Aman anywhere once the owner names the assistant', async () => {
+    const { container } = renderHome({ assistantName: 'Maya', userName: 'Priya', setup: LIVE_SETUP });
 
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(screen.getByTestId('aman-tour').textContent).toContain('Maya is your chief of staff');
-    expect(screen.getByTestId('aman-tour').textContent).not.toMatch(/Aman/);
+    await screen.findByTestId('aman-tour');
+    expect(container.textContent).toContain('Ask what Maya has noticed');
+    expect(container.textContent).not.toMatch(/Aman/);
   });
 });

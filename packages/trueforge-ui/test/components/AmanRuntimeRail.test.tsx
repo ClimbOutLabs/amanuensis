@@ -181,34 +181,38 @@ describe('AmanRuntimeRail', () => {
     }
   });
 
-  it('feathers the avatar edges without a container, motion, or a literal colour', () => {
-    render(
+  it('shows the picture in a plain frame: no tinted card, no shadow, no dot, no mask or blend on the picture', () => {
+    const { container } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
       </RuntimeHarness>,
     );
+    const panda = container.querySelector('[data-section="panda"]');
+    expect(panda).not.toBeNull();
+    for (const tintClass of ['aui-ticket', 'aui-ticket--punch', 'aui-panda']) {
+      expect(panda).not.toHaveClass(tintClass);
+    }
     const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
     expect(avatar).toHaveClass('aman-runtime-rail__avatar');
 
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
     const selector = '.aman-runtime-rail__avatar {';
     // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations. The one extra block
-    // is the dark-mode override, which swaps the feather for a radial mask.
-    expect(stylesheet.split(selector)).toHaveLength(3);
+    // would let this read an earlier rule and pass on stale declarations.
+    expect(stylesheet.split(selector)).toHaveLength(2);
     const rule = stylesheet.slice(stylesheet.indexOf(selector));
     const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
 
-    // The prefixed pair is asserted separately because WebKit ships only those, and an
-    // unprefixed-only rule would leave Safari with the hard rectangle this change removes.
-    expect(avatarRule).toMatch(/^\s{2}mask-image:/m);
-    expect(avatarRule).toMatch(/^\s{2}mask-composite:/m);
-    expect(avatarRule).toContain('-webkit-mask-image:');
-    expect(avatarRule).toContain('-webkit-mask-composite:');
-    // The rail background must show through the feather, so the rule names no colour of
-    // its own beyond the mask alpha ramp, and stays static.
+    // The frame is the theme's border token, the panel's corner radius and the rail background.
+    expect(avatarRule).toContain('border: 0.0625rem solid var(--border);');
+    expect(avatarRule).toContain('border-radius: 0.5rem;');
+    expect(avatarRule).toContain('background-color: var(--sidebar-bg);');
+    expect(avatarRule).toContain('height: 10rem;');
+    // The picture is drawn as it is: no mask, gradient, blend or filter sits on it, so nothing
+    // can bleed past the frame's edge.
+    expect(avatarRule).not.toMatch(/mask|gradient|blend|filter|opacity/);
     expect(avatarRule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(avatarRule).not.toMatch(/animation|transition|transform/);
+    expect(avatarRule).not.toMatch(/\bpx\b/);
   });
 
   it('calls the build line a release, with a shortened reference', () => {
@@ -353,7 +357,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aui-panda__role');
+    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aman-runtime-rail__role');
   });
 
   it('captions the panda "Your Chief of Staff" when no owner name is known', () => {
@@ -363,7 +367,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aui-panda__role');
+    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aman-runtime-rail__role');
   });
 
   it('groups the rail into labeled answering and model sections', () => {

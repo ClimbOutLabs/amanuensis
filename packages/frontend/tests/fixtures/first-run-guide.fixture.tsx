@@ -1,10 +1,10 @@
 import {
   AmanFirstRunGuide,
-  AmanFirstRunSummary,
   AmanPandaSourceProvider,
   AmanSetupProvider,
   AmanTour,
   AmanWelcome,
+  AmanWelcomeFooter,
   PersonalizationPanel,
   PersonalizationProvider,
   ThemeProvider,
@@ -150,12 +150,9 @@ function Screen({ state }: { state: FixtureState }) {
           capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
           helpAreas={[]}
           onHelpAreasChange={() => {}}
-          waiting={{ count: 0, firstId: null }}
-          scheduleCount={0}
           canSend
           onSend={() => {}}
           onHide={() => {}}
-          setup={null}
         />
       </div>
     );
@@ -168,14 +165,9 @@ function Screen({ state }: { state: FixtureState }) {
           capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
           helpAreas={profileFor(state).help_areas}
           onHelpAreasChange={() => {}}
-          userName="Sam"
-          waiting={{ count: 2, firstId: 'fixture-approval' }}
-          scheduleCount={1}
           canSend
           onSend={() => {}}
           onHide={() => {}}
-          setup={<AmanFirstRunSummary placement="chat" />}
-          pandaSrc="/aman-avatar.png"
         />
       </div>
     );
@@ -183,6 +175,7 @@ function Screen({ state }: { state: FixtureState }) {
   return (
     <div className="flex min-h-screen flex-col justify-center py-8">
       <AmanWelcome />
+      <AmanWelcomeFooter />
     </div>
   );
 }

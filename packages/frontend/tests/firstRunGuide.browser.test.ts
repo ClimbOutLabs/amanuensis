@@ -163,7 +163,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         await shoot('tour-none');
         // Hidden on request: the plain greeting, with a way back to the tour.
         await open('hidden');
-        await page.getByRole('button', { name: 'Replay the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByRole('button', { name: 'Show the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(await page.getByTestId('aman-tour').count(), 0);
         await shoot('hidden');
 
@@ -183,7 +183,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.ok(nameBox.y < assistantBox.y, 'the owner name field comes before the assistant name field');
         await shoot('panel');
 
-        // The real shell: the top bar, the first frame and the composer share one screen with no page scroll.
+        // The real shell: the greeting and the status line read on the first screen, above the composer and the tour.
         await open('shell');
         await page.getByTestId('aman-tour').waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         // Let the settle and lay animations finish so the picture shows the resting frame.
@@ -191,9 +191,13 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           document.getAnimations().every(animation => animation.playState !== 'running'),
         );
         await shoot('shell');
+        const statusBox = await page
+          .getByText(/^Your brief is ready/)
+          .first()
+          .boundingBox();
         assert.ok(
-          (await page.evaluate(() => document.documentElement.scrollHeight)) <= viewport.height,
-          `the first frame scrolls the page at ${viewport.name} ${theme}`,
+          statusBox != null && statusBox.y + statusBox.height <= viewport.height,
+          `the status line is not on the first screen at ${viewport.name} ${theme}`,
         );
         // Every grid fills its rows: at desktop width each row is complete, on the phone the cards stack.
         const rowsOf = (selector: string) =>
@@ -202,10 +206,8 @@ test('first-run screens render in light and dark at desktop and phone width', { 
             selector,
           );
         const chipTops = await rowsOf('[role="group"] button');
-        const ticketTops = await rowsOf('[data-testid="aman-tour"] > ul > li');
         if (viewport.name === 'desktop') {
           assert.equal(new Set(chipTops).size, 1, 'the five chips share one row at desktop width');
-          assert.equal(new Set(ticketTops).size, 1, 'the three tickets share one row at desktop width');
         }
         const cardLefts = await page.evaluate(() =>
           Array.from(document.querySelectorAll('[data-testid="aman-tour"] section ul > li')).map(el =>
@@ -216,7 +218,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.equal(
           new Set(cardLefts).size,
           viewport.name === 'desktop' ? 4 : 1,
-          'the capability tickets fill four columns on desktop and one on the phone',
+          'the capability cards fill four columns on desktop and one on the phone',
         );
         assert.ok(
           await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible(),

@@ -4,6 +4,7 @@ import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
 import { RuntimeTourWaiting } from '../components/AmanTourWaiting.js';
+import { AmanWelcomeFooter } from '../components/AmanWelcome.js';
 import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
 import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
@@ -128,6 +129,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                             <>
                               {helpHere ? null : <ThreadWorkOnRepoControls />}
                               {composer}
+                              {helpHere || welcomeHeading !== undefined ? null : <AmanWelcomeFooter />}
                             </>
                           )}
                           {isLoading ? (

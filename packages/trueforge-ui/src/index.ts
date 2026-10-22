@@ -231,7 +231,7 @@ export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/A
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
 export type { AmanSetupState, FirstRunGuideState } from './components/AmanSetupContext.js';
 export { AmanTour, type AmanTourProps } from './components/AmanTour.js';
-export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
+export { AmanWelcome, AmanWelcomeFooter, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
   AppBugReportBundle,

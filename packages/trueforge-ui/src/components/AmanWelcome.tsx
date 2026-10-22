@@ -4,7 +4,6 @@ import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personaliza
 import { useEffect, useState } from 'react';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
-import { Button } from '../atoms/primitives/Button.js';
 import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
@@ -12,9 +11,10 @@ import { useOptionalScheduleServer, useServerCapabilities } from '../server/Serv
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
-import { useOptionalAmanPandaSrc } from './AmanPanda.js';
+import { AmanHomeStatus, AmanStarters } from './AmanHome.js';
+import { AmanPandaRoundTicket, useOptionalAmanPandaSrc } from './AmanPanda.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
-import { AmanTour, greetingLine } from './AmanTour.js';
+import { AmanTour, TOUR_SUBLINE, greetingLine } from './AmanTour.js';
 import { useTourWaiting } from './AmanTourWaiting.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
@@ -59,7 +59,7 @@ function useScheduleCount(): number {
         if (!cancelled) setCount(page.data.length);
       })
       .catch(() => {
-        /* Keep the last count; the day ticket reads fine without it. */
+        /* Keep the last count; the status line reads fine without it. */
       });
     return () => {
       cancelled = true;
@@ -91,7 +91,7 @@ function AmanNameLine() {
   );
 }
 
-/** The tour's line under "Quietly watching": the setup count while the guide is open, else the name line. */
+/** Under the first-run intro: the setup count while the guide is open, else the name line. */
 function TourSetupLine() {
   const setup = useOptionalAmanSetup();
   if (setup !== null && isFirstRunGuideVisible(setup)) {
@@ -100,39 +100,26 @@ function TourSetupLine() {
   return <AmanNameLine />;
 }
 
-/**
- * The setup block the plain greeting shows: the checklist while the owner has not put it away,
- * else one quiet line while the name is unset. The tour keeps only its compact summary line.
- */
+/** Once the tour is hidden, the setup checklist while the owner has not put it away, else the name line. */
 function AmanSetupBlock() {
   const setup = useOptionalAmanSetup();
   if (setup === null) {
     return null;
   }
   if (isFirstRunGuideVisible(setup)) {
-    return (
-      <div className="mb-6 flex w-full flex-col items-center px-4">
-        <AmanFirstRunGuide placement="chat" />
-      </div>
-    );
+    return <AmanFirstRunGuide placement="chat" />;
   }
-  return (
-    <div className="mb-6 flex w-full flex-col items-center px-4">
-      <AmanNameLine />
-    </div>
-  );
+  return <AmanNameLine />;
 }
 
 /**
- * The welcome screen as Amanuensis presents it on an ordinary new chat: the tour, with setup
- * folded in at the top. Once the owner hides the tour, or when the runtime passes a heading
- * (an active agent's name), the plain greeting and setup block show instead.
+ * The home's top, above the composer: the greeting, then for a first-run person one line about the
+ * assistant, the status line, and the setup. An active agent's heading gets the plain greeting only.
  */
 export function AmanWelcome(props: WelcomeScreenProps) {
   const personalization = useOptionalPersonalization();
   const setup = useOptionalAmanSetup();
-  const { hidden, setHidden } = useTourHidden();
-  const capabilities = useTourCapabilities();
+  const { hidden } = useTourHidden();
   const sendPrompt = useSendPrompt();
   const waiting = useTourWaiting();
   const scheduleCount = useScheduleCount();
@@ -142,44 +129,87 @@ export function AmanWelcome(props: WelcomeScreenProps) {
     profile: personalization?.profile,
     signInName: currentUser?.displayName,
   });
+  const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
+  const assistant = assistantDisplayName(profile.assistant_name);
+  const canSend = setup === null || setup.modelName !== null;
   const ordinaryChat = props.heading === undefined;
+  const showTour = ordinaryChat && !hidden;
 
-  if (ordinaryChat && !hidden) {
-    const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
-    const saveHelpAreas = (next: HelpAreaId[]) => {
-      // The chooser reads the saved profile, so a failed save leaves it as it was.
-      void personalization?.updateProfile({ ...profile, help_areas: next }).catch(() => {});
-    };
-    return (
-      <AmanTour
-        capabilities={capabilities}
-        helpAreas={profile.help_areas}
-        onHelpAreasChange={saveHelpAreas}
-        userName={personName}
-        assistantName={profile.assistant_name}
-        waiting={waiting}
-        scheduleCount={scheduleCount}
-        canSend={setup === null || setup.modelName !== null}
-        onSend={sendPrompt}
-        onHide={() => setHidden(true)}
-        setup={<TourSetupLine />}
-        pandaSrc={pandaSrc}
-      />
-    );
-  }
+  const greeting = (
+    <span className="aui-day-title">
+      <span className="aui-underline">{amanWelcomeHeading({ name: personName })}</span>
+    </span>
+  );
+  const phonePanda =
+    pandaSrc === null ? undefined : <AmanPandaRoundTicket src={pandaSrc} name={assistant} className="sm:hidden" />;
+  const hasTopBlock = ordinaryChat || setup !== null;
 
-  const heading = props.heading ?? <span className="aui-day-title">{amanWelcomeHeading({ name: personName })}</span>;
   return (
     <>
-      <WelcomeScreen {...props} heading={heading} />
-      <AmanSetupBlock />
-      {ordinaryChat ? (
-        <div className="mb-6 flex justify-center">
-          <Button type="button" variant="ghost" size="small" onClick={() => setHidden(false)}>
-            Replay the tour
-          </Button>
+      <WelcomeScreen {...props} heading={props.heading ?? greeting} icon={ordinaryChat ? phonePanda : props.icon} />
+      {hasTopBlock ? (
+        <div className="mb-6 flex w-full flex-col items-center gap-3 px-4">
+          {showTour ? <p className="m-0 text-center text-sm text-text-secondary">{TOUR_SUBLINE}</p> : null}
+          {ordinaryChat ? (
+            <AmanHomeStatus
+              assistantName={assistant}
+              waitingCount={waiting.count}
+              scheduleCount={scheduleCount}
+              canSend={canSend}
+              onSend={sendPrompt}
+            />
+          ) : null}
+          {showTour ? <TourSetupLine /> : <AmanSetupBlock />}
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * What the home shows below the composer: up to three starters from the picked help areas, then
+ * the tour panel, or a "Show the tour" link once the owner has hidden it.
+ */
+export function AmanWelcomeFooter() {
+  const personalization = useOptionalPersonalization();
+  const setup = useOptionalAmanSetup();
+  const { hidden, setHidden } = useTourHidden();
+  const capabilities = useTourCapabilities();
+  const sendPrompt = useSendPrompt();
+  const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
+  const canSend = setup === null || setup.modelName !== null;
+  const saveHelpAreas = (next: HelpAreaId[]) => {
+    // The chooser reads the saved profile, so a failed save leaves it as it was.
+    void personalization?.updateProfile({ ...profile, help_areas: next }).catch(() => {});
+  };
+
+  return (
+    <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 px-4 pb-6 pt-6">
+      {canSend ? null : (
+        <p className="m-0 text-center text-sm text-text-secondary">
+          Choose a model in Settings before you start a chat.
+        </p>
+      )}
+      <AmanStarters helpAreas={profile.help_areas} capabilities={capabilities} canSend={canSend} onSend={sendPrompt} />
+      {hidden ? (
+        <button
+          type="button"
+          onClick={() => setHidden(false)}
+          className="cursor-pointer border-0 bg-transparent text-sm text-text-secondary underline underline-offset-2"
+        >
+          Show the tour
+        </button>
+      ) : (
+        <AmanTour
+          capabilities={capabilities}
+          helpAreas={profile.help_areas}
+          onHelpAreasChange={saveHelpAreas}
+          assistantName={profile.assistant_name}
+          canSend={canSend}
+          onSend={sendPrompt}
+          onHide={() => setHidden(true)}
+        />
+      )}
+    </div>
   );
 }

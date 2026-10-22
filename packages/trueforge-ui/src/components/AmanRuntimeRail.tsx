@@ -219,7 +219,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           <OfflineIndicator />
 
           <section
-            className="aui-ticket aui-ticket--punch aui-panda aman-runtime-rail__avatar-card"
+            className="aman-runtime-rail__avatar-card"
             data-section="panda"
             aria-labelledby="aman-runtime-rail-title"
           >
@@ -236,9 +236,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 A
               </span>
             )}
-            <div className="aman-runtime-rail__identity aui-panda__caption">
+            <div className="aman-runtime-rail__identity">
               <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
-              <p className="aui-panda__role">{personName ? `${personName}'s Chief of Staff` : 'Your Chief of Staff'}</p>
+              <p className="aman-runtime-rail__role">
+                {personName ? `${personName}'s Chief of Staff` : 'Your Chief of Staff'}
+              </p>
             </div>
           </section>
 

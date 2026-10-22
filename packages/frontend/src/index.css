@@ -73,7 +73,7 @@ body {
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__section,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__details,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__footer,
-  .aman-shell > .aman-runtime-rail .aui-panda__role {
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__role {
     display: none;
   }
 
@@ -81,14 +81,6 @@ body {
     display: block;
     flex: 1 1 auto;
     min-width: 0;
-    border: 0;
-    padding: 0;
-    background: none;
-    box-shadow: none;
-  }
-
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card::before {
-    display: none;
   }
 
   /* The full status row is hidden at this width, so the compact dot takes over: its

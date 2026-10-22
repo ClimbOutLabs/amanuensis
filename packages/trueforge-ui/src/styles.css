@@ -101,10 +101,6 @@
     --gold-line: #c9a95a;
     --gold-line: oklch(0.747 0.105 87.7);
     /* The panda's frame, sampled from aman-avatar.png: parchment and wood in light. */
-    --panda-glow-from: #e5c7a1;
-    --panda-glow-from: oklch(0.846 0.061 73.2);
-    --panda-glow-to: #d5a272;
-    --panda-glow-to: oklch(0.75 0.088 64.6);
     --focus-ring: #7d5f15;
     --focus-ring: oklch(0.503 0.095 84.8);
     --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.16 0 0 0 0 0.15 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -189,10 +185,6 @@
     --gold-line: #8a6a2a;
     --gold-line: oklch(0.544 0.091 81.9);
     /* The panda's frame, sampled from aman-avatar.png: the wall's glow and its deep brown in dark. */
-    --panda-glow-from: #824b25;
-    --panda-glow-from: oklch(0.469 0.091 53);
-    --panda-glow-to: #4f2710;
-    --panda-glow-to: oklch(0.324 0.069 48.5);
     --focus-ring: #e9b949;
     --focus-ring: oklch(0.809 0.138 85.2);
     --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.12 0 0 0 0 0.15 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -404,37 +396,23 @@
   display: flex;
 }
 
-/* The panda sits in a ticket frame at the top of the rail: the picture, then its caption. */
+/* The picture sits in a plain frame: the panel's border and background, no tint or shadow. The
+   picture is drawn as it is (no crop, filter or blend), and the frame sets its height. */
 .aman-runtime-rail__avatar-card {
+  display: grid;
+  gap: 0.5rem;
   width: 100%;
 }
 
-/* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
-   all four edges lets the frame's glow show through instead of a hard cut. In light, multiply
-   takes the picture's light areas into the glow, so its white backing disappears. The gradients
-   are alpha ramps, not rendered colour, so the rule names no colour of its own. */
 .aman-runtime-rail__avatar {
-  width: 100%;
-  max-width: 15rem;
-  height: auto;
-  object-fit: contain;
-  mix-blend-mode: multiply;
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
-}
-
-/* Dark: multiply would darken the panda's blacks and whites, so the picture is drawn as it is
-   and only its edges fade into the glow through a radial mask. */
-.aui-theme-root.dark .aman-runtime-rail__avatar {
-  mix-blend-mode: normal;
-  -webkit-mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
-  mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
+  display: block;
+  justify-self: center;
+  width: auto;
+  max-width: 100%;
+  height: 10rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  background-color: var(--sidebar-bg);
 }
 
 .aman-runtime-rail__avatar-fallback {
@@ -508,10 +486,16 @@
 
 .aman-runtime-rail__identity h2 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.75rem;
+  line-height: 1.5rem;
+}
+
+.aman-runtime-rail__role {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
 }
 
 .aman-runtime-rail__rules {
@@ -1770,36 +1754,6 @@
 
 .aman-runtime-rail .aui-receipt .aui-row--2 > .state {
   justify-self: start;
-}
-
-/* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
-   instead of a white card. The hairline stays gold. */
-.aui-panda {
-  display: grid;
-  justify-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem;
-  border-color: var(--gold-line);
-  background-color: var(--panda-glow-to);
-  background-image: radial-gradient(ellipse at 50% 40%, var(--panda-glow-from), var(--panda-glow-to) 75%), var(--grain);
-  isolation: isolate;
-}
-
-.aui-panda__caption {
-  display: grid;
-  gap: 0.1rem;
-  width: 100%;
-  padding: 0 0.25rem 0.25rem;
-}
-
-/* The caption sits on the glow, not the card, so it takes the primary text colour: the glow's
-   worst point is too light for the secondary one in light mode. */
-.aui-panda__role {
-  margin: 0;
-  color: var(--text-primary);
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
 }
 
 /* Brief: display face for stop and chapter titles, receipt face for the stop counts. */

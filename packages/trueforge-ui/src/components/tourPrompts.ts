@@ -429,3 +429,21 @@ export function firstFrameCardPrompts({
   ]).filter(item => item.key !== KEEP_PAGES_IN_SPACES.key);
   return [...others.slice(0, FIRST_FRAME_CARD_SLOTS - 1), KEEP_PAGES_IN_SPACES];
 }
+
+/** The most starter suggestions the home offers under the composer. */
+const STARTER_SLOTS = 3;
+
+/**
+ * Up to three starters from the areas the person picked, in the order picked. None until an area
+ * is picked, so the home stays quiet for a person who has not chosen one.
+ */
+export function starterPrompts({
+  helpAreas,
+  capabilities,
+}: {
+  helpAreas: readonly HelpAreaId[];
+  capabilities: TourCapabilities;
+}): TourPrompt[] {
+  const areaQueues = helpAreas.map(id => visibleTourPrompts(HELP_AREAS[id].cards, capabilities));
+  return uniqueByKey(interleave(areaQueues)).slice(0, STARTER_SLOTS);
+}
