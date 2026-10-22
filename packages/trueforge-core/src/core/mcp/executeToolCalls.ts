@@ -32,7 +32,7 @@ import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { heldCallAuditText } from '../permissions/audit';
+import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
@@ -1184,8 +1184,11 @@ export async function executeToolCalls({
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',
-              message: 'The tool could not be prepared and was not executed. Retry once or choose another tool.',
-              suggested_action: 'retry',
+              // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
+              message:
+                preparationFailure.owner_message ??
+                'The tool could not be prepared and was not executed. Retry once or choose another tool.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'retry' : 'contact_user',
             },
         admissionProvenance: admission,
       };
@@ -1858,24 +1861,23 @@ export async function executeToolCalls({
   // A call refused while it was prepared never reaches classification, so it has no classify-time row.
   // Record each refusal so Recent actions shows what was not done. Refused before classification means no tier
   // was set, so it is recorded at Tier 3, the tier that always asks before a change.
-  if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
-    const audit = sentinel.services.audit;
-    for (const { toolCall } of results) {
-      const failure = toolCall.tool_info.pre_dispatch_failure;
-      if (failure === undefined) {
-        continue;
-      }
-      await audit.record({
-        tenant_id: sentinel.identity.tenant_id,
-        created_by: sentinel.identity.created_by,
-        conversation_id: sentinel.identity.conversation_id,
-        tier: toolCall.tool_info.tier ?? 3,
-        tool_name: toolCall.tool_info.original_tool_name,
-        description: `${toolCall.tool_info.original_tool_name}: not done. ${failure.owner_message ?? failure.message}`,
-        outcome: 'auto_denied',
-        auto_deny_reason: 'tool_not_prepared',
-      });
-    }
+  if (sentinel !== undefined) {
+    await recordNotPreparedRefusals({
+      services: sentinel.services,
+      identity: sentinel.identity,
+      refusals: results.flatMap(({ toolCall }) => {
+        const failure = toolCall.tool_info.pre_dispatch_failure;
+        return failure === undefined
+          ? []
+          : [
+              {
+                toolName: toolCall.tool_info.original_tool_name,
+                tier: toolCall.tool_info.tier,
+                message: failure.owner_message ?? failure.message,
+              },
+            ];
+      }),
+    });
   }
   // Sentinel: record outcomes once dispatch is settled. Auto-denied calls were
   // recorded at classify time; carded calls record the user's decision and

@@ -78,6 +78,7 @@ describe('holdApprovalCalls', () => {
     expect(infos.filter(candidate => candidate.held_for_owner !== undefined)).toHaveLength(1);
     expect(infos.filter(candidate => candidate.pre_dispatch_failure?.kind === 'policy_blocked')).toHaveLength(2);
     expect(infos[1]?.pre_dispatch_failure?.message).toContain('Too many actions are already waiting');
+    expect(infos[1]?.pre_dispatch_failure?.owner_message).toBe(infos[1]?.pre_dispatch_failure?.message);
     expect(result.refused.map(entry => entry.reason)).toEqual(['too_many', 'too_many']);
   });
 

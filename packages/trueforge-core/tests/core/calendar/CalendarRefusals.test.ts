@@ -1,4 +1,4 @@
-import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
+import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
@@ -24,15 +24,21 @@ function auditingServices(rows: AuditRecordInput[]): SentinelServices {
 async function runCalls(input: {
   built: Awaited<ReturnType<typeof build>>;
   calls: { id: string; name: 'create_event'; arguments: Record<string, unknown> }[];
+  /** A refusal the reply guard made before dispatch, set on every call instead of the calendar's own check. */
+  preDispatchFailure?: NonNullable<InternalToolCallInfo['pre_dispatch_failure']>;
 }) {
   const { tools, sentinel } = input.built;
   const tool_calls = await Promise.all(
-    input.calls.map(async call => ({
-      id: call.id,
-      type: 'function' as const,
-      function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-      tool_info: await tools.toolCallInfo({ name: call.name, arguments: call.arguments }),
-    })),
+    input.calls.map(async call => {
+      const info = await tools.toolCallInfo({ name: call.name, arguments: call.arguments });
+      return {
+        id: call.id,
+        type: 'function' as const,
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+        tool_info:
+          input.preDispatchFailure === undefined ? info : { ...info, pre_dispatch_failure: input.preDispatchFailure },
+      };
+    }),
   );
   const message: InternalEnrichedAssistantMessage = { role: 'assistant', content: null, tool_calls };
   return await executeToolCalls({
@@ -119,5 +125,34 @@ describe('a create the host refuses before it is shown', () => {
     expect(lines.size).toBe(1);
     expect(rows).toHaveLength(34);
     expect(built.google.urls.filter(entry => entry.startsWith('POST '))).toHaveLength(0);
+  });
+});
+
+describe('a refusal the reply guard makes before dispatch', () => {
+  it('gives the person one plain line, says why, and writes one audit row for it', async () => {
+    const rows: AuditRecordInput[] = [];
+    const built = await build({
+      routes: [],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services: auditingServices(rows),
+    });
+    const owner =
+      'Aman could not run one of the actions in this reply: the title was missing. Ask again to try it once more.';
+    const result = await runCalls({
+      built,
+      calls: [{ id: 'c1', name: 'create_event', arguments: NO_START }],
+      preDispatchFailure: { kind: 'pre_dispatch_failed', message: 'the title was missing', owner_message: owner },
+    });
+
+    expect(result.toolCallResults[0]?.disposition).toBe('never_ran');
+    expect(result.toolCallResults[0]?.remediation).toEqual({
+      reason_code: 'tool_pre_dispatch_failed',
+      message: owner,
+      suggested_action: 'contact_user',
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'tool_not_prepared' });
+    expect(rows[0]?.description).toContain('the title was missing');
   });
 });

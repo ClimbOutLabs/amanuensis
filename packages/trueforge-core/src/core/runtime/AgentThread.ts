@@ -117,7 +117,7 @@ import {
   toDispatchSentinelContext,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
-import { recordHeldActionAudit } from '../permissions/audit';
+import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
@@ -1937,6 +1937,26 @@ export class AgentThread {
     }
   }
 
+  /** Calls dropped with the whole reply get the same audit row as any other refused call. */
+  private async recordDroppedCallRefusals(calls: readonly { function: { name: string } }[] | undefined): Promise<void> {
+    if (this.sentinel === undefined || calls === undefined) {
+      return;
+    }
+    await recordNotPreparedRefusals({
+      services: this.sentinel.services,
+      identity: {
+        tenant_id: this.sentinel.tenant_id,
+        created_by: this.sentinel.created_by,
+        conversation_id: this.sentinel.conversation_id,
+      },
+      refusals: calls.map(call => ({
+        toolName: call.function.name,
+        tier: undefined,
+        message: TOO_MANY_TOOL_CALLS_MESSAGE,
+      })),
+    });
+  }
+
   private async auditHeld(input: {
     info: InternalToolCallInfo;
     outcome: 'logged' | 'approved' | 'denied';
@@ -3287,6 +3307,7 @@ export class AgentThread {
       knownEventIds: collectKnownEventIds(this.context),
     });
     if (replyGuard.tooManyCalls && !unattended) {
+      await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -3345,6 +3366,7 @@ export class AgentThread {
         call => call.tool_info.is_approval_required !== true,
       ).length;
       if (immediateCalls > MAX_TOOL_CALLS_PER_REPLY) {
+        await this.recordDroppedCallRefusals(assistantMessage.tool_calls);
         yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
         return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
       }

@@ -107,7 +107,13 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
  */
 export function parseToolRefusalNotice(content: unknown): string | undefined {
   const outcome = parseToolResultEnvelope(content)?.outcome;
-  if (!isUnknownRecord(outcome) || outcome.disposition !== 'policy_blocked' || !isUnknownRecord(outcome.remediation)) {
+  if (!isUnknownRecord(outcome) || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  // A call refused before it started (the reply guard, the search budget) carries the same plain line as a policy block.
+  const refusedBeforeStart =
+    outcome.disposition === 'never_ran' && outcome.remediation.reason_code === 'tool_pre_dispatch_failed';
+  if (outcome.disposition !== 'policy_blocked' && !refusedBeforeStart) {
     return undefined;
   }
   const { suggested_action: action, message } = outcome.remediation;
@@ -128,7 +134,7 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
     case 'policy_blocked':
       return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
     case 'never_ran':
-      return 'it never started';
+      return parseToolRefusalNotice(content) ?? 'it never started';
     default:
       return undefined;
   }
