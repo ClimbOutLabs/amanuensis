@@ -121,8 +121,23 @@ describe('assessDraft', () => {
   ])('refuses a Reply-To or Sender that is not one plain mailbox: %s', value => {
     for (const name of ['Reply-To', 'Sender']) {
       const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name, value }] });
-      expect(reasonOf(forSend(mail))).toContain(`(${name})`);
+      expect(reasonOf(forSend(mail))).toContain(`${name} line is not one plain address`);
     }
+    // Without a Reply-To, replies go to every From mailbox, so From is held to the same rule.
+    expect(reasonOf(forSend(plainDraft({ id: 'd1', from: value, body: 'x' })))).toBe(
+      "This draft's From line is not one plain address, so Aman cannot show you exactly where it goes. Ask me to write it again.",
+    );
+  });
+
+  it('says plainly why a Sender for another address is refused, and what to do next', () => {
+    const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name: 'Sender', value: 'mallory@example.com' }] });
+    expect(reasonOf(forSend(mail))).toBe(
+      'This draft says it is sent on behalf of another address (Sender), so it was not sent. Ask me to write it again from your own address.',
+    );
+  });
+
+  it('still sends from the account with a quoted name that has a comma', () => {
+    expect(forSend(plainDraft({ id: 'd1', from: '"Lovelace, Ada" <ada@example.com>', body: 'x' })).ok).toBe(true);
   });
 
   it('reads a quoted name with a comma in a Reply-To as one mailbox', () => {

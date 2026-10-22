@@ -676,6 +676,16 @@ describe('send_draft', () => {
         says: 'Sender',
       },
       {
+        name: 'a From that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          from: 'mallory@example.com, <ada@example.com>',
+          to: 'grace@example.com',
+          body: 'x',
+        }),
+        says: 'From line is not one plain address',
+      },
+      {
         name: 'a header Aman cannot check',
         mail: plainDraft({
           id: 'd-m1',

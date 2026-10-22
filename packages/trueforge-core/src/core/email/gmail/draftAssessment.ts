@@ -1,7 +1,8 @@
 /**
  * Decides whether a draft is one Aman can show in full and send exactly as shown. The send card and the review
- * hash cover the recipients, subject and plain text. A draft with anything else that changes what is delivered
- * (an attachment, an HTML version, a reply address, a different sender) is refused, never sent on trust.
+ * hash cover the recipients, where replies go, the subject and the plain text. A draft with anything else that
+ * changes what is delivered (an attachment, an HTML version, a header not listed here, a sender other than the
+ * account) is refused, never sent on trust.
  */
 import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage } from './gmailWire';
@@ -89,8 +90,8 @@ export function fromAddress(raw: string): string | null {
 }
 
 /**
- * The one address of a Reply-To or Sender header, or null unless it is a single plain mailbox. Read as a list first,
- * so an extra address before the brackets, a group or a comment cannot hide behind the account's own address.
+ * The one address of a From, Reply-To or Sender header, or null unless it is a single plain mailbox. Read as a list
+ * first, so an extra address before the brackets, a group or a comment cannot hide behind the account's own address.
  */
 function singleMailboxAddress(raw: string): string | null {
   return addressListIsPlain(raw) && mailboxesOf(raw).length === 1 ? fromAddress(raw) : null;
@@ -116,7 +117,7 @@ const REFUSALS = {
     'This draft has formatting or parts that Aman cannot show you in full, usually because it was edited in Gmail. Ask me to write it again.',
   format: 'This draft has a header that Aman cannot show you or check, so it cannot be sent. Ask me to write it again.',
   headers:
-    'This draft sets headers that Aman cannot show you, such as a reply address or sender. Ask me to write it again.',
+    'This draft lists a recipient in a form Aman cannot show you exactly, such as a group or a note in brackets. Ask me to write it again.',
   selectors:
     'This draft has more variation selectors than a name or word needs, and they do not show, so it cannot be sent. Ask me to write it again.',
   charset:
@@ -135,6 +136,13 @@ function headerNameForDisplay(name: string): string {
 function unknownHeaderRefusal(name: string): string {
   return `This draft has a header Aman cannot check${headerNameForDisplay(name)}, so it was not sent. Ask Aman to write it again without it.`;
 }
+
+function notOneAddressRefusal(name: string): string {
+  return `This draft's ${name} line is not one plain address, so Aman cannot show you exactly where it goes. Ask me to write it again.`;
+}
+
+const OTHER_SENDER_REFUSAL =
+  'This draft says it is sent on behalf of another address (Sender), so it was not sent. Ask me to write it again from your own address.';
 
 function repeatedHeaderRefusal(name: string): string {
   const shown = /^[A-Za-z0-9-]{1,80}$/.test(name) ? name : 'header';
@@ -179,14 +187,14 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     const shown = name === 'sender' ? 'Sender' : 'Reply-To';
     const address = singleMailboxAddress(rawHeaderOf({ part: payload, name }));
     if (address === null) {
-      return { ok: false, reason: unknownHeaderRefusal(shown) };
+      return { ok: false, reason: notOneAddressRefusal(shown) };
     }
     if (address === account) {
       continue;
     }
     // A Reply-To elsewhere is shown on the card before approval. A Sender elsewhere would send as someone else.
     if (name === 'sender') {
-      return { ok: false, reason: unknownHeaderRefusal(shown) };
+      return { ok: false, reason: OTHER_SENDER_REFUSAL };
     }
     replyTo = address;
   }
@@ -211,9 +219,17 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
   if (transferEncoding !== '' && !TRANSFER_ENCODINGS.has(transferEncoding)) {
     return { ok: false, reason: REFUSALS.formatting };
   }
-  const from = fromAddress(rawHeaderOf({ part: payload, name: 'from' }));
+  // Without a Reply-To, replies go to every From mailbox, so From must be exactly one too.
+  const from = singleMailboxAddress(rawHeaderOf({ part: payload, name: 'from' }));
+  if (from === null) {
+    return { ok: false, reason: notOneAddressRefusal('From') };
+  }
   if (from !== input.account.toLowerCase()) {
-    return { ok: false, reason: 'This draft is set to send from a different address than your Gmail account.' };
+    return {
+      ok: false,
+      reason:
+        'This draft is set to send from a different address than your Gmail account. Ask me to write it again from your own address.',
+    };
   }
   for (const name of ['to', 'cc', 'bcc']) {
     if (!addressListIsPlain(rawHeaderOf({ part: payload, name }))) {
