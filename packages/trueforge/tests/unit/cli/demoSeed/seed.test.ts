@@ -120,7 +120,7 @@ describe('demo seed against the real stores', () => {
     const spaces = await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 });
 
     expect(spaces.map(space => space.name)).toEqual(['Tasks']);
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('- [x] Find English-speaking GP - done');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('- [ ] Find English-speaking GP (in progress)');
   });
 
   it('keeps each persona library apart and has every document indexed', async () => {
@@ -211,7 +211,7 @@ describe('demo seed against the real stores', () => {
 
     expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
     const body = await spaceBody(stores, DEMO_TASKS_SPACE_ID);
-    expect(body).toContain('- [x] Find English-speaking GP - done');
+    expect(body).toContain('GP appointment Thursday, November 5, 2026, 09:30');
     expect(body).not.toContain('Edited by the assistant.');
     expect(body).not.toContain('demo_seed_day');
   });
@@ -233,17 +233,17 @@ describe('demo seed against the real stores', () => {
     expect(again.agent).toBe('unchanged');
   });
 
-  it('changes nothing on the next day when nobody edited anything', async () => {
+  it('moves only the dates that follow the day on the next seed, and keeps the rest', async () => {
     await seed(stores, DAY_ONE);
 
     const report = await seed(stores, DAY_TWO);
 
-    // Every dated fact is pinned to the mailbox week, so nothing changes.
-    expect(report.memory).toEqual({ created: 0, updated: 0, unchanged: NOTE_COUNT, removed: 0 });
-    expect(report.spaces).toEqual({ created: 0, updated: 0, unchanged: 1 });
+    // Only the meetup note and the Tasks space name a date that moves with the day.
+    expect(report.memory).toEqual({ created: 0, updated: 1, unchanged: NOTE_COUNT - 1, removed: 0 });
+    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
     expect(report.knowledge).toMatchObject({ created: 0, unchanged: 11, removed: 0 });
     expect(await vault(stores)).toHaveLength(NOTE_COUNT);
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 21, 10:00');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Nov 4, 10:00');
   });
 
   it('seeds a rehearsal day that is not the real today', async () => {
@@ -255,7 +255,7 @@ describe('demo seed against the real stores', () => {
 
     await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });
 
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 21, 10:00');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 28, 10:00');
   });
 
   it('never overwrites a profile the user wrote themselves', async () => {

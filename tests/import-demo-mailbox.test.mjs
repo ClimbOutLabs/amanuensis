@@ -3,11 +3,12 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, URL, URLSearchParams } from 'node:url';
+import { parseDemoDay } from '../demo/fixtures/mailbox/generate-fixtures.mjs';
 import { importDemoMailbox, loadConfig, summarize } from '../demo/scripts/import-demo-mailbox.mjs';
 import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
 
 const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
-const messages = loadDemoSet({ fixtureDir });
+const messages = loadDemoSet({ fixtureDir, today: parseDemoDay('2026-10-19') });
 const quiet = () => undefined;
 
 function jsonResponse({ body, status = 200 }) {

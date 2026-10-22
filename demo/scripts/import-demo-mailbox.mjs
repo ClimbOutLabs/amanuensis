@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // One-off import of the demo mailbox set (demo/fixtures/mailbox/demo-set.json)
 // into a throwaway Gmail account with users.messages.import. Messages keep their
-// Date header as the received time and land unread in the inbox.
+// Date header as the received time and land unread in the inbox. The set is made
+// for today in Lisbon (or --today) when it runs, so its dates follow the day.
 //
 // Configuration comes only from environment variables or a gitignored
 // `.env.test-mailbox` file at the repo root (never the command line):
@@ -17,12 +18,15 @@
 // searching the mailbox, which gmail.insert does not allow.
 //
 // Usage:
-//   pnpm demo:import-mailbox --dry-run   list what would be imported, no network
-//   pnpm demo:import-mailbox             import for real
+//   pnpm demo:import-mailbox --dry-run               list what would be imported, no network
+//   pnpm demo:import-mailbox                         import for real, dated today
+//   pnpm demo:import-mailbox --today 2026-10-19      import the mail for a given day
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URLSearchParams } from 'node:url';
+import { parseArgs } from 'node:util';
+import { parseDemoDay } from '../fixtures/mailbox/generate-fixtures.mjs';
 import { loadDemoSet, parseEnvFile } from './test-mailbox-env.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -160,11 +164,18 @@ export function summarize({ result, total }) {
 }
 
 async function main() {
-  const dryRun = process.argv.slice(2).includes('--dry-run');
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: { 'dry-run': { type: 'boolean', default: false }, today: { type: 'string' } },
+    strict: true,
+    allowPositionals: false,
+  });
+  const dryRun = values['dry-run'];
+  const today = values.today === undefined ? undefined : parseDemoDay(values.today);
   const config = loadConfig({
     fileText: existsSync(envFile) ? readFileSync(envFile, 'utf8') : undefined,
   });
-  const messages = loadDemoSet();
+  const messages = loadDemoSet({ today });
   const result = await importDemoMailbox({ config, messages, dryRun });
   console.log(summarize({ result, total: messages.length }));
 }

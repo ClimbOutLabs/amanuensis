@@ -42,33 +42,60 @@ function noteBody(world: ReturnType<typeof worldOn>, key: string): string {
   return note.body;
 }
 
+const SEED_DAYS = ['2026-10-19', '2026-10-22', '2026-10-25'];
+
+/** The calendar day `offset` days after `seedDay`, formatted the way the seed writes it. */
+function afterSeedDay({
+  seedDay,
+  offset,
+  options,
+}: {
+  seedDay: string;
+  offset: number;
+  options: Intl.DateTimeFormatOptions;
+}): string {
+  const [year = 0, month = 0, dayOfMonth = 0] = seedDay.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...options }).format(
+    new Date(Date.UTC(year, month - 1, dayOfMonth + offset, 12)),
+  );
+}
+
+const longAfter = (seedDay: string, offset: number): string =>
+  afterSeedDay({ seedDay, offset, options: { weekday: 'long', month: 'long', day: 'numeric' } });
+const monthDayAfter = (seedDay: string, offset: number): string =>
+  afterSeedDay({ seedDay, offset, options: { month: 'short', day: 'numeric' } });
+const weekdayAfter = (seedDay: string, offset: number): string =>
+  afterSeedDay({ seedDay, offset, options: { weekday: 'long' } });
+
 describe('buildDemoWorld dates', () => {
-  it('pins every date her mail and calendar own to the demo mailbox week, whatever day the seed runs', () => {
-    const body = tasksBody(worldOn(day('2026-10-19')));
+  it.each(SEED_DAYS)('counts every date from the seed day %s, so the GP visit is three days ahead', seedDay => {
+    const body = tasksBody(worldOn(day(seedDay)));
 
-    expect(body).toContain('GP appointment Thursday, October 22, 2026, 09:30');
-    expect(body).toContain('Appointment Oct 21, 10:00 at Amoreira Health Check');
-    expect(body).toContain('Sessions: Oct 23 Alfama sunrise, Oct 24 Miradouro da Graça golden hour, Oct 31 Belém');
-    expect(body).toContain('Pick up the 35mm-equivalent camera lens - due Thursday, October 22');
-    expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 11');
-    expect(tasksBody(worldOn(day('2026-10-21')))).toBe(body);
-    expect(tasksBody(worldOn(day('2026-11-30')))).toBe(tasksBody(worldOn(day('2026-10-23'))));
+    expect(body).toContain(`GP appointment ${longAfter(seedDay, 3)}, 2026, 09:30`);
+    expect(body).toContain(`Appointment ${monthDayAfter(seedDay, 2)}, 10:00`);
+    expect(body).toContain(`Pick up the 35mm-equivalent camera lens - due ${longAfter(seedDay, 3)}`);
+    expect(body).toContain('- [ ] Find English-speaking GP (in progress)');
+    expect(body).not.toContain('- [x] Find English-speaking GP');
   });
 
-  it('shows the GP visit as done, not in progress, once the seed day is past it', () => {
-    expect(tasksBody(worldOn(day('2026-10-22')))).toContain('- [ ] Find English-speaking GP (in progress)');
-
-    const after = tasksBody(worldOn(day('2026-10-23')));
-    expect(after).toContain('- [x] Find English-speaking GP - done Thursday, October 22');
-    expect(after).not.toContain('Find English-speaking GP (in progress)');
+  it.each(SEED_DAYS)('dates what is finished before the seed day %s', seedDay => {
+    expect(tasksBody(worldOn(day(seedDay)))).toContain(`- [x] Get NIF (tax number) - done ${longAfter(seedDay, -8)}`);
   });
 
-  it('keeps every memory note the same when the day moves', () => {
-    const first = worldOn(MONDAY);
+  it('keeps the same tasks on the same day, and every memory note but the meetup when the day moves', () => {
+    const first = worldOn(day('2026-10-19'));
     const later = worldOn(day('2026-11-02'));
 
-    expect(later.notes).toEqual(first.notes);
-    expect(noteBody(first, 'newcomers')).toContain('Thursday, Oct 29 at Café do Cais');
+    expect(tasksBody(worldOn(day('2026-10-19')))).toBe(tasksBody(first));
+    expect(later.notes.filter(note => note.key !== 'newcomers')).toEqual(
+      first.notes.filter(note => note.key !== 'newcomers'),
+    );
+    expect(noteBody(first, 'newcomers')).toContain(
+      `${weekdayAfter('2026-10-19', 10)}, ${monthDayAfter('2026-10-19', 10)} at Café do Cais`,
+    );
+    expect(noteBody(later, 'newcomers')).toContain(
+      `${weekdayAfter('2026-11-02', 10)}, ${monthDayAfter('2026-11-02', 10)} at Café do Cais`,
+    );
     expect(later.day).toBe('2026-11-02');
   });
 
@@ -163,7 +190,7 @@ describe('buildDemoWorld content', () => {
     const world = worldOn(MONDAY);
 
     expect(tasksBody(world)).toContain(
-      'GP appointment Thursday, October 22, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
+      'GP appointment Thursday, October 29, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
     );
     expect(noteBody(world, 'short-term-rental')).toContain('Travessa das Gaivotas 4, 1200-000 Lisboa, in Chiado');
   });

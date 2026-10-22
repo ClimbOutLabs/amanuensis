@@ -30,6 +30,7 @@ import { Buffer } from 'node:buffer';
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { deflateSync } from 'node:zlib';
 
 const OUT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1049,6 +1050,9 @@ function emlI18n({
 const FONT = {
   ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
   ',': ['.....', '.....', '.....', '.....', '..#..', '..#..', '.#...'],
+  M: ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
+  S: ['.####', '#....', '#....', '.###.', '....#', '....#', '####.'],
+  W: ['#...#', '#...#', '#...#', '#.#.#', '#.#.#', '##.##', '#...#'],
   '-': ['.....', '.....', '.....', '#####', '.....', '.....', '.....'],
   '.': ['.....', '.....', '.....', '.....', '.....', '..#..', '..#..'],
   0: ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
@@ -1393,8 +1397,165 @@ function makeDocx({ title, creator, blocks }) {
 
 const OWNER = 'Maya Hollis <maya.hollis@example.com>';
 
-function buildMessages() {
+// Every date in the demo mail is counted from one day: "today" in Lisbon, or --today. Offsets
+// are days from that day, so the story keeps its gaps and its weekday names on any day of the week.
+export const DEMO_TIME_ZONE = 'Europe/Lisbon';
+const CHICAGO = 'America/Chicago';
+const MADRID = 'Europe/Madrid';
+
+function pad2(number) {
+  return String(number).padStart(2, '0');
+}
+
+/** `20261022` */
+function compactDay(day) {
+  return `${day.year}${pad2(day.month)}${pad2(day.day)}`;
+}
+
+export function parseDemoDay(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (match === null) {
+    throw new Error(`"${text}" is not a day written YYYY-MM-DD, such as 2026-10-19.`);
+  }
+  const day = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  if (!sameDay(dayAdd(day, 0), day)) {
+    throw new Error(`"${text}" is not a real calendar day.`);
+  }
+  return day;
+}
+
+function sameDay(left, right) {
+  return left.year === right.year && left.month === right.month && left.day === right.day;
+}
+
+export function todayIn(zone, now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(now);
+  const value = type => Number(parts.find(part => part.type === type).value);
+  return { year: value('year'), month: value('month'), day: value('day') };
+}
+
+function dayAdd(day, offset) {
+  const date = new Date(Date.UTC(day.year, day.month - 1, day.day + offset));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+}
+
+function formatDay({ day, options, locale = 'en-US' }) {
+  // Named days are formatted from UTC noon, so no zone can move them to the day before.
+  return new Intl.DateTimeFormat(locale, { timeZone: 'UTC', ...options }).format(
+    new Date(Date.UTC(day.year, day.month - 1, day.day, 12)),
+  );
+}
+
+function zoneOffsetMs({ zone, instant }) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(new Date(instant));
+  const value = type => Number(parts.find(part => part.type === type).value);
+  const wall = Date.UTC(
+    value('year'),
+    value('month') - 1,
+    value('day'),
+    value('hour'),
+    value('minute'),
+    value('second'),
+  );
+  return wall - Math.floor(instant / 1000) * 1000;
+}
+
+/** The instant a wall-clock time (HH:MM[:SS]) on `day` names in `zone`. */
+function instantAt({ day, time, zone }) {
+  const [hour, minute, second = 0] = time.split(':').map(Number);
+  const wall = Date.UTC(day.year, day.month - 1, day.day, hour, minute, second);
+  const guess = wall - zoneOffsetMs({ zone, instant: wall });
+  return wall - zoneOffsetMs({ zone, instant: guess });
+}
+
+/** A Date header, such as `Wed, 14 Oct 2026 09:14:22 +0100`, for a wall-clock time in the sender's zone. */
+function mailDate({ day, time, zone }) {
+  const instant = instantAt({ day, time, zone });
+  const minutes = Math.round(zoneOffsetMs({ zone, instant }) / 60000);
+  const magnitude = Math.abs(minutes);
+  const offset = `${minutes < 0 ? '-' : '+'}${pad2(Math.floor(magnitude / 60))}${pad2(magnitude % 60)}`;
+  const weekday = formatDay({ day, options: { weekday: 'short' } });
+  const month = formatDay({ day, options: { month: 'short' } });
+  return `${weekday}, ${pad2(day.day)} ${month} ${day.year} ${time} ${offset}`;
+}
+
+/** An iCalendar UTC time, such as `20261107T080500Z`. */
+function utcStamp({ day, time, zone }) {
+  return `${new Date(instantAt({ day, time, zone })).toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
+}
+
+/** `CDT` or `CST`, as the zone's name on that day. */
+function zoneAbbreviation({ zone, instant }) {
+  return new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' })
+    .formatToParts(new Date(instant))
+    .find(part => part.type === 'timeZoneName').value;
+}
+
+function clockIn({ zone, instant }) {
+  // Node writes a narrow no-break space before AM and PM; the mail uses a plain space.
+  return new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit' })
+    .format(new Date(instant))
+    .replace(/\u202f/g, ' ');
+}
+
+const enWeekday = day => formatDay({ day, options: { weekday: 'long' } });
+const enMonth = day => formatDay({ day, options: { month: 'long' } });
+/** `Thursday, October 22` */
+const enLong = day => `${enWeekday(day)}, ${enMonth(day)} ${day.day}`;
+/** `Thursday, October 22, 2026` */
+const enLongYear = day => `${enLong(day)}, ${day.year}`;
+/** `Wed Oct 21` */
+const enShortDay = day =>
+  `${formatDay({ day, options: { weekday: 'short' } })} ${formatDay({ day, options: { month: 'short' } })} ${day.day}`;
+/** `Fri, Oct 23` */
+const enShort = day =>
+  `${formatDay({ day, options: { weekday: 'short' } })}, ${formatDay({ day, options: { month: 'short' } })} ${day.day}`;
+const ptWeekday = day => formatDay({ day, options: { weekday: 'long' }, locale: 'pt-PT' });
+const ptMonth = day => formatDay({ day, options: { month: 'long' }, locale: 'pt-PT' });
+/** `quinta-feira, 22 de outubro`; Portuguese weekday names take "na" or "no" before them. */
+const ptWeekdayDate = day => `${ptWeekday(day)}, ${day.day} de ${ptMonth(day)}`;
+const ptOn = day => `${/^(sábado|domingo)$/.test(ptWeekday(day)) ? 'no' : 'na'} ${ptWeekdayDate(day)}`;
+/** `22 de outubro de 2026` */
+const ptDateYear = day => `${day.day} de ${ptMonth(day)} de ${day.year}`;
+const esWeekday = day => formatDay({ day, options: { weekday: 'long' }, locale: 'es-ES' });
+const esMonth = day => formatDay({ day, options: { month: 'long' }, locale: 'es-ES' });
+/** `jueves 29 de octubre` */
+const esWeekdayDate = day => `${esWeekday(day)} ${day.day} de ${esMonth(day)}`;
+
+function ordinal(number) {
+  const tens = number % 100;
+  if (tens >= 11 && tens <= 13) {
+    return `${number}th`;
+  }
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[number % 10] ?? 'th';
+  return `${number}${suffix}`;
+}
+
+/** The month before `day`'s month, as a day-of-month range: the billing period of a bill sent on `day`. */
+function previousMonthRange(day) {
+  const last = dayAdd({ year: day.year, month: day.month, day: 1 }, -1);
+  return { first: { year: last.year, month: last.month, day: 1 }, last };
+}
+
+export function buildMessages({ today }) {
   const messages = {};
+  const at = offset => dayAdd(today, offset);
+  // Message-IDs carry the day the mail was made for, so mail made on a later day is a new message.
+  const mid = raw => raw.replace('@', `.${compactDay(today)}@`);
 
   // 01: flight confirmation with PDF itinerary and ICS
   const itineraryPdf = makeTextPdf('Itinerary XK7Q2P', [
@@ -1404,7 +1565,7 @@ function buildMessages() {
     'Passenger: Maya Hollis',
     'Flight: SW 214',
     'Lisbon (LIS) -> Porto (OPO)',
-    'Saturday, November 7, 2026',
+    enLongYear(at(19)),
     'Departure: 08:05 AM WET',
     'Arrival: 08:55 AM WET',
     'Seat: 14A, Economy',
@@ -1418,9 +1579,9 @@ function buildMessages() {
       'PRODID:-//Example Fixtures//Flight//EN',
       'BEGIN:VEVENT',
       'UID:sw214-xk7q2p@skyward-air.example.com',
-      'DTSTAMP:20261014T081422Z',
-      'DTSTART:20261107T080500Z',
-      'DTEND:20261107T085500Z',
+      `DTSTAMP:${utcStamp({ day: at(-5), time: '09:14:22', zone: DEMO_TIME_ZONE })}`,
+      `DTSTART:${utcStamp({ day: at(19), time: '08:05:00', zone: DEMO_TIME_ZONE })}`,
+      `DTEND:${utcStamp({ day: at(19), time: '08:55:00', zone: DEMO_TIME_ZONE })}`,
       'SUMMARY:SW 214: Lisbon to Porto',
       'DESCRIPTION:Booking XK7Q2P\\, seat 14A',
       'LOCATION:Lisbon Airport (LIS)',
@@ -1433,9 +1594,9 @@ function buildMessages() {
   messages['01-flight-confirmation.eml'] = emlWithAttachments({
     from: 'Skyward Air <bookings@skyward-air.example.com>',
     to: OWNER,
-    date: 'Wed, 14 Oct 2026 09:14:22 +0100',
+    date: mailDate({ day: at(-5), time: '09:14:22', zone: DEMO_TIME_ZONE }),
     subject: 'Your booking is confirmed: Skyward Air XK7Q2P',
-    msgid: '<xk7q2p-confirmation@skyward-air.example.com>',
+    msgid: mid('<xk7q2p-confirmation@skyward-air.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
@@ -1444,7 +1605,7 @@ function buildMessages() {
       '  Flight:    SW 214 (Skyward Air)',
       '  From:      Lisbon (LIS)',
       '  To:        Porto (OPO)',
-      '  Date:      Saturday, November 7, 2026',
+      `  Date:      ${enLongYear(at(19))}`,
       '  Departs:   08:05 AM WET',
       '  Arrives:   08:55 AM WET',
       '  Passenger: Maya Hollis',
@@ -1466,16 +1627,16 @@ function buildMessages() {
   messages['02-gp-appointment-confirmation.eml'] = emlSimple({
     from: 'Brightwater Family Clinic <appointments@brightwater-clinic.example.org>',
     to: OWNER,
-    date: 'Wed, 14 Oct 2026 10:00:05 +0100',
-    subject: 'Appointment confirmed: Thursday, October 22 at 09:30',
-    msgid: '<appt-20261022@brightwater-clinic.example.org>',
+    date: mailDate({ day: at(-5), time: '10:00:05', zone: DEMO_TIME_ZONE }),
+    subject: `Appointment confirmed: ${enLong(at(3))} at 09:30`,
+    msgid: mid(`<appt-${compactDay(at(3))}@brightwater-clinic.example.org>`),
     body: crlfJoin([
       'Hi Maya,',
       '',
       'Your first appointment is confirmed:',
       '',
       '  What:     New patient check-up',
-      '  When:     Thursday, October 22, 2026 at 09:30',
+      `  When:     ${enLongYear(at(3))} at 09:30`,
       '  Where:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '  Doctor:   Dra. Helena Rocha',
       '',
@@ -1490,15 +1651,21 @@ function buildMessages() {
   });
 
   // 03: electricity bill in European Portuguese, with a PDF
-  const billPdf = makeTextPdf('Fatura FT 2026/118842', [
+  // The bill is sent in the first half of the month for the month before, and is due 11 days after today.
+  const billMailDay = at(-7);
+  const billPeriod = previousMonthRange(billMailDay);
+  const billMonth = ptMonth(billPeriod.first);
+  const billYear = billMailDay.year;
+  const billDue = at(11);
+  const billPdf = makeTextPdf(`Fatura FT ${billYear}/118842`, [
     'LUZ DO TEJO ENERGIA - FATURA DE ELETRICIDADE',
-    'Fatura n.º FT 2026/118842',
-    'Período de faturação: 1 a 30 de setembro de 2026',
+    `Fatura n.º FT ${billYear}/118842`,
+    `Período de faturação: 1 a ${ptDateYear(billPeriod.last)}`,
     '',
     'Cliente: Maya Hollis',
     'Consumo: 214 kWh',
     'Valor a pagar: 38,47 euros',
-    'Pagar até: 30 de outubro de 2026',
+    `Pagar até: ${ptDateYear(billDue)}`,
     '',
     'Pagamento por Multibanco:',
     'Entidade 21302, referência 482 193 077',
@@ -1506,19 +1673,19 @@ function buildMessages() {
   messages['03-portuguese-electricity-bill.eml'] = emlI18n({
     from: formatSender({ name: 'Luz do Tejo Energia', address: 'faturacao@luz-do-tejo.example.net' }),
     to: OWNER,
-    date: 'Mon, 12 Oct 2026 08:30:11 +0100',
-    subject: 'A sua fatura de eletricidade de setembro já está disponível',
-    msgid: '<fatura-202609@luz-do-tejo.example.net>',
+    date: mailDate({ day: billMailDay, time: '08:30:11', zone: DEMO_TIME_ZONE }),
+    subject: `A sua fatura de eletricidade de ${billMonth} já está disponível`,
+    msgid: mid('<fatura-202609@luz-do-tejo.example.net>'),
     body: [
       'Olá, Maya,',
       '',
-      'A sua fatura de eletricidade de setembro já está disponível.',
+      `A sua fatura de eletricidade de ${billMonth} já está disponível.`,
       '',
-      '  Fatura: FT 2026/118842',
-      '  Período: 1 a 30 de setembro de 2026',
+      `  Fatura: FT ${billYear}/118842`,
+      `  Período: 1 a ${ptDateYear(billPeriod.last)}`,
       '  Consumo: 214 kWh',
       '  Valor a pagar: 38,47 euros',
-      '  Pagar até: 30 de outubro de 2026',
+      `  Pagar até: ${ptDateYear(billDue)}`,
       '',
       'Pode pagar por Multibanco com a entidade 21302 e a referência',
       '482 193 077. A fatura em PDF segue em anexo.',
@@ -1542,7 +1709,7 @@ function buildMessages() {
       {
         table: [
           ['Campo', 'Detalhe'],
-          ['Data', 'segunda-feira, 26 de outubro de 2026'],
+          ['Data', `${ptWeekday(at(7))}, ${ptDateYear(at(7))}`],
           ['Horário', 'das 9h00 às 12h00'],
           ['Trabalho', 'Reparar a torneira da cozinha'],
           ['Presença', 'É necessário estar alguém em casa'],
@@ -1555,13 +1722,13 @@ function buildMessages() {
   messages['04-portuguese-landlord-repair.eml'] = emlI18n({
     from: formatSender({ name: 'Teresa Matos', address: 'teresa.matos@example.com' }),
     to: OWNER,
-    date: 'Fri, 16 Oct 2026 14:22:40 +0100',
+    date: mailDate({ day: at(-3), time: '14:22:40', zone: DEMO_TIME_ZONE }),
     subject: 'Reparação da torneira da cozinha: visita do canalizador',
-    msgid: '<torneira-visita@teresa.matos.example.com>',
+    msgid: mid('<torneira-visita@teresa.matos.example.com>'),
     body: [
       'Olá, Maya,',
       '',
-      'O canalizador pode passar na segunda-feira, 26 de outubro,',
+      `O canalizador pode passar ${ptOn(at(7))},`,
       'entre as 9h e as 12h, para arranjar a torneira da cozinha.',
       '',
       'Pode confirmar se lhe dá jeito? É preciso estar alguém em casa',
@@ -1609,16 +1776,16 @@ function buildMessages() {
   messages['06-package-delivery.eml'] = emlSimple({
     from: 'SwiftParcel <tracking@swiftparcel.example.com>',
     to: OWNER,
-    date: 'Sat, 17 Oct 2026 18:45:33 +0100',
-    subject: 'Your package arrives Tuesday, October 20',
-    msgid: '<spx-884102-7719@swiftparcel.example.com>',
+    date: mailDate({ day: at(-2), time: '18:45:33', zone: DEMO_TIME_ZONE }),
+    subject: `Your package arrives ${enLong(at(1))}`,
+    msgid: mid('<spx-884102-7719@swiftparcel.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
       'Good news: your package is on its way.',
       '',
       '  Tracking:  SPX-884102-7719',
-      '  Arriving:  Tuesday, October 20, 2026',
+      `  Arriving:  ${enLongYear(at(1))}`,
       '  Shipped:   Austin, TX',
       '',
       'Track it here: https://www.example.com/track/SPX-884102-7719',
@@ -1631,9 +1798,9 @@ function buildMessages() {
   messages['07-dinner-plans.eml'] = emlSimple({
     from: 'Rui Carvalho <rui.carvalho@example.com>',
     to: OWNER,
-    date: 'Fri, 16 Oct 2026 19:03:17 +0100',
+    date: mailDate({ day: at(-3), time: '19:03:17', zone: DEMO_TIME_ZONE }),
     subject: 'Dinner next week?',
-    msgid: '<dinner-oct@rui.carvalho.example.com>',
+    msgid: mid('<dinner-oct@rui.carvalho.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
@@ -1641,8 +1808,8 @@ function buildMessages() {
       'Mouraria, the Tasca da Rosa, with fado on some nights. Two',
       'options:',
       '',
-      '  - Wednesday, October 21 at 8:00 PM',
-      '  - Friday, October 23 at 8:00 PM',
+      `  - ${enLong(at(2))} at 8:00 PM`,
+      `  - ${enLong(at(4))} at 8:00 PM`,
       '',
       'Let me know which works, or suggest another day.',
       '',
@@ -1664,9 +1831,9 @@ function buildMessages() {
   messages['08-camera-order-ready.eml'] = emlWithAttachments({
     from: 'Objectiva Foto <encomendas@objectiva-foto.example.com>',
     to: OWNER,
-    date: 'Thu, 15 Oct 2026 12:15:44 +0100',
+    date: mailDate({ day: at(-4), time: '12:15:44', zone: DEMO_TIME_ZONE }),
     subject: 'Your order OF-2026-10482 is ready for pickup',
-    msgid: '<order-of-2026-10482@objectiva-foto.example.com>',
+    msgid: mid('<order-of-2026-10482@objectiva-foto.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
@@ -1688,9 +1855,9 @@ function buildMessages() {
   messages['09-phishing-warning.eml'] = emlSimple({
     from: '"Account Security" <security-alert@amaz0n-verify.example.com>',
     to: OWNER,
-    date: 'Sun, 18 Oct 2026 03:17:29 +0100',
+    date: mailDate({ day: at(-1), time: '03:17:29', zone: DEMO_TIME_ZONE }),
     subject: 'URGENT: Verify your password within 24 hours',
-    msgid: '<urgent-verify-9912@amaz0n-verify.example.com>',
+    msgid: mid('<urgent-verify-9912@amaz0n-verify.example.com>'),
     body: crlfJoin([
       'Dear customer,',
       '',
@@ -1711,13 +1878,13 @@ function buildMessages() {
   messages['10a-trip-plan.eml'] = emlSimple({
     from: 'Sam Patel <sam.patel@example.com>',
     to: OWNER,
-    date: 'Tue, 13 Oct 2026 11:00:00 +0100',
+    date: mailDate({ day: at(-6), time: '11:00:00', zone: DEMO_TIME_ZONE }),
     subject: 'Weekend hiking trip',
-    msgid: '<hike-oct25@sam.patel.example.com>',
+    msgid: mid('<hike-oct25@sam.patel.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
-      'Want to do a hike on Sunday, October 25? I was thinking the',
+      `Want to do a hike on ${enLong(at(6))}? I was thinking the`,
       'coastal path near Cabo da Roca - it is about 9 km with great',
       'views. We could start around 8:30 AM.',
       '',
@@ -1729,26 +1896,29 @@ function buildMessages() {
   messages['10b-trip-plan-reply.eml'] = emlSimple({
     from: OWNER,
     to: 'Sam Patel <sam.patel@example.com>',
-    date: 'Tue, 13 Oct 2026 15:30:00 +0100',
+    date: mailDate({ day: at(-6), time: '15:30:00', zone: DEMO_TIME_ZONE }),
     subject: 'Re: Weekend hiking trip',
-    msgid: '<re-hike-oct25@maya.hollis.example.com>',
+    msgid: mid('<re-hike-oct25@maya.hollis.example.com>'),
     body: crlfJoin([
       'Hi Sam,',
       '',
-      'Sounds great. The Cabo da Roca coastal path on Sunday the',
-      '25th works for me. 8:30 AM start is fine - want me to bring',
+      `Sounds great. The Cabo da Roca coastal path on ${enWeekday(at(6))} the`,
+      `${ordinal(at(6).day)} works for me. 8:30 AM start is fine - want me to bring`,
       'anything?',
       '',
       'Maya',
     ]),
-    extraHeaders: ['In-Reply-To: <hike-oct25@sam.patel.example.com>', 'References: <hike-oct25@sam.patel.example.com>'],
+    extraHeaders: [
+      `In-Reply-To: ${mid('<hike-oct25@sam.patel.example.com>')}`,
+      `References: ${mid('<hike-oct25@sam.patel.example.com>')}`,
+    ],
   });
   messages['10c-trip-plan-change.eml'] = emlSimple({
     from: 'Sam Patel <sam.patel@example.com>',
     to: OWNER,
-    date: 'Thu, 15 Oct 2026 09:12:00 +0100',
+    date: mailDate({ day: at(-4), time: '09:12:00', zone: DEMO_TIME_ZONE }),
     subject: 'Re: Weekend hiking trip',
-    msgid: '<re2-hike-oct25@sam.patel.example.com>',
+    msgid: mid('<re2-hike-oct25@sam.patel.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
@@ -1760,12 +1930,17 @@ function buildMessages() {
       'Sam',
     ]),
     extraHeaders: [
-      'In-Reply-To: <re-hike-oct25@maya.hollis.example.com>',
-      'References: <hike-oct25@sam.patel.example.com> <re-hike-oct25@maya.hollis.example.com>',
+      `In-Reply-To: ${mid('<re-hike-oct25@maya.hollis.example.com>')}`,
+      `References: ${mid('<hike-oct25@sam.patel.example.com>')} ${mid('<re-hike-oct25@maya.hollis.example.com>')}`,
     ],
   });
 
   // 11: calendar invite with ICS (her US team works on Central time)
+  const inviteStart = instantAt({ day: at(2), time: '11:00:00', zone: CHICAGO });
+  const inviteEnd = inviteStart + 60 * 60e3;
+  const inviteZone = zoneAbbreviation({ zone: CHICAGO, instant: inviteStart });
+  const inviteTimes = `${clockIn({ zone: CHICAGO, instant: inviteStart })} - ${clockIn({ zone: CHICAGO, instant: inviteEnd })}`;
+  const inviteLisbonTimes = `${clockIn({ zone: DEMO_TIME_ZONE, instant: inviteStart })} - ${clockIn({ zone: DEMO_TIME_ZONE, instant: inviteEnd })} in Lisbon`;
   const inviteIcs = Buffer.from(
     crlfJoin([
       'BEGIN:VCALENDAR',
@@ -1773,10 +1948,10 @@ function buildMessages() {
       'PRODID:-//Example Fixtures//Invite//EN',
       'METHOD:REQUEST',
       'BEGIN:VEVENT',
-      'UID:q4-design-review-20261021@priya.nair.example.com',
-      'DTSTAMP:20261016T130000Z',
-      'DTSTART:20261021T160000Z',
-      'DTEND:20261021T170000Z',
+      `UID:q4-design-review-${compactDay(at(2))}@priya.nair.example.com`,
+      `DTSTAMP:${utcStamp({ day: at(-3), time: '08:00:00', zone: CHICAGO })}`,
+      `DTSTART:${utcStamp({ day: at(2), time: '11:00:00', zone: CHICAGO })}`,
+      `DTEND:${utcStamp({ day: at(2), time: '12:00:00', zone: CHICAGO })}`,
       'SUMMARY:Q4 Design Review',
       'DESCRIPTION:Quarterly design review with the team.',
       'LOCATION:Video call',
@@ -1791,17 +1966,17 @@ function buildMessages() {
   messages['11-calendar-invite.eml'] = emlWithAttachments({
     from: 'Priya Nair <priya.nair@example.com>',
     to: OWNER,
-    date: 'Fri, 16 Oct 2026 08:00:00 -0500',
-    subject: 'Invitation: Q4 Design Review @ Wed Oct 21, 2026 11:00 AM - 12:00 PM (CDT)',
-    msgid: '<q4-design-review-invite@priya.nair.example.com>',
+    date: mailDate({ day: at(-3), time: '08:00:00', zone: CHICAGO }),
+    subject: `Invitation: Q4 Design Review @ ${enShortDay(at(2))}, ${at(2).year} ${inviteTimes} (${inviteZone})`,
+    msgid: mid('<q4-design-review-invite@priya.nair.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
       'You are invited to:',
       '',
       '  Q4 Design Review',
-      '  Wednesday, October 21, 2026',
-      '  11:00 AM - 12:00 PM CDT (5:00 - 6:00 PM in Lisbon)',
+      `  ${enLongYear(at(2))}`,
+      `  ${inviteTimes} ${inviteZone} (${inviteLisbonTimes})`,
       '  Video call / https://www.example.com/meet/q4review',
       '',
       'Agenda is attached as a calendar invite.',
@@ -2051,13 +2226,17 @@ function buildMessages() {
   });
 
   // 12: scanned note as PNG
-  const notePng = makeNotePng(['Plumber: Fix-It Plumbing, 555-0142.', 'Call before Monday about the', 'kitchen tap.']);
+  const notePng = makeNotePng([
+    'Plumber: Fix-It Plumbing, 555-0142.',
+    `Call before ${enWeekday(at(7))} about the`,
+    'kitchen tap.',
+  ]);
   messages['12-scanned-note.eml'] = emlWithAttachments({
     from: OWNER,
     to: OWNER,
-    date: 'Sun, 18 Oct 2026 20:05:00 +0100',
+    date: mailDate({ day: at(-1), time: '20:05:00', zone: DEMO_TIME_ZONE }),
     subject: 'Scanned note: plumber contact',
-    msgid: '<scanned-note-001@maya.hollis.example.com>',
+    msgid: mid('<scanned-note-001@maya.hollis.example.com>'),
     body: crlfJoin(['Scanned from my desk - keeping a copy here.', '', '- Maya']),
     attachments: [{ filename: 'note.png', mime: 'image/png', data: notePng }],
   });
@@ -2066,9 +2245,9 @@ function buildMessages() {
   messages['21-portuguese-class-homework.eml'] = emlI18n({
     from: formatSender({ name: 'Marta Figueiredo', address: 'marta.figueiredo@example.net' }),
     to: OWNER,
-    date: 'Mon, 12 Oct 2026 18:10:00 +0100',
+    date: mailDate({ day: at(-7), time: '18:10:00', zone: DEMO_TIME_ZONE }),
     subject: 'TPC da semana 3: descreva o seu bairro',
-    msgid: '<tpc-semana-3@marta.figueiredo.example.net>',
+    msgid: mid('<tpc-semana-3@marta.figueiredo.example.net>'),
     body: [
       'Olá, Maya!',
       '',
@@ -2079,7 +2258,7 @@ function buildMessages() {
       '  - Diga onde mora e o que há perto de casa.',
       '  - Diga como vai para o centro.',
       '',
-      'Envie as frases por e-mail até quarta-feira, 21 de outubro,',
+      `Envie as frases por e-mail até ${ptWeekdayDate(at(2))},`,
       'antes da aula das 18h30. Se tiver dúvidas, pergunte na aula.',
       '',
       'Até quarta!',
@@ -2091,9 +2270,9 @@ function buildMessages() {
   messages['22-portuguese-bakery-order.eml'] = emlI18n({
     from: formatSender({ name: 'Padaria Pão de Mel', address: 'pedidos@padaria-pao-de-mel.example.net' }),
     to: OWNER,
-    date: 'Fri, 16 Oct 2026 17:35:00 +0100',
+    date: mailDate({ day: at(-3), time: '17:35:00', zone: DEMO_TIME_ZONE }),
     subject: 'Seu pedido PM-2048 está confirmado',
-    msgid: '<pedido-pm-2048@padaria-pao-de-mel.example.net>',
+    msgid: mid('<pedido-pm-2048@padaria-pao-de-mel.example.net>'),
     body: [
       'Olá, Maya!',
       '',
@@ -2102,7 +2281,7 @@ function buildMessages() {
       '  Pedido: PM-2048',
       '  Itens: 12 pastéis de nata e 1 bolo de laranja',
       '  Total: 27,50 euros (pagamento na retirada)',
-      '  Retirada: sábado, 24 de outubro, entre 9h e 11h',
+      `  Retirada: ${ptWeekdayDate(at(5))}, entre 9h e 11h`,
       '',
       'Pode retirar na nossa loja no Chiado. Se precisar mudar o',
       'horário, é só responder a este e-mail ou ligar para 555-0163.',
@@ -2116,21 +2295,21 @@ function buildMessages() {
   messages['23-spanish-lunch-invite.eml'] = emlI18n({
     from: formatSender({ name: 'Lucía Navarro', address: 'lucia.navarro@example.com' }),
     to: OWNER,
-    date: 'Sat, 17 Oct 2026 11:20:00 +0200',
-    subject: '¿Comemos juntas el jueves 29?',
-    msgid: '<comida-jueves-29@lucia.navarro.example.com>',
+    date: mailDate({ day: at(-2), time: '11:20:00', zone: MADRID }),
+    subject: `¿Comemos juntas el ${esWeekday(at(10))} ${at(10).day}?`,
+    msgid: mid('<comida-jueves-29@lucia.navarro.example.com>'),
     body: [
       'Hola, Maya:',
       '',
       '¿Qué tal la vida en Lisboa? Tengo muchas ganas de saber cómo',
       'te va con el portugués y con la casa nueva.',
       '',
-      'Voy a estar en Lisboa por trabajo del 28 al 30 de octubre y me',
+      `Voy a estar en Lisboa por trabajo del ${esWeekdayDate(at(9)).replace(/^\S+ /, '')} al ${esWeekdayDate(at(11)).replace(/^\S+ /, '')} y me`,
       'encantaría verte. ¿Te apetece que comamos juntas? Tengo dos',
       'opciones:',
       '',
-      '  - el jueves 29 de octubre a las 14:00',
-      '  - el viernes 30 de octubre a las 13:30',
+      `  - el ${esWeekdayDate(at(10))} a las 14:00`,
+      `  - el ${esWeekdayDate(at(11))} a las 13:30`,
       '',
       'Dime cuál te viene mejor y reservo mesa en algún sitio',
       'tranquilo cerca de donde vivas. Si prefieres otro día, dímelo',
@@ -2158,9 +2337,9 @@ function buildMessages() {
       {
         table: [
           ['Date', 'Place', 'Light'],
-          ['Fri, Oct 23', 'Alfama', 'Sunrise'],
-          ['Sat, Oct 24', 'Miradouro da Graça', 'Golden hour'],
-          ['Sat, Oct 31', 'Belém', 'Golden hour'],
+          [enShort(at(4)), 'Alfama', 'Sunrise'],
+          [enShort(at(5)), 'Miradouro da Graça', 'Golden hour'],
+          [enShort(at(12)), 'Belém', 'Golden hour'],
         ],
       },
     ],
@@ -2168,9 +2347,9 @@ function buildMessages() {
   messages['24-english-photo-walk-itinerary.eml'] = emlWithAttachments({
     from: 'Rui Carvalho <rui.carvalho@example.com>',
     to: OWNER,
-    date: 'Sun, 18 Oct 2026 17:05:00 +0100',
+    date: mailDate({ day: at(-1), time: '17:05:00', zone: DEMO_TIME_ZONE }),
     subject: 'Old Lisbon photo walks: draft itinerary',
-    msgid: '<photo-walks-draft@rui.carvalho.example.com>',
+    msgid: mid('<photo-walks-draft@rui.carvalho.example.com>'),
     body: crlfJoin([
       'Hi Maya,',
       '',
@@ -2195,16 +2374,16 @@ function buildMessages() {
   messages['25-gp-consulta-confirmacao.eml'] = emlI18n({
     from: 'Brightwater Family Clinic <consultas@brightwater-clinic.example.org>',
     to: OWNER,
-    date: 'Fri, 16 Oct 2026 09:12:00 +0100',
+    date: mailDate({ day: at(-3), time: '09:12:00', zone: DEMO_TIME_ZONE }),
     subject: 'Confirmação de consulta / Appointment confirmation',
-    msgid: '<consulta-20261022@brightwater-clinic.example.org>',
+    msgid: mid(`<consulta-${compactDay(at(3))}@brightwater-clinic.example.org>`),
     body: [
       'Olá, Maya,',
       '',
       'A sua consulta de clínica geral está confirmada:',
       '',
       '  Médica:  Dra. Helena Rocha',
-      '  Quando:  quinta-feira, 22 de outubro de 2026, às 09:30',
+      `  Quando:  ${ptWeekday(at(3))}, ${ptDateYear(at(3))}, às 09:30`,
       '  Onde:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '',
       'Traga o passaporte, o NIF e o cartão do seguro de saúde.',
@@ -2218,7 +2397,7 @@ function buildMessages() {
       'Your GP appointment is confirmed:',
       '',
       '  Doctor: Dra. Helena Rocha',
-      '  When:   Thursday, 22 October 2026, at 09:30',
+      `  When:   ${enWeekday(at(3))}, ${at(3).day} ${enMonth(at(3))} ${at(3).year}, at 09:30`,
       '  Where:  Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '',
       'Please bring your passport, your NIF and your health insurance card.',
@@ -2233,11 +2412,20 @@ function buildMessages() {
 }
 
 function main() {
-  const messages = buildMessages();
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: { today: { type: 'string' } },
+    strict: true,
+    allowPositionals: false,
+  });
+  const today = values.today === undefined ? todayIn(DEMO_TIME_ZONE) : parseDemoDay(values.today);
+  const messages = buildMessages({ today });
   for (const name of Object.keys(messages).sort()) {
     writeFileSync(join(OUT_DIR, name), messages[name], 'utf8');
     console.log('wrote', name);
   }
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

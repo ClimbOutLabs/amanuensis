@@ -72,7 +72,7 @@ describe('the rest of the world agrees with itself', () => {
   });
 
   it('is due to pick up the lens before the first photo session, and finishes the viewings by their due date', () => {
-    expect(tasks()).toContain('Pick up the 35mm-equivalent camera lens - due Thursday, October 22');
-    expect(tasks()).toContain('Tour apartments (in progress) - due Thursday, October 22');
+    expect(tasks()).toContain('Pick up the 35mm-equivalent camera lens - due Thursday, October 29');
+    expect(tasks()).toContain('Tour apartments (in progress) - due Thursday, October 29');
   });
 });

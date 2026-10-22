@@ -53,7 +53,7 @@ shred -u ~/tf.key
 
 ## 4. The demo world
 
-`--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner (or `--demo-user ADDRESS`). Dates are relative to today (Europe/Madrid).
+`--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner (or `--demo-user ADDRESS`). Every date in her world is counted from the day the seed runs, in Europe/Lisbon (Maya's zone). The seed and the mail move together only when both are run on the same day, so re-run both on the day of judging.
 
 - The seed needs a configured model. The Token Factory model is added to the app when it starts, so this works right after the install.
 - `DEMO_MODE` only enables the seeder. Do not connect a real Google account to a demo instance.
@@ -66,8 +66,8 @@ The mailbox is Maya's test Gmail account, filled with the invented emails from `
 
 1. Install (sections 3 and 4), a day early.
 2. Import the invented emails into Maya's Gmail with `demo:import-mailbox`.
-3. Add the birthday to her Google Calendar by hand: an all-day event a few days after the judging date, with an invented name, and not on the GP appointment date (22 October).
-4. On the morning of judging, run `./installer/install.sh instance demo-seed` (section 7 first if you need a reset), so the dates are relative to that day.
+3. Add the birthday to her Google Calendar by hand: an all-day event a few days after the judging date, with an invented name, and not on the GP appointment date (three days after the day you seed).
+4. On the morning of judging, run `./installer/install.sh instance demo-seed` (section 7 first if you need a reset), so the dates count from that day. Then run `pnpm demo:import-mailbox` again on that day, which makes the mail for that day; the mail imported on an earlier day stays in the mailbox as it was.
 5. Run `aman doctor` and send one test message.
 
 ## 6. Check it
@@ -87,7 +87,7 @@ Then open `https://203-0-113-10.sslip.io` and sign in as `judge@example.com`. Se
 
 The first removes the synthetic records only; the second seeds them again. Chats the judges made are not synthetic, so they stay. For a fully clean start, remove the instance and install again (section 8).
 
-Re-seed on the morning of judging, since the seeded dates are relative to the day it runs.
+Re-seed and re-import the mail on the morning of judging, since both count from the day they run. Each run makes new Message-IDs, so the new mail is imported; old copies stay in the mailbox until you delete them.
 
 ## 8. Tear down after judging
 
