@@ -225,10 +225,12 @@ describe('parseMapsResult', () => {
       expect(parsed.data?.places?.map(place => place.name)).toEqual(['Garden Health Centre']);
     });
 
-    it('explains in plain words when nothing could be checked', () => {
+    it('settles a result with nothing checked as refused, with no card and no message for the person', () => {
       const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'not_grounded' }), 'render_places');
-      expect(parsed.state).toBe('unavailable');
-      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
+      expect(parsed.state).toBe('refused');
+      expect(parsed.data).toBeNull();
+      expect(parsed.refused).toEqual([]);
+      expect(parsed.blockedMessage).toBeUndefined();
     });
 
     it('carries the refused places of a part-way result to the card', () => {
@@ -253,7 +255,7 @@ describe('parseMapsResult', () => {
       ]);
     });
 
-    it('names up to three refused places and one next step when nothing was pinned', () => {
+    it('keeps every refused place with its reason when nothing was pinned', () => {
       const refused = ['Alpha House', 'Beta House', 'Gamma House', 'Delta House'].map(name => ({
         name,
         reason: 'The name is not on that page. Copy it word for word from the page and try again.',
@@ -262,13 +264,9 @@ describe('parseMapsResult', () => {
         JSON.stringify({ status: 'error', code: 'not_grounded', refused }),
         'render_places',
       );
-      expect(parsed.state).toBe('unavailable');
-      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
-      expect(parsed.blockedMessage).toContain('Alpha House');
-      expect(parsed.blockedMessage).toContain('Beta House');
-      expect(parsed.blockedMessage).toContain('Gamma House');
-      expect(parsed.blockedMessage).not.toContain('Delta House');
-      expect(parsed.blockedMessage).toContain('then try again');
+      expect(parsed.state).toBe('refused');
+      expect(parsed.data).toBeNull();
+      expect(parsed.refused).toEqual(refused);
     });
   });
 });

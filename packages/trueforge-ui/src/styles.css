@@ -1401,6 +1401,30 @@
   color: var(--text-secondary);
 }
 
+.maps-card-details {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-details summary {
+  cursor: pointer;
+}
+
+.maps-card-refused {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+
+.maps-card-refused-label {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+
+.maps-card-refused-name {
+  font-weight: 600;
+}
+
 .maps-place-source {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
@@ -1574,6 +1598,35 @@
 
 .aui-ticket__tear {
   border-top: 0.125rem dashed var(--border);
+}
+
+/* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
+.aui-ticket__title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.aui-ticket__label {
+  font-family: var(--font-receipt);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* A stub holds a short line: a long recipient list is cut to three lines, the full text stays in Details. */
+.aui-ticket__detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Keyboard focus on a ticket is a solid ring in --focus-ring, not a faded one: it keeps 3:1 on the card and the gold fill. */
+.aui-theme-root .aui-ticket :focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
 }
 
 /* Underline: a hand-drawn stroke under one phrase. Mask keeps the colour a theme token. */
