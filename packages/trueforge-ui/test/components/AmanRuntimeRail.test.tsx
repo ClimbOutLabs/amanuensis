@@ -627,6 +627,17 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(1);
   });
 
+  it('sets the Waiting for you label in the primary text colour, not the gold ink', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={['approval-1']} />
+      </RuntimeHarness>,
+    );
+    const label = screen.getByText('Waiting for you');
+    expect(label).toHaveClass('aui-panda__role');
+    expect(label).not.toHaveClass('text-gold-ink');
+  });
+
   it('leaves Needs you out when nothing waits, so the rail carries no gold card', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
