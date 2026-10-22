@@ -184,3 +184,121 @@ describe('normalizeSandboxArtifactBlocks', () => {
     );
   });
 });
+
+describe('unclosed blocks in finished messages', () => {
+  it('keeps the prose that follows a block the finished message never closed', () => {
+    const message = [
+      'Done.',
+      '',
+      '```sandbox_artifacts',
+      CHART_LINK,
+      '',
+      'That chart covers the week from Monday to Sunday.',
+    ].join('\n');
+    expect(extractSandboxArtifactsFromMessage(message)).toEqual([CHART]);
+    const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+    expect(normalized).toContain('That chart covers the week from Monday to Sunday.');
+    expect(normalized.endsWith(`${CANONICAL_CHART}\n`)).toBe(true);
+  });
+
+  it('does not treat a link in the prose after an unclosed block as a file', () => {
+    const message = [
+      'Done.',
+      '',
+      '```sandbox_artifacts',
+      CHART_LINK,
+      '',
+      'See [the notes](https://example.com/notes) for details.',
+    ].join('\n');
+    expect(extractSandboxArtifactsFromMessage(message)).toEqual([CHART]);
+    const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+    expect(normalized).toContain('See [the notes](https://example.com/notes) for details.');
+    expect(normalized.endsWith(`${CANONICAL_CHART}\n`)).toBe(true);
+  });
+
+  it('keeps the text after an unclosed marker that names no file', () => {
+    const message = ['Done.', '', '```sandbox_artifacts', 'Everything is in the folder I mentioned earlier.'].join(
+      '\n',
+    );
+    expect(extractSandboxArtifactsFromMessage(message)).toEqual([]);
+    const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+    expect(normalized).toContain('Everything is in the folder I mentioned earlier.');
+    expect(normalized).not.toContain('sandbox_artifacts');
+  });
+
+  it('keeps hiding everything after an unclosed marker while the message is still streaming', () => {
+    const partial = ['Done.', '', '```sandbox_artifacts', CHART_LINK, '', 'Still writing this part.'].join('\n');
+    expect(normalizeSandboxArtifactBlocks({ text: partial, complete: false })).toBe('Done.');
+  });
+});
+
+describe('markers inside other fences', () => {
+  const EXAMPLE_IN_MARKDOWN_FENCE = [
+    'Use this in your reply:',
+    '',
+    '```markdown',
+    'Put this at the end:',
+    '```sandbox_artifacts',
+    '[fake.pdf](/tmp/fake.pdf)',
+    '```',
+    '```',
+  ].join('\n');
+
+  const EXAMPLE_IN_LONGER_FENCE = [
+    '````markdown',
+    'Put this at the end:',
+    '```sandbox_artifacts',
+    '[fake.pdf](/tmp/fake.pdf)',
+    '```',
+    '````',
+  ].join('\n');
+
+  const EXAMPLE_IN_MARKDOWN_FENCE_CRLF = EXAMPLE_IN_MARKDOWN_FENCE.replaceAll('\n', '\r\n');
+
+  it('extracts nothing from a marker quoted as an example in a fence that holds other text', () => {
+    expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_MARKDOWN_FENCE)).toEqual([]);
+    expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_LONGER_FENCE)).toEqual([]);
+  });
+
+  it('leaves a marker quoted as an example inside another fence untouched', () => {
+    expect(normalizeSandboxArtifactBlocks({ text: EXAMPLE_IN_MARKDOWN_FENCE, complete: true })).toBe(
+      EXAMPLE_IN_MARKDOWN_FENCE,
+    );
+    expect(normalizeSandboxArtifactBlocks({ text: EXAMPLE_IN_LONGER_FENCE, complete: true })).toBe(
+      EXAMPLE_IN_LONGER_FENCE,
+    );
+  });
+
+  it('extracts nothing and changes nothing for the quoted example with CRLF line endings', () => {
+    expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_MARKDOWN_FENCE_CRLF)).toEqual([]);
+    expect(normalizeSandboxArtifactBlocks({ text: EXAMPLE_IN_MARKDOWN_FENCE_CRLF, complete: true })).toBe(
+      EXAMPLE_IN_MARKDOWN_FENCE_CRLF,
+    );
+  });
+
+  it('still finds a real block that comes after a closed example fence', () => {
+    const message = [
+      'Here is an example:',
+      '',
+      '```js',
+      'const x = 1;',
+      '```',
+      '',
+      '```sandbox_artifacts',
+      CHART_LINK,
+      '```',
+    ].join('\n');
+    expect(extractSandboxArtifactsFromMessage(message)).toEqual([CHART]);
+    const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+    expect(normalized).toContain('const x = 1;');
+    expect(normalized.endsWith(`${CANONICAL_CHART}\n`)).toBe(true);
+  });
+
+  it('still finds the file when an artifacts block is the only content of the fence around it, blank lines aside', () => {
+    const message = ['````markdown', '', '```sandbox_artifacts', CHART_LINK, '```', '', '````'].join('\n');
+    expect(extractSandboxArtifactsFromMessage(message)).toEqual([CHART]);
+    const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+    expect(normalized.endsWith(`${CANONICAL_CHART}\n`)).toBe(true);
+    expect(normalized).not.toContain('````');
+  });
+});

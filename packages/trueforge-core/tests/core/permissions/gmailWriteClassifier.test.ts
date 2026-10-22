@@ -51,6 +51,7 @@ const CONTENT: ReviewableDraft = {
   references: '',
   fromName: '',
   nameLeftOff: false,
+  replyTo: null,
 };
 
 describe('Gmail write classification', () => {

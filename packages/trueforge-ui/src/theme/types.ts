@@ -3,7 +3,12 @@ import type { ComponentType, CSSProperties, FC, ReactNode, SVGProps } from 'reac
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
-export type ThemePreset = 'trueforge' | 'claude' | 'chatgpt' | 'gemini' | 'midnight' | 'forest' | 'sunset' | 'volt';
+/** Picker order. The first entry is the default for new users. */
+export const THEME_PRESET_IDS = ['paper', 'forest', 'midnight', 'high-contrast'] as const;
+
+export type ThemePreset = (typeof THEME_PRESET_IDS)[number];
+
+export const DEFAULT_THEME_PRESET: ThemePreset = 'paper';
 
 export type SemanticTokens = {
   // Across product
