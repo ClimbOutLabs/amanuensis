@@ -1,5 +1,4 @@
-import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
-import { dayLabels, type DayLabels } from '../calendar';
+import { dayLabels, STORY, type CalendarDay, type DayLabels } from '../storyDays.mjs';
 import { CAMERA_SHOP, GP_CLINIC, VISA_CLINIC } from './places';
 
 type TaskState = 'done' | 'in_progress' | 'open';
@@ -19,29 +18,29 @@ function mayaTasks(days: DayLabels): readonly MayaTask[] {
     {
       title: 'Book flight to Lisbon',
       state: 'done',
-      doneOffset: -17,
+      doneOffset: STORY.TASK_FLIGHT_DONE,
       dueOffset: null,
       notes: null,
     },
     {
       title: 'Get NIF (tax number)',
       state: 'done',
-      doneOffset: -8,
+      doneOffset: STORY.TASK_NIF_DONE,
       dueOffset: null,
       notes: 'Issued via Sofia Almeida. Document saved.',
     },
     {
       title: 'Open Portuguese bank account',
       state: 'done',
-      doneOffset: -6,
+      doneOffset: STORY.TASK_BANK_DONE,
       dueOffset: null,
       notes: null,
     },
-    { title: 'Register with AIMA', state: 'done', doneOffset: -4, dueOffset: null, notes: null },
+    { title: 'Register with AIMA', state: 'done', doneOffset: STORY.TASK_AIMA_DONE, dueOffset: null, notes: null },
     {
       title: 'Find short-term rental for first month',
       state: 'done',
-      doneOffset: -16,
+      doneOffset: STORY.TASK_RENTAL_DONE,
       dueOffset: null,
       notes: null,
     },
@@ -50,27 +49,27 @@ function mayaTasks(days: DayLabels): readonly MayaTask[] {
       state: 'in_progress',
       doneOffset: null,
       dueOffset: null,
-      notes: `GP appointment ${days.long(3)}, 2026, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
+      notes: `GP appointment ${days.longYear(STORY.GP_VISIT)}, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
     },
     {
       title: 'Complete visa medical',
       state: 'in_progress',
       doneOffset: null,
-      dueOffset: 2,
-      notes: `Appointment ${days.monthDay(2)}, 10:00 at ${VISA_CLINIC.name}. Bring passport, NIF, insurance card, medication list, allergy note.`,
+      dueOffset: STORY.VISA_VISIT,
+      notes: `Appointment ${days.monthDay(STORY.VISA_VISIT)}, 10:00 at ${VISA_CLINIC.name}. Bring passport, NIF, insurance card, medication list, allergy note.`,
     },
     {
       title: 'Tour apartments',
       state: 'in_progress',
       doneOffset: null,
-      dueOffset: 3,
-      notes: `Two viewings ${days.monthDay(1)} (Alfama 11:00, Graça 15:30), two more ${days.monthDay(3)} (Mouraria 11:30, Campo de Ourique 16:00).`,
+      dueOffset: STORY.TOUR_SECOND_DAY,
+      notes: `Two viewings ${days.monthDay(STORY.TOUR_FIRST_DAY)} (Alfama 11:00, Graça 15:30), two more ${days.monthDay(STORY.TOUR_SECOND_DAY)} (Mouraria 11:30, Campo de Ourique 16:00).`,
     },
     {
       title: 'Decide on long-term neighborhood',
       state: 'open',
       doneOffset: null,
-      dueOffset: 11,
+      dueOffset: STORY.NEIGHBORHOOD_DECISION,
       notes:
         'Shortlist: Alfama (charm, steep), Graça (views, steep, no metro), Mouraria (multicultural, fado), Campo de Ourique (residential, market, flatter).',
     },
@@ -78,7 +77,7 @@ function mayaTasks(days: DayLabels): readonly MayaTask[] {
       title: 'Pick up the 35mm-equivalent camera lens',
       state: 'open',
       doneOffset: null,
-      dueOffset: 3,
+      dueOffset: STORY.CAMERA_PICKUP,
       notes: `Order ${CAMERA_SHOP.orderNumber} ready for pickup at ${CAMERA_SHOP.name}. Fujifilm XF 23mm f/2. Collect it before the first photo session.`,
     },
     {
@@ -93,7 +92,7 @@ function mayaTasks(days: DayLabels): readonly MayaTask[] {
       state: 'open',
       doneOffset: null,
       dueOffset: null,
-      notes: `Sessions: ${days.monthDay(4)} Alfama sunrise, ${days.monthDay(5)} Miradouro da Graça golden hour, ${days.monthDay(12)} Belém golden hour.`,
+      notes: `Sessions: ${days.monthDay(STORY.ALFAMA_SESSION)} Alfama sunrise, ${days.monthDay(STORY.GRACA_SESSION)} Miradouro da Graça golden hour, ${days.monthDay(STORY.BELEM_SESSION)} Belém golden hour.`,
     },
   ];
 }

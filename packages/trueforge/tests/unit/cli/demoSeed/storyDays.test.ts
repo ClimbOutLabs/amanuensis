@@ -1,6 +1,5 @@
-import { addDays, isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
-import { dayInZone, dayLabels, longDayLabel } from '../../../../src/cli/demoSeed/calendar';
+import { addDays, dayInZone, dayLabels, isoDay, parseDemoDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
 
 describe('calendar', () => {
   it('reads today in the target zone, not in UTC', () => {
@@ -18,7 +17,14 @@ describe('calendar', () => {
   });
 
   it('labels a day with its weekday', () => {
-    expect(longDayLabel({ year: 2026, month: 10, day: 15 })).toBe('Thursday, October 15');
+    expect(dayLabels({ year: 2026, month: 10, day: 15 }).long(0)).toBe('Thursday, October 15');
+    expect(dayLabels({ year: 2026, month: 12, day: 31 }).longYear(3)).toBe('Sunday, January 3, 2027');
+  });
+
+  it('reads only real days written YYYY-MM-DD', () => {
+    expect(parseDemoDay('2026-10-19')).toEqual({ year: 2026, month: 10, day: 19 });
+    expect(() => parseDemoDay('2026-02-30')).toThrow('is not a real calendar day');
+    expect(() => parseDemoDay('19/10/2026')).toThrow('is not a day written YYYY-MM-DD');
   });
 
   it('validates zone names', () => {

@@ -53,7 +53,7 @@ shred -u ~/tf.key
 
 ## 4. The demo world
 
-`--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner (or `--demo-user ADDRESS`). Every date in her world is counted from the day the seed runs, in Europe/Lisbon (Maya's zone). The seed and the mail move together only when both are run on the same day, so re-run both on the day of judging.
+`--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner. To fill or clear the data later, run `install.sh instance demo-seed` (add `--reset` to clear it, and `--instance NAME` if there is more than one instance). Every date in her world is counted from the day the seed runs, in Europe/Lisbon (Maya's zone). The seed and the mail move together only when both are run on the same day, so re-run both on the day of judging.
 
 - The seed needs a configured model. The Token Factory model is added to the app when it starts, so this works right after the install.
 - `DEMO_MODE` only enables the seeder. Do not connect a real Google account to a demo instance.

@@ -3,9 +3,9 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, URL, URLSearchParams } from 'node:url';
-import { parseDemoDay } from '../demo/fixtures/mailbox/generate-fixtures.mjs';
 import { importDemoMailbox, loadConfig, summarize } from '../demo/scripts/import-demo-mailbox.mjs';
 import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
+import { parseDemoDay } from '../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
 
 const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
 const messages = loadDemoSet({ fixtureDir, today: parseDemoDay('2026-10-19') });
@@ -40,7 +40,9 @@ function fakeGmail({ present = [], address = 'throwaway@example.com', failImport
   return { calls, fetchImpl };
 }
 
-const tokenConfig = loadConfig({ env: { TEST_MAILBOX_GMAIL_ACCESS_TOKEN: 'given' } });
+const tokenConfig = loadConfig({
+  env: { TEST_MAILBOX_GMAIL_ACCESS_TOKEN: 'given', TEST_MAILBOX_TO: 'throwaway@example.com' },
+});
 
 test('config reads the environment first, then the env file', () => {
   const config = loadConfig({
@@ -55,7 +57,7 @@ test('dry run lists every message and makes no network calls', async () => {
   const gmail = fakeGmail();
   const lines = [];
   const result = await importDemoMailbox({
-    config: loadConfig({ env: {} }),
+    config: loadConfig({ env: { TEST_MAILBOX_TO: 'throwaway@example.com' } }),
     messages,
     fetchImpl: gmail.fetchImpl,
     dryRun: true,
@@ -114,6 +116,7 @@ test('an access token is minted from the refresh token when none is given', asyn
       TEST_MAILBOX_GMAIL_CLIENT_ID: 'id',
       TEST_MAILBOX_GMAIL_CLIENT_SECRET: 'secret',
       TEST_MAILBOX_GMAIL_REFRESH_TOKEN: 'refresh',
+      TEST_MAILBOX_TO: 'throwaway@example.com',
     },
   });
   await importDemoMailbox({ config, messages: messages.slice(0, 1), fetchImpl: gmail.fetchImpl, log: quiet });
@@ -123,10 +126,39 @@ test('an access token is minted from the refresh token when none is given', asyn
   assert.equal(gmail.calls[1].init.headers.authorization, 'Bearer minted');
 });
 
+test('without TEST_MAILBOX_TO the import refuses to run, before any network call', async () => {
+  const gmail = fakeGmail();
+  await assert.rejects(
+    importDemoMailbox({
+      config: loadConfig({ env: { TEST_MAILBOX_GMAIL_ACCESS_TOKEN: 't' } }),
+      messages,
+      fetchImpl: gmail.fetchImpl,
+      log: quiet,
+    }),
+    /Set TEST_MAILBOX_TO to the test mailbox address/,
+  );
+  await assert.rejects(
+    importDemoMailbox({
+      config: loadConfig({ env: {} }),
+      messages,
+      dryRun: true,
+      fetchImpl: gmail.fetchImpl,
+      log: quiet,
+    }),
+    /Set TEST_MAILBOX_TO/,
+  );
+  assert.equal(gmail.calls.length, 0);
+});
+
 test('missing credentials and a wrong account stop before anything is imported', async () => {
   const gmail = fakeGmail();
   await assert.rejects(
-    importDemoMailbox({ config: loadConfig({ env: {} }), messages, fetchImpl: gmail.fetchImpl, log: quiet }),
+    importDemoMailbox({
+      config: loadConfig({ env: { TEST_MAILBOX_TO: 'throwaway@example.com' } }),
+      messages,
+      fetchImpl: gmail.fetchImpl,
+      log: quiet,
+    }),
     /No Gmail credentials found/,
   );
   const wrong = loadConfig({

@@ -1,6 +1,5 @@
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
 import { photographyGuide, relocationGuide } from './maya/knowledge';
@@ -9,6 +8,7 @@ import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './ma
 import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
 import type { DemoNote, DemoSpace, DemoWorld } from './model';
+import { isoDay, type CalendarDay } from './storyDays.mjs';
 
 /** Provenance stamped on every seeded record; reset removes exactly the records that carry it. */
 export const DEMO_MARKER = 'demo_synthetic';

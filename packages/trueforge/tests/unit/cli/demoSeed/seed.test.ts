@@ -1,7 +1,6 @@
 import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
-import { parseDateOnly } from '@truefoundry/trueforge-core/core/util/calendarDay';
-import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
+import { dayInZone, parseDemoDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import {
   buildDemoWorld,
   DEMO_AGENT_NAME,
@@ -193,14 +192,30 @@ describe('demo seed against the real stores', () => {
     });
   }
 
-  it('keeps what the assistant wrote on the same day, even with nothing of the seed left in the body', async () => {
+  it('replaces what the assistant wrote when the seed runs again on the same day', async () => {
     await seed(stores, DAY_ONE);
     await rewriteTasks('- [x] Pick up the lens\nEdited by the assistant.');
 
     const report = await seed(stores, DAY_ONE);
 
-    expect(report.spaces).toEqual({ created: 0, updated: 0, unchanged: 1 });
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toBe('- [x] Pick up the lens\nEdited by the assistant.');
+    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('GP appointment Thursday, October 29, 2026');
+  });
+
+  it('re-anchors Tasks when a re-seed on the same real day uses another --today', async () => {
+    await seed(stores, DAY_ONE);
+    const rehearsal = buildDemoWorld({
+      today: parseDemoDay('2026-12-31'),
+      timeZone: 'Europe/Lisbon',
+      modelName: MODEL_NAME,
+    });
+
+    const report = await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_ONE });
+
+    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    const body = await spaceBody(stores, DEMO_TASKS_SPACE_ID);
+    expect(body).toContain('GP appointment Sunday, January 3, 2027, 09:30');
+    expect(body).not.toContain('October 29');
   });
 
   it('rewrites the Tasks space on a new seed day, and stamps nothing into it', async () => {
@@ -247,10 +262,7 @@ describe('demo seed against the real stores', () => {
   });
 
   it('seeds a rehearsal day that is not the real today', async () => {
-    const today = parseDateOnly('2026-10-26');
-    if (today === undefined) {
-      throw new Error('Not a day.');
-    }
+    const today = parseDemoDay('2026-10-26');
     const rehearsal = buildDemoWorld({ today, timeZone: 'Europe/Lisbon', modelName: MODEL_NAME });
 
     await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });

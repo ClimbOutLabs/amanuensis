@@ -5,8 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
-import { buildMessages, parseDemoDay } from '../demo/fixtures/mailbox/generate-fixtures.mjs';
+import { buildMessages } from '../demo/fixtures/mailbox/generate-fixtures.mjs';
 import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
+import { parseDemoDay } from '../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
 
 const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
 
@@ -269,6 +270,34 @@ for (const { label, day } of DAYS) {
     }
   });
 }
+
+// Decodes the quoted-printable body of a message written by the generator.
+function decodeQuotedPrintable(text) {
+  const bytes = text
+    .replace(/=\r?\n/g, '')
+    .replace(/=([0-9A-F]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+  return Buffer.from(bytes, 'latin1').toString('utf8');
+}
+
+test('the bill is named for the month it bills, and the closing names the homework deadline weekday', () => {
+  const november = buildMessages({ today: parseDemoDay('2026-11-10') });
+  assert.match(november['03-portuguese-electricity-bill.eml'], /filename="fatura-outubro\.pdf"/);
+  assert.doesNotMatch(november['03-portuguese-electricity-bill.eml'], /fatura-setembro/);
+
+  const december = buildMessages({ today: parseDemoDay('2026-12-31') });
+  assert.match(december['03-portuguese-electricity-bill.eml'], /filename="fatura-novembro\.pdf"/);
+
+  const tuesday = buildMessages({ today: parseDemoDay('2026-10-18') });
+  const homework = decodeQuotedPrintable(tuesday['21-portuguese-class-homework.eml']);
+  assert.match(homework, /até terça-feira, 20 de outubro/);
+  assert.match(homework, /Até terça-feira!/);
+  assert.doesNotMatch(homework, /Até quarta/);
+
+  const newYear = decodeQuotedPrintable(
+    buildMessages({ today: parseDemoDay('2026-12-31') })['21-portuguese-class-homework.eml'],
+  );
+  assert.match(newYear, /Até sábado!/);
+});
 
 test('mail made for two different days has different Message-IDs', () => {
   const monday = loadDemoSet({ today: DAYS[0].day }).map(message => message.messageId);

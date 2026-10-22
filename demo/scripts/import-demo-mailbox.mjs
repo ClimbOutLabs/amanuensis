@@ -26,7 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URLSearchParams } from 'node:url';
 import { parseArgs } from 'node:util';
-import { parseDemoDay } from '../fixtures/mailbox/generate-fixtures.mjs';
+import { parseDemoDay } from '../../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
 import { loadDemoSet, parseEnvFile } from './test-mailbox-env.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -100,6 +100,11 @@ function describe({ message }) {
 }
 
 export async function importDemoMailbox({ config, messages, fetchImpl = fetch, dryRun = false, log = console.log }) {
+  if (config.expectedAddress === '') {
+    throw new Error(
+      'Set TEST_MAILBOX_TO to the test mailbox address, so the mail never goes into another account. Nothing was imported.',
+    );
+  }
   if (dryRun) {
     log(`Dry run: ${String(messages.length)} messages would be imported (nothing was sent):`);
     for (const message of messages) {

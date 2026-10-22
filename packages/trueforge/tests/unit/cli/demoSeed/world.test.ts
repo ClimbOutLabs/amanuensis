@@ -4,8 +4,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { parseDateOnly, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
-import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
+import { dayInZone, parseDemoDay, type CalendarDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
@@ -19,11 +18,7 @@ function worldOn(today: CalendarDay, timeZone = 'Europe/Lisbon') {
 }
 
 function day(text: string): CalendarDay {
-  const parsed = parseDateOnly(text);
-  if (parsed === undefined) {
-    throw new Error(`Not a day: ${text}`);
-  }
-  return parsed;
+  return parseDemoDay(text);
 }
 
 function tasksBody(world: ReturnType<typeof worldOn>): string {
@@ -80,6 +75,16 @@ describe('buildDemoWorld dates', () => {
 
   it.each(SEED_DAYS)('dates what is finished before the seed day %s', seedDay => {
     expect(tasksBody(worldOn(day(seedDay)))).toContain(`- [x] Get NIF (tax number) - done ${longAfter(seedDay, -8)}`);
+  });
+
+  it('dates the GP visit note with the year it falls in, across a year end', () => {
+    const note = tasksBody(worldOn(day('2026-12-31')))
+      .split('\n')
+      .find(line => line.includes('GP appointment'));
+    expect(note).toContain('GP appointment Sunday, January 3, 2027, 09:30');
+
+    const nextYear = tasksBody(worldOn(day('2027-01-02')));
+    expect(nextYear).toContain('GP appointment Tuesday, January 5, 2027, 09:30');
   });
 
   it('keeps the same tasks on the same day, and every memory note but the meetup when the day moves', () => {

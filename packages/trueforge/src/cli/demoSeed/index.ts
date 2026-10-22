@@ -1,9 +1,9 @@
-import { parseDateOnly } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
 import type { DemoSeedSession } from './session';
+import { parseDemoDay, type CalendarDay } from './storyDays.mjs';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
 const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
@@ -11,8 +11,8 @@ const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <ian
 Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
 two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected Google account. Every
 record is marked demo_synthetic. Every date in her world is counted from "today", so the tasks, notes and her
-mail (made with pnpm demo:import-mailbox) always line up with the day. Re-running it on the same day keeps the
-Tasks space as it is; --reset removes the synthetic records. Needs DEMO_MODE=true.
+mail (made with pnpm demo:import-mailbox) always line up with the day. Re-running it rewrites the Tasks space to that
+day's list; --reset removes the synthetic records. Needs DEMO_MODE=true.
 
   --reset              Remove the synthetic records only, then stop
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
@@ -20,6 +20,18 @@ Tasks space as it is; --reset removes the synthetic records. Needs DEMO_MODE=tru
   --today <day>        Treat this day as "today", such as 2026-10-19 (default: the real today in the time zone)
   --model <p/model>    Model for the personas and agent (default: first configured model)
 `;
+
+/** The `--today` day, or undefined when the flag is absent. */
+function parseToday(text: string | undefined): CalendarDay | undefined {
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    return parseDemoDay(text);
+  } catch (error) {
+    throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-19.', { cause: error });
+  }
+}
 
 export interface DemoSeedDeps {
   now(): Date;
@@ -95,10 +107,7 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
       throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Lisbon.`);
     }
 
-    const today = options.today === undefined ? undefined : parseDateOnly(options.today);
-    if (options.today !== undefined && today === undefined) {
-      throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-19.');
-    }
+    const today = parseToday(options.today);
 
     if (!(await deps.demoModeEnabled())) {
       await io.stderr('Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance.\n');

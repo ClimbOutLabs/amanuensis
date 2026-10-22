@@ -1,11 +1,10 @@
-import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
-import { dayLabels } from '../calendar';
 import type { DemoNote } from '../model';
+import { dayLabels, STORY, type CalendarDay } from '../storyDays.mjs';
 
 /** Maya's long-term memory for `today`, one note per fact; a date in it is the one her mail and calendar hold. */
 export function mayaMemoryNotes(today: CalendarDay): DemoNote[] {
   const days = dayLabels(today);
-  const meetup = `${days.weekday(10)}, ${days.monthDay(10)}`;
+  const meetup = `${days.weekday(STORY.LUNCH_OPTION_A)}, ${days.monthDay(STORY.LUNCH_OPTION_A)}`;
   return [
     {
       key: 'identity',
