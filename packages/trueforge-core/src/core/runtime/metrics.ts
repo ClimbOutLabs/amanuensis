@@ -15,6 +15,8 @@ export const AgentThreadMetricsSchema = z
     total_tool_calls: z.number().int().nonnegative(),
     total_summarizations: z.number().int().nonnegative(),
     total_sub_agents: z.number().int().nonnegative(),
+    /** Model requests per reasoning effort sent, keyed by effort name; `unset` means no effort parameter. */
+    step_reasoning_efforts: z.record(z.string(), z.number().int().nonnegative()).optional(),
   })
   .openapi('AgentThreadMetrics');
 
@@ -50,6 +52,26 @@ export function updateMetricsFromUsage(target: AgentThreadMetrics, usage: Comple
   target.total_cost_in_usd = sumOptional(target.total_cost_in_usd, usage.cost_in_usd);
 }
 
+/** Count one model request under the effort it was sent with. */
+export function addReasoningEffortStep(target: AgentThreadMetrics, effort: string): void {
+  const counts = target.step_reasoning_efforts ?? {};
+  target.step_reasoning_efforts = { ...counts, [effort]: (counts[effort] ?? 0) + 1 };
+}
+
+function mergeEffortCounts(
+  target: Record<string, number> | undefined,
+  source: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (source === undefined) {
+    return target;
+  }
+  const merged = { ...target };
+  for (const [effort, count] of Object.entries(source)) {
+    merged[effort] = (merged[effort] ?? 0) + count;
+  }
+  return merged;
+}
+
 export function addAgentThreadMetrics(target: AgentThreadMetrics, source: AgentThreadMetrics): void {
   target.total_input_tokens += source.total_input_tokens;
   target.total_output_tokens += source.total_output_tokens;
@@ -62,4 +84,5 @@ export function addAgentThreadMetrics(target: AgentThreadMetrics, source: AgentT
   target.total_tool_calls += source.total_tool_calls;
   target.total_summarizations += source.total_summarizations;
   target.total_sub_agents += source.total_sub_agents;
+  target.step_reasoning_efforts = mergeEffortCounts(target.step_reasoning_efforts, source.step_reasoning_efforts);
 }

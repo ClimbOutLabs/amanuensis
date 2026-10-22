@@ -56,6 +56,8 @@ export interface AgentDefinition {
     | {
         /** Maximum combined input/output context for the resolved model, when known. */
         contextLength: number | undefined;
+        /** Efforts the model advertises; undefined or empty means no effort parameter is sent. */
+        reasoningEfforts: readonly string[] | undefined;
       }
     | undefined;
   /**

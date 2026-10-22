@@ -36,7 +36,7 @@ async function* promptStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawA
 
 function makeThread(input: {
   context?: ContextMessage[] | undefined;
-  modelProperties?: { contextLength: number | undefined } | undefined;
+  modelProperties?: { contextLength: number | undefined; reasoningEfforts: readonly string[] | undefined } | undefined;
   modelParams?: ModelParams | undefined;
   capabilities?: readonly AgentCapability[] | undefined;
 }): { thread: AgentThread; create: jest.Mock } {
@@ -187,7 +187,7 @@ describe('token-based pre-flight guard', () => {
   it('forces a compaction pass when the estimated request exceeds the model context length', async () => {
     const { thread, create } = makeThread({
       context: OVER_LIMIT_CONTEXT,
-      modelProperties: { contextLength: 4096 },
+      modelProperties: { contextLength: 4096, reasoningEfforts: undefined },
       capabilities: [forcedShrinkCapability],
     });
     const events = await drainEvents(thread, new AbortController().signal);
@@ -202,7 +202,7 @@ describe('token-based pre-flight guard', () => {
   it('fails fast with a clear error when the request is still over the limit after compaction', async () => {
     const { thread, create } = makeThread({
       context: OVER_LIMIT_CONTEXT,
-      modelProperties: { contextLength: 4096 },
+      modelProperties: { contextLength: 4096, reasoningEfforts: undefined },
       // No capabilities: forced compaction is a no-op, so the estimate stays over.
     });
     const events = await drainEvents(thread, new AbortController().signal);
@@ -217,7 +217,7 @@ describe('token-based pre-flight guard', () => {
 
   it('sends the request untouched when the estimate is under the limit', async () => {
     const { thread, create } = makeThread({
-      modelProperties: { contextLength: 128_000 },
+      modelProperties: { contextLength: 128_000, reasoningEfforts: undefined },
     });
     const events = await drainEvents(thread, new AbortController().signal);
 
@@ -231,7 +231,7 @@ describe('token-based pre-flight guard', () => {
     let forcedPasses = 0;
     const { thread, create } = makeThread({
       context: OVER_LIMIT_CONTEXT,
-      modelProperties: { contextLength: 4096 },
+      modelProperties: { contextLength: 4096, reasoningEfforts: undefined },
       capabilities: [
         makeNormalCompactionCapability(() => {
           forcedPasses += 1;
@@ -265,7 +265,7 @@ describe('token-based pre-flight guard', () => {
     };
     const { thread, create } = makeThread({
       context: [imageMessage],
-      modelProperties: { contextLength: 128_000 },
+      modelProperties: { contextLength: 128_000, reasoningEfforts: undefined },
     });
     const events = await drainEvents(thread, new AbortController().signal);
 

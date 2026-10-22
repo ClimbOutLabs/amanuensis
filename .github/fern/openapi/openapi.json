@@ -6576,6 +6576,14 @@
             "description": "Provider-specific reasoning effort (e.g. low/medium/high).",
             "type": "string"
           },
+          "reasoning_effort_mode": {
+            "description": "How reasoning effort is chosen. automatic (default) picks it per step; fixed sends reasoning_effort on every step.",
+            "enum": [
+              "automatic",
+              "fixed"
+            ],
+            "type": "string"
+          },
           "temperature": {
             "description": "Sampling temperature; higher values increase randomness.",
             "type": "number"
@@ -11577,6 +11585,14 @@
       "TurnMetrics": {
         "description": "Optional billable aggregate for the whole turn.",
         "properties": {
+          "step_reasoning_efforts": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Model requests per reasoning effort in this turn. The key unset means no effort was sent.",
+            "type": "object"
+          },
           "total_cache_read_tokens": {
             "description": "Total cache-read tokens across model calls in this turn.",
             "minimum": 0,

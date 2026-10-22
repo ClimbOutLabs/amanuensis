@@ -63,7 +63,9 @@ function makeCapability(input: {
       modelId: undefined,
       configuredModels: undefined,
       modelClient: makeMockILLM({ createNonStream: input.createNonStream }),
-      ...(input.contextLength === undefined ? {} : { modelProperties: { contextLength: input.contextLength } }),
+      ...(input.contextLength === undefined
+        ? {}
+        : { modelProperties: { contextLength: input.contextLength, reasoningEfforts: undefined } }),
     },
     compactionThresholdTokens: input.thresholdTokens ?? 1,
   });
@@ -357,7 +359,7 @@ describe('pre-flight guard with an explicit threshold above the model window', (
       modelId: undefined,
       configuredModels: undefined,
       toolSets: [],
-      modelProperties: { contextLength: 8_192 },
+      modelProperties: { contextLength: 8_192, reasoningEfforts: undefined },
     };
     const thread = new AgentThread({
       threadId: 'main',
@@ -562,12 +564,12 @@ describe('separate compaction model', () => {
         modelId: undefined,
         configuredModels: undefined,
         modelClient: makeMockILLM(),
-        modelProperties: { contextLength: input.threadLength },
+        modelProperties: { contextLength: input.threadLength, reasoningEfforts: undefined },
       },
       compactionModel: {
         modelClient: makeMockILLM({ createNonStream }),
         modelParams: {},
-        modelProperties: { contextLength: input.compactionLength },
+        modelProperties: { contextLength: input.compactionLength, reasoningEfforts: undefined },
       },
       compactionThresholdTokens: 1,
     });

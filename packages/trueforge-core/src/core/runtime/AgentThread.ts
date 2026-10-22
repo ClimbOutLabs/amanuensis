@@ -67,6 +67,13 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import {
+  readReasoningEffortMode,
+  readStoredReasoningEffort,
+  resolveStepReasoningEffort,
+  stepMaxOutputTokens,
+  type ReasoningStepKind,
+} from '../llm/reasoningEffortPolicy';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -201,7 +208,12 @@ import {
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
-import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
+import {
+  addReasoningEffortStep,
+  createEmptyAgentThreadMetrics,
+  updateMetricsFromUsage,
+  type AgentThreadMetrics,
+} from './metrics';
 import {
   collectKnownEventIds,
   guardModelReply,
@@ -573,6 +585,8 @@ function requestHasAnsweredClarification(context: readonly ContextMessage[]): bo
 type StepOutcome = 'exit' | 'continue';
 
 interface StepLLMCallOptions {
+  /** Which kind of request this is; picks the reasoning effort and output cap. */
+  reasoningStepKind: ReasoningStepKind;
   /** Sub-agent completion message sent to the parent when the model returns no tool calls and no
    * visible content. `undefined` when the caller does not want a terminal-failure fallback. */
   emptyTerminalFallback: string | undefined;
@@ -2381,7 +2395,29 @@ export class AgentThread {
     return total;
   }
 
-  private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
+  /**
+   * Which kind of model call the next request is. A sub-agent always counts as one. A request
+   * right after tool results is a continuation, or the final answer when no tools are left to offer.
+   * Anything else answers the user's message, which is a first step.
+   */
+  private reasoningStepKind({
+    offeredToolCount,
+    finalAnswerPhase,
+  }: {
+    offeredToolCount: number;
+    finalAnswerPhase: boolean;
+  }): ReasoningStepKind {
+    if (this.parent !== undefined) {
+      return 'sub_agent';
+    }
+    const last = this.context.at(-1);
+    if (last === undefined || !('role' in last) || last.role !== 'tool') {
+      return 'first';
+    }
+    return finalAnswerPhase || offeredToolCount === 0 ? 'final_answer' : 'continuation';
+  }
+
+  private transformToLLMRequest(tools: ChatCompletionTool[], stepKind: ReasoningStepKind): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
     // day the rebuilt string is byte-identical, so prefix caching is untouched;
     // on a date change the one rebuild trades a single cache miss for a
@@ -2454,6 +2490,31 @@ export class AgentThread {
     if (this.definition.modelParams) {
       Object.assign(requestBody, this.definition.modelParams);
     }
+
+    // The effort and output cap are chosen per request, so they overwrite whatever the persona
+    // stored. `reasoning_effort_mode` is harness config and must not reach the provider.
+    Reflect.deleteProperty(requestBody, 'reasoning_effort_mode');
+    const reasoningEffort = resolveStepReasoningEffort({
+      stepKind,
+      mode: readReasoningEffortMode(this.definition.modelParams),
+      storedEffort: readStoredReasoningEffort(this.definition.modelParams),
+      supported: this.definition.modelProperties?.reasoningEfforts,
+    });
+    if (reasoningEffort === undefined) {
+      Reflect.deleteProperty(requestBody, 'reasoning_effort');
+    } else {
+      Reflect.set(requestBody, 'reasoning_effort', reasoningEffort);
+    }
+    const configuredMaxTokens = resolveMaxOutputTokens(requestBody);
+    const maxTokens = stepMaxOutputTokens({ stepKind, configured: configuredMaxTokens, reasoningEffort });
+    if (maxTokens !== undefined && maxTokens !== configuredMaxTokens) {
+      Reflect.set(
+        requestBody,
+        Reflect.has(requestBody, 'max_completion_tokens') ? 'max_completion_tokens' : 'max_tokens',
+        maxTokens,
+      );
+    }
+    addReasoningEffortStep(this.metrics, reasoningEffort ?? 'unset');
 
     if (tools.length > 0) {
       requestBody.tools = tools;
@@ -3091,7 +3152,8 @@ export class AgentThread {
       }
     }
 
-    let requestBody = this.transformToLLMRequest(tools);
+    const { reasoningStepKind } = options;
+    let requestBody = this.transformToLLMRequest(tools, reasoningStepKind);
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -3220,7 +3282,7 @@ export class AgentThread {
         if (signal?.aborted) {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
-        requestBody = this.transformToLLMRequest(tools);
+        requestBody = this.transformToLLMRequest(tools, reasoningStepKind);
       }
     }
 
@@ -4604,6 +4666,10 @@ export class AgentThread {
               toolMapping,
               signal,
               {
+                reasoningStepKind: this.reasoningStepKind({
+                  offeredToolCount: requestTools.length,
+                  finalAnswerPhase,
+                }),
                 emptyTerminalFallback: undefined,
                 retryModelMessageEventId: pendingRetryModelMessageEventId,
               },
