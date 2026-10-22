@@ -759,7 +759,9 @@ describe('approval gate over an inert connector', () => {
         )[0];
 
         expect(ref?.tier).toBe(3);
-        expect(ref?.tier3_card?.plain_what).toContain(INERT_READ_TOOL);
+        expect(ref?.tier3_card?.plain_what).toBe(
+          'This is a new tool from inert. Check what it will do before you allow it.',
+        );
         expect(ref?.tier3_card?.outbound_text).toContain('text: inert');
         expect(server.mcp.readInvocations()).toBe(1);
       },

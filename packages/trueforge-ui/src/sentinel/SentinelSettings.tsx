@@ -1,23 +1,12 @@
 'use client';
 
-import { searchProviderLabel } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
-import { useEffect, useState, type FC } from 'react';
+import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
-import { isSearchProvider } from '../server/searchProviderTypes.js';
-import { useOptionalCatalogServer } from '../server/ServerContext.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
 import { TIER2_ACTION_KINDS, TIER2_ACTION_LABELS, type Tier2ActionKind } from './types.js';
-
-function hostOf(url: string): string | undefined {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * Settings > Permissions: the user-only offline mode toggle, the web search switch, the maps
@@ -33,29 +22,6 @@ export const SentinelSettings: FC = () => {
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [mapsError, setMapsError] = useState<string | null>(null);
-  const catalog = useOptionalCatalogServer();
-  const [searchProvider, setSearchProvider] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (catalog === null) {
-      return;
-    }
-    let active = true;
-    // The sentence falls back to a generic name when the connector list cannot load.
-    catalog.connectorCatalog.listConnectors().then(
-      connectors => {
-        const designated = (connectors ?? []).find(isSearchProvider);
-        const label = designated === undefined ? undefined : searchProviderLabel({ host: hostOf(designated.url) });
-        if (active && label !== undefined) {
-          setSearchProvider(label);
-        }
-      },
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [catalog]);
 
   if (sentinel === null) {
     return (
@@ -185,7 +151,9 @@ export const SentinelSettings: FC = () => {
               : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
           </p>
           <p className="mt-1 text-sm text-text-secondary">
-            {`Searches go to ${searchProvider ?? 'your search provider'}, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode.`}
+            {
+              "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode."
+            }
           </p>
           {searchError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

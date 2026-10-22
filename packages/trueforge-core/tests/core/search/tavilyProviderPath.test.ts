@@ -86,7 +86,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(isCallToolResponseResult(await h.toolSet.callTool(extract))).toBe(true);
     expect(h.sent.map(call => call.url)).toEqual(['https://api.tavily.com/search', 'https://api.tavily.com/extract']);
     expect(h.audit.map(row => row.tool_name)).toEqual(['tavily_search', 'tavily_extract']);
-    expect(h.audit[0]?.description).toBe('Searched with Tavily: English speaking doctor Lisbon');
+    expect(h.audit[0]?.description).toBe('Searched: English speaking doctor Lisbon');
   });
 
   it('holds a search after this chat read private data, and names Tavily on the card', async () => {

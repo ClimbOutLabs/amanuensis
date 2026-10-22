@@ -37,7 +37,7 @@ describe('buildActivityItems', () => {
       ORIGIN_MS,
     );
     expect(items).toHaveLength(1);
-    expect(items[0]?.title).toBe('Searched the web with Tavily');
+    expect(items[0]?.title).toBe('Searched the web');
     expect(items[0]?.detail).toContain('3 searches');
     expect(items[0]?.count).toBe(3);
     expect(items[0]?.timestampMs).toBe(ORIGIN_MS + 1_000);
@@ -52,11 +52,7 @@ describe('buildActivityItems', () => {
       ],
       ORIGIN_MS,
     );
-    expect(items.map(item => item.title)).toEqual([
-      'Read web pages with Tavily',
-      'Checked your calendar',
-      'Checked email',
-    ]);
+    expect(items.map(item => item.title)).toEqual(['Read web pages', 'Checked your calendar', 'Checked email']);
   });
 
   it('labels the calendar tools by what they do', () => {
@@ -83,7 +79,7 @@ describe('buildActivityItems', () => {
 
   it('skips internal bookkeeping tools', () => {
     const items = buildActivityItems([toolCall('record_finding', 1_000), toolCall('tavily_search', 2_000)], ORIGIN_MS);
-    expect(items.map(item => item.title)).toEqual(['Searched the web with Tavily']);
+    expect(items.map(item => item.title)).toEqual(['Searched the web']);
   });
 
   it('does not group tool calls separated by other events', () => {
@@ -95,11 +91,7 @@ describe('buildActivityItems', () => {
       ],
       ORIGIN_MS,
     );
-    expect(items.map(item => item.title)).toEqual([
-      'Searched the web with Tavily',
-      'Asked for your approval',
-      'Searched the web with Tavily',
-    ]);
+    expect(items.map(item => item.title)).toEqual(['Searched the web', 'Asked for your approval', 'Searched the web']);
   });
 
   it('translates approvals, waits, helpers, snags, and completion', () => {
@@ -140,7 +132,7 @@ describe('buildActivityItems', () => {
       ],
       ORIGIN_MS,
     );
-    expect(items.map(item => item.title)).toEqual(['Searched the web with Tavily']);
+    expect(items.map(item => item.title)).toEqual(['Searched the web']);
   });
 
   it('orders items chronologically regardless of input order', () => {
@@ -151,6 +143,6 @@ describe('buildActivityItems', () => {
       ],
       ORIGIN_MS,
     );
-    expect(items.map(item => item.title)).toEqual(['Searched the web with Tavily', 'Wrapped up']);
+    expect(items.map(item => item.title)).toEqual(['Searched the web', 'Wrapped up']);
   });
 });

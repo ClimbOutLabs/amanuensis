@@ -6,9 +6,6 @@ import { OfflineIndicator } from '@/sentinel/OfflineIndicator.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { SentinelSettings } from '@/sentinel/SentinelSettings.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
-import { ServerProvider } from '@/server/ServerContext.js';
-import type { ConnectorBase } from '@/server/types.js';
-import { createMockAgentUIServer, createMockCatalog } from '../server/mockServer.js';
 
 function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi.fn> } {
   const updateUserSettings = vi.fn(async (patch: Partial<SentinelUserSettings>) => ({
@@ -132,7 +129,7 @@ describe('SentinelSettings', () => {
   });
 
   it.each([true, false])(
-    'says where searches go before the connector list loads, whether searches run without asking (%s) or ask',
+    'says what the search service sees, whether searches run without asking (%s) or ask',
     async on => {
       const { api } = stubApi({
         offline_mode: false,
@@ -153,43 +150,6 @@ describe('SentinelSettings', () => {
       ).toBeInTheDocument();
     },
   );
-
-  it('names the designated search provider, Tavily, in the search sentence', async () => {
-    const { api } = stubApi({
-      offline_mode: false,
-      tier2_auto_allow: [],
-      search_without_asking: true,
-      maps_without_asking: false,
-      sandbox_without_asking: true,
-    });
-    const tavily: ConnectorBase & { searchProvider: true } = {
-      id: 'tavily',
-      name: 'tavily',
-      description: 'Search the web',
-      url: 'https://mcp.tavily.com/mcp',
-      authenticated: true,
-      requiresAuth: false,
-      auth: { type: 'none' },
-      searchProvider: true,
-    };
-    const server = createMockAgentUIServer({
-      catalog: createMockCatalog({
-        connectorCatalog: { ...createMockCatalog().connectorCatalog, listConnectors: async () => [tavily] },
-      }),
-    });
-    render(
-      <ServerProvider server={server}>
-        <SentinelApiProvider api={api}>
-          <SentinelSettings />
-        </SentinelApiProvider>
-      </ServerProvider>,
-    );
-    expect(
-      await screen.findByText(
-        "Searches go to Tavily, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode.",
-      ),
-    ).toBeInTheDocument();
-  });
 
   it('reports a failed search setting save beside the switch', async () => {
     const { api, updateUserSettings } = stubApi({

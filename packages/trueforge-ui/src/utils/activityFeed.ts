@@ -37,8 +37,8 @@ type ToolLabel = {
 const INTERNAL_TOOLS = new Set(['record_finding']);
 
 const TOOL_MATCHERS: Array<{ pattern: RegExp } & ToolLabel> = [
-  { pattern: /^tavily_search/, kind: 'search', title: 'Searched the web with Tavily', plural: 'searches' },
-  { pattern: /^tavily_extract/, kind: 'read', title: 'Read web pages with Tavily', plural: 'pages' },
+  { pattern: /^tavily_search/, kind: 'search', title: 'Searched the web', plural: 'searches' },
+  { pattern: /^tavily_extract/, kind: 'read', title: 'Read web pages', plural: 'pages' },
   {
     pattern: /calendar|(^|__)(list_events|get_event)$/,
     kind: 'calendar',

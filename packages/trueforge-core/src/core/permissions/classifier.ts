@@ -1801,7 +1801,7 @@ async function holdSearchCall(input: {
   });
   return {
     ...decision,
-    audit_description: searchHoldAuditText({ server: provider ?? SEARCH_SERVER_FALLBACK, say: input.say }),
+    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say }),
   };
 }
 
@@ -1820,7 +1820,6 @@ async function classifySearchProviderTool(input: {
   extraction: ExtractionResult;
 }): Promise<TierDecision | undefined> {
   const { action, ctx, extraction } = input;
-  const provider = searchProviderLabel({ host: action.mcp_server_host });
   const name = action.tool_name.toLowerCase();
   if (
     (action.mcp_hints.read_only_hint !== true && action.mcp_search_tool !== true) ||
@@ -1912,7 +1911,7 @@ async function classifySearchProviderTool(input: {
   }
   return tier1Decision({
     reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
-    reason_detail: provider === undefined ? `Searched: ${queryText}` : `Searched with ${provider}: ${queryText}`,
+    reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
