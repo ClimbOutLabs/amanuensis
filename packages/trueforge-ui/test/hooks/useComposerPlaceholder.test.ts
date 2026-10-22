@@ -51,29 +51,38 @@ describe('pickComposerPlaceholder', () => {
   });
 });
 
+// The store lives for the page, so each test uses its own chat ids.
 describe('resolveComposerPlaceholder', () => {
-  it('keeps the earlier line for the same chat and does not draw again', () => {
-    const first = resolveComposerPlaceholder({ current: null, chatId: 'chat-a', random: fixedRandom(0) });
+  it('keeps the line through a composer remount in the same chat and does not draw again', () => {
+    const first = resolveComposerPlaceholder({ chatId: 'remount-chat', random: fixedRandom(0) });
     let draws = 0;
-    const again = resolveComposerPlaceholder({
-      current: first,
-      chatId: 'chat-a',
+    const afterRemount = resolveComposerPlaceholder({
+      chatId: 'remount-chat',
       random: () => {
         draws += 1;
         return 0.9;
       },
     });
 
-    expect(again).toBe(first);
+    expect(first).toBe(COMPOSER_PLACEHOLDER_LINES[0]);
+    expect(afterRemount).toBe(first);
     expect(draws).toBe(0);
   });
 
-  it('picks a new line when the chat changes', () => {
-    const first = resolveComposerPlaceholder({ current: null, chatId: 'chat-a', random: fixedRandom(0) });
-    const second = resolveComposerPlaceholder({ current: first, chatId: 'chat-b', random: fixedRandom(0.9) });
+  it('keeps the line for chat A when switching A to B and back to A', () => {
+    const chatA = resolveComposerPlaceholder({ chatId: 'switch-a', random: fixedRandom(0) });
+    const chatB = resolveComposerPlaceholder({ chatId: 'switch-b', random: fixedRandom(0.9) });
+    const chatAAgain = resolveComposerPlaceholder({ chatId: 'switch-a', random: fixedRandom(0.9) });
 
-    expect(second.chatId).toBe('chat-b');
-    expect(second.line).toBe(COMPOSER_PLACEHOLDER_LINES[9]);
-    expect(second.line).not.toBe(first.line);
+    expect(chatB).toBe(COMPOSER_PLACEHOLDER_LINES[9]);
+    expect(chatAAgain).toBe(chatA);
+  });
+
+  it('keeps a new chat line across the first send, since its local id does not change', () => {
+    const beforeSend = resolveComposerPlaceholder({ chatId: 'new-chat-local-id', random: fixedRandom(0.5) });
+    const afterSend = resolveComposerPlaceholder({ chatId: 'new-chat-local-id', random: fixedRandom(0) });
+
+    expect(beforeSend).toBe(COMPOSER_PLACEHOLDER_LINES[5]);
+    expect(afterSend).toBe(beforeSend);
   });
 });

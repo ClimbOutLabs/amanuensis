@@ -1,5 +1,4 @@
 import { useAuiState } from '@assistant-ui/react';
-import { useState } from 'react';
 
 /** The only composer placeholders. The assistant asks these itself, so they never carry its name. */
 export const COMPOSER_PLACEHOLDER_LINES: readonly string[] = [
@@ -26,27 +25,20 @@ export function pickComposerPlaceholder(random: () => number): string {
   return line;
 }
 
-export type ComposerPlaceholderPick = { chatId: string; line: string };
+/** Each chat's line, kept for the life of the page so remounts, chat switches and the first send keep it. */
+const lineByChat = new Map<string, string>();
 
-/** Keeps the earlier pick while the chat is the same, so typing and re-renders never change the line. */
-export function resolveComposerPlaceholder({
-  current,
-  chatId,
-  random,
-}: {
-  current: ComposerPlaceholderPick | null;
-  chatId: string;
-  random: () => number;
-}): ComposerPlaceholderPick {
-  if (current !== null && current.chatId === chatId) return current;
-  return { chatId, line: pickComposerPlaceholder(random) };
+/** Returns the chat's line, drawing one the first time the chat is seen. */
+export function resolveComposerPlaceholder({ chatId, random }: { chatId: string; random: () => number }): string {
+  const existing = lineByChat.get(chatId);
+  if (existing !== undefined) return existing;
+  const line = pickComposerPlaceholder(random);
+  lineByChat.set(chatId, line);
+  return line;
 }
 
 /** The line for the open chat. `threadListItem.id` is the local id, which survives the first send. */
 export function useComposerPlaceholder(): string {
   const chatId = useAuiState(state => state.threadListItem.id);
-  const [picked, setPicked] = useState<ComposerPlaceholderPick | null>(null);
-  const next = resolveComposerPlaceholder({ current: picked, chatId, random: Math.random });
-  if (next !== picked) setPicked(next);
-  return next.line;
+  return resolveComposerPlaceholder({ chatId, random: Math.random });
 }
