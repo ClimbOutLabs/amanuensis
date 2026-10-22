@@ -249,6 +249,8 @@ export type SentinelAuditEntry = {
 export type SentinelUserAuditEntry = SentinelAuditEntry & {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 };
 
 /** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
@@ -716,7 +718,8 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
   for (const item of body.data) {
     const entry = parseAuditEntry(item);
     if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
-    entries.push({ ...entry, chat_exists: item.chat_exists });
+    const session_title = typeof item.session_title === 'string' ? item.session_title : null;
+    entries.push({ ...entry, chat_exists: item.chat_exists, session_title });
   }
   const pagination = isRecord(body.pagination) ? body.pagination : undefined;
   const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');

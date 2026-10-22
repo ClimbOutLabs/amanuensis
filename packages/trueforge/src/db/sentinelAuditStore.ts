@@ -10,6 +10,7 @@ export interface SentinelAuditDatabase {
   session: {
     tenant_id: string;
     session_id: string;
+    title: string | null;
   };
   sentinel_audit: {
     id: string;
@@ -70,6 +71,8 @@ export interface ListUserSentinelAuditInput {
 export interface UserSentinelAuditRecord extends SentinelAuditRecord {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 }
 
 export interface UserSentinelAuditPage {
@@ -162,7 +165,7 @@ export class SentinelAuditStore implements ISentinelAuditStore {
           .onRef('session.session_id', '=', 'sentinel_audit.conversation_id'),
       )
       .selectAll('sentinel_audit')
-      .select('session.session_id as joined_session_id')
+      .select(['session.session_id as joined_session_id', 'session.title as joined_session_title'])
       .where('sentinel_audit.tenant_id', '=', input.tenant_id)
       .where('sentinel_audit.created_by', '=', input.created_by);
     if (input.outcome !== undefined) {
@@ -185,6 +188,7 @@ export class SentinelAuditStore implements ISentinelAuditStore {
     const entries = rows.slice(0, input.limit).map(row => ({
       ...toRecord(row),
       chat_exists: row.joined_session_id !== null,
+      session_title: row.joined_session_title,
     }));
     const last = entries.at(-1);
     return {

@@ -35,27 +35,42 @@ function parseOutcomeFilter(value: string): SentinelAuditOutcome | undefined {
   return SENTINEL_AUDIT_OUTCOMES.find(outcome => outcome === value);
 }
 
-const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => (
-  <li className="flex flex-col gap-1 border-b border-border/60 px-4 py-3 last:border-b-0">
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <time dateTime={entry.created_at} className="text-xs text-text-secondary">
-        {whenLabel(entry.created_at)}
-      </time>
-      <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>{sentinelAuditLabel(entry)}</span>
-    </div>
-    <p className="text-sm text-text-primary">{entry.description}</p>
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
-      <span className="min-w-0 truncate font-mono">{entry.action_type}</span>
-      {!entry.chat_exists ? (
-        <span>Chat deleted</span>
-      ) : chatHref !== null ? (
-        <a href={chatHref} className="underline hover:text-text-primary">
-          Open chat
-        </a>
-      ) : null}
-    </div>
-  </li>
-);
+// Matches the sidebar: a chat with no usable title shows as untitled.
+function chatTitle(sessionTitle: string | null): string {
+  const title = sessionTitle?.trim() ?? '';
+  return title === '' ? 'Untitled chat' : title;
+}
+
+const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => {
+  const title = chatTitle(entry.session_title);
+  return (
+    <li className="flex flex-col gap-1 border-b border-border/60 px-4 py-3 last:border-b-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <time dateTime={entry.created_at} className="text-xs text-text-secondary">
+          {whenLabel(entry.created_at)}
+        </time>
+        <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>{sentinelAuditLabel(entry)}</span>
+      </div>
+      <p className="text-sm text-text-primary">{entry.description}</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
+        <span className="min-w-0 truncate font-mono">{entry.action_type}</span>
+        {!entry.chat_exists ? (
+          <span className="min-w-0 max-w-full">In: a deleted chat</span>
+        ) : chatHref !== null ? (
+          <a
+            href={chatHref}
+            title={title}
+            className="block min-w-0 max-w-full truncate underline hover:text-text-primary"
+          >
+            {`In: ${title}`}
+          </a>
+        ) : (
+          <span className="block min-w-0 max-w-full truncate">{`In: ${title}`}</span>
+        )}
+      </div>
+    </li>
+  );
+};
 
 /**
  * Settings > Audit: every Sentinel audit entry for the signed-in user across all chats, newest

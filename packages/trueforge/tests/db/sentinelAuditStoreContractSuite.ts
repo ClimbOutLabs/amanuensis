@@ -10,7 +10,7 @@ import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 
 export interface SentinelAuditStoreContractEnv {
   store: ISentinelAuditStore;
-  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession' | 'getSession'>;
+  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession' | 'getSession' | 'updateSession'>;
 }
 
 function entry(overrides: Partial<AuditRecordInput>): AuditRecordInput {
@@ -102,6 +102,13 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     const env = getEnv();
     await createChat(env, 'kept');
     await createChat(env, 'gone');
+    await env.sessions.updateSession({
+      tenant_id: 't1',
+      session_id: 'kept',
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      title: 'Kept plan',
+      metadata: undefined,
+    });
     await recordInOrder(env.store, [
       entry({ conversation_id: 'gone', tool_name: 'send_email', outcome: 'approved', tier: 3 }),
       entry({ conversation_id: 'kept', tool_name: 'write_file', outcome: 'ran', tier: 2 }),
@@ -112,10 +119,10 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     const page = await env.store.listForUser({ ...forUser, limit: 10 });
 
     expect(page.next_page_token).toBeUndefined();
-    expect(page.entries.map(row => [row.tool_name, row.conversation_id, row.chat_exists])).toEqual([
-      ['search', 'never-stored', false],
-      ['write_file', 'kept', true],
-      ['send_email', 'gone', false],
+    expect(page.entries.map(row => [row.tool_name, row.conversation_id, row.chat_exists, row.session_title])).toEqual([
+      ['search', 'never-stored', false, null],
+      ['write_file', 'kept', true, 'Kept plan'],
+      ['send_email', 'gone', false, null],
     ]);
     expect(page.entries[2]).toMatchObject({ outcome: 'approved', tier: 3, description: 'Read a file' });
   });

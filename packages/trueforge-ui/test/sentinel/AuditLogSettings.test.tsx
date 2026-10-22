@@ -18,6 +18,7 @@ function makeEntry(overrides: Partial<SentinelUserAuditEntry>): SentinelUserAudi
     description: 'Sent an email to the plumber',
     outcome: 'approved',
     chat_exists: true,
+    session_title: 'Plumber quotes',
     ...overrides,
   };
 }
@@ -77,12 +78,55 @@ describe('AuditLogSettings', () => {
 
     expect(within(live).getByText('Approved')).toBeInTheDocument();
     expect(within(live).getByText('send_email')).toBeInTheDocument();
-    expect(within(live).getByRole('link', { name: 'Open chat' }).getAttribute('href')).toContain('chat-live');
+    expect(within(live).getByRole('link', { name: 'In: Plumber quotes' }).getAttribute('href')).toContain('chat-live');
     expect(within(live).getByText(/2026/)).toBeInTheDocument();
 
     expect(within(gone).getByText('Refused')).toBeInTheDocument();
-    expect(within(gone).getByText('Chat deleted')).toBeInTheDocument();
+    expect(within(gone).getByText('In: a deleted chat')).toBeInTheDocument();
     expect(within(gone).queryByRole('link')).toBeNull();
+  });
+
+  it('shows Untitled chat for a live chat with no title, still linked', async () => {
+    renderPage(
+      stubApi(async () => ({
+        entries: [makeEntry({ id: 'untitled', session_title: null, description: 'Untitled row' })],
+      })),
+    );
+
+    const row = (await screen.findByText('Untitled row')).closest('li');
+    if (row === null) throw new Error('audit row did not render as a list item');
+
+    expect(within(row).getByRole('link', { name: 'In: Untitled chat' }).getAttribute('href')).toContain('chat-1');
+  });
+
+  it('keeps a whitespace-only title as Untitled chat', async () => {
+    renderPage(
+      stubApi(async () => ({
+        entries: [makeEntry({ session_title: '   ', description: 'Blank title row' })],
+      })),
+    );
+
+    const row = (await screen.findByText('Blank title row')).closest('li');
+    if (row === null) throw new Error('audit row did not render as a list item');
+
+    expect(within(row).getByRole('link', { name: 'In: Untitled chat' })).toBeInTheDocument();
+  });
+
+  it('keeps the full title in the accessible name of a long title, which truncates visually', async () => {
+    const longTitle =
+      'Quarterly plan for the kitchen renovation, including the plumber quotes, the electrician schedule, and the tile samples from the showroom';
+    renderPage(
+      stubApi(async () => ({
+        entries: [makeEntry({ session_title: longTitle, description: 'Long title row' })],
+      })),
+    );
+
+    const row = (await screen.findByText('Long title row')).closest('li');
+    if (row === null) throw new Error('audit row did not render as a list item');
+
+    const link = within(row).getByRole('link', { name: `In: ${longTitle}` });
+    expect(link.className).toContain('truncate');
+    expect(link.getAttribute('title')).toBe(longTitle);
   });
 
   it('loads the next page with the token and appends it', async () => {
