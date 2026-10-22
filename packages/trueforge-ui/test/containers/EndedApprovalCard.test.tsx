@@ -62,16 +62,22 @@ function renderCard(messages: ThreadMessageLike[]) {
 function fakeServer(waitingIds: string[], statuses: string[] = ['done']) {
   let reads = 0;
   return {
-    peekSessionTip: vi.fn(async () => ({
-      turnId: 'turn-tip',
+    peekSessionTip: vi.fn(async () => {
       // Each read takes the next status; the last one repeats.
-      status: statuses[Math.min(reads++, statuses.length - 1)],
-      pendingApprovals: waitingIds.map(toolCallId => ({
-        toolCallId,
-        threadId: 'main',
-        createdAt: '2026-10-22T10:00:00.000Z',
-      })),
-    })),
+      const status = statuses[Math.min(reads, statuses.length - 1)];
+      reads += 1;
+      // As the real adapter: a tip that is still running lists no cards.
+      const listed = status === 'done' ? waitingIds : [];
+      return {
+        turnId: 'turn-tip',
+        status,
+        pendingApprovals: listed.map(toolCallId => ({
+          toolCallId,
+          threadId: 'main',
+          createdAt: '2026-10-22T10:00:00.000Z',
+        })),
+      };
+    }),
     dismissPendingApprovals: vi.fn(),
     answerHeldAction: vi.fn(),
     getLastCompactionStatus: vi.fn(),
