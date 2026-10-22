@@ -101,27 +101,27 @@ function pluralize(count: number, singular: string): string {
 
 export type BriefAuditSummary = {
   /** Things Aman read without changing anything, from the chat's audit log. */
-  readQuietly: number;
+  readAllowed: number;
   /** Actions that ran or were approved. Zero means nothing was sent. */
   actionsRan: number;
 };
 
 /** Counts for the trust line, read from the chat's audit entries. Brief item marks are not counted. */
 export function summarizeBriefAudit(entries: readonly { outcome: string; action_type: string }[]): BriefAuditSummary {
-  let readQuietly = 0;
+  let readAllowed = 0;
   let actionsRan = 0;
   for (const entry of entries) {
     if (entry.action_type.startsWith('brief.')) continue;
-    if (entry.outcome === 'logged') readQuietly += 1;
+    if (entry.outcome === 'logged') readAllowed += 1;
     if (entry.outcome === 'ran' || entry.outcome === 'approved') actionsRan += 1;
   }
-  return { readQuietly, actionsRan };
+  return { readAllowed, actionsRan };
 }
 
 /** The trust line. Only counts the audit log holds; nothing is claimed about sends it does not show. */
 export function briefFooterLine(summary: BriefAuditSummary): string {
   const parts: string[] = [];
-  if (summary.readQuietly > 0) parts.push(`Read ${pluralize(summary.readQuietly, 'thing')} quietly.`);
-  parts.push(summary.actionsRan === 0 ? 'Sent nothing.' : `${pluralize(summary.actionsRan, 'action')} ran.`);
+  if (summary.readAllowed > 0) parts.push(`${pluralize(summary.readAllowed, 'thing')} read, allowed by your settings.`);
+  parts.push(summary.actionsRan === 0 ? 'Nothing was sent.' : `${pluralize(summary.actionsRan, 'action')} ran.`);
   return parts.join(' ');
 }

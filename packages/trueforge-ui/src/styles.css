@@ -484,16 +484,6 @@
   background: color-mix(in oklab, var(--text-primary) 8%, transparent);
 }
 
-/* Memory recall reads as one control: the box and its word share a hit area. */
-.aman-runtime-rail__switch {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
 .aman-runtime-rail__identity {
   padding: 0.25rem 0 1rem;
 }

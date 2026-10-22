@@ -1,4 +1,9 @@
-import type { SentinelAuditEntry, SentinelAuditOutcome } from './types.js';
+import {
+  ALLOWED_BY_SETTINGS_LABEL,
+  WAITING_FOR_YOU_LABEL,
+  type SentinelAuditEntry,
+  type SentinelAuditOutcome,
+} from './types.js';
 
 /**
  * The one owner of the receipt's words: what each tool call reads as, and the state each audit
@@ -6,16 +11,16 @@ import type { SentinelAuditEntry, SentinelAuditOutcome } from './types.js';
  */
 
 /** The five states a receipt row can end on. `waiting` comes from a pending approval, not an audit entry. */
-export const ACTIVITY_STATES = ['waiting', 'approved', 'declined', 'turned_down', 'done_quietly'] as const;
+export const ACTIVITY_STATES = ['waiting', 'approved', 'declined', 'turned_down', 'allowed'] as const;
 
 export type ActivityState = (typeof ACTIVITY_STATES)[number];
 
 export const ACTIVITY_STATE_LABELS: Record<ActivityState, string> = {
-  waiting: 'Waiting for you',
+  waiting: WAITING_FOR_YOU_LABEL,
   approved: 'You approved',
   declined: 'You declined',
   turned_down: 'Turned down automatically',
-  done_quietly: 'Done quietly',
+  allowed: ALLOWED_BY_SETTINGS_LABEL,
 };
 
 /** The dot before a state word, as theme token classes only. */
@@ -24,22 +29,22 @@ export const ACTIVITY_STATE_DOT_CLASSES: Record<ActivityState, string> = {
   approved: 'bg-success-bg',
   declined: 'bg-text-secondary',
   turned_down: 'bg-failure-bg',
-  done_quietly: 'bg-text-secondary/50',
+  allowed: 'bg-text-secondary/50',
 };
 
 const OUTCOME_STATES: Record<Exclude<SentinelAuditOutcome, 'logged'>, ActivityState> = {
-  ran: 'done_quietly',
+  ran: 'allowed',
   approved: 'approved',
   denied: 'declined',
   auto_denied: 'turned_down',
 };
 
 /**
- * A `logged` row is a Tier 1 read that ran without asking (done quietly), or a Tier 2 or 3 call
- * held for the owner (waiting for you). The stored tier tells them apart.
+ * A `logged` row is a Tier 1 read that ran under the person's settings (allowed), or a Tier 2 or 3
+ * call waiting for them. The stored tier tells them apart.
  */
 export function activityStateOf(entry: Pick<SentinelAuditEntry, 'outcome' | 'tier'>): ActivityState {
-  if (entry.outcome === 'logged') return entry.tier === 1 ? 'done_quietly' : 'waiting';
+  if (entry.outcome === 'logged') return entry.tier === 1 ? 'allowed' : 'waiting';
   return OUTCOME_STATES[entry.outcome];
 }
 

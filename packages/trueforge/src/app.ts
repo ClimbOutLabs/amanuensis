@@ -40,6 +40,7 @@ import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
+import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
@@ -103,6 +104,7 @@ import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
+import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
@@ -754,6 +756,22 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         chatImages: deps.chatImages,
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Space pictures, browser session only: the owner\'s own spaces link them, and no agent or API token may fetch on the person\'s behalf.
+  app.route(
+    '/api/space-pictures',
+    withAuth(
+      createSpacePicturesRouter({
+        tenantId: TENANT_ID,
+        pictures: createSpacePictureService({
+          spaceStore: deps.spaceStore,
+          fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+          now: () => Date.now(),
+        }),
+        resolveRequestContext,
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),

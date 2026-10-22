@@ -90,14 +90,22 @@ describe('summarizeBriefAudit and briefFooterLine', () => {
       { outcome: 'logged', action_type: 'brief.item_done' },
       { outcome: 'ran', action_type: 'mail.send' },
     ]);
-    expect(summary).toEqual({ readQuietly: 1, actionsRan: 1 });
+    expect(summary).toEqual({ readAllowed: 1, actionsRan: 1 });
+  });
+
+  it('reports nothing for an empty log', () => {
+    expect(summarizeBriefAudit([])).toEqual({ readAllowed: 0, actionsRan: 0 });
   });
 
   it('says what was read and that nothing was sent when no action ran', () => {
-    expect(briefFooterLine({ readQuietly: 12, actionsRan: 0 })).toBe('Read 12 things quietly. Sent nothing.');
+    expect(briefFooterLine({ readAllowed: 12, actionsRan: 0 })).toBe(
+      '12 things read, allowed by your settings. Nothing was sent.',
+    );
   });
 
   it('counts the actions that ran instead of claiming nothing was sent', () => {
-    expect(briefFooterLine({ readQuietly: 1, actionsRan: 2 })).toBe('Read 1 thing quietly. 2 actions ran.');
+    expect(briefFooterLine({ readAllowed: 1, actionsRan: 2 })).toBe(
+      '1 thing read, allowed by your settings. 2 actions ran.',
+    );
   });
 });
