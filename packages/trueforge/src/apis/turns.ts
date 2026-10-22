@@ -2,7 +2,13 @@
  * DB-backed turns API (mounted at /api/v1/sessions).
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  ISessionStore,
+  Sessions,
+  TerminalTurnState,
+  Turn,
+  TurnStreamingEvent,
+} from '@truefoundry/trueforge-core/agent-session';
 import {
   ApprovalRequestEndedError,
   CancellationReason,
@@ -1123,19 +1129,7 @@ export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void
 }
 
 async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
-  const {
-    trackedStream,
-    turnEventStream,
-    sessionId,
-    turnId,
-    executionDeadline,
-    logger,
-    onEvent,
-    memory,
-    artifacts,
-    profileLearning,
-    modelUsage,
-  } = input;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1143,6 +1137,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // turn that attached one starts out tainted. A turn with neither is the user's own voice:
   // `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -1154,61 +1149,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
-        // First, so the answer's usage is visible before the slower follow-up work below.
-        const flushUsage = async () => {
-          if (modelUsage !== undefined) {
-            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
-          }
-        };
-        await flushUsage();
-        if (memory !== undefined) {
-          // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
-          // it, and the verification pass inside retries a failed retain once.
-          const stored = await submitRetainWithVerification({
-            client: memory.client,
-            sessionId,
-            turnId,
-            userText: memory.userText,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            completedAt: event.state.completed_at,
-            sessionTitle: memory.sessionTitle,
-            origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
-            logger,
-            summarize: memory.summarize,
-            outcomeLog: memory.outcomeLog,
-          });
-          // Only a stored turn can have gone to the persona it started with; a skipped or failed
-          // retain is already explained by its own reason line.
-          if (stored && memory.outcomeLog !== undefined) {
-            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
-          }
-        }
-        if (profileLearning !== undefined) {
-          // The assistant's reply is deliberately not passed here: it is not a source of facts
-          // about the user, so the learning pass only ever sees the user's own turn text.
-          // Awaited so the tracked drain covers the pass; the pass writes its audit event to
-          // the turnEventStream (how an open tab sees it without reloading the turn).
-          await submitProfileLearning({
-            ...profileLearning,
-            sessionId,
-            turnId,
-            completedAt: event.state.completed_at,
-            turnEventStream,
-            logger,
-          });
-        }
-        // The summarization and profile learning calls above record after the first flush.
-        await flushUsage();
-        if (artifacts !== undefined) {
-          await resolveAndSubmitArtifactPersistence({
-            ...artifacts,
-            sessionId,
-            turnId,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            logger,
-          });
-        }
+        // Not awaited here: the stream must finish now, so the chat's next turn never waits on
+        // this work. The drain still awaits it below, so shutdown covers it.
+        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput });
       }
+    }
+    if (followUp !== undefined) {
+      await waitForTurnFollowUp({ followUp, sessionId, turnId, logger });
     }
   } catch (error) {
     if (error instanceof SessionStoreNotFoundError) {
@@ -1226,6 +1173,106 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
     }
   } finally {
     executionDeadline.dispose();
+  }
+}
+
+/**
+ * The work a finished turn does after its answer: usage, memory, profile learning, artifacts.
+ * Never throws; a failure is logged.
+ */
+async function runTurnFollowUp(params: {
+  input: DrainTurnEventsInput;
+  state: Extract<TerminalTurnState, { status: 'done' }>;
+  ingestedToolOutput: boolean;
+}): Promise<void> {
+  const { input, state, ingestedToolOutput } = params;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
+  try {
+    // First, so the answer's usage is visible before the slower follow-up work below.
+    const flushUsage = async () => {
+      if (modelUsage !== undefined) {
+        await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+      }
+    };
+    await flushUsage();
+    if (memory !== undefined) {
+      // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
+      // it, and the verification pass inside retries a failed retain once.
+      const stored = await submitRetainWithVerification({
+        client: memory.client,
+        sessionId,
+        turnId,
+        userText: memory.userText,
+        assistantText: formatAssistantMessageText(state.output?.content),
+        completedAt: state.completed_at,
+        sessionTitle: memory.sessionTitle,
+        origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        logger,
+        summarize: memory.summarize,
+        outcomeLog: memory.outcomeLog,
+      });
+      // Only a stored turn can have gone to the persona it started with; a skipped or failed
+      // retain is already explained by its own reason line.
+      if (stored && memory.outcomeLog !== undefined) {
+        await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+      }
+    }
+    if (profileLearning !== undefined) {
+      // The assistant's reply is deliberately not passed here: it is not a source of facts
+      // about the user, so the learning pass only ever sees the user's own turn text.
+      // Awaited so the tracked drain covers the pass; the pass writes its audit event to
+      // the turnEventStream (how an open tab sees it without reloading the turn).
+      await submitProfileLearning({
+        ...profileLearning,
+        sessionId,
+        turnId,
+        completedAt: state.completed_at,
+        turnEventStream,
+        logger,
+      });
+    }
+    // The summarization and profile learning calls above record after the first flush.
+    await flushUsage();
+    if (artifacts !== undefined) {
+      await resolveAndSubmitArtifactPersistence({
+        ...artifacts,
+        sessionId,
+        turnId,
+        assistantText: formatAssistantMessageText(state.output?.content),
+        logger,
+      });
+    }
+  } catch (error) {
+    logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+}
+
+/** Waits for a turn's follow-up work up to its time limit; past it the work keeps running unwatched. */
+async function waitForTurnFollowUp(params: {
+  followUp: Promise<void>;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { followUp, sessionId, turnId, logger } = params;
+  const timeoutMs = configuration.TURN_FOLLOW_UP_TIMEOUT_MS;
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    followUp.then(() => false),
+    new Promise<boolean>(resolve => {
+      timeout = setTimeout(() => {
+        resolve(true);
+      }, timeoutMs);
+    }),
+  ]).finally(() => {
+    clearTimeout(timeout);
+  });
+  if (timedOut) {
+    logger.warn('Turn follow-up work ran past its time limit; it keeps running in the background', {
+      sessionId,
+      turnId,
+      timeoutMs,
+    });
   }
 }
 

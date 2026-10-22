@@ -113,3 +113,43 @@ describe('freezing a streaming turn keeps the steps it already ran', () => {
     expect(types.at(-1)).toBe(TurnEventType.TURN_DONE);
   });
 });
+
+describe('freezing a finished turn whose consumer is still busy', () => {
+  it('returns without waiting for the consumer and keeps the turn done', async () => {
+    const store = new InMemorySessionStore();
+    const sessions = new Sessions({ sessionStore: store });
+    const session = await sessions.create({
+      tenant_id: 'tenant-1',
+      session_id: 'session-busy-consumer',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      external_id: null,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver: makeTestResolver(),
+    });
+
+    // The consumer does slow work after the terminal event, as the server does after an answer.
+    const consumerBusy = deferred();
+    const doneSeen = deferred();
+    const drained = (async () => {
+      for await (const event of turn.stream()) {
+        if (event.type === TurnEventType.TURN_DONE) {
+          doneSeen.resolve();
+          await consumerBusy.promise;
+        }
+      }
+    })();
+    await doneSeen.promise;
+
+    const frozen = await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.CancelledForNextTurn });
+    expect(frozen.state.status).toBe('done');
+
+    consumerBusy.resolve();
+    await drained;
+  });
+});
