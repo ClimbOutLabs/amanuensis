@@ -831,7 +831,7 @@ describe('audit rows for a held web search', () => {
       await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
       expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(descriptions(h))).not.toContain(query);
-      expect(descriptions(h)[0]).toMatch(/Search the web through \S+\. This search contains /);
+      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This search contains /);
     }
   });
 
@@ -950,7 +950,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
 
     expect(h.audit.length).toBeGreaterThanOrEqual(1);
     expectNoCaughtText(h);
-    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. ');
+    expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 
@@ -972,7 +972,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
 
     expect(h.audit.length).toBeGreaterThanOrEqual(2);
     expectNoCaughtText(h);
-    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. ');
+    expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 });
