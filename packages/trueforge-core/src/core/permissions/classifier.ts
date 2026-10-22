@@ -97,6 +97,7 @@ import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './
 import {
   GUARD_RULE_SAY,
   HOLD_SAY,
+  SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
   searchProviderLabel,
@@ -1754,7 +1755,7 @@ async function holdSearchCall(input: {
   const { action, ctx, fields } = input;
   const shown =
     input.summary.length > SEARCH_CARD_TEXT_MAX ? `${input.summary.slice(0, SEARCH_CARD_TEXT_MAX)}...` : input.summary;
-  const provider = searchProviderLabel({ host: action.mcp_server_host, name: action.mcp_server_name });
+  const provider = searchProviderLabel({ host: action.mcp_server_host });
   const tavilyText =
     input.params === undefined
       ? null
@@ -1780,7 +1781,7 @@ async function holdSearchCall(input: {
       parsed_command: null,
       outbound_text: fields.outbound_text,
       // The card's "Sends to" line names the provider, not the host it is reached on.
-      destination_host: provider,
+      destination_host: provider ?? SEARCH_SERVER_FALLBACK,
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
@@ -1793,7 +1794,10 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
-  return { ...decision, audit_description: searchHoldAuditText({ server: provider, say: input.say }) };
+  return {
+    ...decision,
+    audit_description: searchHoldAuditText({ server: provider ?? SEARCH_SERVER_FALLBACK, say: input.say }),
+  };
 }
 
 /**
@@ -1811,7 +1815,7 @@ async function classifySearchProviderTool(input: {
   extraction: ExtractionResult;
 }): Promise<TierDecision | undefined> {
   const { action, ctx, extraction } = input;
-  const provider = searchProviderLabel({ host: action.mcp_server_host, name: action.mcp_server_name });
+  const provider = searchProviderLabel({ host: action.mcp_server_host });
   const name = action.tool_name.toLowerCase();
   if (
     (action.mcp_hints.read_only_hint !== true && action.mcp_search_tool !== true) ||
@@ -1903,7 +1907,7 @@ async function classifySearchProviderTool(input: {
   }
   return tier1Decision({
     reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
-    reason_detail: `Searched with ${provider}: ${queryText}`,
+    reason_detail: provider === undefined ? `Searched: ${queryText}` : `Searched with ${provider}: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });

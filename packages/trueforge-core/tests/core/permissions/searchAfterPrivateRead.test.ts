@@ -108,7 +108,7 @@ describe('a web search after a mail read, checked against what the mail said', (
       reason: 'mcp_search_after_read_checked',
       silent_search_query: 'best tapas in Lisbon',
     });
-    expect(decision.reason_detail).toBe('Searched with search: best tapas in Lisbon');
+    expect(decision.reason_detail).toBe('Searched: best tapas in Lisbon');
   });
 
   it('asks when the query carries a sender name', async () => {

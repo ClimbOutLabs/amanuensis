@@ -120,7 +120,7 @@ export function heldCallAuditText(
   const card = info.tier3_card ?? null;
   if (info.search_provider_call === true || (card !== null && isSearchHoldCardText(card.plain_what))) {
     return searchHoldAuditText({
-      server: card?.destination ?? SEARCH_SERVER_FALLBACK,
+      server: SEARCH_SERVER_FALLBACK,
       say: savedSearchHold(card?.why_asked_again ?? null)?.say ?? HOLD_SAY.generic,
     });
   }

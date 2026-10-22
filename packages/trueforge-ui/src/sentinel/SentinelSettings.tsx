@@ -43,8 +43,9 @@ export const SentinelSettings: FC = () => {
     catalog.connectorCatalog.listConnectors().then(
       connectors => {
         const designated = (connectors ?? []).find(isSearchProvider);
-        if (active && designated !== undefined) {
-          setSearchProvider(searchProviderLabel({ host: hostOf(designated.url), name: designated.name }));
+        const label = designated === undefined ? undefined : searchProviderLabel({ host: hostOf(designated.url) });
+        if (active && label !== undefined) {
+          setSearchProvider(label);
         }
       },
       () => undefined,

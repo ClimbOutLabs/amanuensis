@@ -18,12 +18,11 @@ const PROVIDER_LABEL_BY_HOST = new Map<string, string>([
 ]);
 
 /**
- * The web search provider's name as a person sees it: its brand for a known host, otherwise the
- * connector's own name. Never a secret, and never the host of an unknown provider.
+ * The brand a person sees for the web search provider, by the host its connector answers on. Undefined
+ * for any other provider: callers then say "the search provider", never the connector's id or host.
  */
-export function searchProviderLabel({ host, name }: { host: string | undefined; name: string | undefined }): string {
-  const known = host === undefined ? undefined : PROVIDER_LABEL_BY_HOST.get(host.toLowerCase());
-  return known ?? name ?? SEARCH_SERVER_FALLBACK;
+export function searchProviderLabel({ host }: { host: string | undefined }): string | undefined {
+  return host === undefined ? undefined : PROVIDER_LABEL_BY_HOST.get(host.toLowerCase());
 }
 
 /** The held web search card names the search in plain words, never the connector's id. */
