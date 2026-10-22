@@ -59,6 +59,7 @@ function makeThread(input: { modelClient: ILLM; toolSets: ReturnType<typeof make
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

@@ -35,6 +35,7 @@ import {
 } from './contextUtils';
 import type { CreateDynamicSubAgentThread } from './CreateDynamicSubAgentThread';
 import { addAgentThreadMetrics, createEmptyAgentThreadMetrics, type AgentThreadMetrics } from './metrics';
+import { WRITE_CAP_STOP_MESSAGE } from './replyActionChecks';
 
 const MAX_PARALLEL_SUB_AGENTS = 5;
 
@@ -521,7 +522,8 @@ export class AgentThreadOrchestrator {
           // so getMetrics() counts this sub-agent once. After `yield chunk` per durable-state.
           addAgentThreadMetrics(this.finishedSubAgentMetrics, currentThread.getAgentThreadMetrics());
           this.agentThreads.delete(chunk.thread_id);
-          return { shouldStopExecution: false };
+          // The write cap ends the whole turn, even when a sub-agent is the thread that hit it.
+          return { shouldStopExecution: currentThread.turnToolCallLedger.stoppedForWriteCap };
         }
         yield chunk;
         return { shouldStopExecution: true };
@@ -538,6 +540,7 @@ export class AgentThreadOrchestrator {
         const subAgentThread = await resolveBeforeAbort(
           this.createDynamicSubAgentThread({
             parentDefinition: currentThread.definition,
+            turnToolCallLedger: currentThread.turnToolCallLedger,
             request: chunk.agent_info,
             threadId: subAgentThreadId,
             parent,
@@ -685,6 +688,13 @@ export class AgentThreadOrchestrator {
                 if (chunk.handoff_cause !== undefined) {
                   rootAgentError.handoff_cause = chunk.handoff_cause;
                 }
+              }
+              if (!rootAgentError && mainThread.turnToolCallLedger.stoppedForWriteCap) {
+                rootAgentError = {
+                  error: WRITE_CAP_STOP_MESSAGE,
+                  output: undefined,
+                  handoff_cause: 'model_stream_fault',
+                };
               }
               if (chunk.type !== InternalEventType.PASSTHROUGH) {
                 const { output: outputContribution, requiredAction } = agentThreadEventToTerminalFields(chunk);
