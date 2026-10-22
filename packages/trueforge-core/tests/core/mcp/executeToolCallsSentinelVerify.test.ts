@@ -11,7 +11,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ApprovalDecision } from '../../../src/core/events/schema';
+import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
@@ -73,6 +73,8 @@ async function dispatchApproved(input: {
   toolInfo: Partial<InternalToolCallInfo> & { original_tool_name: string };
   /** Derives the canonical params the way the tool set does when it mints. */
   mintCanonicalParams?: IToolSet['mintCanonicalParams'];
+  /** How the turn admitted the call; absent derives it from the decision. */
+  admission?: ToolAdmissionProvenance | undefined;
 }): Promise<{
   failure: boolean;
   disposition: string | undefined;
@@ -97,6 +99,7 @@ async function dispatchApproved(input: {
       input.decision === null ? [] : [['call-1', input.decision ?? { status: 'allow' }]],
     ),
     memoState: createToolCallMemoState(),
+    ...(input.admission === undefined ? {} : { admissionProvenance: new Map([['call-1', input.admission]]) }),
     sentinel: {
       services: input.services,
       web_search: createWebSearchTurnState(),
@@ -584,5 +587,39 @@ describe('executeToolCalls sentinel pre-dispatch: an approved send cannot change
       expect(outcome.disposition).toBe('policy_blocked');
       expect(outcome.reasonCode).toBe('sentinel_verification_failed');
     }
+  });
+});
+
+describe('executeToolCalls sentinel audit for a chat grant', () => {
+  const params = { title: 'Lunch' };
+  const card = { ...TIER2_CARD, plain_what: 'Look up a note.' };
+
+  test('says no card was shown, so the row never reads like the person approved this call', async () => {
+    const { services, records } = servicesWithAudit();
+    const tokenId = await mintToken({ services, tool_name: 'lookup_note', canonical_params: params });
+    const outcome = await dispatchApproved({
+      services,
+      decision: { status: 'allow', scope: 'chat' },
+      admission: { source: 'chat_grant', decision: 'allow', scope: 'chat' },
+      wireName: 'test_tool',
+      wireArgs: params,
+      toolInfo: { original_tool_name: 'lookup_note', tier: 3, tier3_card: card, approval_token_id: tokenId },
+    });
+    expect(outcome.executed).toBe(true);
+    expect(records.map(record => [record.outcome, record.description])).toEqual([
+      ['approved', 'Allowed for this chat, no card shown: Look up a note.'],
+    ]);
+  });
+
+  test('keeps the plain description for an answer the person gave on the card', async () => {
+    const { services, records } = servicesWithAudit();
+    const tokenId = await mintToken({ services, tool_name: 'lookup_note', canonical_params: params });
+    await dispatchApproved({
+      services,
+      wireName: 'test_tool',
+      wireArgs: params,
+      toolInfo: { original_tool_name: 'lookup_note', tier: 3, tier3_card: card, approval_token_id: tokenId },
+    });
+    expect(records.map(record => record.description)).toEqual(['Look up a note.']);
   });
 });

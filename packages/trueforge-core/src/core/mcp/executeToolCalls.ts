@@ -2097,7 +2097,7 @@ export async function executeToolCalls({
   // relaxed Tier 2 calls record that they ran.
   if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
     const audit = sentinel.services.audit;
-    for (const { toolCall, disposition } of results) {
+    for (const { toolCall, disposition, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
@@ -2121,7 +2121,11 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: heldCallAuditText(info),
+        // A chat grant answers without a card, so the row says so instead of reading like the person's own click.
+        description:
+          admitted.source === 'chat_grant'
+            ? `Allowed for this chat, no card shown: ${heldCallAuditText(info)}`
+            : heldCallAuditText(info),
         outcome,
         auto_deny_reason: null,
       });
