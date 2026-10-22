@@ -34,7 +34,7 @@ Read from Tavily's official docs on 2026-10-17 (docs.tavily.com):
 
 **Pages are untrusted.** Tool results mark page text as untrusted, and the read-content screen the host already applies to tool output applies here too. Page text never gives instructions.
 
-**Grounding is checked by the server, not trusted from the model.** `tavily_extract` stamps each page with the time it was fetched and keeps the text in a small server memory (URL keyed, bounded, expires in 30 minutes). The pin tool `render_places` keeps a field only when its value is found in that page's text; a field it cannot find is dropped and the card says nothing about it. The source link must be a page that was extracted. The fetch time is the server's, never the model's.
+**Grounding is checked by the server, not trusted from the model.** `tavily_extract` stamps each page with the time it was fetched and keeps the text in a small server memory (URL keyed, bounded, expires in 30 minutes). Each result of a search tool is kept as a source too: its link, title and snippet, one result at a time. Only tools that search count; a page reading tool, or any call that names a link, never adds search results. A read page replaces a snippet for the same link, and a snippet never replaces a read page. The query, any result whose title or text is mostly words from the chat's searches, and any answer a provider wrote are never kept. A place from a search result, or from a page read from a search result's link, is refused when most of the telling words of its name or address come from the chat's searches, in any order. Words are compared after hidden characters are removed and look-alike letters are folded. A search result, and a page read from one, is forgotten as soon as the searches it was checked against are. The pin tool `render_places` keeps a place only when its name and address are both in one listing block of that source's text: within about 40 words, and the address is the nearest address line to the name, looking after the name first. Any street word, in any language and with or without a house number, counts as an address line. It keeps a field only when its value is found in that text; a field it cannot find is dropped and the card says nothing about it. The source link must be a page the server kept for this chat. The fetch time is the server's, never the model's. A refused place may be sent once more in the same answer, counted by its name whatever link or address comes with it, and an approval does not reset the count; after a second refusal the tool tells the model to stop using the map and answer in text.
 
 **Pins use the maps tool family.** `render_places` is a third maps tool, Tier 3 on every call like `render_map`: the card lists the addresses sent to the geocoder host and the tile host. It reuses the maps geocoder, limiter and cache. The maps result schema gains one shape, `places`, rendered by the same MapCard as a multi-pin view; there is no second schema.
 
@@ -50,7 +50,7 @@ render_places(params: {
     name: string;                                     // 1..128
     address: string;                                  // 1..128
     languages?: string; hours?: string; price?: string; phone?: string; // each 1..128
-    source_url: string;                               // a page that tavily_extract returned
+    source_url: string;                               // a page or search result this chat's tools returned
   }>;
   calendar_locations?: string[];                      // 0..10, each 1..128
 }) -> {
@@ -67,7 +67,7 @@ Every bound is 128 or under and no field uses a regex, as for the other maps too
 
 - Sent to `api.tavily.com`: the search text, then the page URLs. Tavily also sees the server's IP, and with a key, the account. Nothing else is sent.
 - Sent to the maps geocoder: the addresses found on the pages, only after the user approves the pin card.
-- Page text stays in server memory for 30 minutes and is never written to the database or logs.
+- Page and search result text stays in server memory for 30 minutes and is never written to the database or logs.
 - Keyless use sends no account or key. If the user objects, they can pick another provider or set searches to Ask.
 
 ## Testing

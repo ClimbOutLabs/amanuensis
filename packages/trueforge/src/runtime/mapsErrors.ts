@@ -14,6 +14,8 @@ export interface MapsErrorBody {
   service?: 'geocoder' | 'router' | undefined;
   /** Places that were refused and why, so the model can fix one detail and the card can name them. */
   refused?: { name: string; reason: string }[] | undefined;
+  /** Set once a place was refused twice in this turn: tells the model to stop using the map. */
+  stop?: string | undefined;
 }
 
 /** Upstream failure with a maps error code for the tool result body. */
