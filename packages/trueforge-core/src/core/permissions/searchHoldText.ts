@@ -82,7 +82,9 @@ export function withHoldSay(text: string, say: string): string {
  * "." still gets the closing period, so the card can read the query back with its own period kept.
  */
 export function searchHoldCardText({ summary, say }: { summary: string; say: string }): string {
-  if (summary === '') return withHoldSay(WEB_SEARCH_NAME, say);
+  if (summary === '') {
+    return withHoldSay(WEB_SEARCH_NAME, say);
+  }
   const subject = `${WEB_SEARCH_WHAT_PREFIX}${summary}`;
   return /[!?]$/.test(subject) ? `${subject} ${say}` : `${subject}. ${say}`;
 }
