@@ -29,9 +29,8 @@ const SEARCH_CARD: SentinelApprovalCard = {
 function renderSearch(onApproveForChat = vi.fn()) {
   render(
     <PermissionApprovalCard
-      toolName="web_search"
       card={SEARCH_CARD}
-      tier={3}
+      othersWaiting={0}
       onApprove={vi.fn()}
       onApproveForChat={onApproveForChat}
       onDeny={vi.fn()}
@@ -51,9 +50,8 @@ describe('PermissionApprovalCard for a held search', () => {
   it('keeps the generic chat choice for a card that is not a search', () => {
     render(
       <PermissionApprovalCard
-        toolName="payment"
         card={{ ...SEARCH_CARD, plain_what: 'Send $250 to Acme Corp' }}
-        tier={3}
+        othersWaiting={0}
         onApprove={vi.fn()}
         onApproveForChat={vi.fn()}
         onDeny={vi.fn()}
@@ -62,14 +60,16 @@ describe('PermissionApprovalCard for a held search', () => {
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
   });
 
-  it('shows the query in the visible block and folds the service fields behind Details', () => {
+  it('shows the query in the Details block, with the service fields folded below it', () => {
     renderSearch();
-    const visible = screen.getByText('query: "Find quiet coffee shops in San Francisco"');
-    expect(visible).toBeVisible();
-    expect(visible.textContent).not.toContain('session_id');
     const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('Details'));
+    const visible = screen.getByText('query: "Find quiet coffee shops in San Francisco"');
+    expect(visible).toBeVisible();
+    expect(visible.textContent).not.toContain('session_id');
+    expect(screen.getByText('Search service details').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('Also sent by the search service')).toBeInTheDocument();
     expect(screen.getByText(/session_id: "sess-123"/)).toBeInTheDocument();
   });

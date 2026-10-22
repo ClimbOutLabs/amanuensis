@@ -149,7 +149,7 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
 function PlumbingDetails({ text }: { text: string }) {
   return (
     <details className="rounded border border-border bg-primary-bg px-3 py-2">
-      <summary className="cursor-pointer text-sm text-text-secondary">Details</summary>
+      <summary className="cursor-pointer text-sm text-text-secondary">Search service details</summary>
       <p className="mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
         Also sent by the search service
       </p>
