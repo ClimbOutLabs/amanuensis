@@ -31,6 +31,7 @@ describe('AgentThread ability boundaries instruction', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -56,12 +57,13 @@ describe('AgentThread ability boundaries instruction', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test', toolSets: [] },
-      context: [{ role: 'user', content: 'Check my bills.' }],
+      context: [{ role: 'user', content: 'Check my bills on the web.' }],
     });
 
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {

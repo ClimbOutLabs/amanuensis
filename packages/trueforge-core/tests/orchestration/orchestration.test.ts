@@ -65,6 +65,7 @@ describe('orchestration: mocked LLM and no tools', () => {
       capabilities: undefined,
       capabilityState: undefined,
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

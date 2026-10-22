@@ -35,6 +35,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   create_sub_agent: false,
   get_openui_instructions: false,
   replace_task_checklist: false,
+  load_bundle: false,
   // Networked builtins.
   web_search: true,
   // Embedded maps: geocoding, routing, and tiles all leave the machine.

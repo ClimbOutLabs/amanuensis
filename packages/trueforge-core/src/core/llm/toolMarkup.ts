@@ -1,17 +1,8 @@
-import { isRecord } from '../util/records';
-
-/** Shown in place of tool-call markup that could not be rebuilt into calls. */
-export const BROKEN_TOOL_MARKUP_MESSAGE =
-  "The model's reply came back garbled. Try again, or pick another model in the model picker.";
-
-/** One tool call rebuilt from markup: the tool name and its arguments as a record. */
-export interface RecoveredToolCall {
-  name: string;
-  arguments: Record<string, unknown>;
-}
-
-export type ToolMarkupOutcome =
-  { status: 'clean' } | { status: 'recovered'; calls: RecoveredToolCall[] } | { status: 'broken' };
+/**
+ * 'leaked' means the reply carried tool-call markup as text. That markup is never shown or run,
+ * and the turn is not retried.
+ */
+export type ToolMarkupOutcome = 'clean' | 'leaked';
 
 /** Closing tags of the markup forms. Alone on a line they are stray markers the person must not see. */
 const STRAY_CLOSING_TAGS: readonly string[] = [
@@ -29,16 +20,17 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
  * the text is held while its shape is judged, and only a candidate that grows into the full
  * shape of a real call is treated as markup. A candidate that settles as prose is released as
  * the text it always was, and one still forming when the reply ends is released whole. The DSML
- * form uses a fullwidth bar (U+FF5C) inside the brackets; that character is data the detector
- * matches, never text Aman writes itself. A closing tag is a candidate too: alone on its line it is
- * a stray marker and is hidden, while inside a sentence it is prose.
+ * and chat-template tokens use a fullwidth bar (U+FF5C) inside the brackets; that character is data
+ * the detector matches, never text Aman writes itself. A closing tag is a candidate too: alone on
+ * its line it is a stray marker and is hidden, while inside a sentence it is prose.
  */
 const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_calls',
   '<tool_call',
   '<invoke',
+  '<function=',
   '[TOOL_CALLS]',
-  '<｜DSML｜',
+  '<｜',
   '<function_results',
   ...STRAY_CLOSING_TAGS,
 ];
@@ -121,7 +113,14 @@ function judgeDsml(text: string): CandidateVerdict {
     return { verdict: 'undecided' };
   }
   let tagAt: number;
-  if (after.startsWith('invoke')) {
+  if (after.startsWith('parameter')) {
+    // A named parameter is a call's argument on its own: it is never prose that merely names it.
+    const tagEnd = text.indexOf('>');
+    if (tagEnd === -1) {
+      return { verdict: 'undecided' };
+    }
+    return tagHasName(text.slice(0, tagEnd + 1)) ? { verdict: 'markup' } : { verdict: 'dead', deadLength: tagEnd + 1 };
+  } else if (after.startsWith('invoke')) {
     tagAt = 0;
   } else if (after.startsWith(DSML_WRAPPER_TAG)) {
     const inner = text.slice(DSML_MARKER.length + DSML_WRAPPER_TAG.length);
@@ -133,7 +132,7 @@ function judgeDsml(text: string): CandidateVerdict {
       return { verdict: 'dead', deadLength: DSML_MARKER.length + DSML_WRAPPER_TAG.length };
     }
     tagAt = text.length - trimmed.length;
-  } else if (DSML_WRAPPER_TAG.startsWith(after) || 'invoke'.startsWith(after)) {
+  } else if (DSML_WRAPPER_TAG.startsWith(after) || 'invoke'.startsWith(after) || 'parameter'.startsWith(after)) {
     return { verdict: 'undecided' };
   } else {
     return { verdict: 'dead', deadLength: DSML_MARKER.length };
@@ -167,10 +166,28 @@ function judgeFunctionResults(text: string): CandidateVerdict {
   return text.includes('</function_results>', tagEnd + 1) ? { verdict: 'markup' } : { verdict: 'undecided' };
 }
 
-/** The shape judgment for held text opening with the DSML marker or a results block tag. */
-function judgeShapedOpener(text: string): CandidateVerdict | undefined {
+/**
+ * Judges held text that opens with a fullwidth-bar token. A complete chat-template token such as
+ * `<｜tool▁call▁begin｜>` is markup by itself; DSML tags need their own shape; anything else with
+ * the bar is prose.
+ */
+function judgeFullwidth(text: string): CandidateVerdict {
+  if (/^<｜[^\s<>｜]*｜>/.test(text)) {
+    return { verdict: 'markup' };
+  }
+  if (/^<｜[^\s<>｜]*$/.test(text)) {
+    return { verdict: 'undecided' };
+  }
   if (text.startsWith(DSML_MARKER)) {
     return judgeDsml(text);
+  }
+  return { verdict: 'dead', deadLength: '<｜'.length };
+}
+
+/** The shape judgment for held text opening with a fullwidth token or a results block tag. */
+function judgeShapedOpener(text: string): CandidateVerdict | undefined {
+  if (text.startsWith('<｜')) {
+    return judgeFullwidth(text);
   }
   if (text.startsWith('<function_results')) {
     return judgeFunctionResults(text);
@@ -260,6 +277,16 @@ function judgeOwnShape(text: string, startsLine: boolean): CandidateVerdict {
       return { verdict: 'undecided' };
     }
     return { verdict: 'dead', deadLength: tagEnd + 1 };
+  }
+  if (text.startsWith('<function=')) {
+    // The function-name form: a tag naming the call is markup as soon as it closes.
+    const tagEnd = text.indexOf('>');
+    if (tagEnd === -1) {
+      return { verdict: 'undecided' };
+    }
+    return /^<function=[\w.-]+>$/.test(text.slice(0, tagEnd + 1))
+      ? { verdict: 'markup' }
+      : { verdict: 'dead', deadLength: tagEnd + 1 };
   }
   return { verdict: 'undecided' };
 }
@@ -359,7 +386,6 @@ type ScanEvent =
 /** Holds streamed answer text back until it is known not to be leaked tool-call markup. */
 export class ToolMarkupGuard {
   #pending = '';
-  #markup = '';
   #inMarkup = false;
   /** The marker that opened the fence the scan is inside, or undefined when outside one. */
   #fence: string | undefined;
@@ -379,7 +405,6 @@ export class ToolMarkupGuard {
   /** Feed one streamed text piece; returns the text that is safe to show now. */
   push(text: string): string {
     if (this.#inMarkup) {
-      this.#markup += text;
       return '';
     }
     this.#pending += text;
@@ -402,7 +427,6 @@ export class ToolMarkupGuard {
         const judged = judgeCandidate({ text: candidate, startsLine: this.#candidateStartsLine });
         if (judged.verdict === 'markup') {
           emit += this.#take(this.#candidateAt);
-          this.#markup = this.#pending;
           this.#pending = '';
           this.#candidateAt = undefined;
           this.#inMarkup = true;
@@ -572,12 +596,9 @@ export class ToolMarkupGuard {
     return this.#inMarkup || this.#candidateAt !== undefined;
   }
 
-  /** Settles the reply: clean, rebuilt into calls, or broken. */
+  /** Settles the reply. Markup captured along the way is dropped with it, so nothing in it is ever shown or run. */
   finish(): ToolMarkupOutcome {
-    if (!this.#inMarkup) {
-      return { status: 'clean' };
-    }
-    return parseToolMarkup(this.#markup);
+    return this.#inMarkup ? 'leaked' : 'clean';
   }
 
   /** The earliest thing in the text the scan must act on, or undefined when it is plain text. */
@@ -650,142 +671,4 @@ export class ToolMarkupGuard {
     }
     return 0;
   }
-}
-
-const DSML_INVOKE_PATTERN = /<｜DSML｜invoke name="([^"]+)">([\s\S]*?)<\/｜DSML｜invoke>/g;
-const DSML_PARAMETER_PATTERN =
-  /<｜DSML｜parameter name="([^"]+)"(?: string="(true|false)")?>([\s\S]*?)<\/｜DSML｜parameter>/g;
-const HERMES_CALL_PATTERN = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
-
-/** Rebuilds the calls in one DSML invoke block; undefined when any part is half-formed. */
-function parseDsmlInvoke(body: string): Record<string, unknown> | undefined {
-  const args: Record<string, unknown> = {};
-  let matched = false;
-  for (const parameter of body.matchAll(DSML_PARAMETER_PATTERN)) {
-    matched = true;
-    const name = parameter[1];
-    const raw = parameter[3];
-    if (name === undefined || raw === undefined) {
-      return undefined;
-    }
-    if (parameter[2] === 'false') {
-      try {
-        args[name] = JSON.parse(raw.trim());
-      } catch {
-        return undefined;
-      }
-    } else {
-      args[name] = raw;
-    }
-  }
-  // An invoke whose parameters did not parse as parameters is half-formed, not an empty call.
-  if (!matched && body.trim() !== '') {
-    return undefined;
-  }
-  return args;
-}
-
-/** The calls in a Mistral [TOOL_CALLS] payload: a JSON list of name and arguments entries. */
-function parseMistralCalls(markup: string): RecoveredToolCall[] | undefined {
-  const at = markup.indexOf('[TOOL_CALLS]');
-  if (at === -1) {
-    return undefined;
-  }
-  const rest = markup.slice(at + '[TOOL_CALLS]'.length).trim();
-  if (!rest.startsWith('[')) {
-    return undefined;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rest);
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    return undefined;
-  }
-  const calls: RecoveredToolCall[] = [];
-  for (const entry of parsed) {
-    if (!isRecord(entry) || typeof entry['name'] !== 'string' || entry['name'] === '') {
-      return undefined;
-    }
-    const args = entry['arguments'];
-    if (args === undefined) {
-      calls.push({ name: entry['name'], arguments: {} });
-    } else if (isRecord(args)) {
-      calls.push({ name: entry['name'], arguments: args });
-    } else {
-      return undefined;
-    }
-  }
-  return calls;
-}
-
-/**
- * Rebuilds real tool calls from captured markup, or reports it broken. Anything that is not a
- * complete, well-formed call in a known markup form is broken: a half-formed call must never run,
- * and a function_results block is an invented result, so it is broken whatever else surrounds it.
- */
-export function parseToolMarkup(markup: string): ToolMarkupOutcome {
-  if (markup.includes('function_results')) {
-    return { status: 'broken' };
-  }
-  if (markup.includes('<｜DSML｜')) {
-    const calls: RecoveredToolCall[] = [];
-    for (const invoke of markup.matchAll(DSML_INVOKE_PATTERN)) {
-      const name = invoke[1];
-      const body = invoke[2];
-      if (name === undefined || body === undefined || name === '') {
-        return { status: 'broken' };
-      }
-      const args = parseDsmlInvoke(body);
-      if (args === undefined) {
-        return { status: 'broken' };
-      }
-      calls.push({ name, arguments: args });
-    }
-    return calls.length > 0 ? { status: 'recovered', calls } : { status: 'broken' };
-  }
-  if (markup.includes('<tool_call')) {
-    const calls: RecoveredToolCall[] = [];
-    for (const match of markup.matchAll(HERMES_CALL_PATTERN)) {
-      const raw = match[1];
-      if (raw === undefined) {
-        return { status: 'broken' };
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        return { status: 'broken' };
-      }
-      if (!isRecord(parsed) || typeof parsed['name'] !== 'string' || parsed['name'] === '') {
-        return { status: 'broken' };
-      }
-      const rawArgs = parsed['arguments'];
-      if (rawArgs === undefined) {
-        calls.push({ name: parsed['name'], arguments: {} });
-      } else if (isRecord(rawArgs)) {
-        calls.push({ name: parsed['name'], arguments: rawArgs });
-      } else if (typeof rawArgs === 'string') {
-        try {
-          const inner: unknown = JSON.parse(rawArgs);
-          if (!isRecord(inner)) {
-            return { status: 'broken' };
-          }
-          calls.push({ name: parsed['name'], arguments: inner });
-        } catch {
-          return { status: 'broken' };
-        }
-      } else {
-        return { status: 'broken' };
-      }
-    }
-    return calls.length > 0 ? { status: 'recovered', calls } : { status: 'broken' };
-  }
-  const mistral = parseMistralCalls(markup);
-  if (mistral !== undefined) {
-    return { status: 'recovered', calls: mistral };
-  }
-  return { status: 'broken' };
 }

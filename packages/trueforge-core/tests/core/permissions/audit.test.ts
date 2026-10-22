@@ -5,7 +5,7 @@ const cardNumber = '4111 1111 1111 1111';
 
 function savedSearchCard(whyAskedAgain: string | null) {
   return {
-    plain_what: `Search the web through web-search for: rotate ${key}, refund to ${cardNumber}`,
+    plain_what: `Search the web through the search provider for: rotate ${key}, refund to ${cardNumber}`,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: whyAskedAgain,
@@ -24,10 +24,10 @@ describe('heldCallAuditText', () => {
     expect(
       heldCallAuditText({
         original_tool_name: 'web_search',
-        audit_description: 'Search the web through web-search',
+        audit_description: 'Search the web through the search provider',
         tier3_card: savedSearchCard(null),
       }),
-    ).toBe('Search the web through web-search');
+    ).toBe('Search the web through the search provider');
   });
 
   it.each([
@@ -39,7 +39,7 @@ describe('heldCallAuditText', () => {
     [null, 'Aman is checking with you before searching.'],
   ])('names the saved reason %s, never the query, for a saved search card', (why, expected) => {
     const text = heldCallAuditText({ original_tool_name: 'web_search', tier3_card: savedSearchCard(why) });
-    expect(text).toBe(`Search the web through web-search. ${expected}`);
+    expect(text).toBe(`Search the web through the search provider. ${expected}`);
     expect(text).not.toContain(key);
     expect(text).not.toContain(cardNumber);
   });
@@ -50,7 +50,7 @@ describe('heldCallAuditText', () => {
       search_provider_call: true,
       tier3_card: { ...savedSearchCard(null), plain_what: `Open a page about ${key}` },
     });
-    expect(text).toBe('Search the web through web-search. Aman is checking with you before searching.');
+    expect(text).toBe('Search the web through the search provider. Aman is checking with you before searching.');
   });
 
   it('keeps the card sentence for any other call', () => {

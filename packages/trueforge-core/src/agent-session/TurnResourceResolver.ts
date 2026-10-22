@@ -1,6 +1,8 @@
 import type { Logger } from 'winston';
+import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
 import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
+import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
 import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
@@ -16,6 +18,7 @@ import {
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
+import type { ToolBundleName } from '../core/runtime/toolBundleCatalog';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
 import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
@@ -43,6 +46,19 @@ export type TurnSandboxFactory = (input: {
   tracing: AgentTracing;
   sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
+
+/** The bundle a host-provisioned connector's tools are sent with: search goes with web, the first-party mail and calendar accounts with google. */
+function connectorBundle(input: {
+  name: string;
+  firstParty: boolean;
+  searchProvider: boolean;
+}): ToolBundleName | undefined {
+  if (input.searchProvider) {
+    return 'web';
+  }
+  const mailOrCalendar = input.name === MAIL_CONNECTOR_NAME || input.name === CALDAV_SERVER_NAME;
+  return input.firstParty && mailOrCalendar ? 'google' : undefined;
+}
 
 function specWantsSandbox(spec: AgentSpec): boolean {
   return spec.config.sandbox.enabled;
@@ -186,6 +202,8 @@ export class TurnResourceResolver<
       toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
+      /** See ITurnResourceResolver.serverSandboxAvailable. */
+      serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
       /**
@@ -247,6 +265,10 @@ export class TurnResourceResolver<
 
   get boundRepository(): BoundRepository | undefined {
     return this.deps.boundRepository;
+  }
+
+  get serverSandboxAvailable(): boolean | undefined {
+    return this.deps.serverSandboxAvailable;
   }
 
   get clientTimezone(): string | undefined {
@@ -414,6 +436,11 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          bundle: connectorBundle({
+            name: entry.name,
+            firstParty: this.#firstPartyServers.has(entry.name),
+            searchProvider: this.#searchProviderServers.has(entry.name),
+          }),
           pages: fetchedPages,
           pagesScope: pageScope,
         });

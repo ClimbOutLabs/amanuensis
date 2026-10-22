@@ -19,7 +19,7 @@ const { answerHeldAction, reload, server } = vi.hoisted(() => {
       dismissEndedApproval: vi.fn(),
       answerHeldAction: answer,
       getLastCompactionStatus: vi.fn(),
-      getLastTurnInputTokens: vi.fn(),
+      getLastCallInputTokens: vi.fn(),
     },
   };
   return { answerHeldAction: answer, reload: vi.fn(), server: current };

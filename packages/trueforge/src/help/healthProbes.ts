@@ -1,13 +1,17 @@
 import { extractErrorLogFields, isAuthRequired, RemoteMCP, VercelAILLM } from '@truefoundry/trueforge-core/core';
+import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
+import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
+import { GoogleReconnectRequiredError } from '@truefoundry/trueforge-core/core/google/errors';
+import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { getMcpConnection, getModelDetails } from '../runtime/sessionResources';
-import { readDefaultChatModel } from '../runtime/tokenFactoryProvider';
-import type { ConnectorProbe, ModelProbe } from './healthCheck';
+import type { ConnectorProbe, GoogleLoginProbe, ModelProbe } from './healthCheck';
 
 /** The test call is one word and must not hold a person's page open. */
 export const MODEL_PROBE_TIMEOUT_MS = 8_000;
@@ -29,7 +33,7 @@ export async function probeModel({
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<ModelProbe> {
-  const modelName = await readDefaultChatModel({ globalSettingsStore, logger });
+  const modelName = await resolveDefaultChatModel({ tenantId, modelProviderStore, globalSettingsStore, logger });
   if (modelName === undefined) {
     return { kind: 'no_default' };
   }
@@ -59,6 +63,45 @@ export async function probeModel({
   } catch (error) {
     logger.warn('Help check: the default model did not answer', extractErrorLogFields(error));
     return { kind: 'no_answer' };
+  }
+}
+
+/**
+ * Checks the built-in Google login by refreshing its access token, the same call a Gmail or Calendar tool makes.
+ * Only the outcome leaves this function, never a token.
+ */
+export async function probeGoogleLogin({
+  owner,
+  connections,
+  fetchImpl,
+  logger,
+}: {
+  owner: GoogleOwner;
+  connections: GoogleConnectionStore;
+  /** Replaceable so tests never reach Google. */
+  fetchImpl: typeof fetch | undefined;
+  logger: Logger;
+}): Promise<GoogleLoginProbe> {
+  const record = await connections.get(owner);
+  if (record === null) {
+    return 'not_set_up';
+  }
+  const features = grantedFeatures(record.granted_scopes);
+  if (!features.includes('gmail_read') && !features.includes('calendar_read')) {
+    return 'not_set_up';
+  }
+  if (record.status === 'needs_reconnect') {
+    return 'needs_reconnect';
+  }
+  try {
+    await new GoogleAccessTokens({ connections, owner, now: undefined, fetchImpl }).get();
+    return 'answered';
+  } catch (error) {
+    if (error instanceof GoogleReconnectRequiredError) {
+      return 'needs_reconnect';
+    }
+    logger.warn('Help check: the Google login did not answer', extractErrorLogFields(error));
+    return 'no_answer';
   }
 }
 

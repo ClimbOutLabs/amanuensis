@@ -12,6 +12,7 @@ import {
   type CallToolResponse,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { MODEL_USAGE_EVENT_TYPE } from '../schemas/modelUsageEvents';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
@@ -135,7 +136,7 @@ async function usageEntriesForSession({
 }
 
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance, not just their use. Use it for questions about what their chats cost. Periods: today, this_week, this_month (default), or date_range. Tokens with no known price are counted apart; a cost is null when any of its tokens lack a price. Say so; never guess a price. Answer in a few plain sentences with the figures; a small bar chart fits several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is null when any of its tokens lack a price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;
@@ -153,6 +154,7 @@ export interface UsageSummaryCapabilityOptions extends UsageSummaryTurnContext {
 class UsageSummaryTool extends LocalToolMCP {
   readonly name = USAGE_SUMMARY_SERVER_ID;
   readonly displayName = 'Usage';
+  protected override readonly bundle: ToolBundleName = 'extras';
 
   constructor(private readonly options: UsageSummaryCapabilityOptions) {
     super({ tracing: options.tracing });
