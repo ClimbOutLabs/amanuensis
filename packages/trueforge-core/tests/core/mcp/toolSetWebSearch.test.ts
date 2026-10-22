@@ -169,7 +169,7 @@ describe('the designated search provider', () => {
         tier: 1,
         tool_name: 'lookup',
         outcome: 'logged',
-        description: 'Searched: tallest building in Lisbon',
+        description: 'Searched with finder: tallest building in Lisbon',
         conversation_id: 'c1',
       }),
     ]);
@@ -583,7 +583,7 @@ describe('links', () => {
 
     await h.toolSet.callTool({ name: 'read_page', arguments: { url: page } });
 
-    expect(h.audit.map(row => row.description)).toEqual(['Searched: oslo weather', `Searched: ${page}`]);
+    expect(h.audit.map(row => row.description)).toEqual(['Searched with finder: oslo weather', `Searched with finder: ${page}`]);
   });
 
   it('asks for any modified or composed URL', async () => {
@@ -985,7 +985,7 @@ describe('approval cards beside the designated provider', () => {
     const h = harness({ searchProvider: true, searchWithoutAsking: false });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.destination_host).toBe('search.example.com');
+    expect(info.tier3_card?.destination_host).toBe('finder');
     expect(info.tier3_card?.outbound_text).toContain(`query: ${query}`);
 
     // Dispatch re-derives the id with the connector, so a token minted without it would never redeem.

@@ -9,6 +9,7 @@ import { isCallToolResponseResult, type CallToolResponse } from '../../../src/co
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { isSearchHoldCardText } from '../../../src/core/permissions/searchHoldText';
+import { markPrivateDataRead } from '../../../src/core/permissions/webSearch';
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
 import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
@@ -57,7 +58,7 @@ function harness(options: { searchWithoutAsking: boolean; secrets?: readonly str
     sentinel: host,
     searchProvider: { tools: [...TAVILY_SOURCE_TOOLS], plumbing_fields: [] },
   });
-  return { toolSet, audit, sent };
+  return { toolSet, audit, sent, host };
 }
 
 /** A call the turn loop could not take an approval for does not run; it comes back as a plain error. */
@@ -85,6 +86,53 @@ describe('Tavily through the designated search provider path', () => {
     expect(isCallToolResponseResult(await h.toolSet.callTool(extract))).toBe(true);
     expect(h.sent.map(call => call.url)).toEqual(['https://api.tavily.com/search', 'https://api.tavily.com/extract']);
     expect(h.audit.map(row => row.tool_name)).toEqual(['tavily_search', 'tavily_extract']);
+    expect(h.audit[0]?.description).toBe('Searched with Tavily: English speaking doctor Lisbon');
+  });
+
+  it('holds a search after this chat read private data, and names Tavily on the card', async () => {
+    const h = harness({ searchWithoutAsking: true });
+    markPrivateDataRead(h.host.web_search);
+    const info = await h.toolSet.toolCallInfo(search);
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toMatch(
+      /This chat has read your private data, so Aman is checking before searching\.$/,
+    );
+    expect(info.tier3_card?.destination_host).toBe('Tavily');
+    expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('holds a search that carries the Tavily key, masks it on the card and in the audit row', async () => {
+    const tavilyKey = 'tvly-test-key-0123456789abcdef';
+    const h = harness({ searchWithoutAsking: true, secrets: [tavilyKey] });
+    const leaking = { name: 'tavily_search', arguments: { query: `doctor ${tavilyKey}` } };
+    const info = await h.toolSet.toolCallInfo(leaking);
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toMatch(/This search contains something that looks like a password or key\.$/);
+    for (const text of [info.tier3_card?.plain_what, info.tier3_card?.outbound_text, info.audit_description]) {
+      expect(text ?? '').not.toContain(tavilyKey);
+    }
+    expect(await refusedWithoutSending(h.toolSet.callTool(leaking))).toBe(true);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('holds a search that carries a Tavily-shaped key even when the host does not hold it', async () => {
+    const h = harness({ searchWithoutAsking: true });
+    const leaking = { name: 'tavily_search', arguments: { query: 'doctor tvly-abcdef0123456789XYZ' } };
+    const info = await h.toolSet.toolCallInfo(leaking);
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toMatch(/This search contains something that looks like a password or key\.$/);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('holds an extract of a link that no search returned, and says so on the card', async () => {
+    const h = harness({ searchWithoutAsking: true });
+    const composed = { name: 'tavily_extract', arguments: { urls: ['https://made-up.example/page'] } };
+    const info = await h.toolSet.toolCallInfo(composed);
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toMatch(/This opens a link that didn't come from your search results\.$/);
+    expect(info.tier3_card?.destination_host).toBe('Tavily');
+    expect(h.sent).toEqual([]);
   });
 
   it('asks for a search with the query, host and credits, without naming the endpoint, and sends nothing until approved', async () => {
@@ -101,7 +149,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(card?.plain_what).toMatch(
       /uses 2 Tavily credits\. Searches are set to ask, so Aman is checking with you first.$/,
     );
-    expect(card?.destination_host).toBe('api.tavily.com');
+    expect(card?.destination_host).toBe('Tavily');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
     expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
     expect(h.sent).toEqual([]);
@@ -118,7 +166,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier3_card?.plain_what).not.toContain('/extract');
     expect(info.tier3_card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
-    expect(info.tier3_card?.destination_host).toBe('api.tavily.com');
+    expect(info.tier3_card?.destination_host).toBe('Tavily');
     expect(info.tier3_card?.plain_what).toMatch(/This opens a link that didn't come from your search results\.$/);
     expect(info.tier3_card?.why_asked_again).toBeNull();
     expect(isSearchHoldCardText(info.tier3_card?.plain_what ?? '')).toBe(true);

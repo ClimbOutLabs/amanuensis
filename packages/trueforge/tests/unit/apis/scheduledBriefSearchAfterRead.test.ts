@@ -228,7 +228,9 @@ describe('scheduled brief: search and map after reading the mail', () => {
       expect(tavily.calls[0]?.body).toMatchObject({ query: CLEAN_QUERY });
 
       const entries = await auditEntries(server, sessionId);
-      const search = entries.find(e => e.tool_name === 'tavily_search' && e.description === `Searched: ${CLEAN_QUERY}`);
+      const search = entries.find(
+        e => e.tool_name === 'tavily_search' && e.description === `Searched with Tavily: ${CLEAN_QUERY}`,
+      );
       const map = entries.find(e => e.tool_name === 'render_map' && e.description === `Map: ${HARBOUR_ADDRESS}`);
       expect(search).toMatchObject({ tier: 1, outcome: 'logged' });
       expect(map).toMatchObject({ tier: 1, outcome: 'logged' });

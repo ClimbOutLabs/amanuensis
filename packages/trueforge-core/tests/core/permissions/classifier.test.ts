@@ -1362,7 +1362,7 @@ describe('a silent search row names only what was searched', () => {
   it('keeps the session id and model name out of the reason and the silent query a person reads', async () => {
     const decision = await classifyTier(PLUMBED_SEARCH, makeCtx());
     expect(decision).toMatchObject({ tier: 1, silent_search_query: 'Lisbon weather today' });
-    expect(decision.reason_detail).toBe('Searched: Lisbon weather today');
+    expect(decision.reason_detail).toBe('Searched with search: Lisbon weather today');
     for (const text of [decision.reason_detail, decision.silent_search_query]) {
       expect(text).not.toContain(SESSION_ID);
       expect(text).not.toContain(MODEL);

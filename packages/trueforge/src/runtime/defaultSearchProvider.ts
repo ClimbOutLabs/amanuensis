@@ -3,8 +3,13 @@ import type { Logger } from 'winston';
 
 import { defaultSearchConnector } from '../catalog/defaultSearchConnector';
 import type { McpCatalog } from '../catalog/McpCatalog';
+import type { SearchProviderChoice } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import type { RemoteMcpServerManifest } from '../schemas/mcpServer';
+
+/** Catalog name of the Tavily preset, the connector `SEARCH_PROVIDER=tavily` designates. */
+export const TAVILY_CONNECTOR_NAME = 'tavily';
 
 /** Global-settings key whose presence means the default search provider was already offered once. */
 export const DEFAULT_SEARCH_PROVIDER_SEEDED_KEY = 'default_search_provider_seeded';
@@ -57,6 +62,63 @@ export async function seedDefaultSearchProvider({
   }
   await globalSettingsStore.setSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY, value: new Date().toISOString() });
   return hasChosen ? 'kept_existing' : 'added';
+}
+
+/**
+ * Boot step for `SEARCH_PROVIDER=tavily`: writes the Tavily connector with the key from the
+ * environment and makes it the one search provider, releasing any other connector's role. It runs
+ * on every start, so a rotated key takes effect; the key is never logged. Throws when the key is
+ * missing, so an instance never quietly searches with a provider its owner did not pick.
+ */
+export async function designateTavilyAtBoot({
+  choice,
+  tavilyApiKey,
+  catalog,
+  mcpServerStore,
+  tenant_id,
+  logger,
+}: {
+  choice: SearchProviderChoice;
+  tavilyApiKey: string | undefined;
+  catalog: McpCatalog;
+  mcpServerStore: IMcpServerStore;
+  tenant_id: string;
+  logger: Logger;
+}): Promise<void> {
+  if (choice !== 'tavily') {
+    return;
+  }
+  if (tavilyApiKey === undefined) {
+    throw new Error(
+      'SEARCH_PROVIDER is set to tavily, but TAVILY_API_KEY is empty. Put your Tavily key in TAVILY_API_KEY in the instance .env file, then restart.',
+    );
+  }
+  const preset = catalog.list().find(entry => entry.name === TAVILY_CONNECTOR_NAME);
+  if (preset === undefined) {
+    throw new Error('The connector catalog has no Tavily entry, so Tavily cannot be the search provider.');
+  }
+  const manifest: RemoteMcpServerManifest = {
+    type: 'remote',
+    name: preset.name,
+    url: preset.url,
+    description: preset.description,
+    search_provider: true,
+    search_tools: [...catalog.searchToolsForUrl(preset.url)],
+    auth: { type: 'header', headers: { Authorization: `Bearer ${tavilyApiKey}` } },
+  };
+  await mcpServerStore.upsertServer({ tenant_id, name: preset.name, manifest, first_party: false });
+  const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
+  for (const server of servers) {
+    if (server.name !== preset.name && server.manifest.type === 'remote' && server.manifest.search_provider === true) {
+      await mcpServerStore.upsertServer({
+        tenant_id,
+        name: server.name,
+        manifest: { ...server.manifest, search_provider: false },
+        first_party: server.first_party,
+      });
+    }
+  }
+  logger.info('Set Tavily as the web search provider from SEARCH_PROVIDER', { connector: preset.name });
 }
 
 /** Boot step: seeds once, never in TrueFoundry mode, and never lets a failure keep the server from starting. */

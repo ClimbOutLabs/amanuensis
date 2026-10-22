@@ -1217,7 +1217,7 @@ describe('web search provider over an inert connector', () => {
           tier: 1,
           tool_name: INERT_ECHO_TOOL,
           outcome: 'logged',
-          description: 'Searched: tallest-building-in-Lisbon',
+          description: 'Searched with inert: tallest-building-in-Lisbon',
         }),
       ]);
     },

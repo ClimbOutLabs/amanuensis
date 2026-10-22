@@ -1,4 +1,5 @@
 /** Wording of held web search and map cards and their audit rows. Browser-safe: the UI reads it too. */
+import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
 
 /** Clause for a held key in other tools' outbound reasons; search cards use HOLD_SAY.secret instead. */
@@ -8,6 +9,22 @@ export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
 export const SEARCH_SERVER_FALLBACK = 'the search provider';
 
 const SEARCH_WHAT_PREFIX = 'Search the web through ';
+
+/** Brand names of the known search providers, by the host their connector or API answers on. */
+const PROVIDER_LABEL_BY_HOST = new Map<string, string>([
+  [TAVILY_CONNECTOR_HOST, 'Tavily'],
+  [TAVILY_API_HOST, 'Tavily'],
+  ['search.parallel.ai', 'Parallel'],
+]);
+
+/**
+ * The web search provider's name as a person sees it: its brand for a known host, otherwise the
+ * connector's own name. Never a secret, and never the host of an unknown provider.
+ */
+export function searchProviderLabel({ host, name }: { host: string | undefined; name: string | undefined }): string {
+  const known = host === undefined ? undefined : PROVIDER_LABEL_BY_HOST.get(host.toLowerCase());
+  return known ?? name ?? SEARCH_SERVER_FALLBACK;
+}
 
 /** The held web search card names the search in plain words, never the connector's id. */
 const WEB_SEARCH_NAME = 'Web search';

@@ -431,6 +431,21 @@ export function parseTokenFactoryMode(options: {
   throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
 }
 
+/** The web search provider an instance designates at startup. */
+export type SearchProviderChoice = 'parallel' | 'tavily';
+
+/** Parses `SEARCH_PROVIDER`. Unset/blank → `parallel`, the keyless default. */
+export function parseSearchProviderChoice(options: { envKey: string; raw: string | undefined }): SearchProviderChoice {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'parallel';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'parallel' || value === 'tavily') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of parallel, tavily; got ${JSON.stringify(options.raw)}`);
+}
+
 /** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
 function blankToUndefined(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
@@ -1568,6 +1583,17 @@ export interface SharedServerConfiguration {
    */
   NEBIUS_API_KEY: string | undefined;
   /**
+   * The web search provider this instance designates at startup. `parallel` (the default) keeps
+   * the keyless Parallel connector; `tavily` designates the Tavily connector with `TAVILY_API_KEY`.
+   * Env: `SEARCH_PROVIDER`. Default `parallel`.
+   */
+  SEARCH_PROVIDER: SearchProviderChoice;
+  /**
+   * Tavily API key, written to the Tavily connector at startup when `SEARCH_PROVIDER` is `tavily`.
+   * Never logged. Env: `TAVILY_API_KEY`. Unset by default.
+   */
+  TAVILY_API_KEY: string | undefined;
+  /**
    * Token Factory model id used for fallback and forced routing.
    * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
    */
@@ -2258,6 +2284,8 @@ const shared: SharedServerConfiguration = {
     defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),
+  TAVILY_API_KEY: blankToUndefined(getEnv('TAVILY_API_KEY')),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
   TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
