@@ -891,7 +891,7 @@ describe('getModelDetails for self-hosted and cloud models', () => {
         type: 'custom',
         name: 'home-gpu',
         base_url: 'https://gpu.home.example.com/v1',
-        auth: { api_key: 'sk-home' },
+        auth: { api_key: 'sk-test' },
         models: [
           { model_id: 'thinker-uncapped', name: 'uncapped', properties: { context_length: 32000 } },
           {
@@ -908,7 +908,7 @@ describe('getModelDetails for self-hosted and cloud models', () => {
       manifest: {
         type: 'openai',
         base_url: 'https://api.openai.com/v1',
-        auth: { api_key: 'sk-cloud' },
+        auth: { api_key: 'sk-test' },
         models: [{ model_id: 'cloud-model', name: 'cloud-model', properties: { context_length: 128000 } }],
       },
     });
