@@ -430,6 +430,46 @@ describe('ComposerContainer', () => {
     await waitFor(() => expect(window.sessionStorage.getItem(key)).toBe('lost?, edited'));
   });
 
+  it('shows Stopping… after Cancel and leaves the running state once the turn stops', async () => {
+    let finishCancel: () => void = () => undefined;
+    cancelRun.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishCancel = resolve;
+        }),
+    );
+    const running: ThreadMessageLike[] = [
+      { role: 'user', content: 'What is on in town tonight?' },
+      { role: 'assistant', content: '' },
+    ];
+    const view = render(
+      <RuntimeHarness messages={running} isRunning>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    const stopping = await screen.findByRole('button', { name: 'Stopping' });
+    expect(stopping).toHaveTextContent('Stopping…');
+    expect(stopping).toBeDisabled();
+    expect(cancelRun).toHaveBeenCalledOnce();
+
+    // The runtime ends the run (confirmed or not, within its bound), then cancel() resolves.
+    view.rerender(
+      <RuntimeHarness messages={running}>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+    finishCancel();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  });
+
   it('a second send after a completed turn sends only the new text', async () => {
     const onNew = vi.fn<(message: AppendMessage) => Promise<void>>(async () => {});
     const view = render(

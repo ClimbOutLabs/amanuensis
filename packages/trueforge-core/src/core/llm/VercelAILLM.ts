@@ -1433,9 +1433,7 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
  * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
- * so downstream error handling is unchanged; the underlying request is expected to observe that
- * abort (via a combined `AbortSignal`) and end the source stream, which unblocks the `for await`
- * below with a rejection.
+ * so downstream error handling is unchanged, and rejects the pending read at once.
  */
 export async function* enforceStreamDeadlines<T>({
   stream,
@@ -1465,12 +1463,33 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.chunkMs);
   };
 
+  // A provider stream does not always end when its request is aborted, so an expired deadline
+  // rejects the pending read itself; the source is asked to close but never awaited.
+  const iterator = stream[Symbol.asyncIterator]();
+  const expired = new Promise<never>((_, reject) => {
+    const onExpired = () => {
+      const reason: unknown = deadlineController.signal.reason;
+      const expiredError = new Error(describeStreamError(reason), { cause: reason });
+      expiredError.name = 'TimeoutError';
+      reject(expiredError);
+    };
+    if (deadlineController.signal.aborted) {
+      onExpired();
+    } else {
+      deadlineController.signal.addEventListener('abort', onExpired, { once: true });
+    }
+  });
+  // Observed here so an expiry nobody is reading never surfaces as an unhandled rejection.
+  expired.catch(() => undefined);
+
   armFirstChunkTimer();
   try {
-    // The underlying stream is expected to end (reject) shortly after `deadlineController` aborts,
-    // since callers combine it into the signal driving the request — a fired timer is not handled
-    // here so that rejection, not a silent early return, is what ends this generator.
-    for await (const part of stream) {
+    for (;;) {
+      const result = await Promise.race([iterator.next(), expired]);
+      if (result.done === true) {
+        return;
+      }
+      const part = result.value;
       if (hasSubstance(part)) {
         clearTimeout(timer);
         armChunkTimer();
@@ -1479,6 +1498,9 @@ export async function* enforceStreamDeadlines<T>({
     }
   } finally {
     clearTimeout(timer);
+    void Promise.resolve()
+      .then(() => iterator.return?.())
+      .catch(() => undefined);
   }
 }
 

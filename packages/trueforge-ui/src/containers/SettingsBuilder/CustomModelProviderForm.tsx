@@ -385,10 +385,13 @@ const CustomModelProviderForm = ({
                 inputMode="numeric"
                 value={firstChunkMs}
                 onChange={event => setFirstChunkMs(event.target.value)}
-                placeholder="300000"
+                placeholder="90000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait for a reply to start. Default: 300000 ms.</FieldHelp>
+              <FieldHelp>
+                How long to wait for a reply to start. Default: 90000 ms. A longer wait needs the server setting raised
+                too.
+              </FieldHelp>
             </div>
             <div>
               <label htmlFor="custom-provider-chunk-ms" className="mb-1.5 block text-sm font-medium text-text-primary">
@@ -404,7 +407,10 @@ const CustomModelProviderForm = ({
                 placeholder="60000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait if a reply stops partway. Default: 60000 ms.</FieldHelp>
+              <FieldHelp>
+                How long to wait if a reply stops partway. Default: 60000 ms. A longer wait needs the server setting
+                raised too.
+              </FieldHelp>
             </div>
           </div>
 

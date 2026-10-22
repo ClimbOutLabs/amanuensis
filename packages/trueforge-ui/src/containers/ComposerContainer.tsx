@@ -2,7 +2,7 @@
 
 import { ComposerPrimitive, useAui, useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec, useTrueFoundryCancel } from '@truefoundry/assistant-ui-runtime';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
@@ -67,6 +67,11 @@ function ComposerBody({
   }, [aui]);
   const canManageSession = useActiveSessionCanManage();
   const cancel = useTrueFoundryCancel();
+  // Shown from the press until the turn leaves the running state, which the runtime bounds.
+  const [isStopping, setIsStopping] = useState(false);
+  useEffect(() => {
+    if (!isBusy) setIsStopping(false);
+  }, [isBusy]);
   const toaster = useToasterOptional();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const disabled = isBusy || forceDisabled || !canManageSession;
@@ -128,16 +133,20 @@ function ComposerBody({
             disabled={disabled}
             canSubmit={canSubmit}
             isRunning={isBusy && !forceDisabled}
+            isStopping={isStopping}
             onSubmit={submit}
             onCancel={
               canManageSession
                 ? () => {
+                    setIsStopping(true);
                     void (async () => {
                       try {
                         await cancel();
                         resetBusy();
                       } catch (error) {
                         toaster?.showError(error);
+                      } finally {
+                        setIsStopping(false);
                       }
                     })();
                   }
