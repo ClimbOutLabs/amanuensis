@@ -1,4 +1,3 @@
-import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
@@ -7,13 +6,11 @@ import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
-import type { MemoryBankStatus } from './AmanSetupContext.js';
 import {
   PersonalizationProvider,
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
-import { personDisplayName } from './personDisplayName.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -33,11 +30,6 @@ export type AmanRuntimeRailProps = {
    */
   activity?: AmanAvatarActivity;
   modelName?: string;
-  /**
-   * The sign-in name, used only when the person has not chosen one in Personalization. With
-   * neither, the account row is left out.
-   */
-  userName?: string | undefined;
   /** The persona or agent answering right now, when the host tracks one. */
   personaName?: string | undefined;
   /** Host-provided status wins; when omitted the rail probes `/healthz` itself. */
@@ -46,12 +38,7 @@ export type AmanRuntimeRailProps = {
   version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
-  /**
-   * The memory bank, null when memory is off, undefined when unknown. Unknown leaves the row out
-   * rather than claiming a state the host could not confirm.
-   */
-  memoryBank?: MemoryBankStatus | null | undefined;
-  /** Where "set up" points when memory is off; omitted renders plain text. */
+  /** Where the "Change in Settings" link points; omitted hides the link. */
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
@@ -142,53 +129,15 @@ function summarizeBuild({ version, buildRef }: { version: string; buildRef: stri
 
 type RuntimeRailContentProps = Omit<AmanRuntimeRailProps, 'personalizationApi'>;
 
-/**
- * Memory recall toggle: reads the current recallEnabled flag from the agent spec
- * and provides a switch to toggle it.
- */
-const MemoryRecallToggle: FC<{ memoryBank: MemoryBankStatus | null | undefined }> = ({ memoryBank }) => {
-  const { agentSpec } = useTrueFoundryAgentSpec();
-  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
-
-  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
-  const isConfigured = !!memoryBank?.connected;
-
-  const handleToggle = useCallback(() => {
-    if (!updateAgentSpec) return;
-    updateAgentSpec({
-      config: {
-        ...(agentSpec?.config ?? {}),
-        memory: {
-          ...(agentSpec?.config?.memory ?? {}),
-          recallEnabled: !recallEnabled,
-        },
-      },
-    });
-  }, [updateAgentSpec, agentSpec, recallEnabled]);
-
-  if (!isConfigured) {
-    return null;
-  }
-
-  return (
-    <label className="aman-runtime-rail__switch">
-      <input type="checkbox" checked={recallEnabled} onChange={handleToggle} aria-label="Toggle memory recall" />
-      <span>{recallEnabled ? 'On' : 'Off'}</span>
-    </label>
-  );
-};
-
 const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   avatarSrc,
   avatarMotion,
   activity = 'idle',
   modelName = 'Not configured',
-  userName,
   personaName,
   status: statusOverride,
   version,
   buildRef,
-  memoryBank,
   settingsHref,
   pendingApprovalIds = [],
   auditFeed,
@@ -211,7 +160,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   // Collapsed, the dot is the only status left. Its words carry the connection state only; the
   // model name stays behind Details.
   const compactSummary = statusLabel;
-  const personName = personDisplayName({ profile, signInName: userName });
   const trimmedPersonaName = personaName?.trim();
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
@@ -333,28 +281,13 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           {auditFeed === undefined ? null : (
             <section
               className="aman-runtime-rail__section"
-              data-section="receipt"
-              aria-labelledby="aman-runtime-rail-receipt-label"
+              data-section="recent-actions"
+              aria-labelledby="aman-runtime-rail-recent-actions-label"
             >
-              <h3 id="aman-runtime-rail-receipt-label" className="aman-runtime-rail__section-label">
-                Receipt
+              <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
+                Recent actions
               </h3>
               {auditFeed}
-            </section>
-          )}
-
-          {personName === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="account"
-              aria-labelledby="aman-runtime-rail-account-label"
-            >
-              <h3 id="aman-runtime-rail-account-label" className="aman-runtime-rail__section-label">
-                You
-              </h3>
-              <div className="aman-runtime-rail__section-value" title={personName}>
-                {personName}
-              </div>
             </section>
           )}
 
@@ -370,46 +303,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               <div className="aman-runtime-rail__section-value" title={trimmedPersonaName}>
                 {trimmedPersonaName}
               </div>
-            </section>
-          )}
-
-          {memoryBank === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="memory"
-              aria-labelledby="aman-runtime-rail-memory-label"
-            >
-              <h3 id="aman-runtime-rail-memory-label" className="aman-runtime-rail__section-label">
-                Memory
-              </h3>
-              {memoryBank === null ? (
-                <div className="aman-runtime-rail__section-value">
-                  Off
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>set up</a>
-                    </>
-                  )}
-                </div>
-              ) : memoryBank.connected ? (
-                <>
-                  <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                    {memoryBank.name} · on
-                  </div>
-                  <MemoryRecallToggle memoryBank={memoryBank} />
-                </>
-              ) : (
-                <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                  {memoryBank.name} · needs sign-in
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>sign in</a>
-                    </>
-                  )}
-                </div>
-              )}
             </section>
           )}
 
