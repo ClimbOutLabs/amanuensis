@@ -11,14 +11,14 @@ const VALID = {
       name: 'Your model',
       status: 'fail',
       message: 'No model is connected.',
-      next_step: 'Add one in Settings, Models. Token Factory is one option.',
+      next_step: null,
     },
     { id: 'mail_calendar', name: 'Email and calendar', status: 'not_set_up', message: 'Not set up.', next_step: null },
   ],
   host_report: {
     state: 'missing',
     checked_at: null,
-    message: 'No full check has been run yet. Run aman doctor on your computer.',
+    message: null,
     next_step: null,
   },
 };
