@@ -1887,9 +1887,7 @@ export class AgentThread {
           output: clientToolResults.map(result => result.event),
           currentContextUsage: undefined,
           usage: undefined,
-          ...(nudgeFlush.toolCallMemoAfterFlush === undefined
-            ? {}
-            : { toolCallMemo: nudgeFlush.toolCallMemoAfterFlush }),
+          toolCallMemo: nudgeFlush.toolCallMemoAfterFlush ?? this.toolCallMemo,
         });
         this.pendingHeldReplayEvents = heldReplay.events;
         this.heldReplayOutput = heldReplay.events.at(-1);
@@ -1908,9 +1906,9 @@ export class AgentThread {
           output: [],
           currentContextUsage: undefined,
           usage: undefined,
-          ...(nudgeFlush.toolCallMemoAfterFlush === undefined
-            ? {}
-            : { toolCallMemo: nudgeFlush.toolCallMemoAfterFlush }),
+          // Always saved: the turn ledger it holds is shared with sub-agents, and a sub-agent that has
+          // finished leaves no snapshot of its own for a later resume to read.
+          toolCallMemo: nudgeFlush.toolCallMemoAfterFlush ?? this.toolCallMemo,
         });
         if (nudgeFlush.toolCallMemoAfterFlush !== undefined) {
           this.toolCallMemo = nudgeFlush.toolCallMemoAfterFlush;

@@ -4,6 +4,7 @@
  * reopened from storage, so every resume rebuilds the turn's counts from what was saved.
  */
 import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
+import { MAIN_THREAD_ID } from '../../src/agent-session/models/TurnRecord';
 import { EventType } from '../../src/agent-session/schemas/events';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
@@ -65,30 +66,33 @@ function textStream(text: string): AsyncGenerator<ExtendedChatCompletionChunk, R
   })();
 }
 
+type Reply = { id: string; name: string; args: string } | { text: string };
+
 /**
  * The root sends two notes, then starts a sub-agent. The sub-agent first repeats the root's last
  * note, then sends four new ones. Every send asks for approval, so the request pauses before each.
  */
-function scriptedModel() {
+const CAP_SCRIPT: Reply[] = [
+  { id: 'root-1', name: 'send_note', args: noteArgs('Note 1') },
+  { id: 'root-2', name: 'send_note', args: noteArgs('Note 2') },
+  { id: 'root-sub', name: 'create_sub_agent', args: SUB_AGENT_ARGS },
+  { id: 'sub-repeat', name: 'send_note', args: noteArgs('Note 2') },
+  { id: 'sub-3', name: 'send_note', args: noteArgs('Note 3') },
+  { id: 'sub-4', name: 'send_note', args: noteArgs('Note 4') },
+  { id: 'sub-5', name: 'send_note', args: noteArgs('Note 5') },
+  { id: 'sub-6', name: 'send_note', args: noteArgs('Note 6') },
+];
+
+function scriptedModel(script: Reply[]) {
   const create = jest.fn();
-  const replies = [
-    toolCallStream('root-1', { name: 'send_note', args: noteArgs('Note 1') }),
-    toolCallStream('root-2', { name: 'send_note', args: noteArgs('Note 2') }),
-    toolCallStream('root-sub', { name: 'create_sub_agent', args: SUB_AGENT_ARGS }),
-    toolCallStream('sub-repeat', { name: 'send_note', args: noteArgs('Note 2') }),
-    toolCallStream('sub-3', { name: 'send_note', args: noteArgs('Note 3') }),
-    toolCallStream('sub-4', { name: 'send_note', args: noteArgs('Note 4') }),
-    toolCallStream('sub-5', { name: 'send_note', args: noteArgs('Note 5') }),
-    toolCallStream('sub-6', { name: 'send_note', args: noteArgs('Note 6') }),
-  ];
-  for (const reply of replies) {
-    create.mockImplementationOnce(() => reply);
+  for (const reply of script) {
+    create.mockImplementationOnce(() => ('text' in reply ? textStream(reply.text) : toolCallStream(reply.id, reply)));
   }
   create.mockImplementation(() => textStream('Finished.'));
   return create;
 }
 
-async function setup({ cards }: { cards: boolean }) {
+async function setup({ cards, script }: { cards: boolean; script: Reply[] }) {
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'sent' })));
   const source: ToolSource = {
     name: 'mail',
@@ -118,7 +122,7 @@ async function setup({ cards }: { cards: boolean }) {
         ...(cards ? {} : { is_approval_required: false, tier: 3 as const }),
       }),
   };
-  const create = scriptedModel();
+  const create = scriptedModel(script);
   const sentinelServices = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
   const base = makeTestResolver({ modelClient: makeMockILLM({ create }) });
   const resolver: ITurnResourceResolver = {
@@ -167,92 +171,118 @@ async function setup({ cards }: { cards: boolean }) {
   return { store, sentinelServices, resolver, callTool, create };
 }
 
+type Fixture = Awaited<ReturnType<typeof setup>>;
+type StoredTurn = Awaited<ReturnType<Fixture['store']['getTurn']>>;
+
+async function startTurn(fixture: Fixture) {
+  const session = await new Sessions({
+    sessionStore: fixture.store,
+    sentinelServices: fixture.sentinelServices,
+  }).create({
+    tenant_id: 't',
+    session_id: 'notes-chat',
+    external_id: 'notes-chat-1',
+    created_by_subject: OWNER,
+    agent: { type: 'inline', spec: makeAgentSpec() },
+  });
+  const handle = await session.createTurn({
+    turn_id: mintTestTurnId(),
+    input: [{ type: EventType.USER_MESSAGE, content: 'Send Ana my notes' }],
+    signal: new AbortController().signal,
+    resolver: fixture.resolver,
+  });
+  for await (const event of handle.stream()) {
+    void event;
+  }
+  return await fixture.store.getTurn({ session_id: 'notes-chat', turn_id: handle.id });
+}
+
+/** Approves the cards of a paused request once, through a session reopened from storage. */
+async function approveOnce({ store, sentinelServices, resolver }: Fixture, paused: StoredTurn) {
+  const pending = paused?.state.status === 'done' ? paused.state.required_actions : [];
+  const cards = pending.filter(action => action.type === EventType.TOOL_APPROVAL_REQUIRED);
+  if (cards.length === 0) {
+    return undefined;
+  }
+  const reopened = await new Sessions({ sessionStore: store, sentinelServices }).get({
+    tenant_id: 't',
+    session_id: 'notes-chat',
+  });
+  const answer = await reopened?.createTurn({
+    turn_id: mintTestTurnId(),
+    input: cards.flatMap(card =>
+      card.type === EventType.TOOL_APPROVAL_REQUIRED
+        ? card.tool_calls.map(call => ({
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: card.thread_id ?? '',
+            tool_call_id: call.id,
+            approval: { status: 'allow' as const },
+          }))
+        : [],
+    ),
+    previous_turn_id: paused?.id,
+    signal: new AbortController().signal,
+    resolver,
+  });
+  for await (const event of answer?.stream() ?? []) {
+    void event;
+  }
+  return answer === undefined ? undefined : await store.getTurn({ session_id: 'notes-chat', turn_id: answer.id });
+}
+
+async function approveAll(fixture: Fixture, paused: StoredTurn) {
+  let turn = paused;
+  for (let resumes = 0; resumes < 20; resumes += 1) {
+    const next = await approveOnce(fixture, turn);
+    if (next === undefined) {
+      return turn;
+    }
+    turn = next;
+  }
+  return turn;
+}
+
 describe('turn-wide tool limits across approval pauses in a full session', () => {
   it('refuses a repeat of the root call and the 6th send after resumes, and ends the request plainly', async () => {
-    const { store, sentinelServices, resolver, callTool, create } = await setup({ cards: true });
-    const sessions = new Sessions({ sessionStore: store, sentinelServices });
-    const session = await sessions.create({
-      tenant_id: 't',
-      session_id: 'notes-chat',
-      external_id: 'notes-chat-1',
-      created_by_subject: OWNER,
-      agent: { type: 'inline', spec: makeAgentSpec() },
-    });
-    const first = await session.createTurn({
-      turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'Send Ana my notes' }],
-      signal: new AbortController().signal,
-      resolver,
-    });
-    for await (const event of first.stream()) {
-      void event;
-    }
-    let turn = await session.getTurn(first.id);
+    const fixture = await setup({ cards: true, script: CAP_SCRIPT });
+    const turn = await approveAll(fixture, await startTurn(fixture));
 
-    // Approve every card through a session reopened from storage, until the request ends.
-    for (let resumes = 0; resumes < 20; resumes += 1) {
-      const pending = turn?.state.status === 'done' ? turn.state.required_actions : [];
-      const cards = pending.filter(action => action.type === EventType.TOOL_APPROVAL_REQUIRED);
-      if (cards.length === 0) {
-        break;
-      }
-      const reopened = await new Sessions({ sessionStore: store, sentinelServices }).get({
-        tenant_id: 't',
-        session_id: 'notes-chat',
-      });
-      const answer = await reopened?.createTurn({
-        turn_id: mintTestTurnId(),
-        input: cards.flatMap(card =>
-          card.type === EventType.TOOL_APPROVAL_REQUIRED
-            ? card.tool_calls.map(call => ({
-                type: EventType.USER_TOOL_APPROVAL,
-                thread_id: card.thread_id ?? '',
-                tool_call_id: call.id,
-                approval: { status: 'allow' as const },
-              }))
-            : [],
-        ),
-        previous_turn_id: turn?.id,
-        signal: new AbortController().signal,
-        resolver,
-      });
-      for await (const event of answer?.stream() ?? []) {
-        void event;
-      }
-      turn = answer === undefined ? undefined : await reopened?.getTurn(answer.id);
-    }
-
-    const sentBodies = callTool.mock.calls.map(call => JSON.stringify(call));
-    expect(callTool).toHaveBeenCalledTimes(MAX_WRITE_CALLS_PER_TURN);
+    const sentBodies = fixture.callTool.mock.calls.map(call => JSON.stringify(call));
+    expect(fixture.callTool).toHaveBeenCalledTimes(MAX_WRITE_CALLS_PER_TURN);
     expect(sentBodies.filter(body => body.includes('Note 2'))).toHaveLength(1);
     expect(sentBodies.some(body => body.includes('Note 6'))).toBe(false);
     expect(turn?.state).toMatchObject({ status: 'error', message: WRITE_CAP_STOP_MESSAGE });
     // The root is not asked to carry on after the sub-agent hit the cap.
-    expect(create.mock.calls.length).toBe(8);
+    expect(fixture.create.mock.calls.length).toBe(CAP_SCRIPT.length);
   });
 
   it('ends the request when a sub-agent hits the cap in a turn with no pauses', async () => {
-    const { store, sentinelServices, resolver, callTool, create } = await setup({ cards: false });
-    const session = await new Sessions({ sessionStore: store, sentinelServices }).create({
-      tenant_id: 't',
-      session_id: 'notes-chat',
-      external_id: 'notes-chat-1',
-      created_by_subject: OWNER,
-      agent: { type: 'inline', spec: makeAgentSpec() },
-    });
-    const handle = await session.createTurn({
-      turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'Send Ana my notes' }],
-      signal: new AbortController().signal,
-      resolver,
-    });
-    for await (const event of handle.stream()) {
-      void event;
-    }
-    const turn = await session.getTurn(handle.id);
+    const fixture = await setup({ cards: false, script: CAP_SCRIPT });
+    const turn = await startTurn(fixture);
 
-    expect(callTool).toHaveBeenCalledTimes(MAX_WRITE_CALLS_PER_TURN);
+    expect(fixture.callTool).toHaveBeenCalledTimes(MAX_WRITE_CALLS_PER_TURN);
     expect(turn?.state).toMatchObject({ status: 'error', message: WRITE_CAP_STOP_MESSAGE });
-    expect(create.mock.calls.length).toBe(8);
+    expect(fixture.create.mock.calls.length).toBe(CAP_SCRIPT.length);
+  });
+
+  it('keeps the counts of a sub-agent that finished before a later pause', async () => {
+    // The sub-agent sends Note 1 and finishes. The root then sends Note 2, which pauses the request
+    // again; the count saved at that pause must still hold the sub-agent's write.
+    const fixture = await setup({
+      cards: true,
+      script: [
+        { id: 'root-sub', name: 'create_sub_agent', args: SUB_AGENT_ARGS },
+        { id: 'sub-1', name: 'send_note', args: noteArgs('Note 1') },
+        { text: 'Note 1 is sent.' },
+        { id: 'root-2', name: 'send_note', args: noteArgs('Note 2') },
+      ],
+    });
+    const subAgentCard = await startTurn(fixture);
+    const rootCard = await approveOnce(fixture, subAgentCard);
+    const finished = await approveAll(fixture, rootCard);
+
+    expect(rootCard?.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo?.write_calls_this_turn).toBe(1);
+    expect(finished?.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo?.write_calls_this_turn).toBe(2);
+    expect(fixture.callTool).toHaveBeenCalledTimes(2);
   });
 });
