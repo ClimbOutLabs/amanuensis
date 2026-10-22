@@ -21,6 +21,7 @@ import type {
   GetSessionByExternalIdInput,
   GetSessionInput,
   ListSessionsInput,
+  SetPrivateFingerprintsInput,
   StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
@@ -35,6 +36,11 @@ import {
   SessionStoreInvariantError,
   TurnNotFoundError,
 } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
+import {
+  ChatPrivateFingerprintsSchema,
+  mergeChatPrivateFingerprints,
+  type ChatPrivateFingerprints,
+} from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import { sql, type Kysely } from 'kysely';
 import { SESSION_EXTERNAL_ID_UQ } from '../../../indexes';
 import { sessionAgentFromColumns, sessionAgentToColumns } from '../../../sessionAgentColumns';
@@ -78,6 +84,7 @@ function mapRowToSessionRecord(row: {
   last_turn_id: string | null;
   approval_grants: string[];
   task_checklist: TaskChecklist;
+  private_fingerprints: ChatPrivateFingerprints | null;
   external_id: string | null;
   custom: Record<string, unknown> | null;
   metadata: SessionMetadata;
@@ -104,6 +111,7 @@ function mapRowToSessionRecord(row: {
     last_turn_id: row.last_turn_id,
     approval_grants: row.approval_grants,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
+    private_fingerprints: ChatPrivateFingerprintsSchema.nullable().parse(row.private_fingerprints),
     external_id: row.external_id,
     custom: parseSessionCustom(row.custom),
     metadata: parseSessionMetadata(row.metadata),
@@ -135,6 +143,7 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         // literal '{}', which then casts to jsonb as an empty OBJECT, not [].
         approval_grants: json([]),
         task_checklist: json(emptyTaskChecklist()),
+        private_fingerprints: null,
         custom: input.custom !== null ? json(input.custom) : null,
         metadata: json(input.metadata),
         external_id: input.external_id,
@@ -372,4 +381,28 @@ export async function listSessions(
   const { data: pageRows, pagination } = paginateSessionListRows(rows, limit, row => row.updated_at_cursor);
 
   return { data: pageRows.map(mapRowToSessionRecord), pagination };
+}
+
+export async function setPrivateFingerprints(db: Kysely<Database>, input: SetPrivateFingerprintsInput): Promise<void> {
+  await db.transaction().execute(async trx => {
+    // Locked, so two turns saving at once each merge into what the other stored.
+    const row = await trx
+      .selectFrom('session')
+      .select('private_fingerprints')
+      .where('session_id', '=', input.session_id)
+      .forUpdate()
+      .executeTakeFirst();
+    if (row === undefined) {
+      return;
+    }
+    const fingerprints = mergeChatPrivateFingerprints({
+      stored: ChatPrivateFingerprintsSchema.nullable().parse(row.private_fingerprints),
+      saved: input.fingerprints,
+    });
+    await trx
+      .updateTable('session')
+      .set({ private_fingerprints: json(fingerprints) })
+      .where('session_id', '=', input.session_id)
+      .execute();
+  });
 }

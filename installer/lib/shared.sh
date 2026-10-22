@@ -7,6 +7,16 @@ SANDBOX_NODE_MINOR=14
 # ASCII only: a Turkish locale would turn I into a dotless i and break comparisons with plain words.
 lowercase() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 
+# A path for a person to read: the home folder becomes ~. Here, not in ui.sh, because the doctor's checks use it
+# before the terminal style is loaded (and --json never loads it).
+ui_path() {
+  case "$1" in
+    "${HOME:-/nonexistent}") printf '~' ;;
+    "${HOME:-/nonexistent}"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 # ---- who besides the owner can sign in --------------------------------------------------------------------------
 # An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
 # allowed email each. The installer removes them and the doctor reports them, both through this one rule.

@@ -57,6 +57,11 @@ export interface HarnessChatServerExtensions {
     reason: string;
   }): Promise<{ dismissed: number; alreadyResolved: boolean }>;
   /**
+   * Clear the card of a request that already ended. Nothing runs: the server records the dismissal
+   * and the card stays cleared after a reload.
+   */
+  dismissEndedApproval(request: { sessionId: string; threadId: string; toolCallId: string }): Promise<void>;
+  /**
    * Answer an action a scheduled run held for the owner. Approving runs just that call, once;
    * the server refuses it when the hold ran out or no longer matches what the owner was shown.
    * Resolves with what became of the call, read from the answer's own turn.
@@ -82,16 +87,21 @@ export interface HarnessChatServerExtensions {
   getLastTurnInputTokens(request: { sessionId: string }): Promise<number | null>;
 }
 
+/** The reason the agent reads when a card for an ended request is cleared. */
+export const ENDED_APPROVAL_DISMISS_REASON = 'Dismissed after the request ended.';
+
 /** Type guard for servers that provide the harness chat extensions. */
 export function hasSessionResync(server: object): server is HarnessChatServerExtensions {
   const peek: unknown = Reflect.get(server, 'peekSessionTip');
   const dismiss: unknown = Reflect.get(server, 'dismissPendingApprovals');
+  const dismissEnded: unknown = Reflect.get(server, 'dismissEndedApproval');
   const answerHeld: unknown = Reflect.get(server, 'answerHeldAction');
   const compaction: unknown = Reflect.get(server, 'getLastCompactionStatus');
   const tokens: unknown = Reflect.get(server, 'getLastTurnInputTokens');
   return (
     typeof peek === 'function' &&
     typeof dismiss === 'function' &&
+    typeof dismissEnded === 'function' &&
     typeof answerHeld === 'function' &&
     typeof compaction === 'function' &&
     typeof tokens === 'function'
@@ -208,6 +218,28 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     return { dismissed: input.length, alreadyResolved: false };
   }
 
+  async function dismissEndedApproval({
+    sessionId,
+    threadId,
+    toolCallId,
+  }: {
+    sessionId: string;
+    threadId: string;
+    toolCallId: string;
+  }): Promise<void> {
+    await client.sessions.createTurn(sessionId, {
+      input: [
+        {
+          type: 'user.tool_approval',
+          threadId,
+          toolCallId,
+          approval: { status: 'deny', reason: ENDED_APPROVAL_DISMISS_REASON },
+        },
+      ],
+      previousTurnId: 'auto',
+    });
+  }
+
   async function answerHeldAction({
     sessionId,
     threadId,
@@ -277,6 +309,7 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
   return {
     peekSessionTip,
     dismissPendingApprovals,
+    dismissEndedApproval,
     answerHeldAction,
     getLastCompactionStatus,
     getLastTurnInputTokens,

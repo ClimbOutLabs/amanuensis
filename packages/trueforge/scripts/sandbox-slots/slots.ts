@@ -150,6 +150,37 @@ function tail(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(-400);
 }
 
+/**
+ * The failing attestation lines in a slot's log, each cut free of the log's own prefixes (the container name
+ * and the time it was written) and said in plain words: the line itself names the safety check that failed
+ * and why. A line that does not read as a check and a reason is kept as it is.
+ */
+export function attestationFailuresOf(text: string): string[] {
+  const failures: string[] = [];
+  for (const line of text.split('\n')) {
+    const at = line.indexOf('attestation FAILED');
+    if (at >= 0) {
+      failures.push(plainFailure(line.slice(at).trim()));
+    }
+  }
+  return failures;
+}
+
+/** "attestation FAILED network: interfaces: ..." said plainly: "Safety check network failed: interfaces: ...". */
+function plainFailure(line: string): string {
+  const rest = line.slice('attestation FAILED '.length);
+  const colon = rest.indexOf(': ');
+  if (colon <= 0) {
+    return line;
+  }
+  return `Safety check ${rest.slice(0, colon)} failed: ${rest.slice(colon + 2)}`;
+}
+
+/** True when a slot's healthcheck answer names its failing checks itself: one FAIL line per failed check. */
+function healthcheckNamesFailures(output: string): boolean {
+  return /(^|\n)FAIL /.test(output) || output.includes('attestation failed:');
+}
+
 class Slots {
   readonly checks: SlotsCheck[] = [];
   private diskMode: DiskMode = 'off';
@@ -217,6 +248,27 @@ class Slots {
       env['AMAN_SLOTS_DISK_BYTES'] = String(this.diskBytes);
     }
     return env;
+  }
+
+  /**
+   * Reads the logs of the given slots (all of them when none are named) out loud, so they are written to the
+   * log file as well as read here: the reason a slot failed must reach the log, not only this run's output.
+   */
+  private async slotLogs(services: string[]): Promise<CommandResult> {
+    return this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '50', ...services]), echo: true });
+  }
+
+  /**
+   * Reads lines out loud, so they are written to the log file as well: the output of an echoed call is what
+   * reaches the log (see the runner in main.ts), so the plain failure lines are printed through one. Best
+   * effort: the failure itself is already in this run's result, so a line that cannot be read out is not
+   * another failure.
+   */
+  private async sayOutLoud(lines: string[]): Promise<void> {
+    if (lines.length === 0) {
+      return;
+    }
+    await this.run({ command: 'printf', args: ['%s\n', ...lines], echo: true }).catch(() => undefined);
   }
 
   private composeArgs(tail: string[]): string[] {
@@ -640,15 +692,17 @@ class Slots {
       echo: true,
     });
     if (up.exitCode !== 0) {
-      const logs = await this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '15']) });
+      const logs = await this.slotLogs([]);
+      const failures = attestationFailuresOf(`${logs.stdout}\n${logs.stderr}`);
+      await this.sayOutLoud(failures);
       const failed = withDetail({
         sentence: 'The sandboxes did not become healthy',
-        detail: tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
+        detail: failures.length > 0 ? failures.join(' ') : tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
       });
       throw new StepFailure(
         'start',
         failed.message,
-        `Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
+        `Read the safety check lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
         undefined,
         failed.detail,
       );
@@ -668,9 +722,20 @@ class Slots {
         ]),
       });
       if (result.exitCode !== 0) {
+        let detail = tail(`${result.stdout} ${result.stderr}`);
+        // A slot that is not running cannot answer, so its answer names no check; its own log holds the
+        // attestation line instead. An answer that names its checks is kept as it is.
+        if (!healthcheckNamesFailures(`${result.stdout}\n${result.stderr}`)) {
+          const logs = await this.slotLogs([`sandbox-${String(slot)}`]);
+          const failures = attestationFailuresOf(`${logs.stdout}\n${logs.stderr}`);
+          if (failures.length > 0) {
+            detail = failures.join(' ');
+            await this.sayOutLoud(failures);
+          }
+        }
         const failed = withDetail({
           sentence: `Sandbox ${String(slot)} failed its safety checks`,
-          detail: tail(`${result.stdout} ${result.stderr}`),
+          detail,
         });
         throw new StepFailure(
           'attest',

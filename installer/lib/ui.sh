@@ -123,14 +123,6 @@ _ui_marked() { # color marker text [tail]
   _ui_block "  $(_ui_s "$1" "$2") " 4 "$3" '' "${4:-}"
 }
 
-ui_path() {
-  case "$1" in
-    "${HOME:-/nonexistent}") printf '~' ;;
-    "${HOME:-/nonexistent}"/*) printf '~%s' "${1#"$HOME"}" ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
-
 # 9s, 2m 05s, 1h 02m
 ui_fmt_elapsed() {
   local s=$1
