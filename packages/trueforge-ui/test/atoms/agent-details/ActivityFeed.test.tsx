@@ -30,7 +30,7 @@ describe('ActivityFeed', () => {
   it('renders tool calls in plain language without leaking tool names', () => {
     render(<ActivityFeed segments={[webSearch(0)]} originMs={1_000_000} />);
 
-    expect(screen.getByText('Searched the web')).toBeInTheDocument();
+    expect(screen.getByText('Searched the web with Tavily')).toBeInTheDocument();
     expect(screen.queryByText('tavily_search')).not.toBeInTheDocument();
   });
 
@@ -42,18 +42,18 @@ describe('ActivityFeed', () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('Searched the web')).not.toBeInTheDocument();
+    expect(screen.queryByText('Searched the web with Tavily')).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Searched the web')).toBeInTheDocument();
+    expect(screen.getByText('Searched the web with Tavily')).toBeInTheDocument();
   });
 
   it('starts collapsed when defaultExpanded is false', () => {
     render(<ActivityFeed segments={[webSearch(0)]} originMs={1_000_000} defaultExpanded={false} />);
 
     expect(screen.getByRole('button', { name: 'Activity' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('Searched the web')).not.toBeInTheDocument();
+    expect(screen.queryByText('Searched the web with Tavily')).not.toBeInTheDocument();
   });
 
   it('renders nothing when no segment produces an activity item', () => {
@@ -97,6 +97,6 @@ describe('ActivityFeed', () => {
     const { container } = render(<ActivityFeed segments={segments} originMs={1_000_000} />);
 
     const firstRow = container.querySelectorAll('ul > li')[0];
-    expect(firstRow?.textContent).toContain('Read web pages');
+    expect(firstRow?.textContent).toContain('Read web pages with Tavily');
   });
 });

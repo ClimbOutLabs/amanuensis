@@ -8,7 +8,7 @@ import { SentinelSettings } from '@/sentinel/SentinelSettings.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ConnectorBase } from '@/server/types.js';
-import { createMockAgentUIServer } from '../server/mockServer.js';
+import { createMockAgentUIServer, createMockCatalog } from '../server/mockServer.js';
 
 function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi.fn> } {
   const updateUserSettings = vi.fn(async (patch: Partial<SentinelUserSettings>) => ({
@@ -173,10 +173,9 @@ describe('SentinelSettings', () => {
       searchProvider: true,
     };
     const server = createMockAgentUIServer({
-      connectorCatalog: {
-        ...createMockAgentUIServer().connectorCatalog,
-        listConnectors: async () => [tavily],
-      },
+      catalog: createMockCatalog({
+        connectorCatalog: { ...createMockCatalog().connectorCatalog, listConnectors: async () => [tavily] },
+      }),
     });
     render(
       <ServerProvider server={server}>
