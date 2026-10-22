@@ -31,7 +31,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { heldCallAuditText } from '../permissions/audit';
+import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
@@ -1397,8 +1397,11 @@ export async function executeToolCalls({
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',
-              message: 'The tool could not be prepared and was not executed. Retry once or choose another tool.',
-              suggested_action: 'retry',
+              // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
+              message:
+                preparationFailure.owner_message ??
+                'The tool could not be prepared and was not executed. Retry once or choose another tool.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'retry' : 'contact_user',
             },
         admissionProvenance: admission,
       };
@@ -2068,6 +2071,27 @@ export async function executeToolCalls({
     }
     return outcome;
   });
+  // A call refused while it was prepared never reaches classification, so it has no classify-time row.
+  // Record each refusal so Recent actions shows what was not done. Refused before classification means no tier
+  // was set, so it is recorded at Tier 3, the tier that always asks before a change.
+  if (sentinel !== undefined) {
+    await recordNotPreparedRefusals({
+      services: sentinel.services,
+      identity: sentinel.identity,
+      refusals: results.flatMap(({ toolCall }) => {
+        const failure = toolCall.tool_info.pre_dispatch_failure;
+        return failure === undefined
+          ? []
+          : [
+              {
+                toolName: toolCall.tool_info.original_tool_name,
+                tier: toolCall.tool_info.tier,
+                message: failure.owner_message ?? failure.message,
+              },
+            ];
+      }),
+    });
+  }
   // Sentinel: record outcomes once dispatch is settled. Auto-denied calls were
   // recorded at classify time; carded calls record the user's decision and
   // relaxed Tier 2 calls record that they ran.

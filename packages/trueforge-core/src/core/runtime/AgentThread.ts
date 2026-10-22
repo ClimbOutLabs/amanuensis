@@ -121,7 +121,7 @@ import {
   toDispatchSentinelContext,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
-import { recordHeldActionAudit } from '../permissions/audit';
+import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
@@ -207,7 +207,12 @@ import {
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
-import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
+import {
+  createEmptyAgentThreadMetrics,
+  recordToolCallResult,
+  updateMetricsFromUsage,
+  type AgentThreadMetrics,
+} from './metrics';
 import {
   collectKnownEventIds,
   guardModelReply,
@@ -2001,6 +2006,26 @@ export class AgentThread {
     }
   }
 
+  /** Calls dropped with the whole reply get the same audit row as any other refused call. */
+  private async recordDroppedCallRefusals(calls: readonly { function: { name: string } }[] | undefined): Promise<void> {
+    if (this.sentinel === undefined || calls === undefined) {
+      return;
+    }
+    await recordNotPreparedRefusals({
+      services: this.sentinel.services,
+      identity: {
+        tenant_id: this.sentinel.tenant_id,
+        created_by: this.sentinel.created_by,
+        conversation_id: this.sentinel.conversation_id,
+      },
+      refusals: calls.map(call => ({
+        toolName: call.function.name,
+        tier: undefined,
+        message: TOO_MANY_TOOL_CALLS_MESSAGE,
+      })),
+    });
+  }
+
   private async auditHeld(input: {
     info: InternalToolCallInfo;
     outcome: 'logged' | 'approved' | 'denied';
@@ -3228,6 +3253,7 @@ export class AgentThread {
       } satisfies ModelMessageEvent;
 
       let firstDeltaTimestamped = false;
+      const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
         // The first chunk waits behind the watchdog: a provider that accepts the request but
@@ -3273,6 +3299,7 @@ export class AgentThread {
           if (event) {
             if (!firstDeltaTimestamped) {
               firstDeltaTimestamped = true;
+              this.metrics.time_to_first_token_ms ??= Date.now() - modelRequestStartedAt;
               yield { ...event, created_at: new Date().toISOString() };
             } else {
               yield event;
@@ -3430,6 +3457,7 @@ export class AgentThread {
       knownEventIds: collectKnownEventIds(this.context),
     });
     if (replyGuard.tooManyCalls && !unattended) {
+      await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -3481,7 +3509,11 @@ export class AgentThread {
             tool_info: {
               ...call.tool_info,
               is_approval_required: false,
-              pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: problem },
+              pre_dispatch_failure: {
+                kind: 'pre_dispatch_failed',
+                message: problem,
+                owner_message: `Aman could not run one of the actions in this reply: ${problem} Ask again to try it once more.`,
+              },
             },
           };
         }),
@@ -3496,6 +3528,7 @@ export class AgentThread {
         call => call.tool_info.is_approval_required !== true,
       ).length;
       if (immediateCalls > MAX_TOOL_CALLS_PER_REPLY) {
+        await this.recordDroppedCallRefusals(assistantMessage.tool_calls);
         yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
         return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
       }
@@ -3846,6 +3879,7 @@ export class AgentThread {
                 message:
                   `Research tool-call budget exhausted (${String(this.taskState.tool_calls_used)} of ${String(budget)} used). ` +
                   'This call was not executed. Bank remaining findings with record_finding and write the final answer.',
+                owner_message: `Aman stopped a search: it had used all ${String(budget)} tool steps for this question. Ask again to continue with a narrower question.`,
               },
             },
           },
@@ -4096,8 +4130,13 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
-    this.metrics.total_tool_calls += toolCallResults.length;
     for (const result of toolCallResults) {
+      const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
+      recordToolCallResult(this.metrics, {
+        toolName: toolCall?.function.name ?? 'unknown_tool',
+        disposition: result.disposition,
+        reasonCode: result.remediation?.reason_code ?? null,
+      });
       // Calls with no metadata count as writes, as isSafeToRepeat treats them.
       const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
       if (result.disposition === 'executed_ok' && !result.failure && writes) {

@@ -13,6 +13,7 @@ async function systemPromptFor(input: { serverSandboxAvailable: boolean | undefi
     turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
+    turnToolCallLedger: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     serverSandboxAvailable: input.serverSandboxAvailable,
