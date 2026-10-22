@@ -229,7 +229,7 @@ export function useRewardLedger(): {
 }
 
 export type HighlightCandidates = {
-  /** The first approval waiting on the person, from the rail's Needs you ticket. */
+  /** The first approval waiting on the person in the chat. */
   firstWaitingApprovalId: string | null;
   /** The next appointment on the brief, by its stop. */
   nextAppointmentId: string | null;

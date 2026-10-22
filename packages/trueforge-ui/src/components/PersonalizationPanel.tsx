@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 import { Markdown } from '../atoms/Markdown.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { Switch } from '../atoms/primitives/Switch.js';
+import { DEFAULT_ASSISTANT_DISPLAY_NAME } from './assistantDisplayName.js';
 import { HelpAreaChoices } from './HelpAreaChoices.js';
 import {
   EMPTY_PERSONALIZATION_PROFILE,
@@ -272,7 +273,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     className={inputClassName}
                     value={draft.assistant_name ?? ''}
                     onChange={event => updateDraft('assistant_name', event.target.value)}
-                    placeholder="Aman"
+                    placeholder={DEFAULT_ASSISTANT_DISPLAY_NAME}
                   />
                 </div>
                 <div>

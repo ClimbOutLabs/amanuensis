@@ -398,8 +398,6 @@ export {
   useOptionalSentinelApiState,
 } from './sentinel/SentinelApiContext.js';
 export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
-export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
-export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
 export { SentinelSettings } from './sentinel/SentinelSettings.js';
 export { Tier2RelaxationToggle } from './sentinel/Tier2RelaxationToggle.js';
 export type { Tier2RelaxationToggleProps } from './sentinel/Tier2RelaxationToggle.js';

@@ -2,8 +2,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { RecentActions } from '@/sentinel/RecentActions.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
-import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
 import type { SentinelApi, SentinelAuditEntry } from '@/sentinel/types.js';
 
 function makeEntry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
@@ -41,50 +41,41 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
   };
 }
 
-function renderFeed(entries: SentinelAuditEntry[]) {
+function renderActions(entries: SentinelAuditEntry[]) {
   render(
     <SentinelApiProvider api={stubApi(entries)}>
-      <SentinelAuditFeed sessionId="session-1" />
+      <RecentActions sessionId="session-1" open onToggle={vi.fn()} />
     </SentinelApiProvider>,
   );
 }
 
-describe('SentinelAuditFeed', () => {
-  it('groups entries by verb and state into one counted row', async () => {
-    renderFeed([
-      makeEntry({ id: 'entry-1', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
-      makeEntry({ id: 'entry-2', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
-      makeEntry({ id: 'entry-3', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
-    ]);
-    expect(await screen.findByText('Read your email · 3')).toBeInTheDocument();
-    expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
-  });
-
-  it('shows the five state words, one per row, and never the raw tool name or the description', async () => {
-    renderFeed([
+describe('RecentActions', () => {
+  it('shows each state in plain words, one per row, and never the raw tool name or the description', async () => {
+    renderActions([
       makeEntry({ id: 'entry-1', action_type: 'gmail_send', outcome: 'approved', tier: 3, description: 'Sent to Rui' }),
       makeEntry({ id: 'entry-2', action_type: 'exec', outcome: 'denied', tier: 3 }),
       makeEntry({ id: 'entry-3', action_type: 'web_search', outcome: 'auto_denied', tier: 3 }),
       makeEntry({ id: 'entry-4', action_type: 'write_file', outcome: 'ran', tier: 2 }),
       makeEntry({ id: 'entry-5', action_type: 'exec', outcome: 'logged', tier: 2 }),
     ]);
-    expect(await screen.findByText('Sent an email')).toBeInTheDocument();
+    expect(await screen.findByText('Gmail · sent an email')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 5' }));
     expect(screen.getByText('You approved')).toBeInTheDocument();
     expect(screen.getByText('You declined')).toBeInTheDocument();
-    expect(screen.getByText('Turned down automatically')).toBeInTheDocument();
+    expect(screen.getByText('Failed: blocked by your settings')).toBeInTheDocument();
     expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
     expect(screen.getByText('Waiting for you')).toBeInTheDocument();
     expect(screen.queryByText('gmail_send')).not.toBeInTheDocument();
     expect(screen.queryByText('Sent to Rui')).not.toBeInTheDocument();
   });
 
-  it('uses the plain fallback for a tool the verb table does not know', async () => {
-    renderFeed([makeEntry({ id: 'entry-1', action_type: 'mystery_tool', outcome: 'ran' })]);
-    expect(await screen.findByText('Used a connected app')).toBeInTheDocument();
+  it('uses the tool name in sentence case for a tool the table does not know', async () => {
+    renderActions([makeEntry({ id: 'entry-1', action_type: 'mystery_tool', outcome: 'ran' })]);
+    expect(await screen.findByText('Mystery tool')).toBeInTheDocument();
     expect(screen.queryByText('mystery_tool')).not.toBeInTheDocument();
   });
 
-  it('shows five rows and a Show all control with the entry count for the rest', async () => {
+  it('shows four rows and a Show all control with the entry count for the rest', async () => {
     const entries = ['gmail_read', 'calendar_read', 'web_search', 'exec', 'write_file', 'space_read'].map(
       (action, index) =>
         makeEntry({
@@ -94,15 +85,15 @@ describe('SentinelAuditFeed', () => {
           created_at: `2026-09-29T10:0${index}:00.000Z`,
         }),
     );
-    renderFeed(entries);
-    expect(await screen.findByText('Read a space')).toBeInTheDocument();
-    expect(screen.queryByText('Read your email')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show all (6)' }));
-    expect(screen.getByText('Read your email')).toBeInTheDocument();
+    renderActions(entries);
+    expect(await screen.findByText('Spaces · read a space')).toBeInTheDocument();
+    expect(screen.queryByText('Gmail · read email')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 6' }));
+    expect(screen.getByText('Gmail · read email')).toBeInTheDocument();
   });
 
   it('shows the empty line when the session has no permission activity', async () => {
-    renderFeed([]);
+    renderActions([]);
     expect(await screen.findByText('Nothing has happened in this chat yet.')).toBeInTheDocument();
   });
 });

@@ -22,10 +22,8 @@ describe('B2 look styles', () => {
       '.aui-ticket__tear {',
       '.aui-ticket__stub {',
       '.aui-row {',
-      '.aui-row--2 {',
       '.aui-chapter {',
       '.aui-underline::after {',
-      '.aui-receipt {',
     ]) {
       expect(b2Section, selector).toContain(selector);
     }

@@ -1,90 +1,104 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  ACTIVITY_FALLBACK_VERB,
-  ACTIVITY_STATE_LABELS,
-  activityStateOf,
-  activityVerbOf,
-  receiptRowsOf,
+  ACTIVITY_SUBTITLES,
+  activityRowOf,
+  activityTitleOf,
+  groupActivityRows,
+  relativeTimeLabel,
 } from '@/sentinel/activityVerbs.js';
 import type { SentinelAuditEntry } from '@/sentinel/types.js';
+
+const NOW = new Date('2026-10-22T12:00:00.000Z');
 
 function entry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
   return {
     id: 'entry',
     session_id: 'session-1',
-    created_at: '2026-10-21T09:00:00.000Z',
-    tier: 1,
-    action_type: 'gmail_read',
+    created_at: NOW.toISOString(),
+    tier: 2,
+    action_type: 'web_search',
     description: '',
-    outcome: 'logged',
+    outcome: 'ran',
     ...overrides,
   };
 }
 
-describe('activityVerbOf', () => {
-  it('reads a known tool as a plain verb phrase', () => {
-    expect(activityVerbOf('web_search')).toBe('Searched the web');
-    expect(activityVerbOf('gmail_read')).toBe('Read your email');
+const minutesBefore = (minutes: number): string => new Date(NOW.getTime() - minutes * 60_000).toISOString();
+
+describe('activityTitleOf', () => {
+  it('names the real service and what it did', () => {
+    expect(activityTitleOf('gmail_read')).toBe('Gmail · read email');
+    expect(activityTitleOf('web_search')).toBe('Web search · searched the web');
   });
 
-  it('falls back to a plain phrase, never the raw tool name', () => {
-    expect(activityVerbOf('some_new_tool')).toBe(ACTIVITY_FALLBACK_VERB);
-  });
-});
-
-describe('activityStateOf', () => {
-  it('maps each audit outcome to one of the five state words', () => {
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'approved', tier: 3 }))]).toBe('You approved');
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'denied', tier: 3 }))]).toBe('You declined');
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'auto_denied', tier: 3 }))]).toBe(
-      'Turned down automatically',
-    );
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'ran', tier: 2 }))]).toBe(
-      'Done · allowed by your settings',
-    );
-  });
-
-  it('splits a logged row by tier: a read the settings allow is allowed, a held call is waiting for you', () => {
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 1 }))]).toBe(
-      'Done · allowed by your settings',
-    );
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 2 }))]).toBe('Waiting for you');
+  it('falls back to the tool name in sentence case, never connected app', () => {
+    expect(activityTitleOf('some_new_tool')).toBe('Some new tool');
+    expect(activityTitleOf('some_new_tool')).not.toMatch(/connected app/i);
   });
 });
 
-describe('receiptRowsOf', () => {
-  it('counts entries that share a verb and a state into one row', () => {
-    const rows = receiptRowsOf([
-      entry({ id: '1', created_at: '2026-10-21T09:00:00.000Z' }),
-      entry({ id: '2', created_at: '2026-10-21T09:05:00.000Z' }),
-      entry({ id: '3', created_at: '2026-10-21T09:02:00.000Z' }),
-    ]);
-    expect(rows).toEqual([
-      {
-        key: 'allowed:Read your email',
-        verb: 'Read your email',
-        state: 'allowed',
-        count: 3,
-        latestAt: '2026-10-21T09:05:00.000Z',
-      },
-    ]);
+describe('activityRowOf', () => {
+  it('gives each audit outcome its mark and one subtitle', () => {
+    const rows = {
+      ran: activityRowOf(entry({ outcome: 'ran' })),
+      approved: activityRowOf(entry({ outcome: 'approved', tier: 3 })),
+      denied: activityRowOf(entry({ outcome: 'denied', tier: 3 })),
+      autoDenied: activityRowOf(entry({ outcome: 'auto_denied', tier: 3 })),
+      readRan: activityRowOf(entry({ outcome: 'logged', tier: 1 })),
+      held: activityRowOf(entry({ outcome: 'logged', tier: 2 })),
+    };
+    expect([rows.ran.subtitle, rows.ran.mark]).toEqual([ACTIVITY_SUBTITLES.doneAllowed, '✓']);
+    expect([rows.approved.subtitle, rows.approved.mark]).toEqual([ACTIVITY_SUBTITLES.approved, '✓']);
+    expect([rows.denied.subtitle, rows.denied.mark]).toEqual([ACTIVITY_SUBTITLES.declined, '–']);
+    expect([rows.autoDenied.subtitle, rows.autoDenied.mark]).toEqual(['Failed: blocked by your settings', '!']);
+    expect([rows.readRan.subtitle, rows.readRan.mark]).toEqual([ACTIVITY_SUBTITLES.doneAllowed, '✓']);
+    expect([rows.held.subtitle, rows.held.mark]).toEqual([ACTIVITY_SUBTITLES.waiting, '·']);
   });
 
-  it('keeps the same verb apart when the state differs', () => {
-    const rows = receiptRowsOf([
-      entry({ id: '1', action_type: 'gmail_send', outcome: 'approved', tier: 3 }),
-      entry({ id: '2', action_type: 'gmail_send', outcome: 'denied', tier: 3 }),
-    ]);
-    expect(rows.map(row => row.state)).toEqual(['approved', 'declined']);
-    expect(rows.map(row => row.count)).toEqual([1, 1]);
+  it('marks only an auto-denied row as failed', () => {
+    expect(activityRowOf(entry({ outcome: 'auto_denied', tier: 3 })).failed).toBe(true);
+    expect(activityRowOf(entry({ outcome: 'denied', tier: 3 })).failed).toBe(false);
+  });
+});
+
+describe('groupActivityRows', () => {
+  it('keeps rows less than ten minutes apart in one reply, newest first', () => {
+    const groups = groupActivityRows({
+      entries: [entry({ id: 'old', created_at: minutesBefore(8) }), entry({ id: 'new', created_at: minutesBefore(1) })],
+      now: NOW,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe('This reply');
+    expect(groups[0]?.rows.map(row => row.id)).toEqual(['new', 'old']);
   });
 
-  it('lists the newest row first', () => {
-    const rows = receiptRowsOf([
-      entry({ id: '1', action_type: 'exec', outcome: 'ran', created_at: '2026-10-21T08:00:00.000Z' }),
-      entry({ id: '2', action_type: 'web_search', outcome: 'ran', created_at: '2026-10-21T10:00:00.000Z' }),
-    ]);
-    expect(rows.map(row => row.verb)).toEqual(['Searched the web', 'Ran a command']);
+  it('starts a new group after a quiet gap, labelled by when it happened', () => {
+    const groups = groupActivityRows({
+      entries: [
+        entry({ id: 'now', created_at: minutesBefore(1) }),
+        entry({ id: 'earlier', created_at: minutesBefore(3 * 24 * 60) }),
+      ],
+      now: NOW,
+    });
+    expect(groups.map(group => group.label)).toEqual(['This reply', 'Earlier']);
+  });
+
+  it('does not call an old reply This reply, even when it is the newest', () => {
+    const groups = groupActivityRows({ entries: [entry({ created_at: minutesBefore(45) })], now: NOW });
+    expect(groups[0]?.label).not.toBe('This reply');
+  });
+
+  it('returns no groups for an empty chat', () => {
+    expect(groupActivityRows({ entries: [], now: NOW })).toEqual([]);
+  });
+});
+
+describe('relativeTimeLabel', () => {
+  it('reads elapsed time in one short phrase', () => {
+    expect(relativeTimeLabel({ iso: minutesBefore(0), now: NOW })).toBe('just now');
+    expect(relativeTimeLabel({ iso: minutesBefore(2), now: NOW })).toBe('2m ago');
+    expect(relativeTimeLabel({ iso: minutesBefore(150), now: NOW })).toBe('2h ago');
+    expect(relativeTimeLabel({ iso: minutesBefore(3 * 24 * 60), now: NOW })).toBe('3d ago');
   });
 });
