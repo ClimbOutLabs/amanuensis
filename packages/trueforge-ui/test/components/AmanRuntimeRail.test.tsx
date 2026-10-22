@@ -709,12 +709,12 @@ describe('AmanRuntimeRail folded sections, waiting status and Recent actions', (
   it('names the real service and gives one of the five subtitles on each row, never connected app', async () => {
     const { container } = renderRail({
       entries: [
-        auditEntry({ id: 'a', action_type: 'gmail_read', outcome: 'ran' }),
-        auditEntry({ id: 'b', action_type: 'web_search', outcome: 'approved', tier: 3 }),
-        auditEntry({ id: 'c', action_type: 'calendar_write', outcome: 'denied', tier: 3 }),
-        auditEntry({ id: 'd', action_type: 'exec', outcome: 'logged', tier: 2 }),
-        auditEntry({ id: 'e', action_type: 'exec', outcome: 'auto_denied', tier: 3 }),
-        auditEntry({ id: 'f', action_type: 'some_new_tool', outcome: 'ran' }),
+        auditEntry({ id: 'a', action_type: 'gmail_read', outcome: 'ran', created_at: minutesAgo(1) }),
+        auditEntry({ id: 'b', action_type: 'web_search', outcome: 'approved', tier: 3, created_at: minutesAgo(2) }),
+        auditEntry({ id: 'c', action_type: 'calendar_write', outcome: 'denied', tier: 3, created_at: minutesAgo(3) }),
+        auditEntry({ id: 'd', action_type: 'exec', outcome: 'logged', tier: 2, created_at: minutesAgo(4) }),
+        auditEntry({ id: 'e', action_type: 'exec', outcome: 'auto_denied', tier: 3, created_at: minutesAgo(5) }),
+        auditEntry({ id: 'f', action_type: 'some_new_tool', outcome: 'ran', created_at: minutesAgo(6) }),
       ],
     });
     fireEvent.click(await screen.findByRole('button', { name: /^Recent actions/ }));

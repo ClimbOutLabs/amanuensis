@@ -93,7 +93,7 @@ function ImplementationPlanGrantControlsWithApi({
         });
     };
     refresh();
-    // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
+    // Skip poll ticks while the tab is hidden (matching RecentActions) so a hidden tab
     // fires no requests; refresh once immediately when the tab becomes visible again.
     const intervalId = isRunning
       ? setInterval(() => {

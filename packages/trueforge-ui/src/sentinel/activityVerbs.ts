@@ -1,4 +1,4 @@
-import type { SentinelAuditEntry } from './types.js';
+import { ALLOWED_BY_SETTINGS_LABEL, WAITING_FOR_YOU_LABEL, type SentinelAuditEntry } from './types.js';
 
 /**
  * The one owner of the rail's activity words: what each tool call is called, the line each
@@ -8,10 +8,10 @@ import type { SentinelAuditEntry } from './types.js';
 
 /** The line under a row's title. */
 export const ACTIVITY_SUBTITLES = {
-  doneAllowed: 'Done · allowed by your settings',
+  doneAllowed: ALLOWED_BY_SETTINGS_LABEL,
   approved: 'You approved',
   declined: 'You declined',
-  waiting: 'Waiting for you',
+  waiting: WAITING_FOR_YOU_LABEL,
 } as const;
 
 /** The line for an action that could not run; the reason is short and plain. */
