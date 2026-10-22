@@ -115,6 +115,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import { parseToolCallArguments } from '../mcp/toolArgumentCheck';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import {
@@ -210,6 +211,7 @@ import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './Deferred
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
   addReasoningEffortStep,
+  addTruncatedToolCalls,
   createEmptyAgentThreadMetrics,
   updateMetricsFromUsage,
   type AgentThreadMetrics,
@@ -647,12 +649,6 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
-}
-
-function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
-  const rest = { ...message };
-  delete rest.tool_calls;
-  return rest;
 }
 
 /**
@@ -2506,7 +2502,12 @@ export class AgentThread {
       Reflect.set(requestBody, 'reasoning_effort', reasoningEffort);
     }
     const configuredMaxTokens = resolveMaxOutputTokens(requestBody);
-    const maxTokens = stepMaxOutputTokens({ stepKind, configured: configuredMaxTokens, reasoningEffort });
+    const maxTokens = stepMaxOutputTokens({
+      stepKind,
+      offersTools: tools.length > 0,
+      configured: configuredMaxTokens,
+      reasoningEffort,
+    });
     if (maxTokens !== undefined && maxTokens !== configuredMaxTokens) {
       Reflect.set(
         requestBody,
@@ -3390,10 +3391,16 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
-    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
-    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    // A reply cut off at the output limit can stop mid tool call. Its calls stay in the reply: the
+    // reply guard resolves a call with incomplete arguments as not run, with the correction, so the
+    // model sends it again. Counted so these cut-offs stay visible in the metrics.
     if (finishReason === 'length') {
-      assistantMessage = withoutToolCalls(assistantMessage);
+      const incompleteCalls = (result.value.output.tool_calls ?? []).filter(
+        call => parseToolCallArguments(call) === undefined,
+      ).length;
+      if (incompleteCalls > 0) {
+        addTruncatedToolCalls(this.metrics, incompleteCalls);
+      }
     }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
@@ -3487,7 +3494,7 @@ export class AgentThread {
 
     let completion: SubAgentCompletionMarker | undefined;
     if (this.parent) {
-      if (finishReason === 'length') {
+      if (finishReason === 'length' && !hasToolCalls(assistantMessage)) {
         const errorMessage = assistantMessageContentToStringForSubAgent(
           assistantMessage.content,
           'max_tokens breached',
@@ -3518,7 +3525,9 @@ export class AgentThread {
       }
     }
 
-    const completedWithinTokenBudget = finishReason !== 'length';
+    // A cut-off reply that carries tool calls is kept in context, so the next step sees the calls'
+    // corrections and the text the reply produced.
+    const completedWithinTokenBudget = finishReason !== 'length' || hasToolCalls(assistantMessage);
     yield* this.appendToContext({
       context: completedWithinTokenBudget ? [assistantMessage] : [],
       output: [agentAssistantMessage],
@@ -3529,7 +3538,7 @@ export class AgentThread {
       completion,
     });
 
-    if (finishReason === 'length') {
+    if (finishReason === 'length' && !hasToolCalls(assistantMessage)) {
       const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };

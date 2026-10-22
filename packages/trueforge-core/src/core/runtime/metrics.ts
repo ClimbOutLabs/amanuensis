@@ -15,6 +15,8 @@ export const AgentThreadMetricsSchema = z
     total_tool_calls: z.number().int().nonnegative(),
     total_summarizations: z.number().int().nonnegative(),
     total_sub_agents: z.number().int().nonnegative(),
+    /** Tool calls whose arguments a model reply cut off at the output limit left incomplete. */
+    total_truncated_tool_calls: z.number().int().nonnegative().optional(),
     /** Model requests per reasoning effort sent, keyed by effort name; `unset` means no effort parameter. */
     step_reasoning_efforts: z.record(z.string(), z.number().int().nonnegative()).optional(),
   })
@@ -58,6 +60,11 @@ export function addReasoningEffortStep(target: AgentThreadMetrics, effort: strin
   target.step_reasoning_efforts = { ...counts, [effort]: (counts[effort] ?? 0) + 1 };
 }
 
+/** Count tool calls a length-cut reply left with incomplete arguments. */
+export function addTruncatedToolCalls(target: AgentThreadMetrics, count: number): void {
+  target.total_truncated_tool_calls = (target.total_truncated_tool_calls ?? 0) + count;
+}
+
 function mergeEffortCounts(
   target: Record<string, number> | undefined,
   source: Record<string, number> | undefined,
@@ -84,5 +91,6 @@ export function addAgentThreadMetrics(target: AgentThreadMetrics, source: AgentT
   target.total_tool_calls += source.total_tool_calls;
   target.total_summarizations += source.total_summarizations;
   target.total_sub_agents += source.total_sub_agents;
+  target.total_truncated_tool_calls = sumOptional(target.total_truncated_tool_calls, source.total_truncated_tool_calls);
   target.step_reasoning_efforts = mergeEffortCounts(target.step_reasoning_efforts, source.step_reasoning_efforts);
 }

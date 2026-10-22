@@ -1,6 +1,7 @@
 import {
   addAgentThreadMetrics,
   addReasoningEffortStep,
+  addTruncatedToolCalls,
   createEmptyAgentThreadMetrics,
 } from '../../../src/core/runtime/metrics';
 
@@ -31,5 +32,23 @@ describe('reasoning effort step counts', () => {
     const parent = createEmptyAgentThreadMetrics();
     addAgentThreadMetrics(parent, createEmptyAgentThreadMetrics());
     expect(parent.step_reasoning_efforts).toBeUndefined();
+  });
+});
+
+describe('truncated tool call counts', () => {
+  it('counts the incomplete calls of cut-off replies and merges them into the parent', () => {
+    const parent = createEmptyAgentThreadMetrics();
+    addTruncatedToolCalls(parent, 1);
+    const child = createEmptyAgentThreadMetrics();
+    addTruncatedToolCalls(child, 2);
+
+    addAgentThreadMetrics(parent, child);
+    expect(parent.total_truncated_tool_calls).toBe(3);
+  });
+
+  it('stays absent when no reply was cut off with a call', () => {
+    const parent = createEmptyAgentThreadMetrics();
+    addAgentThreadMetrics(parent, createEmptyAgentThreadMetrics());
+    expect(parent.total_truncated_tool_calls).toBeUndefined();
   });
 });

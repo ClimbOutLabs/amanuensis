@@ -1,6 +1,5 @@
 import {
   CAPPED_STEP_REASONING_ALLOWANCE_TOKENS,
-  CONTINUATION_OUTPUT_TOKENS,
   FINAL_ANSWER_OUTPUT_TOKENS,
   nearestSupportedEffort,
   readReasoningEffortMode,
@@ -88,48 +87,71 @@ describe('resolveStepReasoningEffort', () => {
 });
 
 describe('stepMaxOutputTokens', () => {
-  it('caps tool continuations with the reasoning allowance when an effort is sent', () => {
-    expect(stepMaxOutputTokens({ stepKind: 'continuation', configured: undefined, reasoningEffort: 'low' })).toBe(
-      CONTINUATION_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS,
-    );
+  it('caps a final answer that offers no tools, with the reasoning allowance when an effort is sent', () => {
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: false,
+        configured: undefined,
+        reasoningEffort: undefined,
+      }),
+    ).toBe(FINAL_ANSWER_OUTPUT_TOKENS);
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: false,
+        configured: undefined,
+        reasoningEffort: 'medium',
+      }),
+    ).toBe(FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS);
   });
 
-  it('drops the reasoning allowance when no effort is sent or effort is none', () => {
-    expect(stepMaxOutputTokens({ stepKind: 'continuation', configured: undefined, reasoningEffort: undefined })).toBe(
-      CONTINUATION_OUTPUT_TOKENS,
-    );
-    expect(stepMaxOutputTokens({ stepKind: 'continuation', configured: undefined, reasoningEffort: 'none' })).toBe(
-      CONTINUATION_OUTPUT_TOKENS,
-    );
+  it('never raises a configured limit above the final-answer cap', () => {
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: false,
+        configured: 500,
+        reasoningEffort: undefined,
+      }),
+    ).toBe(500);
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: false,
+        configured: 1_000_000,
+        reasoningEffort: undefined,
+      }),
+    ).toBe(FINAL_ANSWER_OUTPUT_TOKENS);
   });
 
-  it('never raises a configured limit above the cap', () => {
-    expect(stepMaxOutputTokens({ stepKind: 'continuation', configured: 500, reasoningEffort: undefined })).toBe(500);
-    expect(stepMaxOutputTokens({ stepKind: 'continuation', configured: 1_000_000, reasoningEffort: undefined })).toBe(
-      CONTINUATION_OUTPUT_TOKENS,
-    );
+  it('never caps a final-answer step that still offers tools, since a tool call may be written there', () => {
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: true,
+        configured: undefined,
+        reasoningEffort: 'medium',
+      }),
+    ).toBeUndefined();
+    expect(
+      stepMaxOutputTokens({
+        stepKind: 'final_answer',
+        offersTools: true,
+        configured: 16_000,
+        reasoningEffort: 'medium',
+      }),
+    ).toBe(16_000);
   });
 
-  it('lets a continuation carry a long tool-call argument, which the provider counts against the same limit', () => {
-    const longToolCallArgumentTokens = 6_000;
-    const cap = stepMaxOutputTokens({ stepKind: 'continuation', configured: undefined, reasoningEffort: undefined });
-    expect(cap).toBeDefined();
-    expect(cap ?? 0).toBeGreaterThan(longToolCallArgumentTokens);
-  });
-
-  it('caps a final answer at the prose limit, with the reasoning allowance when an effort is sent', () => {
-    expect(stepMaxOutputTokens({ stepKind: 'final_answer', configured: undefined, reasoningEffort: undefined })).toBe(
-      FINAL_ANSWER_OUTPUT_TOKENS,
-    );
-    expect(stepMaxOutputTokens({ stepKind: 'final_answer', configured: undefined, reasoningEffort: 'medium' })).toBe(
-      FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS,
-    );
-  });
-
-  it('leaves first and sub-agent steps at the configured limit', () => {
-    for (const stepKind of ['first', 'sub_agent'] as const) {
-      expect(stepMaxOutputTokens({ stepKind, configured: 16_000, reasoningEffort: 'high' })).toBe(16_000);
-      expect(stepMaxOutputTokens({ stepKind, configured: undefined, reasoningEffort: 'high' })).toBeUndefined();
+  it('keeps tool-capable continuation, first and sub-agent steps at the configured limit', () => {
+    for (const stepKind of ['continuation', 'first', 'sub_agent'] as const) {
+      expect(stepMaxOutputTokens({ stepKind, offersTools: true, configured: 16_000, reasoningEffort: 'high' })).toBe(
+        16_000,
+      );
+      expect(
+        stepMaxOutputTokens({ stepKind, offersTools: true, configured: undefined, reasoningEffort: 'high' }),
+      ).toBeUndefined();
     }
   });
 });

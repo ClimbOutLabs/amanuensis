@@ -75,6 +75,12 @@ export const TurnMetricsSchema = z
       .record(z.string(), z.number().int().nonnegative())
       .optional()
       .describe('Model requests per reasoning effort in this turn. The key unset means no effort was sent.'),
+    total_truncated_tool_calls: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Tool calls in this turn whose arguments were cut off at the output limit and not sent.'),
   })
   .openapi('TurnMetrics');
 

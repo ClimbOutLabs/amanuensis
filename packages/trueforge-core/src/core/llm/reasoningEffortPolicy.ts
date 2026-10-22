@@ -24,14 +24,9 @@ export const STEP_REASONING_LEVEL = {
 } as const satisfies Record<ReasoningStepKind, string>;
 
 /**
- * Output cap for tool-continuation steps. The provider counts a tool call's arguments against the same
- * limit as visible text, so a cap sized for prose would cut a large file write or edit mid-call.
- */
-export const CONTINUATION_OUTPUT_TOKENS = 8_192;
-
-/**
- * Visible-output cap for final-answer steps. Those offer no tools, so the output is prose alone and a
- * short reply is all the step needs.
+ * Visible-output cap for final-answer steps that offer no tools, so the output is prose alone and a
+ * short reply is all the step needs. Steps that may emit a tool call are never capped: the provider
+ * counts a call's arguments against the same limit, so a cap would cut a large write mid-call.
  */
 export const FINAL_ANSWER_OUTPUT_TOKENS = 2_048;
 
@@ -101,30 +96,26 @@ export function resolveStepReasoningEffort({
 }
 
 /**
- * The max-output cap for a request. Continuation and final-answer steps are capped; every other step
- * keeps the configured limit, and an unset limit stays unset for them.
+ * The max-output cap for a request. Only a final-answer step that offers no tools is capped; every
+ * other step keeps the configured limit, and an unset limit stays unset for it.
  */
 export function stepMaxOutputTokens({
   stepKind,
+  offersTools,
   configured,
   reasoningEffort,
 }: {
   stepKind: ReasoningStepKind;
+  offersTools: boolean;
   configured: number | undefined;
   reasoningEffort: string | undefined;
 }): number | undefined {
-  const visibleCap =
-    stepKind === 'continuation'
-      ? CONTINUATION_OUTPUT_TOKENS
-      : stepKind === 'final_answer'
-        ? FINAL_ANSWER_OUTPUT_TOKENS
-        : undefined;
-  if (visibleCap === undefined) {
+  if (stepKind !== 'final_answer' || offersTools) {
     return configured;
   }
   const reasoningAllowance =
     reasoningEffort !== undefined && reasoningEffort !== 'none' ? CAPPED_STEP_REASONING_ALLOWANCE_TOKENS : 0;
-  const cap = visibleCap + reasoningAllowance;
+  const cap = FINAL_ANSWER_OUTPUT_TOKENS + reasoningAllowance;
   return configured === undefined ? cap : Math.min(configured, cap);
 }
 

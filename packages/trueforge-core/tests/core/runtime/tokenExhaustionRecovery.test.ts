@@ -180,10 +180,15 @@ describe('AgentThread token exhaustion recovery', () => {
     );
   });
 
-  it('keeps the text of a reply cut off mid tool call but saves no half-written call', async () => {
+  it('keeps the text of a reply cut off mid tool call, tells the model the call was incomplete, and the turn goes on', async () => {
+    const requests: ChatCompletionMessageParam[][] = [];
     const create = jest
       .fn<ReturnType<ILLM['create']>, Parameters<ILLM['create']>>()
-      .mockImplementationOnce(() => cutOffMidToolCallStream());
+      .mockImplementationOnce(() => cutOffMidToolCallStream())
+      .mockImplementationOnce((body: LLMCreateParamsStreaming) => {
+        requests.push(body.messages);
+        return finalAnswerStream();
+      });
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
@@ -205,7 +210,6 @@ describe('AgentThread token exhaustion recovery', () => {
     const append = events.find(event => event.type === 'internal.agent.context.append');
     expect(append).toEqual(
       expect.objectContaining({
-        context: [],
         output: [
           expect.objectContaining({
             type: 'model.message',
@@ -215,15 +219,14 @@ describe('AgentThread token exhaustion recovery', () => {
         ],
       }),
     );
-    expect(JSON.stringify(append)).not.toContain('call-cut');
     expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'internal.agent.done',
-          status: 'error',
-          error: "Aman's reply was cut off because it ran long. Ask it to continue.",
-        }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ type: 'internal.agent.done', status: 'done' })]),
     );
+    expect(JSON.stringify(events)).not.toContain("Aman's reply was cut off");
+    expect(requests[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: 'tool', tool_call_id: 'call-cut' })]),
+    );
+    expect(JSON.stringify(requests[0])).toContain('never_ran');
+    expect(thread.getAgentThreadMetrics().total_truncated_tool_calls).toBe(1);
   });
 });

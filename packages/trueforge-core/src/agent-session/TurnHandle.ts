@@ -133,6 +133,7 @@ function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics): TurnMet
     total_reasoning_tokens: metrics.total_reasoning_tokens,
     total_cost_in_usd: metrics.total_cost_in_usd,
     step_reasoning_efforts: metrics.step_reasoning_efforts,
+    total_truncated_tool_calls: metrics.total_truncated_tool_calls,
   };
 }
 
