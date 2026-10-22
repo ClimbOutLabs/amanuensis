@@ -85,6 +85,7 @@ function harness(options: { transit?: unknown; road?: unknown; timezone?: string
     tracing: NOOP_AGENT_TRACING,
     logger: createLogger({ silent: true }),
     pages_scope: PAGES_SCOPE,
+    starts_answer: true,
     timezone: options.timezone ?? 'Europe/Lisbon',
   });
   const toolSet = capability.systemToolSets?.[0];

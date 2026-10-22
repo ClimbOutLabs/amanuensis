@@ -29,6 +29,7 @@ const SEARCH_CARD: SentinelApprovalCard = {
 function renderSearch(onApproveForChat = vi.fn()) {
   render(
     <PermissionApprovalCard
+      approvalId="approval-search"
       card={SEARCH_CARD}
       othersWaiting={0}
       onApprove={vi.fn()}
@@ -50,6 +51,7 @@ describe('PermissionApprovalCard for a held search', () => {
   it('keeps the generic chat choice for a card that is not a search', () => {
     render(
       <PermissionApprovalCard
+        approvalId="approval-search"
         card={{ ...SEARCH_CARD, plain_what: 'Send $250 to Acme Corp' }}
         othersWaiting={0}
         onApprove={vi.fn()}
@@ -94,6 +96,7 @@ describe('PermissionApprovalCard for a held search', () => {
     const query = 'a'.repeat(300);
     render(
       <PermissionApprovalCard
+        approvalId="approval-search"
         card={{ ...SEARCH_CARD, plain_what: searchHoldCardText({ summary: query, say: HOLD_SAY.private_read }) }}
         othersWaiting={0}
         onApprove={vi.fn()}
@@ -109,6 +112,7 @@ describe('PermissionApprovalCard for a held search', () => {
     const sentence = `Search the web with Tavily for: ${'b'.repeat(200)}. This sends those words to api.tavily.com.`;
     render(
       <PermissionApprovalCard
+        approvalId="approval-search"
         card={{ ...SEARCH_CARD, plain_what: sentence }}
         othersWaiting={0}
         onApprove={vi.fn()}

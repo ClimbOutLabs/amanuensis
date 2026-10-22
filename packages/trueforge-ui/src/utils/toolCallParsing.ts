@@ -1,4 +1,5 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
 import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
@@ -547,12 +548,25 @@ export function parseMcpToolArgs(argsText: string | undefined): {
   }
 }
 
+/**
+ * The one place tool output is decoded for display. A host may store a plain text result as a JSON
+ * string literal, so its line breaks read as `\n` and its quotes as `\"`; those become real text here.
+ */
 export function getJsonDisplayValue(content: string | undefined): {
   value: string;
   isJson: boolean;
 } {
   if (!content?.trim()) return { value: '', isJson: false };
   const trimmed = content.trim();
+  if (trimmed[0] === '"') {
+    try {
+      const decoded: unknown = JSON.parse(trimmed);
+      if (typeof decoded === 'string')
+        return { value: escapeDisplayText(decoded, { keepNewlines: true }), isJson: false };
+    } catch {
+      /* not a JSON string literal: show it as stored */
+    }
+  }
   if (trimmed[0] !== '{' && trimmed[0] !== '[') {
     return { value: content, isJson: false };
   }

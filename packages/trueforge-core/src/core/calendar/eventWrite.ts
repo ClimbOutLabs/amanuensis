@@ -37,6 +37,9 @@ export interface EventWriteBody {
 /** The only calendar Aman writes: the owner's main one. */
 export const PRIMARY_CALENDAR_ID = 'primary';
 
+/** Shown in place of a guest's address when Google gives none. */
+const UNADDRESSED_GUEST = 'a guest with no address';
+
 export interface EventWriteRequest {
   /** With the event id, the target the approval is bound to. */
   calendar_id: typeof PRIMARY_CALENDAR_ID;
@@ -393,8 +396,9 @@ export function resolveUpdate(input: {
         'Google did not list every guest of this event, so Aman cannot show who it would reach. Change it in Google Calendar.',
     };
   }
+  // A guest with no address still counts: the card shows it, and the email choice is still required.
   const guests = (existing.attendees ?? []).flatMap(guest =>
-    guest.self === true || guest.email === undefined ? [] : [guest.email],
+    guest.self === true ? [] : [guest.email ?? UNADDRESSED_GUEST],
   );
   if (guests.length > 0 && call.send_updates === undefined) {
     return {

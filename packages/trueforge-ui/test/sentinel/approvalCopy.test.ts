@@ -4,7 +4,6 @@ import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/p
 
 import {
   approvalQuestion,
-  approvalSentLine,
   approvalStub,
   approveVerb,
   declineVerb,
@@ -48,16 +47,11 @@ const reply: SentinelApprovalCard['email'] = {
 };
 
 describe('approval copy', () => {
-  it('asks a reply as a question to the person it answers', () => {
+  it('asks "Send this reply?" for a reply, with Send and Don\'t send', () => {
     const card = cardWith({ email: reply });
-    expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
-    expect(approveVerb(card)).toBe('Send it');
+    expect(approvalQuestion(card)).toBe('Send this reply?');
+    expect(approveVerb(card)).toBe('Send');
     expect(declineVerb(card)).toBe("Don't send");
-    expect(approvalStub(card, { sentAt: null })).toEqual({
-      what: 'Reply to Rui',
-      detail: 'Lease renewal',
-      state: null,
-    });
   });
 
   it('never shows a search connector id on a held search stub', () => {
@@ -71,16 +65,24 @@ describe('approval copy', () => {
     expect(stub.detail).toBeNull();
   });
 
-  it('counts the other recipients of a new email', () => {
+  it('asks "Send this email?" for a new message, whatever the number of recipients', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null, to: [bare('a@x.com'), bare('b@x.com')] } });
-    expect(approvalQuestion(card)).toBe('Send this email to a@x.com and 1 more?');
+    expect(approvalQuestion(card)).toBe('Send this email?');
+    expect(approveVerb(card)).toBe('Send');
   });
 
-  it('asks a draft to be saved, with no send verb', () => {
+  it('says "Add and send" for a send to a new address, since approving adds it', () => {
+    const card = cardWith({ email: { ...reply, reply_in_thread: null }, mail_new_recipients: ['a@x.com'] });
+    expect(approvalQuestion(card)).toBe('Send this email?');
+    expect(approveVerb(card)).toBe('Add and send');
+    expect(declineVerb(card)).toBe("Don't send");
+  });
+
+  it('asks "Save this draft?" with Save draft, and Don\'t save to decline', () => {
     const card = cardWith({ email: { ...reply, action: 'save' } });
     expect(approvalQuestion(card)).toBe('Save this draft?');
-    expect(approveVerb(card)).toBe('Save it');
-    expect(declineVerb(card)).toBe('Not now');
+    expect(approveVerb(card)).toBe('Save draft');
+    expect(declineVerb(card)).toBe("Don't save");
   });
 
   it('names a calendar event and asks to add it', () => {
@@ -127,11 +129,13 @@ describe('approval copy', () => {
     expect(declineVerb(card)).toBe('Not now');
   });
 
-  it('shows the time once sent, in the badge and the stub', () => {
-    const card = cardWith({ email: reply });
-    expect(approvalSentLine(card, '09:14')).toBe('Sent to Rui · 09:14');
-    expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Sent 09:14');
-    expect(approvalSentLine(cardWith({}), '09:14')).toBe('Done · 09:14');
+  it('shows the time in the stub once a ticket is done', () => {
+    const card = cardWith({ calendar_event: null });
+    expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Done 09:14');
+  });
+
+  it('leaves the stub state empty while a ticket waits, since the badge already says so', () => {
+    expect(approvalStub(cardWith({ calendar_event: null }), { sentAt: null }).state).toBeNull();
   });
 });
 
@@ -139,6 +143,16 @@ describe('searchHoldParts', () => {
   it('reads the query and the reason back from a held search sentence', () => {
     const text = searchHoldCardText({ summary: 'lamp: brass, 2 pack', say: HOLD_SAY.private_read });
     expect(searchHoldParts(text)).toEqual({ query: 'lamp: brass, 2 pack', reason: HOLD_SAY.private_read });
+  });
+
+  it('keeps a period that ends the query', () => {
+    const text = searchHoldCardText({ summary: 'open hours of St. Mary Inc.', say: HOLD_SAY.search_setting });
+    expect(searchHoldParts(text)).toEqual({ query: 'open hours of St. Mary Inc.', reason: HOLD_SAY.search_setting });
+  });
+
+  it('drops only the closing period of a query that does not end in one', () => {
+    const text = searchHoldCardText({ summary: 'lamp', say: HOLD_SAY.search_setting });
+    expect(searchHoldParts(text)?.query).toBe('lamp');
   });
 
   it('returns undefined for a card that is not a held search', () => {

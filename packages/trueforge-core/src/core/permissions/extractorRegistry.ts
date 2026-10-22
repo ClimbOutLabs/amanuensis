@@ -1,4 +1,5 @@
-import { hasAnyHiddenCharacter, hasHiddenCharacters, replaceHiddenCharacters } from '../email/gmail/mimeText';
+import { hasAnyHiddenCharacter, hasHiddenCharacters } from '../email/gmail/mimeText.js';
+import { escapeDisplayText } from './displayText.js';
 
 /**
  * Server-side extractor registry for Tier 3 approval cards.
@@ -110,26 +111,6 @@ function isRecipientKey(key: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function escapeToken(char: string): string {
-  return `\\u{${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}}`;
-}
-
-/** Tab and carriage return, which a card never shows raw, and lone surrogates; newlines too unless they are kept. */
-const REMAINING_ESCAPES = /\p{Cc}|\p{Surrogate}/gu;
-const REMAINING_ESCAPES_KEEPING_NEWLINES = /(?!\n)\p{Cc}|\p{Surrogate}/gu;
-
-/**
- * Makes model-controlled text safe to show: characters that can hide or fake text become visible
- * `\u{XXXX}` tokens. Display only; nothing that is sent or hashed passes through here. Newlines are
- * kept only when asked, and CRLF counts as one.
- */
-export function escapeDisplayText(text: string, options?: { keepNewlines?: boolean }): string {
-  const keepNewlines = options?.keepNewlines === true;
-  // The one definition of "does not show" decides first; the pass below adds what a card never shows raw.
-  const visible = replaceHiddenCharacters(keepNewlines ? text.replace(/\r\n/g, '\n') : text, escapeToken);
-  return visible.replace(keepNewlines ? REMAINING_ESCAPES_KEEPING_NEWLINES : REMAINING_ESCAPES, escapeToken);
 }
 
 function clean(text: string): string {
@@ -477,6 +458,65 @@ function nameWords(toolName: string): string {
 
 function hasPhrase(words: string, ...phrases: string[]): boolean {
   return phrases.some(phrase => words.includes(`_${phrase}_`));
+}
+
+const CALENDAR_SUBJECT_WORDS = [
+  'event',
+  'events',
+  'calendar',
+  'calendars',
+  'meeting',
+  'meetings',
+  'appointment',
+  'appointments',
+  'invite',
+  'invitation',
+  'booking',
+];
+/** A tool that names its guests and changes them reaches those guests, so the name alone is enough. */
+const CALENDAR_GUEST_WORDS = ['attendee', 'attendees', 'guest', 'guests'];
+const CALENDAR_CHANGE_WORDS = [
+  'create',
+  'add',
+  'insert',
+  'invite',
+  'new',
+  'import',
+  'update',
+  'edit',
+  'modify',
+  'patch',
+  'change',
+  'set',
+  'put',
+  'upsert',
+  'save',
+  'write',
+  'move',
+  'reschedule',
+  'schedule',
+  'book',
+  'delete',
+  'remove',
+  'cancel',
+  'respond',
+  'reply',
+  'rsvp',
+  'accept',
+  'decline',
+];
+
+/**
+ * A connector tool whose name says it changes a calendar, such as `create_event`. Judged on the name alone,
+ * because the connector's own read-only claim is exactly what such a tool cannot be trusted on.
+ */
+export function isCalendarChangeToolName(toolName: string): boolean {
+  const words = nameWords(toolName);
+  return (
+    (hasPhrase(words, ...CALENDAR_SUBJECT_WORDS) && hasPhrase(words, ...CALENDAR_CHANGE_WORDS)) ||
+    hasPhrase(words, 'rsvp', 'quickadd') ||
+    (hasPhrase(words, ...CALENDAR_GUEST_WORDS) && hasPhrase(words, ...CALENDAR_CHANGE_WORDS))
+  );
 }
 
 interface ConnectorCallInput {
