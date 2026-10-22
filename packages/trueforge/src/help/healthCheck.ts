@@ -1,7 +1,7 @@
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 
-import type { HelpHealthCheck, HelpHealthItem, HelpHostReport } from '../schemas/help';
+import type { HelpHealthCheck, HelpHealthItem, HelpHostReport, HostReportFile } from '../schemas/help';
 import type { HostReportRead } from './hostReport';
 
 /**
@@ -40,9 +40,7 @@ const MAIL_CALENDAR_ITEM_ID = 'mail_calendar';
 /** The custom MCP connectors that serve email and calendar, by the names they are registered under. */
 const MAIL_CALENDAR_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME];
 
-const HOST_REPORT_OLD_MESSAGE = 'The last full check is more than 7 days old.';
-const DEEPER_CHECK_SENTENCE =
-  'A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor';
+const HOST_REPORT_STALE_DAYS = 7;
 
 function modelItem(model: ModelProbe): HelpHealthItem {
   const base = { id: MODEL_ITEM_ID, name: 'Your model' };
@@ -50,12 +48,8 @@ function modelItem(model: ModelProbe): HelpHealthItem {
     case 'answered':
       return { ...base, status: 'pass', message: 'The model answered.', next_step: null };
     case 'no_default':
-      return {
-        ...base,
-        status: 'fail',
-        message: 'No model is connected.',
-        next_step: 'Add one in Settings, Models. Token Factory is one option.',
-      };
+      // The help panel shows the next step itself, with a link to Settings.
+      return { ...base, status: 'fail', message: 'No model is connected.', next_step: null };
     case 'misconfigured':
       return {
         ...base,
@@ -115,8 +109,7 @@ function schedulesItem(scheduler: SchedulerProbe): HelpHealthItem {
         ...base,
         status: 'fail',
         message: 'Schedules have stopped.',
-        next_step:
-          'Restart Aman. If that does not help, open a terminal on the computer running Aman and type: aman doctor',
+        next_step: 'Restart Aman. If that does not help, ask Iris in this chat.',
       };
     case 'elsewhere':
       return {
@@ -168,40 +161,42 @@ function mailCalendarItem({
   };
 }
 
+/** The saved report's result in plain words. Its failed and warned checks are listed as items. */
+function hostReportResult(report: HostReportFile): string {
+  const issues = report.checks.filter(check => check.status === 'fail' || check.status === 'warn').length;
+  if (issues === 0) {
+    return 'all good';
+  }
+  return issues === 1 ? '1 thing needs attention' : `${String(issues)} things need attention`;
+}
+
+/** Shows the saved full check's date and result. With no readable saved report it says nothing. */
 function hostReportSection(hostReport: HostReportRead): HelpHostReport {
   switch (hostReport.state) {
     case 'ok':
       return {
         state: 'ok',
         checked_at: hostReport.report.checked_at,
-        message: null,
+        message: hostReportResult(hostReport.report),
         next_step: null,
       };
     case 'stale':
       return {
         state: 'stale',
         checked_at: hostReport.report.checked_at,
-        message: `${HOST_REPORT_OLD_MESSAGE} ${DEEPER_CHECK_SENTENCE}`,
-        next_step: null,
+        message: hostReportResult(hostReport.report),
+        next_step: `It is more than ${String(HOST_REPORT_STALE_DAYS)} days old.`,
       };
     case 'missing':
-      return {
-        state: 'missing',
-        checked_at: null,
-        message: DEEPER_CHECK_SENTENCE,
-        next_step: null,
-      };
     case 'invalid':
-      return {
-        state: 'invalid',
-        checked_at: null,
-        message: `The last full check could not be read, so it is treated as missing. ${DEEPER_CHECK_SENTENCE}`,
-        next_step: null,
-      };
+      return { state: hostReport.state, checked_at: null, message: null, next_step: null };
   }
 }
 
-/** Failed and warned lines from the installer's report, in the same list as the live checks. */
+/**
+ * Failed and warned lines from the installer's report, in the same list as the live checks. The
+ * installer's own fix steps are commands, so they are left out; the help panel shows no commands.
+ */
 function hostReportItems(hostReport: HostReportRead): HelpHealthItem[] {
   if (hostReport.state !== 'ok' && hostReport.state !== 'stale') {
     return [];
@@ -213,7 +208,7 @@ function hostReportItems(hostReport: HostReportRead): HelpHealthItem[] {
       name: check.name,
       status: check.status,
       message: check.message,
-      next_step: check.next_step,
+      next_step: null,
     }));
 }
 

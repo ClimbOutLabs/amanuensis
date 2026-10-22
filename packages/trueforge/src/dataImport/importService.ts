@@ -41,6 +41,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
+import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
@@ -1305,7 +1306,20 @@ async function importArchive<TTransaction>(
     catalogConnectorNames: new Set(deps.mcpCatalog.list().map(preset => preset.name)),
     logger: deps.logger,
   });
-  const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
+  const {
+    manifest,
+    sessions,
+    folders,
+    personas: archivedPersonas,
+    personalization,
+    spaces,
+    schedules,
+    settings,
+    audit,
+  } = contents;
+  // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
+  // Its memory still maps to the person's own guide, and the summary still counts it.
+  const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
   const connectors = normalizeImportedConnectors(contents.connectors);
   const connectorNames = new Set(connectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
@@ -1371,7 +1385,7 @@ async function importArchive<TTransaction>(
 
   const personaSegBySource = new Map<string, string>();
   const personaWireBySourceSeg = new Map<string, string>();
-  for (const { persona } of personas) {
+  for (const { persona } of archivedPersonas) {
     const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
@@ -1451,7 +1465,7 @@ async function importArchive<TTransaction>(
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
-      personas: personas.length,
+      personas: archivedPersonas.length,
       spaces: spaces.length,
       schedules: schedules.length,
       folders: folders.length,
@@ -1761,7 +1775,7 @@ async function importArchive<TTransaction>(
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
-      personas: personas.length,
+      personas: archivedPersonas.length,
       spaces: spaces.length,
       schedules: schedules.length,
       folders: folders.length,

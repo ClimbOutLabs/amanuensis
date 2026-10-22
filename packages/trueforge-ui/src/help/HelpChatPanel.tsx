@@ -1,12 +1,13 @@
 'use client';
 
 import { useAui } from '@assistant-ui/react';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { Icon } from '../icons/Icon.js';
+import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import {
   buildIrisHelpMessage,
   formatLastFullCheck,
@@ -130,27 +131,41 @@ function ItemRow({ item }: { item: HelpHealthItem }) {
   );
 }
 
+/** The saved full check: its date and result. With no readable saved report it shows nothing. */
 function HostReportLine({ help }: { help: HelpContextValue }) {
-  const session = help.session;
-  const report = session?.check?.host_report;
-  if (report === undefined) {
+  const report = help.session?.check?.host_report;
+  if (report === undefined || report.checked_at === null || report.message === null) {
     return null;
   }
-  if (report.state === 'ok' && report.checked_at !== null) {
-    return <p className="text-sm text-text-secondary">Last full check: {formatLastFullCheck(report.checked_at)}</p>;
-  }
+  const when = formatLastFullCheck(report.checked_at);
   return (
-    <p className="flex items-start gap-2 text-sm text-danger">
-      <Icon name={ITEM_ICON.fail} aria-hidden />
-      <span>
-        {report.message}
-        {report.next_step === null ? null : ` ${report.next_step}`}
-      </span>
-    </p>
+    <div className="flex flex-col gap-1 text-sm text-text-secondary">
+      <p>
+        Full check: {when} · {report.message}
+      </p>
+      {report.next_step === null ? null : <p>{report.next_step}</p>}
+    </div>
   );
 }
 
-function phaseLine(session: HelpSession): string | null {
+/** Opens Settings › Models in place when the shell is there; plain text otherwise. */
+function SettingsModelsLink() {
+  const shell = useOptionalShellMode();
+  if (shell === null) {
+    return <>Settings</>;
+  }
+  return (
+    <button
+      type="button"
+      className="text-text-primary underline underline-offset-2 hover:text-primary-button-bg"
+      onClick={() => shell.setSettingsOpen(true, 'models')}
+    >
+      Settings
+    </button>
+  );
+}
+
+function phaseLine(session: HelpSession): ReactNode {
   switch (session.phase) {
     case 'pending':
     case 'checking':
@@ -158,11 +173,15 @@ function phaseLine(session: HelpSession): string | null {
     case 'joining':
       return 'Iris is joining this chat.';
     case 'unavailable':
-      return 'Iris could not join this chat. Open a terminal on the computer running Aman and type: aman doctor. Then press Check again.';
+      return 'Iris could not join this chat. Check your connection, then press Check again.';
     case 'check_failed':
       return 'The check could not run. Check your connection, then press Check again.';
     case 'no_model':
-      return 'Add a model to get started. Token Factory is one option.';
+      return (
+        <>
+          Add a model in <SettingsModelsLink /> to get started.
+        </>
+      );
     case 'joined':
       return null;
   }

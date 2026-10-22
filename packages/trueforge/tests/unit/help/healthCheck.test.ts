@@ -63,7 +63,7 @@ describe('buildHelpHealthCheck', () => {
       name: 'Your model',
       status: 'fail',
       message: 'No model is connected.',
-      next_step: 'Add one in Settings, Models. Token Factory is one option.',
+      next_step: null,
     });
     expect(check.model_ready).toBe(false);
   });
@@ -182,43 +182,56 @@ describe('buildHelpHealthCheck', () => {
     expect(item(check, 'host_ports')).toMatchObject({ status: 'fail', name: 'Ports' });
   });
 
-  it('shows the last full check time and no message when the report is fresh', () => {
+  it('shows the saved full check date and its result, counting failed and warned checks', () => {
     expect(build().host_report).toEqual({
       state: 'ok',
       checked_at: '2026-10-20T08:30:00Z',
-      message: null,
+      message: '2 things need attention',
       next_step: null,
     });
   });
 
-  it('says no full check has been run yet when the report is missing', () => {
+  it('says all good when the saved report has no failed or warned checks', () => {
+    const passing = { ...REPORT, checks: REPORT.checks.slice(0, 1) };
+
+    expect(build({ hostReport: { state: 'ok', report: passing } }).host_report).toMatchObject({
+      state: 'ok',
+      message: 'all good',
+    });
+  });
+
+  it('never shows a command in the help panel, even when the installer report has one', () => {
+    const check = build();
+    const everyText = JSON.stringify(check);
+
+    expect(everyText).not.toMatch(/aman doctor|terminal/);
+  });
+
+  it('says nothing about a full check when there is no saved report', () => {
     const missing: HostReportRead = { state: 'missing' };
 
     expect(build({ hostReport: missing }).host_report).toEqual({
       state: 'missing',
       checked_at: null,
-      message:
-        'A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
+      message: null,
       next_step: null,
     });
   });
 
-  it('treats an unreadable report as missing and says so', () => {
+  it('says nothing about a full check when the saved report cannot be read', () => {
     const section = build({ hostReport: { state: 'invalid' } }).host_report;
 
-    expect(section.state).toBe('invalid');
-    expect(section.message).toBe(
-      'The last full check could not be read, so it is treated as missing. A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
-    );
+    expect(section).toEqual({ state: 'invalid', checked_at: null, message: null, next_step: null });
   });
 
-  it('says a stale report is more than seven days old and suggests running aman doctor again', () => {
+  it('keeps the date and result of a stale report and says it is more than seven days old', () => {
     const section = build({ hostReport: { state: 'stale', report: REPORT } }).host_report;
 
-    expect(section.state).toBe('stale');
-    expect(section.checked_at).toBe('2026-10-20T08:30:00Z');
-    expect(section.message).toBe(
-      'The last full check is more than 7 days old. A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
-    );
+    expect(section).toEqual({
+      state: 'stale',
+      checked_at: '2026-10-20T08:30:00Z',
+      message: '2 things need attention',
+      next_step: 'It is more than 7 days old.',
+    });
   });
 });

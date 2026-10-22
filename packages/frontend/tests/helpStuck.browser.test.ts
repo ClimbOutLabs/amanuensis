@@ -33,13 +33,13 @@ const CASES = [
   {
     name: 'no model',
     query: 'health=no_model&iris=joined',
-    line: 'Add a model to get started. Token Factory is one option.',
+    line: 'Add a model in Settings to get started.',
     results: ['Quick health check'],
   },
   {
     name: 'Iris cannot join',
     query: 'health=ready&iris=missing',
-    line: 'Iris could not join this chat. Open a terminal on the computer running Aman and type: aman doctor. Then press Check again.',
+    line: 'Iris could not join this chat. Check your connection, then press Check again.',
     results: ['Quick health check'],
   },
 ] as const;
