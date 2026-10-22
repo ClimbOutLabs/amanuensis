@@ -1,4 +1,6 @@
 import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -9,6 +11,7 @@ import {
   type TierDecision,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
@@ -311,10 +314,13 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    const response = normalizeGithubFileContentsResponse({
-      serverName: this.name,
+    const response = this.withCaldavResultNote({
       params,
-      response: await this.source.callTool(params, decision, context),
+      response: normalizeGithubFileContentsResponse({
+        serverName: this.name,
+        params,
+        response: await this.source.callTool(params, decision, context),
+      }),
     });
     if (
       this.pages !== undefined &&
@@ -468,6 +474,55 @@ export class ToolSet implements IToolSet {
     }
   }
 
+  /**
+   * The event a CalDAV change names, read once before it is classified so the card can say what it
+   * changes. Null when that read fails, and the card then says the title could not be read.
+   */
+  private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
+    if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {
+      return undefined;
+    }
+    const args = isRecord(params.arguments) ? params.arguments : {};
+    const id = typeof args['id'] === 'string' ? args['id'] : undefined;
+    const needsReview =
+      params.name === 'update_event' ||
+      params.name === 'delete_event' ||
+      (params.name === 'respond_to_event' && typeof args['confirm_token'] === 'string');
+    if (id === undefined || !needsReview) {
+      return undefined;
+    }
+    try {
+      const response = await this.source.callTool({ name: 'get_event', arguments: { id } });
+      if (!isCallToolResponseResult(response) || response.result.isError === true) {
+        return null;
+      }
+      return caldavEventReviewFrom({ id, result: response.result.structuredContent });
+    } catch {
+      return null;
+    }
+  }
+
+  /** Adds the plain-words note the CalDAV reply result needs when the calendar sent no reply itself. */
+  private withCaldavResultNote({
+    params,
+    response,
+  }: {
+    params: CallToolRequest['params'];
+    response: CallToolResponse;
+  }): CallToolResponse {
+    if (!this.firstParty || this.name !== CALDAV_SERVER_NAME || !isCallToolResponseResult(response)) {
+      return response;
+    }
+    const note = caldavResultNote({ tool_name: params.name, structured: response.result.structuredContent });
+    if (note === undefined) {
+      return response;
+    }
+    return {
+      ...response,
+      result: { ...response.result, content: [...response.result.content, { type: 'text', text: note }] },
+    };
+  }
+
   private async buildToolCallInfo(
     params: CallToolRequest['params'],
     tool: AgentToolSchema | undefined,
@@ -496,6 +551,7 @@ export class ToolSet implements IToolSet {
       };
     }
     const info = { ...toolEffectHints(tool), ...sourceInfo };
+    const caldavEvent = await this.caldavEventFor(params);
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -511,6 +567,7 @@ export class ToolSet implements IToolSet {
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),
         mcp_search_plumbing_fields: this.searchPlumbingFields,
+        caldav_event: caldavEvent,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,
