@@ -484,6 +484,16 @@ export class ToolSet implements IToolSet {
     return undefined;
   }
 
+  /**
+   * An approval was minted on the arguments the tool takes, so the dispatch check re-derives them the
+   * same way; the wire still carries what the model wrote.
+   */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    const tool = await this.resolveTool(params.name);
+    const named = this.withNamedArgumentsOnly({ params, tool });
+    return named === params ? undefined : named.arguments;
+  }
+
   resolveConnector(): ConnectorBinding {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
