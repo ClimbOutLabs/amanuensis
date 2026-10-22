@@ -304,7 +304,7 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 
 /** Shown when a model call goes silent; the steps done so far are kept. */
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
-  'The model stopped answering. Try again, or pick another model in the composer.';
+  'The model stopped answering, so Aman stopped this reply. Send your message again to retry.';
 
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
