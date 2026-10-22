@@ -522,7 +522,7 @@ describe('AmanRuntimeRail', () => {
   });
 });
 
-describe('AmanRuntimeRail receipt, rules and Needs you', () => {
+describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
   const settingsStub: SentinelUserSettings = {
     offline_mode: false,
     tier2_auto_allow: [],
@@ -551,14 +551,14 @@ describe('AmanRuntimeRail receipt, rules and Needs you', () => {
     vi.unstubAllGlobals();
   });
 
-  it('puts the panda first, then the status line, Needs you, Your rules and the receipt', async () => {
+  it('puts the panda first, then the status line, Needs you, Your rules and Recent actions', async () => {
     render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
           <AmanRuntimeRail
             avatarSrc="/aman-avatar.png"
             pendingApprovalIds={['approval-1']}
-            auditFeed={<p>Receipt body</p>}
+            auditFeed={<p>Recent actions body</p>}
             settingsHref="/settings"
           />
         </RuntimeHarness>
@@ -568,8 +568,10 @@ describe('AmanRuntimeRail receipt, rules and Needs you', () => {
     const order = Array.from(document.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order.slice(0, 4)).toEqual(['panda', 'needs-you', 'rules', 'receipt']);
-    expect(screen.getByText('Receipt body')).toBeInTheDocument();
+    expect(order.slice(0, 4)).toEqual(['panda', 'needs-you', 'rules', 'recent-actions']);
+    expect(screen.getByRole('region', { name: 'Recent actions' })).toContainElement(
+      screen.getByText('Recent actions body'),
+    );
     expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
   });
 

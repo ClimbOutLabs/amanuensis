@@ -296,11 +296,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           {auditFeed === undefined ? null : (
             <section
               className="aman-runtime-rail__section"
-              data-section="receipt"
-              aria-labelledby="aman-runtime-rail-receipt-label"
+              data-section="recent-actions"
+              aria-labelledby="aman-runtime-rail-recent-actions-label"
             >
-              <h3 id="aman-runtime-rail-receipt-label" className="aman-runtime-rail__section-label">
-                Receipt
+              <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
+                Recent actions
               </h3>
               {auditFeed}
             </section>
