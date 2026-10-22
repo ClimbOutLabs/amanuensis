@@ -1,6 +1,6 @@
 /**
- * 'leaked' means the reply carried tool-call markup as text. That markup is never shown or run;
- * the turn retries the model once instead.
+ * 'leaked' means the reply carried tool-call markup as text. That markup is never shown or run,
+ * and the turn is not retried.
  */
 export type ToolMarkupOutcome = 'clean' | 'leaked';
 

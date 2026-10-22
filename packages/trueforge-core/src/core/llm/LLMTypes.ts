@@ -394,7 +394,7 @@ export interface RawAssistantMessageWithUsage {
   finish_reason: FinishReason | null;
   /**
    * Set when the reply's answer text carried leaked tool-call markup. The markup is held out of
-   * output.content and never runs; the runtime retries the model. Absent when the reply had none.
+   * output.content and never runs, and the turn is not retried. Absent when the reply had none.
    */
   tool_markup?: 'leaked';
   /**

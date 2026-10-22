@@ -13,12 +13,17 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import { MAX_WRITE_CALLS_PER_TURN } from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
-import { TOOL_MARKUP_GIVE_UP_MESSAGE, TOOL_MARKUP_RETRY_MESSAGE } from '../../../src/core/runtime/replyActionChecks';
+import {
+  REPEATED_ACTION_RESULT,
+  WRITE_CAP_BLOCKED_RESULT,
+  WRITE_CAP_STOP_MESSAGE,
+} from '../../../src/core/runtime/replyActionChecks';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { isRecord } from '../../../src/core/util/records';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
@@ -211,26 +216,7 @@ function deliveredText(events: unknown[]): string {
 }
 
 describe('leaked markup', () => {
-  it('never runs a call written as text, and retries the model once with the plain note', async () => {
-    const toolSet = makeToolSet();
-    let round = 0;
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
-      round += 1;
-      if (round === 1) {
-        return replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' });
-      }
-      return finalAnswerStream();
-    });
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-
-    expect(callToolNames(toolSet)).toEqual([]);
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(JSON.stringify(create.mock.calls.at(1)?.[0])).toContain(TOOL_MARKUP_RETRY_MESSAGE);
-    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
-  });
-
-  it('ends the turn with the plain message when the model writes a call as text a second time', async () => {
+  it('never runs a call written as text, never retries, and adds the plain line when no write succeeded', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' }),
@@ -239,12 +225,26 @@ describe('leaked markup', () => {
     const events = await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual([]);
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(events.at(-1)).toMatchObject({
-      type: InternalEventType.AGENT_DONE,
-      status: 'error',
-      error: TOOL_MARKUP_GIVE_UP_MESSAGE,
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(deliveredText(events)).toBe(`Setting the reminder now.\n\n${TOOL_MARKUP_NOTICE}`);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('adds nothing for leaked markup when a write already succeeded in the turn', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-create', name: 'create_event', args: VALID_CREATE_ARGS }] });
+      }
+      return replyStream({ text: 'The reminder is in place.\n', toolMarkup: 'leaked' });
     });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(deliveredText(events)).not.toContain(TOOL_MARKUP_NOTICE);
   });
 
   it('adds the unbacked-claim note when the reply says it set something and no write call ran', async () => {
@@ -507,5 +507,104 @@ describe('duplicates, floods and dependent reads', () => {
       }),
     );
     expect(toolSet.callTool).not.toHaveBeenCalled();
+  });
+});
+
+/** The calendar tool set with create_event classified as a tier 3 write, as the permission layer does. */
+function makeTier3WriteToolSet() {
+  const toolSet = makeToolSet();
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'mcp',
+      mcp_server_id: toolSet.id,
+      mcp_server_name: toolSet.name,
+      original_tool_name: params.name,
+      is_approval_required: false,
+      ...(params.name === 'create_event' ? { tier: 3 as const } : {}),
+    }),
+  );
+  return toolSet;
+}
+
+function createArgs(title: string) {
+  return { ...VALID_CREATE_ARGS, title };
+}
+
+describe('per-turn tool loop guard', () => {
+  it('runs an identical call once in a reply and refuses every repeat in that reply', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const repeats = Array.from({ length: 19 }, (_, index) => ({
+      id: `call-${String(index)}`,
+      name: 'create_event',
+      args: VALID_CREATE_ARGS,
+    }));
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => replyStream({ calls: repeats }));
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    const refused = toolResults(thread).filter(result => result.content.includes(REPEATED_ACTION_RESULT));
+    expect(refused.length).toBeGreaterThan(0);
+  });
+
+  it('refuses an identical call made again in a later step of the same turn', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round <= 2) {
+        return replyStream({ calls: [{ id: `call-${String(round)}`, name: 'create_event', args: VALID_CREATE_ARGS }] });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+  });
+
+  it('stops the turn at the write cap: the write past it never runs and the person is told why', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      return replyStream({
+        calls: [{ id: `call-${String(round)}`, name: 'create_event', args: createArgs(`Dentist ${String(round)}`) }],
+      });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(MAX_WRITE_CALLS_PER_TURN).toBe(5);
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('leaves a normal turn with two writes untouched', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-1', name: 'create_event', args: createArgs('Dentist') }] });
+      }
+      if (round === 2) {
+        return replyStream({ calls: [{ id: 'call-2', name: 'create_event', args: createArgs('Cleaning') }] });
+      }
+      return replyStream({ text: 'Both appointments are in place.' });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event']);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+    expect(deliveredText(events)).toBe('Both appointments are in place.');
   });
 });

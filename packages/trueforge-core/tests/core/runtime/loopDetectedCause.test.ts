@@ -124,6 +124,8 @@ describe('loop_detected handoff cause', () => {
       .mockImplementationOnce(() => searchCallStream({ id: 'search-1', args }))
       .mockImplementationOnce(() => searchCallStream({ id: 'search-2', args }))
       .mockImplementationOnce(() => searchCallStream({ id: 'search-3', args }))
+      .mockImplementationOnce(() => searchCallStream({ id: 'search-4', args }))
+      .mockImplementationOnce(() => searchCallStream({ id: 'search-5', args }))
       .mockImplementation(() => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
@@ -151,7 +153,7 @@ describe('loop_detected handoff cause', () => {
       events.push(event);
     }
 
-    // The model ignored the recovery note and repeated the search a third time.
+    // The model ignored the recovery note and kept repeating the search.
     // The turn stops, and the stop must be reported as loop_detected, not
     // iteration_limit: the per-turn step budget (100) is not what ran out.
     expect(events).toContainEqual(

@@ -101,6 +101,8 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     empty_inspection_nudge_generation: 0,
     no_progress_nudge_generation: 0,
     policy_blocked_calls_this_turn: 0,
+    write_calls_this_turn: 0,
+    successful_writes_this_turn: 0,
     ...overrides,
   };
 }

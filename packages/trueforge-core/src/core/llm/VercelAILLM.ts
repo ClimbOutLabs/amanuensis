@@ -1747,8 +1747,7 @@ export async function* mapStreamToChunks({
   }
 
   // Settle the markup guard. A clean reply releases its held tail, which passes the repetition guard
-  // like the rest of the answer; a reply that carried markup releases nothing of it, and the caller
-  // retries the model.
+  // like the rest of the answer; a reply that carried markup releases nothing of it.
   const markupOutcome = markupGuard.finish();
   let tail = '';
   if (!repetitionStopped) {

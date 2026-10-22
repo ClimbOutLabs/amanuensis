@@ -30,9 +30,9 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
-import type { SentinelDispatchContext } from '../permissions/context';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText } from '../permissions/audit';
+import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
@@ -222,6 +222,10 @@ export interface ToolCallMemoSnapshot {
   no_progress_nudge_generation: number;
   /** Policy-denied calls in the current turn; the per-turn guard budget. */
   policy_blocked_calls_this_turn: number;
+  /** Write calls admitted to dispatch in the current turn; the per-turn write cap. */
+  write_calls_this_turn: number;
+  /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
+  successful_writes_this_turn: number;
 }
 
 /** The guard kinds that can defer a host-authored note before stopping the turn. */
@@ -269,6 +273,8 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'empty_inspection_nudge_generation'
   | 'no_progress_nudge_generation'
   | 'policy_blocked_calls_this_turn'
+  | 'write_calls_this_turn'
+  | 'successful_writes_this_turn'
 > & {
   read_results: { key: string; response: CallToolResponse; failure: boolean; count: number }[];
   // Explicit `| undefined` (the repo's dominant optional-property convention under
@@ -284,6 +290,9 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Optional like the counters above: a snapshot written before this guard existed
   // omits the key, and hydration defaults it to 0.
   policy_blocked_calls_this_turn?: number | undefined;
+  // Same as the policy counter: a snapshot written before the write cap omits the key.
+  write_calls_this_turn?: number | undefined;
+  successful_writes_this_turn?: number | undefined;
 };
 
 export interface ToolCallMemoState {
@@ -326,6 +335,13 @@ export interface ToolCallMemoState {
    * codes and recovery paths, and must not be misdiagnosed as "not allowed here".
    */
   policyBlockedCallsThisTurn: number;
+  /**
+   * Write calls (tier 3) admitted to dispatch this turn, counted like policyBlockedCallsThisTurn
+   * so an approval continuation keeps the count. Enforces the per-turn write cap.
+   */
+  writeCallsThisTurn: number;
+  /** Write calls that ran and succeeded this turn, counted with writeCallsThisTurn for the same reason. */
+  successfulWritesThisTurn: number;
 }
 
 export function createToolCallMemoState(
@@ -353,6 +369,8 @@ export function createToolCallMemoState(
     emptyInspectionNudgeGeneration: 0,
     noProgressNudgeGeneration: 0,
     policyBlockedCallsThisTurn: 0,
+    writeCallsThisTurn: 0,
+    successfulWritesThisTurn: 0,
   };
   if (snapshot === undefined) {
     return state;
@@ -419,6 +437,8 @@ export function createToolCallMemoState(
   state.emptyInspectionNudgeGeneration = snapshot.empty_inspection_nudge_generation ?? 0;
   state.noProgressNudgeGeneration = snapshot.no_progress_nudge_generation ?? 0;
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
+  state.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
+  state.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
   return state;
 }
 
@@ -450,6 +470,8 @@ export function cloneToolCallMemoState(source: ToolCallMemoState): ToolCallMemoS
   state.emptyInspectionNudgeGeneration = source.emptyInspectionNudgeGeneration;
   state.noProgressNudgeGeneration = source.noProgressNudgeGeneration;
   state.policyBlockedCallsThisTurn = source.policyBlockedCallsThisTurn;
+  state.writeCallsThisTurn = source.writeCallsThisTurn;
+  state.successfulWritesThisTurn = source.successfulWritesThisTurn;
   return state;
 }
 
@@ -487,6 +509,8 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     empty_inspection_nudge_generation: state.emptyInspectionNudgeGeneration,
     no_progress_nudge_generation: state.noProgressNudgeGeneration,
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
+    write_calls_this_turn: state.writeCallsThisTurn,
+    successful_writes_this_turn: state.successfulWritesThisTurn,
   };
 }
 
@@ -660,6 +684,11 @@ export const IDENTICAL_CALL_STOP_AT = 4;
  * helpers). The turn is not stopped until IDENTICAL_CALL_STOP_AT.
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
+/**
+ * Write calls (tier 3) a turn may run before the host stops it. The call past the cap never
+ * runs; the turn ends once the batch that reached the cap has resolved.
+ */
+export const MAX_WRITE_CALLS_PER_TURN = 5;
 
 /**
  * What makes two calls "the same" for the per-turn repeat budget: the tool and its arguments.
@@ -1179,7 +1208,9 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
+              message:
+                preparationFailure.owner_message ??
+                'Use a tool that is allowed in this conversation or change strategy.',
               suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {

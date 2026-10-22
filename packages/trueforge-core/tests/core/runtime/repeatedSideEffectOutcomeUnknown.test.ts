@@ -3,6 +3,7 @@ import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
+import { REPEATED_ACTION_RESULT } from '../../../src/core/runtime/replyActionChecks';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
@@ -101,6 +102,6 @@ describe('repeated side effect with a genuinely unknown outcome', () => {
     expect(events).not.toContainEqual(expect.objectContaining({ status: 'error' }));
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
     // The model actually saw the refusal text in the next request it made.
-    expect(JSON.stringify(requests[2]?.messages)).toContain('already attempted');
+    expect(JSON.stringify(requests[2]?.messages)).toContain(REPEATED_ACTION_RESULT);
   });
 });

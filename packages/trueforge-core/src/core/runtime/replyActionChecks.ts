@@ -1,10 +1,14 @@
-/** Sent to the model once when its reply carried a tool call as text, so the call did not run. */
-export const TOOL_MARKUP_RETRY_MESSAGE =
-  'Your last tool call was written as text and did not run. Call the tool again using the tool interface.';
+import { MAX_WRITE_CALLS_PER_TURN } from '../mcp/executeToolCalls';
 
-/** Ends the turn when the model writes a second tool call as text in the same turn. */
-export const TOOL_MARKUP_GIVE_UP_MESSAGE =
-  'The model wrote an action as text instead of doing it, so nothing was changed. Try again, or switch to another model in Settings, Models.';
+/** Result text for a call whose exact action already ran or was refused in this turn. Not run. */
+export const REPEATED_ACTION_RESULT =
+  'This exact action already ran or was refused in this reply. Do not repeat it; tell the person what happened.';
+
+/** Result text for a write call past the per-turn cap. Not run; the turn ends after this batch. */
+export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the maximum of ${String(MAX_WRITE_CALLS_PER_TURN)} changes. Do not make more changes; tell the person what was changed.`;
+
+/** Ends the turn, shown to the person, when the write cap stopped a call. */
+export const WRITE_CAP_STOP_MESSAGE = `Aman stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
 
 /**
  * Past-tense action claims in first person or as a finished state. Kept short on purpose: a claim

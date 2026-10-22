@@ -832,10 +832,9 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(3);
-    // With loop recovery, the fourth identical spawn triggers a recovery note
-    // rather than an immediate error. The turn still ends safely (with an error)
-    // without running forever.
+    // An identical launch is refused once the first has run, so one child starts and the
+    // repeats cannot relaunch it. The turn still ends safely (with an error) without running forever.
+    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'error' });
   });
 
@@ -1353,9 +1352,9 @@ describe('repeat budget', () => {
     });
     const identicalEvents = await runThread(toolSet, identicalCommandCreate);
 
-    // Five calls: four identical trigger the guard, the recovery pass runs a
-    // fifth identical call, and the guard fires again to end the turn.
-    expect(toolSet.callTool).toHaveBeenCalledTimes(5);
+    // Only the first identical call runs; the repeats are refused in the same reply, and the
+    // repeat budget still ends the turn with a loop_detected stop.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
     expect(identicalEvents).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
