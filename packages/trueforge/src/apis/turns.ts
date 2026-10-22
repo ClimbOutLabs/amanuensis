@@ -2297,6 +2297,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.Abandoned);
+      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,
