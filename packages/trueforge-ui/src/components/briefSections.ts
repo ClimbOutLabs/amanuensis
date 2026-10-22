@@ -60,6 +60,8 @@ export function buildBriefView({
     if (items.length === 0) continue;
     const shown = items.slice(0, Math.max(0, budget));
     budget -= shown.length;
+    // A section whose items are all past the limit stays out, so no heading shows over nothing.
+    if (shown.length === 0) continue;
     sections.push({ section, label: BRIEF_SECTION_LABELS[section], count: items.length, items: shown });
   }
   const shownCount = sections.reduce((total, section) => total + section.items.length, 0);

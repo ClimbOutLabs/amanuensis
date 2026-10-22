@@ -263,6 +263,7 @@ function BriefRow({
   const actionRef = useRef<HTMLButtonElement>(null);
   const playHighlight = useHighlightPlay({ briefId, enabled: highlight });
   const isCheck = item.section === 'check_first';
+  const isComing = item.section === 'coming_up';
   const subtitle = item.subtitle.join(' · ');
   const when = item.section === 'coming_up' && item.when !== undefined ? briefWhenLabel(item.when) : undefined;
   const { action } = item;
@@ -301,13 +302,16 @@ function BriefRow({
       aria-label={item.title}
       onKeyDown={onKeyDown}
       className={cn(
-        'group/row grid grid-cols-[1.25rem_3.75rem_minmax(0,1fr)_max-content] items-center gap-x-3 border-t border-border py-3 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink',
+        'group/row grid items-center gap-x-3 border-t border-border py-3 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink',
+        isComing
+          ? 'grid-cols-[1.25rem_3.75rem_minmax(0,1fr)_max-content]'
+          : 'grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
         phase === 'fading' && 'opacity-0 transition-opacity duration-[225ms] ease-out',
       )}
     >
       <span className="relative flex size-[1.25rem] items-center justify-center">
         {isCheck ? (
-          <span aria-hidden="true" className="size-[0.6875rem] rounded-full bg-gold" />
+          <span aria-hidden="true" className="size-[0.6875rem] rounded-full bg-gold ring-1 ring-gold-ink" />
         ) : (
           <>
             <span
@@ -330,7 +334,7 @@ function BriefRow({
           </>
         )}
       </span>
-      <span className="font-receipt text-[0.74rem] text-text-secondary">{when ?? ''}</span>
+      {isComing ? <span className="font-receipt text-[0.74rem] text-text-secondary">{when ?? ''}</span> : null}
       <span className="min-w-0">
         {titleText}
         {subtitle === '' ? null : (
