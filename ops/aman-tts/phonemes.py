@@ -120,7 +120,7 @@ _TOKEN = re.compile(
     r"|(?P<ordinal>\b\d+(?:st|nd|rd|th)\b)"
     r"|(?P<number>\d[\d,]*(?:\.\d+)?)"
     r"|(?P<word>[A-Za-z]+(?:'[A-Za-z]+)*)"
-    r"|(?P<punct>\.\.\.|[.,!?;:—…])"
+    r"|(?P<punct>\.\.\.|[.,!?;:\u2014\u2026])"
     r"|(?P<symbol>[%&+@=])"
 )
 _SYMBOL_WORDS = {"%": ["percent"], "&": ["and"], "+": ["plus"], "@": ["at"], "=": ["equals"]}
@@ -151,7 +151,7 @@ def _tokens(text: str) -> Iterator[tuple[str, str]]:
         if kind == "word":
             yield "word", value
         elif kind == "punct":
-            yield "punct", "…" if value == "..." else value
+            yield "punct", "\u2026" if value == "..." else value
         elif kind == "time":
             hours, minutes = value.split(":")
             for word in _time_words(hours, minutes):
@@ -314,7 +314,7 @@ def to_phonemes(text: str, lexicon: Lexicon) -> str:
     return out.strip()
 
 
-_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+_SENTENCE_END = re.compile(r"(?<=[.!?\u2026])\s+")
 
 
 def split_chunks(phonemes: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
