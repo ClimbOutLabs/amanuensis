@@ -1401,6 +1401,30 @@
   color: var(--text-secondary);
 }
 
+.maps-card-details {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-details summary {
+  cursor: pointer;
+}
+
+.maps-card-refused {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+
+.maps-card-refused-label {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+
+.maps-card-refused-name {
+  font-weight: 600;
+}
+
 .maps-place-source {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
