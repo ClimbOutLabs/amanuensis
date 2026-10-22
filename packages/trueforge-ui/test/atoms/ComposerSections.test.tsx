@@ -51,6 +51,19 @@ describe('ComposerSendButton', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
+  it('shows a disabled Stopping… action after Cancel was pressed', () => {
+    const onCancel = vi.fn();
+    render(
+      <ComposerSendButton disabled={false} canSubmit isRunning isStopping onSubmit={vi.fn()} onCancel={onCancel} />,
+    );
+
+    const stopping = screen.getByRole('button', { name: 'Stopping' });
+    expect(stopping).toHaveTextContent('Stopping…');
+    expect(stopping).toBeDisabled();
+    fireEvent.click(stopping);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
   it('switches to a cancel action while running', () => {
     const onSubmit = vi.fn();
     const onCancel = vi.fn();

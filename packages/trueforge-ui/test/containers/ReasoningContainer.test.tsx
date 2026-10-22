@@ -7,7 +7,7 @@ import type { AgentStepsCardProps } from '@/atoms/adapters/AgentStepsCardAdapter
 import type { ReasoningCardProps } from '@/atoms/adapters/ReasoningCardAdapter.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
-import { RuntimeHarness } from './RuntimeHarness.js';
+import { AgentDetailsHarness, settleAgentDetails } from './agentDetailsHarness.js';
 
 function AgentStepsCardProbe({ children }: AgentStepsCardProps) {
   return <div>{children}</div>;
@@ -24,9 +24,17 @@ function ReasoningCardProbe({ content, isStreaming, headingText }: ReasoningCard
   );
 }
 
-function TestSubject({ message, isRunning = false }: { message: ThreadMessageLike; isRunning?: boolean }) {
+function TestSubject({
+  message,
+  isRunning = false,
+  agentDetails = 'expanded',
+}: {
+  message: ThreadMessageLike;
+  isRunning?: boolean;
+  agentDetails?: 'expanded' | 'collapsed';
+}) {
   return (
-    <RuntimeHarness messages={[message]} isRunning={isRunning}>
+    <AgentDetailsHarness agentDetails={agentDetails} messages={[message]} isRunning={isRunning}>
       <SlotsProvider
         overrides={{
           AgentStepsCard: AgentStepsCardProbe,
@@ -35,12 +43,12 @@ function TestSubject({ message, isRunning = false }: { message: ThreadMessageLik
       >
         <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
       </SlotsProvider>
-    </RuntimeHarness>
+    </AgentDetailsHarness>
   );
 }
 
 describe('ReasoningContainer', () => {
-  it('reports streaming progress without forwarding raw reasoning to the slot', () => {
+  it('reports streaming progress without forwarding raw reasoning to the slot', async () => {
     render(
       <TestSubject
         isRunning
@@ -55,7 +63,7 @@ describe('ReasoningContainer', () => {
       />,
     );
 
-    const probe = screen.getByTestId('reasoning-probe');
+    const probe = await screen.findByTestId('reasoning-probe');
     expect(probe).toHaveAttribute('data-content', '');
     expect(probe).toHaveAttribute('data-streaming', 'true');
     expect(probe).toHaveAttribute('data-heading', 'Thinking…');
@@ -83,11 +91,25 @@ describe('ReasoningContainer', () => {
       status: { type: 'running' },
     };
     const { rerender } = render(<TestSubject message={reasoningRunningMessage} isRunning />);
+    await settleAgentDetails();
 
     expect(screen.getByTestId('reasoning-probe')).toHaveAttribute('data-content', '');
     rerender(<TestSubject message={toolRunningMessage} isRunning />);
     await waitFor(() => expect(screen.queryByTestId('reasoning-probe')).not.toBeInTheDocument());
     expect(screen.queryByText('Thinking…')).not.toBeInTheDocument();
     expect(screen.queryByText('Completed private notes')).not.toBeInTheDocument();
+  });
+
+  it('shows no reasoning progress while agent details are off', async () => {
+    render(
+      <TestSubject
+        isRunning
+        agentDetails="collapsed"
+        message={{ role: 'assistant', content: [{ type: 'reasoning', text: 'private' }], status: { type: 'running' } }}
+      />,
+    );
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('reasoning-probe')).not.toBeInTheDocument();
   });
 });

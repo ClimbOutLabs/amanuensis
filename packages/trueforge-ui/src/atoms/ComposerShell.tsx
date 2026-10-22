@@ -11,6 +11,8 @@ export type ComposerShellProps = {
   disabled: boolean;
   canSubmit: boolean;
   isRunning?: boolean;
+  /** Cancel was pressed and the turn has not stopped yet. */
+  isStopping?: boolean;
   attachments?: ReactNode;
   modelLabel?: string;
   modelIcon?: ReactNode;
@@ -26,6 +28,7 @@ export function ComposerShell({
   disabled,
   canSubmit,
   isRunning = false,
+  isStopping = false,
   attachments,
   modelLabel,
   modelIcon,
@@ -73,6 +76,7 @@ export function ComposerShell({
             disabled={disabled}
             canSubmit={canSubmit}
             isRunning={isRunning}
+            isStopping={isStopping}
             onSubmit={onSubmit}
             onCancel={onCancel}
           />

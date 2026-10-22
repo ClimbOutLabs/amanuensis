@@ -8,7 +8,6 @@ import {
   useToolCallElapsed,
   type ThreadMessage,
   type ToolApprovalResponse,
-  type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import {
@@ -292,6 +291,16 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
 
+  // A reopened chat draws its calls before its saved cards are read. The stand-in card would offer
+  // different choices for a moment, so a waiting call shows a quiet line until the read is done.
+  if (sentinel !== null && !sentinel.savedCardsRead) {
+    return (
+      <p data-role="approval-loading" role="status" className="px-3 py-2 text-sm text-text-secondary">
+        Loading this request…
+      </p>
+    );
+  }
+
   return (
     <ToolApprovalContainer
       toolName={part.toolName}
@@ -414,20 +423,30 @@ function RequestResponseSlots({
 
 /**
  * A "Change it" answer shows the person's words as their own message right after the call, so the
- * history reads in order. The call itself stays declined.
+ * history reads in order. The call itself stays declined. `stepHidden` (agent details off) keeps the
+ * step mounted, so its effects still run, but out of sight; the person's words still show.
  */
-export const ToolCallContainer: ToolCallMessagePartComponent = part => {
+export function ToolCallContainer({
+  stepHidden = false,
+  ...part
+}: ToolCallMessagePartProps & { stepHidden?: boolean }) {
   const UserMessageBubble = useSlot('UserMessageBubble');
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
   const changeText = approval?.approved === false ? changeRequestText(approval.reason) : undefined;
   return (
     <>
-      <ToolCallPart {...part} />
+      {stepHidden ? (
+        <div hidden>
+          <ToolCallPart {...part} />
+        </div>
+      ) : (
+        <ToolCallPart {...part} />
+      )}
       {changeText === undefined ? null : <UserMessageBubble text={changeText} />}
     </>
   );
-};
+}
 
 function ToolCallPart(part: ToolCallMessagePartProps) {
   const ToolCallCard = useSlot('ToolCallCard');
