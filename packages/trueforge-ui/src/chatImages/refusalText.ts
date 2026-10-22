@@ -13,3 +13,6 @@ export const CHAT_IMAGE_REFUSAL_TEXT: Record<ChatImageRefusal, string> = {
 
 /** Shown when a request for an image fails outright. */
 export const CHAT_IMAGE_ERROR_TEXT = "The image couldn't be loaded. Try again later.";
+
+/** Shown when images the person chose to load from their emails could not be fetched at all. */
+export const EMAIL_IMAGES_ERROR_TEXT = "The images couldn't be loaded. Check your connection, then choose Try again.";

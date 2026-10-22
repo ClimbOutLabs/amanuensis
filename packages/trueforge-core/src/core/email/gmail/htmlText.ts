@@ -4,6 +4,8 @@
  * grow with the length of the input.
  */
 
+import { isTrackingImageLink } from '../../chatImages';
+
 /** Longest HTML read; the rest is dropped. Mail bodies that matter are far shorter. */
 export const MAX_HTML_CHARS = 300_000;
 
@@ -304,6 +306,30 @@ export function htmlToText(source: string): string {
     .trim();
 }
 
+/** Images this small or smaller on a side are tracking pixels, not pictures anyone would look at. */
+const TRACKING_PIXEL_MAX_SIDE = 2;
+
+function tinySide(value: string | null): boolean {
+  if (value === null) {
+    return false;
+  }
+  const size = Number.parseFloat(value);
+  return Number.isFinite(size) && size <= TRACKING_PIXEL_MAX_SIDE;
+}
+
+/** True for an `<img>` tag drawn so small or so hidden that it can only be there to report the email was opened. */
+function isTrackingPixelTag(tag: string): boolean {
+  if (tinySide(attributeValue({ tag, name: 'width' })) || tinySide(attributeValue({ tag, name: 'height' }))) {
+    return true;
+  }
+  const style = (attributeValue({ tag, name: 'style' }) ?? '').toLowerCase().replace(/\s/g, '');
+  return (
+    style.includes('display:none') ||
+    style.includes('visibility:hidden') ||
+    /(?:^|;)(?:max-)?(?:width|height):[0-2](?:px)?(?:;|$|!)/.test(style)
+  );
+}
+
 /** Longest image address kept; longer ones are dropped rather than cut. */
 const MAX_IMAGE_LINK_CHARS = 2048;
 
@@ -359,7 +385,13 @@ export function htmlImageLinks(input: { source: string; max: number }): string[]
     if (!isNameChar(boundary)) {
       const raw = imageSource(tag);
       const link = raw === null ? '' : decodeEntities(raw).trim();
-      if (/^https?:\/\//i.test(link) && link.length <= MAX_IMAGE_LINK_CHARS && !links.includes(link)) {
+      if (
+        /^https?:\/\//i.test(link) &&
+        link.length <= MAX_IMAGE_LINK_CHARS &&
+        !links.includes(link) &&
+        !isTrackingPixelTag(tag) &&
+        !isTrackingImageLink(link)
+      ) {
         links.push(link);
       }
     }
