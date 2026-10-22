@@ -26,7 +26,7 @@ over hacking third-party CSS:
 <TrueForgeUI
   layout="sidebar"
   theme={{
-    preset: 'claude',
+    preset: 'paper',
     mode: 'dark',
     tokens: { primary: '#e11d48' },
     brand: { mode: 'logo', name: 'Acme', icon: '/brand/icon.svg', logo: '/brand/wordmark.svg' },

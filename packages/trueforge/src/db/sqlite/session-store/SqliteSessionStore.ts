@@ -11,6 +11,7 @@ import type {
   AppendCommandExecutionStartedInput,
   AppendToEventsInput,
   AppendToThreadContextInput,
+  ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
   CommandExecutionRecord,
@@ -29,6 +30,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ISessionStore,
+  ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -40,12 +42,14 @@ import type {
   PatchSandboxInfoInput,
   PatchThreadCapabilityStateInput,
   PersistImplementationPlanGrantInput,
+  RecordApprovalDismissalInput,
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -62,6 +66,10 @@ import type { Kysely } from 'kysely';
 import type { AppendPassthroughEventsInput, ICompletedTurnEventStore } from '../../completedTurnEvents';
 import type { SessionCustom, TurnCustom } from '../../sessionCustom';
 import type { Database } from '../types';
+import {
+  listApprovalDismissals as listApprovalDismissalsQuery,
+  recordApprovalDismissal as recordApprovalDismissalQuery,
+} from './queries/approvalDismissals';
 import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
 import {
   appendCommandExecutionResult as appendCommandExecutionResultQuery,
@@ -99,6 +107,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  setPrivateFingerprints as setPrivateFingerprintsQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -229,8 +238,20 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
     return deleteSessionFolderQuery(this.db, input);
   }
 
+  recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void> {
+    return recordApprovalDismissalQuery(this.db, input);
+  }
+
+  listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
+    return listApprovalDismissalsQuery(this.db, input);
+  }
+
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {
     return setSessionFolderQuery(this.db, input);
+  }
+
+  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
+    return setPrivateFingerprintsQuery(this.db, input);
   }
 
   async listSessions(

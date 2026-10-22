@@ -8,7 +8,7 @@ function isPreset(value: string | null): value is ThemePreset {
 
 const params = new URLSearchParams(window.location.search);
 const presetParam = params.get('preset');
-const preset = isPreset(presetParam) ? presetParam : 'trueforge';
+const preset = isPreset(presetParam) ? presetParam : 'paper';
 const mode = params.get('mode') === 'dark' ? 'dark' : 'light';
 
 // The edge check only needs the layout chrome, so every API call fails fast instead of reaching a backend.

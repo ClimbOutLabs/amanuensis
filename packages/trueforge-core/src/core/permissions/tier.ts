@@ -81,6 +81,12 @@ export const Tier3EmailSchema = z
       })
       .nullable()
       .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
+    // Cards stored before this field existed read as replies going to the sender, as they did then.
+    reply_to: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The address replies go to when it is not the sender, or null when replies go to the sender.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -167,6 +173,13 @@ export const Tier3CardSchema = z
       .nullable()
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
+    outbound_plumbing_text: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.',
+      ),
     email: Tier3EmailSchema.nullable().optional(),
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),

@@ -118,6 +118,8 @@ export class GmailToolSet extends LocalToolMCP {
   readonly #tools: ToolDefinition[];
   /** Sizes of the attachments placed so far this turn: they number the next one and count against the shared caps. */
   readonly #stagedSizes: number[] = [];
+  /** The send refusal last returned and how many times in a row it came back unchanged. Built per turn with the set. */
+  #sendRefusal: { reason: string; repeats: number } | null = null;
 
   constructor(options: GmailToolSetOptions) {
     super({ tracing: options.tracing });
@@ -127,6 +129,19 @@ export class GmailToolSet extends LocalToolMCP {
 
   protected getTools(): ToolDefinition[] {
     return this.#tools;
+  }
+
+  /**
+   * A refused send in words the model can relay. The same refusal twice in a row cannot be fixed by retrying, so the
+   * second one tells the model to stop and say what is wrong.
+   */
+  #refuseSend(reason: string): string {
+    const repeats = this.#sendRefusal?.reason === reason ? this.#sendRefusal.repeats + 1 : 1;
+    this.#sendRefusal = { reason, repeats };
+    if (repeats < 2) {
+      return sendRefusal(reason);
+    }
+    return `${sendRefusal(reason)} Do not retry; tell the person: ${reason} Then ask them what they want to do next.`;
   }
 
   get #context(): ResultContext {
@@ -324,12 +339,13 @@ export class GmailToolSet extends LocalToolMCP {
         const live = await this.#liveDraft(parsed.data.draft_id);
         const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
         if (!assessed.ok) {
-          return { failure: sendRefusal(assessed.reason) };
+          return { failure: this.#refuseSend(assessed.reason) };
         }
         const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
         if (!threading.ok) {
-          return { failure: sendRefusal(threading.reason) };
+          return { failure: this.#refuseSend(threading.reason) };
         }
+        this.#sendRefusal = null;
         return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
       const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
@@ -443,6 +459,8 @@ export class GmailToolSet extends LocalToolMCP {
       // The model's recipients are validated bare addresses (toolContract), so no name is left off today. This check
       // stays as a defence in case that contract ever admits display names.
       nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
+      // A draft written here never sets a Reply-To, so replies go to the sender.
+      replyTo: null,
     };
     if (answered === undefined && existing !== undefined) {
       // Headers kept from a saved draft are not the model's, but anyone may have edited that draft in Gmail.
@@ -681,11 +699,11 @@ export class GmailToolSet extends LocalToolMCP {
       const live = await this.#liveDraft(input.draft_id);
       const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
       if (!assessed.ok) {
-        return errorResult(sendRefusal(assessed.reason));
+        return errorResult(this.#refuseSend(assessed.reason));
       }
       const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
       if (!threading.ok) {
-        return errorResult(sendRefusal(threading.reason));
+        return errorResult(this.#refuseSend(threading.reason));
       }
       const approved = context?.approved_params?.['review_hash'];
       if (typeof approved !== 'string') {

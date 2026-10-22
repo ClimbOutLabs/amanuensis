@@ -15,8 +15,9 @@ import {
 import { cn } from '../atoms/lib/cn.js';
 import { dayPartForHour } from './dayPart.js';
 import { ensureStyles } from './ensureStyles.js';
-import { resolvePresetTokens } from './presets/index.js';
+import { resolvePresetTokens, resolveThemePreset } from './presets/index.js';
 import {
+  DEFAULT_THEME_PRESET,
   resolveHostTokens,
   TOKEN_CSS_VARS,
   type BrandConfig,
@@ -51,17 +52,6 @@ export { ThemeContext };
 const STORAGE_KEY = 'aui-theme-preference';
 const PRESET_STORAGE_KEY = 'aui-theme-preset';
 
-const VALID_PRESETS: ReadonlyArray<ThemePreset> = [
-  'trueforge',
-  'claude',
-  'chatgpt',
-  'gemini',
-  'midnight',
-  'forest',
-  'sunset',
-  'volt',
-];
-
 function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
   try {
@@ -87,18 +77,24 @@ function readStoredPreference(): ThemeMode | null {
   return null;
 }
 
-/** Returns the stored preset, or `null` when nothing is stored yet. */
+/** Returns the stored preset resolved to a current id, or `null` when nothing usable is stored. */
 function readStoredPreset(): ThemePreset | null {
   if (typeof window === 'undefined') return null;
   try {
     const stored = localStorage.getItem(PRESET_STORAGE_KEY);
-    if (stored != null && (VALID_PRESETS as ReadonlyArray<string>).includes(stored)) {
-      return stored as ThemePreset;
-    }
+    if (stored != null) return resolveThemePreset(stored) ?? null;
   } catch {
     /* ignore */
   }
   return null;
+}
+
+/** Stored preference first, then the host config, then the default. Legacy ids resolve to a current theme. */
+function initialPreset(hostPreset: ThemePreset | undefined): ThemePreset {
+  const stored = readStoredPreset();
+  if (stored) return stored;
+  if (hostPreset === undefined) return DEFAULT_THEME_PRESET;
+  return resolveThemePreset(hostPreset) ?? DEFAULT_THEME_PRESET;
 }
 
 function tokensToStyle(tokens: Partial<SemanticTokens> | undefined): CSSProperties {
@@ -126,8 +122,8 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
   const initialPreference = () => theme?.mode ?? readStoredPreference() ?? theme?.defaultMode ?? 'system';
   const [preference, setPreference] = useState<ThemeMode>(initialPreference);
   const [mode, setMode] = useState<'light' | 'dark'>(() => resolveMode(initialPreference()));
-  // Preset is uncontrolled: the stored preset wins, else the host config, else 'trueforge'.
-  const [preset, setPresetState] = useState<ThemePreset>(() => readStoredPreset() ?? theme?.preset ?? 'trueforge');
+  // Preset is uncontrolled: the stored preset wins, else the host config, else the default.
+  const [preset, setPresetState] = useState<ThemePreset>(() => initialPreset(theme?.preset));
 
   const webFonts = theme?.webFonts;
   useLayoutEffect(() => {
@@ -257,9 +253,9 @@ export function useOptionalThemeMode(): 'light' | 'dark' {
   return useContext(ThemeContext)?.mode ?? 'light';
 }
 
-/** Safe for trees that may sit outside ThemeProvider (falls back to trueforge). */
+/** Safe for trees that may sit outside ThemeProvider (falls back to the default preset). */
 export function useOptionalThemePreset(): ThemePreset {
-  return useContext(ThemeContext)?.preset ?? 'trueforge';
+  return useContext(ThemeContext)?.preset ?? DEFAULT_THEME_PRESET;
 }
 
 /** Safe for trees that may sit outside ThemeProvider (falls back to {}). */

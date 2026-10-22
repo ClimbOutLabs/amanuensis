@@ -30,7 +30,7 @@
 @layer tfy-agent-ui-base {
   .aui-theme-root {
     box-sizing: border-box;
-    /* Fallback palette: matches the `trueforge` preset so surfaces without
+    /* Fallback palette: matches the `paper` preset so surfaces without
      * ThemeProvider tokens render the same product (single token truth). */
     --color-white: #ffffff;
     --color-black: #09090b;
@@ -55,7 +55,7 @@
     --border: #d9ccb6;
     --border: oklch(0.85 0.033 81);
     --input-box-bg: #fffdf8;
-    --input-border: #d7c7aa;
+    --input-border: #998d79;
     --text-primary: #2c2a26;
     --text-primary: oklch(0.286 0.008 84.6);
     --text-secondary: #746b5d;
@@ -91,7 +91,7 @@
     --failure-bg: #a95445;
     --failure-bg: oklch(0.546 0.115 31.4);
     --failure-text: #fffdf8;
-    --warning-bg: #b5894c;
+    --warning-bg: #936f3e;
     --warning-text: #fffdf8;
     /* The one highlight. Bright gold carries marks and fills; gold-ink carries words, edges and focus. */
     --gold: #e9b949;
@@ -139,7 +139,7 @@
     --border: #3e382b;
     --border: oklch(0.343 0.023 86.1);
     --input-box-bg: #2f2a21;
-    --input-border: #3e382b;
+    --input-border: #7c786f;
     --text-primary: #f2ecdd;
     --text-primary: oklch(0.944 0.021 88.7);
     --text-secondary: #a89a7f;
@@ -169,11 +169,11 @@
     --ghost-button-bg: transparent;
     --ghost-button-hover: #3e382b;
     --ghost-button-text: #f2ecdd;
-    --success-bg: #4b8060;
-    --success-bg: oklch(0.553 0.076 156.4);
+    --success-bg: #457558;
+    --success-bg: oklch(0.519 0.07 156.4);
     --success-text: #f2ecdd;
-    --failure-bg: #a95445;
-    --failure-bg: oklch(0.546 0.115 31.4);
+    --failure-bg: #a65344;
+    --failure-bg: oklch(0.54 0.113 31.6);
     --failure-text: #f2ecdd;
     --warning-bg: #b5894c;
     --warning-text: #221f19;
@@ -232,10 +232,10 @@
 }
 
 /*
- * Clone typography: conversation copy and composer text are regular weight;
+ * High contrast typography: conversation copy and composer text are regular weight;
  * controls and headings keep their component-level medium/semibold utilities.
  */
-.aui-theme-root:is([data-preset='claude'], [data-preset='chatgpt'], [data-preset='gemini'])
+.aui-theme-root[data-preset='high-contrast']
   :is(
     .aui-markdown,
     [data-slot='aui_user-message-content'],
@@ -247,8 +247,8 @@
 
 /*
  * Display type: prose and welcome surfaces use the display face; chrome keeps
- * the body face. Only the claude preset's display face is serif — for every
- * other preset this is a no-op because both faces are the same stack.
+ * the body face. Today every preset sets both faces to the same stack, so this
+ * is a no-op until a preset gives them different faces.
  */
 .aui-theme-root .aui-markdown.markdown-body,
 .aui-theme-root .aui-thread-welcome-message-inner {
@@ -720,8 +720,8 @@
   border-radius: inherit;
 }
 
-/* ChatGPT dark: transparent composer border + inset white edge */
-.aui-theme-root[data-preset='chatgpt'][data-theme='dark'] [data-slot='aui_composer-shell'] {
+/* High contrast dark: transparent composer border + inset white edge */
+.aui-theme-root[data-preset='high-contrast'][data-theme='dark'] [data-slot='aui_composer-shell'] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 
@@ -1494,43 +1494,43 @@
  * ──────────────────────────────────────────────────────────────────── */
 
 /* Time of day moves only the paper's lightness and chroma; the hue stays at the gold's 85.2.
- * ThemeProvider writes data-day from the local hour. Only the default preset takes these. */
-.aui-theme-root[data-preset='trueforge'][data-day='morning']:not(.dark) {
+ * ThemeProvider writes data-day from the local hour. Only the paper preset takes these. */
+.aui-theme-root[data-preset='paper'][data-day='morning']:not(.dark) {
   --paper: #faf2df;
   --paper: oklch(0.962 0.026 85.2);
   --paper-top: #fef4df;
   --paper-top: oklch(0.97 0.03 85.2);
 }
 
-.aui-theme-root[data-preset='trueforge'][data-day='midday']:not(.dark) {
+.aui-theme-root[data-preset='paper'][data-day='midday']:not(.dark) {
   --paper: #f9f6f0;
   --paper: oklch(0.974 0.008 85.2);
   --paper-top: #fdf9f0;
   --paper-top: oklch(0.982 0.012 85.2);
 }
 
-.aui-theme-root[data-preset='trueforge'][data-day='evening']:not(.dark) {
+.aui-theme-root[data-preset='paper'][data-day='evening']:not(.dark) {
   --paper: #f7edd8;
   --paper: oklch(0.948 0.03 85.2);
   --paper-top: #fbefd7;
   --paper-top: oklch(0.956 0.034 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='morning'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='morning'] {
   --paper: #2a2416;
   --paper: oklch(0.262 0.026 85.2);
   --paper-top: #2d2515;
   --paper-top: oklch(0.27 0.03 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='midday'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='midday'] {
   --paper: #292620;
   --paper: oklch(0.27 0.012 85.2);
   --paper-top: #2c281f;
   --paper-top: oklch(0.278 0.016 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='evening'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='evening'] {
   --paper: #282112;
   --paper: oklch(0.252 0.028 85.2);
   --paper-top: #2b2311;
@@ -1745,6 +1745,39 @@
   white-space: nowrap;
 }
 
+/* Sharing rows: the name keeps a fixed column and the chips wrap inside the rest of the row. */
+.aui-row--2.aui-row--sharing {
+  grid-template-columns: 8rem minmax(0, 1fr);
+}
+
+.aui-row--sharing .aui-chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Toggle chip: a pressed chip takes the gold-ink edge and a check mark, never a gold fill. */
+.aui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding-inline: 0.625rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  background-color: var(--card-bg);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.aui-chip:hover {
+  color: var(--text-primary);
+}
+
+.aui-chip[aria-pressed='true'] {
+  border-color: var(--gold-ink);
+  color: var(--text-primary);
+}
+
 /* Receipt: a mono list on a card face. */
 .aui-receipt {
   padding: 0.5rem 0.75rem;
@@ -1809,6 +1842,12 @@
 @media (max-width: 40rem) {
   .aui-row {
     grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
+  }
+
+  /* Two-column rows that stack: the right-hand choices drop under the left-hand label. */
+  .aui-row--2.aui-row--stack {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.4rem;
   }
 
   .aui-ticket--stub {
@@ -2051,6 +2090,11 @@
   .aui-theme-root {
     --grain: none;
   }
+}
+
+/* High contrast keeps its surfaces flat: no paper grain. */
+.aui-theme-root[data-preset='high-contrast'] {
+  --grain: none;
 }
 
 .aui-reward-tick {

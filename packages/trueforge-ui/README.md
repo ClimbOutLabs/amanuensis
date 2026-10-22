@@ -206,7 +206,7 @@ export default function App() {
     defaultAgentSpec: { model: { name: 'openai-main/gpt-4.1' } },
   }}
   theme={{
-    preset: 'claude',
+    preset: 'paper',
     brand: { mode: 'icon-title', name: 'Acme', icon: '/icon.svg' },
   }}
   overrides={{/* slot overrides */}}
@@ -244,7 +244,7 @@ const server = {
   server={server}
   layout="sidebar"
   theme={{
-    preset: 'claude', // 'trueforge' | 'claude' | 'chatgpt' | 'gemini'
+    preset: 'paper', // 'paper' | 'forest' | 'midnight' | 'high-contrast'
     mode: 'dark', // omit for uncontrolled (useTheme().setTheme works)
     tokens: {
       primaryBg: 'oklch(0.14 0.02 260)',

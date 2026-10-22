@@ -107,6 +107,7 @@ describe('offersChangeIt', () => {
     body: 'Lunch at noon?',
     replaces: null,
     reply_in_thread: null,
+    reply_to: null,
   };
   const event = {
     action: 'create' as const,

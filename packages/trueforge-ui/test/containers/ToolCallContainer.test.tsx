@@ -881,7 +881,7 @@ describe('ToolCallContainer', () => {
         { role: 'assistant', content: 'an answer' },
       ]);
 
-      expect(screen.getByText('This request expired.')).toBeInTheDocument();
+      expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
       expect(screen.queryByRole('radio', { name: 'Approve' })).not.toBeInTheDocument();
       expect(screen.queryByRole('radio', { name: 'Deny' })).not.toBeInTheDocument();
     });
@@ -893,7 +893,7 @@ describe('ToolCallContainer', () => {
         { role: 'assistant', content: [pendingCall('now')], status: { type: 'requires-action', reason: 'tool-calls' } },
       ]);
 
-      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+      expect(screen.getAllByText('This request ended. Ask again if you still need it.')).toHaveLength(1);
       expect(screen.getAllByRole('radio', { name: 'Approve' })).toHaveLength(1);
     });
 
@@ -975,7 +975,7 @@ describe('ToolCallContainer', () => {
       expect(await screen.findByText('now.example.com')).toBeInTheDocument();
       expect(screen.queryByText('old.example.com')).not.toBeInTheDocument();
       expect(screen.getAllByText('Sends to')).toHaveLength(1);
-      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+      expect(screen.getAllByText('This request ended. Ask again if you still need it.')).toHaveLength(1);
     });
   });
 });
