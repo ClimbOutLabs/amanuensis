@@ -117,6 +117,15 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
+/** Every tool the model may call: those sent in full, and those the tool index in the system prompt lists by name. */
+function callableTools(request: ChatCompletionRequest): AdvertisedTool[] {
+  const system = request.messages.find(message => message.role === 'system');
+  const listed = [...messageText(system?.content).matchAll(/^- ([A-Za-z0-9_-]+): /gm)].flatMap(match =>
+    match[1] === undefined ? [] : [{ function: { name: match[1] } }],
+  );
+  return [...request.tools, ...listed];
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -398,11 +407,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const toolName =
       requestedTool === undefined
         ? undefined
-        : resolveToolName({ directive: requestedTool.match, tools: parsed.tools });
+        : resolveToolName({ directive: requestedTool.match, tools: callableTools(parsed) });
     const toolCalls: ScriptedToolCall[] = [];
     const threeAtOnceName =
       progress.directive === THREE_AT_ONCE_DIRECTIVE && progress.toolResults === 0
-        ? resolveToolName({ directive: 'inert_unannotated', tools: parsed.tools })
+        ? resolveToolName({ directive: 'inert_unannotated', tools: callableTools(parsed) })
         : undefined;
     if (threeAtOnceName !== undefined) {
       for (const text of THREE_AT_ONCE_TEXTS) {

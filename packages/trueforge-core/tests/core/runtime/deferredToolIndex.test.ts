@@ -220,6 +220,18 @@ describe('the tool index behind get_tool_info and call_tool', () => {
     expect(message.tool_calls?.[0]?.function.name).toBe('render_route');
   });
 
+  it('leaves a call to a connector that cannot list its tools with call_tool, without failing the turn', async () => {
+    const connector = makeMockIMCPServer({ name: 'notes', preload: false });
+    jest.mocked(connector.listTools).mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const deferred = new DeferredTool([connector], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      index: (await builtInToolIndex([new MapLikeTools()])).index,
+    });
+    const original = callToolMessage({ mcp_server: 'notes', tool_name: 'search', input: {} });
+    expect((await deferred.toDirectCalls(original)).message).toEqual(original);
+  });
+
   it('leaves a call naming nothing indexed with call_tool, which fails it closed', async () => {
     const deferred = await makeDeferred([new MapLikeTools()]);
     const original = callToolMessage({ mcp_server: 'maps', tool_name: 'dance', input: {} });

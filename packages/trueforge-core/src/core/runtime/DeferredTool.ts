@@ -202,8 +202,16 @@ export class DeferredTool extends LocalToolMCP {
     }
     const server = this.resolveServer(input.server);
     if (server !== undefined) {
-      const listed = await server.listTools();
-      if (isAuthRequired(listed) || listed.result.tools.some(t => t.name === input.name)) {
+      // A connector that cannot list its tools right now may still serve this one, so the call
+      // stays with call_tool, whose own checks fail closed on an unreachable connector.
+      const listed = await server.listTools().catch((error: unknown) => {
+        this.logger.warn('Could not list connector tools to resolve an indexed tool', {
+          ...extractErrorLogFields(error),
+          mcpServer: input.server,
+        });
+        return undefined;
+      });
+      if (listed === undefined || isAuthRequired(listed) || listed.result.tools.some(t => t.name === input.name)) {
         return undefined;
       }
     }
