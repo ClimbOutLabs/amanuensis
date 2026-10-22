@@ -8,6 +8,7 @@ import { Button } from '../atoms/primitives/Button.js';
 import { StubTear } from '../atoms/Reward.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
+import { ACTIVITY_SUBTITLES } from './activityVerbs.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
@@ -225,7 +226,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
           {sentAt === null ? (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              Waiting for you
+              {ACTIVITY_SUBTITLES.waiting}
             </span>
           ) : (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">

@@ -154,7 +154,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'ScrollToBottomButton',
   'SelectAgentEmptyState',
   'SentinelApiProvider',
-  'SentinelAuditFeed',
   'SentinelSettings',
   'ServerProvider',
   'SessionsBrowserButton',

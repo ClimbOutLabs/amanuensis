@@ -1,18 +1,21 @@
-import { useCallback, useState, type FC, type ReactNode } from 'react';
+import { useCallback, useState, type FC } from 'react';
 
+import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
-import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
-import { ACTIVITY_STATE_LABELS } from '../sentinel/activityVerbs.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
+import { RecentActions } from '../sentinel/RecentActions.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
+import { assistantDisplayName } from './assistantDisplayName.js';
 import {
   PersonalizationProvider,
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
+import { personDisplayName } from './personDisplayName.js';
+import { RailDisclosure } from './RailDisclosure.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -44,13 +47,10 @@ export type AmanRuntimeRailProps = {
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
-  /** Ids of the approvals waiting on the person in this chat, oldest first. Empty hides Needs you. */
+  /** Ids of the approvals waiting on the person in this chat, oldest first. Empty leaves the status at its usual state. */
   pendingApprovalIds?: readonly string[];
-  /**
-   * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
-   * Omitted leaves the receipt out entirely.
-   */
-  auditFeed?: ReactNode;
+  /** The chat whose recent actions the rail lists. Omitted leaves the Recent actions section out. */
+  recentActionsSessionId?: string | undefined;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -69,6 +69,40 @@ function readStoredRailCollapsed(): boolean {
   return false;
 }
 
+/** Which folded sections the person left open. Every section starts folded. */
+const RAIL_FOLDS_STORAGE_KEY = 'aui-runtime-rail-folds';
+
+type RailFoldKey = 'rules' | 'memory' | 'recent';
+type RailFolds = Record<RailFoldKey, boolean>;
+
+const ALL_FOLDED: RailFolds = { rules: false, memory: false, recent: false };
+
+/** Reads the stored folds in this browser. Anything unusable reads as all folded. */
+function readStoredFolds(): RailFolds {
+  if (typeof window === 'undefined') return ALL_FOLDED;
+  try {
+    const stored = window.localStorage.getItem(RAIL_FOLDS_STORAGE_KEY);
+    if (stored === null) return ALL_FOLDED;
+    const parsed: unknown = JSON.parse(stored);
+    if (typeof parsed !== 'object' || parsed === null) return ALL_FOLDED;
+    return {
+      rules: 'rules' in parsed && parsed.rules === true,
+      memory: 'memory' in parsed && parsed.memory === true,
+      recent: 'recent' in parsed && parsed.recent === true,
+    };
+  } catch {
+    return ALL_FOLDED;
+  }
+}
+
+function writeStoredFolds(folds: RailFolds): void {
+  try {
+    window.localStorage.setItem(RAIL_FOLDS_STORAGE_KEY, JSON.stringify(folds));
+  } catch {
+    /* ignore */
+  }
+}
+
 const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   ready: 'Ready',
   connecting: 'Connecting',
@@ -76,15 +110,18 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   degraded: 'Degraded',
 };
 
-/** The status line: the connection when it is not fine, otherwise what Aman is doing now. */
+/** The status line: the connection when it is not fine, then the approval wait, then what Aman is doing. */
 function statusLineLabel({
   status,
   activity,
+  waitingOnYou,
 }: {
   status: AmanRuntimeRailStatus;
   activity: AmanAvatarActivity;
+  waitingOnYou: boolean;
 }): string {
   if (status !== 'ready') return STATUS_LABELS[status];
+  if (waitingOnYou) return 'Waiting on your approval';
   switch (activity) {
     case 'idle':
       return 'Ready';
@@ -136,31 +173,31 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   buildRef,
   settingsHref,
   pendingApprovalIds = [],
-  auditFeed,
+  recentActionsSessionId,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
+  const currentUser = useOptionalCurrentUser();
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
+  const [folds, setFolds] = useState(readStoredFolds);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const statusLabel = STATUS_LABELS[status];
-  const statusLine = statusLineLabel({ status, activity });
+  const pendingCount = pendingApprovalIds.length;
+  // An approval waiting on the person outranks the calm states, but not a broken connection.
+  const waitingOnYou = pendingCount > 0 && status === 'ready';
+  const statusLine = statusLineLabel({ status, activity, waitingOnYou });
   const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
   // Collapsed, the dot is the only status left. Its words carry the connection state only; the
   // model name stays behind Details.
   const compactSummary = statusLabel;
   const trimmedPersonaName = personaName?.trim();
-  const pendingCount = pendingApprovalIds.length;
-  // Needs you is the rail's one gold card; the app's selection rule decides, not this component.
-  const highlightedCard = useHighlightedCard({
-    firstWaitingApprovalId: pendingApprovalIds[0] ?? null,
-    nextAppointmentId: null,
-  });
-  const needsYouHighlighted = pendingCount > 0 && highlightedCard === pendingApprovalIds[0];
+  const personName = personDisplayName({ profile, signInName: currentUser?.displayName });
+  const roleLine = personName === undefined ? 'Your Chief of Staff' : `${personName}'s Chief of Staff`;
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
@@ -170,6 +207,14 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
       } catch {
         /* ignore */
       }
+      return next;
+    });
+  }, []);
+
+  const toggleFold = useCallback((key: RailFoldKey) => {
+    setFolds(previous => {
+      const next = { ...previous, [key]: !previous[key] };
+      writeStoredFolds(next);
       return next;
     });
   }, []);
@@ -221,7 +266,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             aria-labelledby="aman-runtime-rail-title"
           >
             {avatarMotion ? (
-              <AmanAvatarMotion activity={activity} sources={avatarMotion} className="aman-runtime-rail__avatar" />
+              <AmanAvatarMotion
+                activity={waitingOnYou ? 'writing' : activity}
+                sources={avatarMotion}
+                className="aman-runtime-rail__avatar"
+              />
             ) : avatarSrc ? (
               <img src={avatarSrc} alt={AVATAR_ALT} className="aman-runtime-rail__avatar" />
             ) : (
@@ -230,12 +279,17 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </span>
             )}
             <div className="aman-runtime-rail__identity aui-panda__caption">
-              <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
-              <p className="aui-panda__role">Your chief of staff</p>
+              <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
+              <p className="aman-runtime-rail__role">{roleLine}</p>
             </div>
           </section>
 
-          <div className="aman-runtime-rail__status" data-status={status} aria-live="polite">
+          <div
+            className="aman-runtime-rail__status"
+            data-status={status}
+            data-waiting={waitingOnYou ? 'true' : undefined}
+            aria-live="polite"
+          >
             <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
             <span>{statusLine}</span>
             {selfProbed && (status === 'offline' || status === 'degraded') && (
@@ -251,33 +305,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             )}
           </div>
 
-          {pendingCount === 0 ? null : (
-            <section
-              className={
-                needsYouHighlighted
-                  ? 'aui-ticket aui-ticket--selected aman-runtime-rail__needs-you'
-                  : 'aui-ticket aman-runtime-rail__needs-you'
-              }
-              data-section="needs-you"
-              aria-labelledby="aman-runtime-rail-needs-label"
-            >
-              <h3 id="aman-runtime-rail-needs-label" className="aman-runtime-rail__section-label">
-                Needs you · {pendingCount}
-              </h3>
-              <p className="aman-runtime-rail__needs-body">Answer {pendingCount === 1 ? 'it' : 'them'} in the chat.</p>
-              <p className="aui-panda__role text-gold-ink">{ACTIVITY_STATE_LABELS.waiting}</p>
-            </section>
-          )}
-
           {settings === null ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="rules"
-              aria-labelledby="aman-runtime-rail-rules-label"
-            >
-              <h3 id="aman-runtime-rail-rules-label" className="aman-runtime-rail__section-label">
-                Your rules
-              </h3>
+            <RailDisclosure section="rules" title="Rules" open={folds.rules} onToggle={() => toggleFold('rules')}>
               <ul className="aman-runtime-rail__rules">
                 <li>{settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first'}</li>
                 <li>
@@ -290,20 +319,29 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                   Change in Settings
                 </a>
               )}
-            </section>
+            </RailDisclosure>
           )}
 
-          {auditFeed === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="recent-actions"
-              aria-labelledby="aman-runtime-rail-recent-actions-label"
-            >
-              <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
-                Recent actions
-              </h3>
-              {auditFeed}
-            </section>
+          <RailDisclosure section="memory" title="Memory" open={folds.memory} onToggle={() => toggleFold('memory')}>
+            <p className="aman-runtime-rail__empty">
+              Memory is kept in Settings.
+              {settingsHref === undefined ? null : (
+                <>
+                  {' '}
+                  <a className="aman-runtime-rail__link" href={settingsHref}>
+                    Open Settings
+                  </a>
+                </>
+              )}
+            </p>
+          </RailDisclosure>
+
+          {recentActionsSessionId === undefined ? null : (
+            <RecentActions
+              sessionId={recentActionsSessionId}
+              open={folds.recent}
+              onToggle={() => toggleFold('recent')}
+            />
           )}
 
           {trimmedPersonaName === undefined || trimmedPersonaName === '' ? null : (

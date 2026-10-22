@@ -15,7 +15,6 @@ import {
   RepositoryWorkProvider,
   RunCodeStatusProvider,
   SentinelApiProvider,
-  SentinelAuditFeed,
   ThemeProvider,
   TrueForgeUI,
   useTheme,
@@ -217,7 +216,7 @@ function AmanShell({
   // Active session id, lifted out of the chat runtime so the right-rail permissions
   // feed can follow the session the user is looking at.
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
-  // Approvals waiting in the active chat, for the rail's Needs you ticket.
+  // Approvals waiting in the active chat, for the rail's waiting status.
   const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
   return (
     <div className="aman-shell">
@@ -239,7 +238,7 @@ function AmanShell({
         buildRef={buildRef}
         settingsHref="/settings"
         pendingApprovalIds={pendingApprovalIds}
-        auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
+        recentActionsSessionId={activeSessionId}
       />
     </div>
   );

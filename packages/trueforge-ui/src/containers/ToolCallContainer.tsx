@@ -18,7 +18,6 @@ import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissio
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
-import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
@@ -121,10 +120,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
-  const isMobile = useIsMobile();
-  // The rail's Needs you ticket carries the one highlight on desktop; the approval ticket carries it only where the rail is hidden.
+  // The first approval waiting in the chat carries the screen's one gold card.
   const highlightedApprovalId = useHighlightedCard({
-    firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
+    firstWaitingApprovalId: pendingApprovals[0]?.approvalId ?? null,
     nextAppointmentId: null,
   });
 

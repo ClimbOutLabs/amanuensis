@@ -7,7 +7,6 @@ import { Icon } from '../icons/Icon.js';
 import { buildSessionResumeHref } from '../routing/paths.js';
 import { useOptionalResolvedRoutes } from '../routing/ResolvedRoutesContext.js';
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
-import { outcomeTone } from './SentinelAuditFeed.js';
 import {
   SENTINEL_AUDIT_OUTCOME_LABELS,
   SENTINEL_AUDIT_OUTCOMES,
@@ -17,6 +16,18 @@ import {
 } from './types.js';
 
 const PAGE_SIZE = 50;
+
+function outcomeTone(outcome: SentinelAuditOutcome): string {
+  switch (outcome) {
+    case 'denied':
+    case 'auto_denied':
+      return 'text-failure-bg';
+    case 'approved':
+    case 'ran':
+    case 'logged':
+      return 'text-text-secondary';
+  }
+}
 
 const formatWhen = new Intl.DateTimeFormat(undefined, {
   month: 'short',

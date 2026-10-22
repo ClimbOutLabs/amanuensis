@@ -329,6 +329,9 @@
   background: var(--sidebar-bg);
   padding: 1.25rem 0.75rem 0.75rem;
   color: var(--text-primary);
+  /* The rail's secondary lines are small, and the shared token falls short of AA on this face in
+   * light mode; a mix of the primary text keeps the same role and clears 4.5:1 in both modes. */
+  --text-secondary: color-mix(in oklab, var(--text-primary) 72%, var(--sidebar-bg));
   /* Tall rail content (e.g. the permissions audit feed) scrolls inside the rail
    * instead of stretching the page and pushing the chat composer below the fold. */
   min-height: 0;
@@ -454,6 +457,11 @@
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning-bg) 14%, transparent);
 }
 
+.aman-runtime-rail__status[data-waiting='true'] .aman-runtime-rail__status-dot {
+  background: var(--gold-ink);
+  box-shadow: 0 0 0 0.25rem color-mix(in oklab, var(--gold-ink) 14%, transparent);
+}
+
 .aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot,
 .aman-runtime-rail__compact-status[data-status='offline'] .aman-runtime-rail__status-dot {
   background: var(--failure-bg);
@@ -494,16 +502,10 @@
   line-height: 1.75rem;
 }
 
-/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
-.aman-runtime-rail__needs-you {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.75rem;
-}
-
-.aman-runtime-rail__needs-body {
+/* The role line sits under the name in the body face; the name is the only heading in the rail. */
+.aman-runtime-rail__role {
   margin: 0;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 
@@ -529,10 +531,8 @@
 .aman-runtime-rail__section-label {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.6875rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .aman-runtime-rail__section-value {
@@ -568,10 +568,8 @@
 
 .aman-runtime-rail__details-summary {
   color: var(--text-secondary);
-  font-size: 0.6875rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -592,6 +590,197 @@
   overflow-wrap: anywhere;
   margin: 0 0 0.35rem;
   color: var(--text-primary);
+}
+
+/* A folded section: the header is the toggle, one line for the title and count, one for the detail. */
+.aman-runtime-rail__disclosure {
+  display: grid;
+  width: 100%;
+  gap: 0.2rem;
+  padding: 0.1rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.aman-runtime-rail__disclosure-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.aman-runtime-rail__chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.aman-runtime-rail__disclosure-title {
+  font-weight: 600;
+}
+
+.aman-runtime-rail__disclosure-count {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The warning dot is the one thing in the header that asks for a look; it never opens the section. */
+.aman-runtime-rail__attention {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--gold-ink);
+}
+
+.aman-runtime-rail__disclosure-detail {
+  display: block;
+  overflow: hidden;
+  padding-inline-start: 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__disclosure-body {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+/* Opening a section eases in; with reduced motion it simply appears. */
+@media (prefers-reduced-motion: no-preference) {
+  .aman-runtime-rail__disclosure-body {
+    animation: aman-runtime-rail-reveal 150ms ease-out;
+  }
+}
+
+@keyframes aman-runtime-rail-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.aman-runtime-rail__group {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.aman-runtime-rail__group-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.aman-runtime-rail__rows {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each row is one keyboard stop, so its focus ring is drawn on the row itself. */
+.aman-runtime-rail__row {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.4rem;
+  border-radius: 0.375rem;
+  padding: 0.3rem 0.35rem;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.aman-runtime-rail__row:hover {
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+}
+
+.aman-runtime-rail__mark {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: center;
+}
+
+.aman-runtime-rail__row[data-failed='true'] .aman-runtime-rail__mark {
+  color: var(--text-primary);
+}
+
+.aman-runtime-rail__row-text {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.aman-runtime-rail__row-title {
+  overflow-wrap: anywhere;
+}
+
+.aman-runtime-rail__row-subtitle {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.aman-runtime-rail__row-time {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__show-all {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold-ink);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+  cursor: pointer;
+}
+
+.aman-runtime-rail__empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.aman-runtime-rail__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.aman-runtime-rail__text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.aman-runtime-rail .aman-runtime-rail__disclosure:focus-visible,
+.aman-runtime-rail .aman-runtime-rail__row:focus-visible,
+.aman-runtime-rail .aman-runtime-rail__show-all:focus-visible,
+.aman-runtime-rail .aman-runtime-rail__text-button:focus-visible {
+  outline: 0.125rem solid var(--text-primary);
+  outline-offset: 0.125rem;
 }
 
 /* The release line is the smallest thing in the rail, and the last. */
@@ -1697,42 +1886,7 @@
 }
 
 /* Two-column rows (receipt, rail): verb and count on the left, state on the right. */
-.aui-row--2 {
-  grid-template-columns: minmax(0, 1fr) max-content;
-}
-
-.aui-row--2 > .state {
-  justify-self: end;
-  white-space: nowrap;
-}
-
-/* Receipt: a mono list on a card face. */
-.aui-receipt {
-  padding: 0.5rem 0.75rem;
-  background-color: var(--card-bg);
-  background-image: var(--grain);
-  border: 0.0625rem solid var(--border);
-  border-radius: 0.5rem;
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-}
-
-.aui-receipt .aui-row + .aui-row {
-  border-top: 0.0625rem dotted var(--border);
-}
-
-/* The rail is too narrow for verb and state side by side: the state sits under its verb. */
-.aman-runtime-rail .aui-receipt .aui-row--2 {
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: 0.1rem;
-}
-
-.aman-runtime-rail .aui-receipt .aui-row--2 > .state {
-  justify-self: start;
-}
-
-/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
+/* The panda's frame: a ticket with a gold-line edge and no fill. */
 .aui-panda {
   display: grid;
   justify-items: center;
@@ -1746,15 +1900,6 @@
   gap: 0.1rem;
   width: 100%;
   padding: 0 0.25rem 0.25rem;
-}
-
-.aui-panda__role {
-  margin: 0;
-  color: var(--text-secondary);
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 /* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
