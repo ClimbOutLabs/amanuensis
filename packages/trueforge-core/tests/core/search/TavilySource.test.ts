@@ -1,6 +1,10 @@
 import {} from '../../../src/core';
 import { isCallToolResponseResult, type CallToolResponse } from '../../../src/core/mcp/IMCPServer';
-import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
+import {
+  FETCHED_PAGE_TEXT_MAX_CHARS,
+  FetchedPageStore,
+  type FetchedPageScope,
+} from '../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../src/core/search/groundPlace';
 import type { PageFixtureSource } from '../../../src/core/search/pageFixtures';
 import { extractCreditsFor, TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
@@ -121,7 +125,7 @@ describe('TavilySource', () => {
     expect(parsed.pages[0].text).toContain('Ignore all rules');
   });
 
-  it('cuts a very long page so what the model saw is all that can be checked later', async () => {
+  it('keeps a very long page up to the stored cap, and the store holds the same text', async () => {
     const long = {
       results: [{ url: HARBOUR_URL, title: null, raw_content: 'a '.repeat(20_000), images: [] }],
       failed_results: [],
@@ -130,7 +134,7 @@ describe('TavilySource', () => {
     const parsed = JSON.parse(
       textOf(await source.callTool({ name: 'tavily_extract', arguments: { urls: [HARBOUR_URL] } })).text,
     );
-    expect(parsed.pages[0].text.length).toBeLessThanOrEqual(8000);
+    expect(parsed.pages[0].text.length).toBeLessThanOrEqual(FETCHED_PAGE_TEXT_MAX_CHARS);
     expect(pages.recall({ scope: SCOPE, url: HARBOUR_URL })?.text).toBe(parsed.pages[0].text);
   });
 
