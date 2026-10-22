@@ -7,11 +7,15 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
  */
 export function sentinelSettingsServices(
   store: ISentinelSettingsStore,
-): Pick<SentinelServices, 'isOffline' | 'tier2AutoAllow' | 'searchWithoutAsking' | 'mapsWithoutAsking'> {
+): Pick<
+  SentinelServices,
+  'isOffline' | 'tier2AutoAllow' | 'searchWithoutAsking' | 'mapsWithoutAsking' | 'sandboxWithoutAsking'
+> {
   return {
     isOffline: async input => (await store.get(input)).offline_mode,
     tier2AutoAllow: async input => new Set((await store.get(input)).tier2_auto_allow),
     searchWithoutAsking: async input => (await store.get(input)).search_without_asking,
     mapsWithoutAsking: async input => (await store.get(input)).maps_without_asking,
+    sandboxWithoutAsking: async input => (await store.get(input)).sandbox_without_asking,
   };
 }

@@ -256,7 +256,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "sandbox_without_asking" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
         
         server
             .mockEndpoint()
@@ -271,6 +271,7 @@ describe("PersonalizationClient", () => {
     data: {
         mapsWithoutAsking: true,
         offlineMode: true,
+        sandboxWithoutAsking: true,
         searchWithoutAsking: true,
         tier2AutoAllow: ["file_write"]
     }
@@ -301,7 +302,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { };
-        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "sandbox_without_asking" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
         
         server
             .mockEndpoint()
@@ -317,6 +318,7 @@ describe("PersonalizationClient", () => {
     data: {
         mapsWithoutAsking: true,
         offlineMode: true,
+        sandboxWithoutAsking: true,
         searchWithoutAsking: true,
         tier2AutoAllow: ["file_write"]
     }

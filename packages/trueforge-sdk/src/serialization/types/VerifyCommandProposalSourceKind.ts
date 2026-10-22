@@ -4,8 +4,8 @@ import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
-export const VerifyCommandProposalSourceKind: core.serialization.Schema<serializers.VerifyCommandProposalSourceKind.Raw, TrueForge.VerifyCommandProposalSourceKind> = core.serialization.enum_(["agents_md", "package_json"]);
+export const VerifyCommandProposalSourceKind: core.serialization.Schema<serializers.VerifyCommandProposalSourceKind.Raw, TrueForge.VerifyCommandProposalSourceKind> = core.serialization.enum_(["agents_md", "makefile", "package_json", "pyproject_toml"]);
 
 export declare namespace VerifyCommandProposalSourceKind {
-    export type Raw = "agents_md" | "package_json";
+    export type Raw = "agents_md" | "makefile" | "package_json" | "pyproject_toml";
 }

@@ -4,6 +4,7 @@
  */
 
 export { threadCapabilities } from './builtinsFromSpec';
+export { narrowConnectorTools } from './narrowConnectorTools';
 export { AgentSpecSchema, DEFAULT_AGENT_CONFIG_ITERATION_LIMIT, RuntimeConfigSchema } from './schemas/agentSpec';
 export type { AgentSpec, Skill } from './schemas/agentSpec';
 

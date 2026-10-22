@@ -86,6 +86,7 @@ async function setup() {
       resolveModelProviderStore: () => modelProviderStore,
       resolveRequestContext: () => user,
       knowledgeDir,
+      ensureAmanGuide: () => Promise.resolve(),
     }),
   );
   const sessionPersonas = mount(

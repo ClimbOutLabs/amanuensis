@@ -2,6 +2,8 @@
 
 export const VerifyCommandProposalSourceKind = {
         AgentsMd: "agents_md",
-        PackageJson: "package_json"
+        Makefile: "makefile",
+        PackageJson: "package_json",
+        PyprojectToml: "pyproject_toml"
     } as const;
 export type VerifyCommandProposalSourceKind = typeof VerifyCommandProposalSourceKind[keyof typeof VerifyCommandProposalSourceKind];
