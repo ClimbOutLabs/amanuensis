@@ -68,14 +68,6 @@ export function buildBriefView({
   return { sections, hiddenCount: live.length - shownCount };
 }
 
-/** "Good morning", "Good afternoon" or "Good evening", by the person's local hour, with their name when known. */
-export function briefGreeting({ now, name }: { now: Date; name: string | undefined }): string {
-  const hour = now.getHours();
-  const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const trimmed = name?.trim() ?? '';
-  return trimmed === '' ? `Good ${part}` : `Good ${part}, ${trimmed}`;
-}
-
 /** The top bar's title for a brief: "Brief · Tuesday 21 October", cut to 40 characters. */
 export function briefTopBarTitle(now: Date): string {
   const date = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
@@ -83,7 +75,7 @@ export function briefTopBarTitle(now: Date): string {
   return title.length <= 40 ? title : `${title.slice(0, 39)}…`;
 }
 
-/** A calendar time for the Coming up column, in the browser's time zone: "Sun 25 / 3:30pm". */
+/** A calendar time for a Coming up row, in the browser's time zone: "Sun 25 / 3:30pm". */
 export function briefWhenLabel(iso: string): string | undefined {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return undefined;

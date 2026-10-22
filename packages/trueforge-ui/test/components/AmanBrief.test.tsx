@@ -1,5 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { briefItemKey, type MorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import {
+  briefItemKey,
+  parseMorningBrief,
+  type MorningBrief,
+} from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { AmanBrief } from '@/components/AmanBrief.js';
@@ -136,12 +140,68 @@ describe('AmanBrief', () => {
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
-  it('opens a link target in a new window without a referrer', () => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+  it('makes a link target the real link of the row, opening in a new window without a referrer', () => {
     renderBrief(BRIEF);
-    fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
-    expect(open).toHaveBeenCalledWith('https://calendar.example.com/slots', '_blank', 'noopener,noreferrer');
-    open.mockRestore();
+    const link = screen.getByRole('link', { name: 'Compare' });
+    expect(link).toHaveAttribute('href', 'https://calendar.example.com/slots');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('marks a row done with a click on its status mark', () => {
+    vi.useFakeTimers();
+    const api = fakeApi();
+    renderBrief(BRIEF, api);
+    fireEvent.click(screen.getByRole('button', { name: 'Mark done: Reply to Ines' }));
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    expect(api.markBriefItemDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no markdown syntax when the model answer has markdown in every field', () => {
+    const payload = {
+      digest: '**Two things** need you, *one* from `mail`.',
+      items: [
+        {
+          section: 'coming_up',
+          title: '**Fri 10/23, 10:00 AM** _Dentist_',
+          subtitle: ['*calendar*', '**PVNQDX6V4FW**', '[Oak Clinic](https://clinic.example.com)'],
+          when: '2026-10-23T10:00:00-07:00',
+          action: { label: '[Check the route]', target: { kind: 'link', url: 'https://maps.example.com/route' } },
+        },
+        {
+          section: 'decision',
+          title: '# Reply to *Wren*',
+          subtitle: ['__Lease__ renewal'],
+          source: '*email*',
+          action: { label: '**Draft a reply**', target: { kind: 'prompt', text: 'Draft a reply to Wren' } },
+        },
+      ],
+    };
+    const brief = parseMorningBrief(`Here it is.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (brief === null) throw new Error('Expected the brief to parse');
+    renderBrief(brief);
+    const card = screen.getByTestId('aman-brief');
+    expect(card.textContent).not.toMatch(/[*_`#[\]]/);
+    expect(screen.getByText('Fri 10/23, 10:00 AM Dentist')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Check the route' })).toHaveAttribute(
+      'href',
+      'https://maps.example.com/route',
+    );
+    expect(screen.getByRole('button', { name: 'Draft a reply' })).toBeInTheDocument();
+    expect(screen.getAllByTestId('brief-source').map(label => label.textContent)).toEqual(['email', 'calendar']);
+  });
+
+  it('uses the theme body size for titles, the smaller size for subtitles, and the serif only for the greeting', () => {
+    renderBrief(BRIEF);
+    const title = screen.getByText('Reply to Ines');
+    expect(title).toHaveClass('text-base');
+    expect(title).not.toHaveClass('font-serif');
+    expect(title.nextElementSibling).toHaveClass('text-sm');
+    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('font-serif');
+    expect(screen.getByTestId('aman-brief').querySelectorAll('.font-serif')).toHaveLength(1);
   });
 
   it('shows at most six items, then "+ N more items" that expands inline', () => {

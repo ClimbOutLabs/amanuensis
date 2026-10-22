@@ -5,7 +5,7 @@ import { z } from 'zod';
  * creates as a brief all send this text, so every brief asks for the same things in the same order.
  */
 export const MORNING_BRIEF_PROMPT =
-  'Give me my morning brief. 1. Read everything new since my last brief, or the last 24 hours: all of it, page by page, not just the first few. Then today\'s and the next 7 days\' calendar, the lists in my spaces, and what you remember about me. 2. Write one plain-words digest sentence, then the items, most urgent first. Each item is one thing I can act on. Put anything that may be wrong (a conflict, a likely typo, a date or time that does not match) under check_first. Put replies and choices waiting on me under decision. Put calendar items under coming_up, with their start time. Put a due date under deadline only when it is not already a decision. Each item gets one next step: a label and a target, where the target is a prompt for me to send or an https link. 3. Give the answer as one JSON object in a ```json code block, shaped as {"digest": string, "items": [{"section": "check_first" | "decision" | "coming_up" | "deadline", "title": string, "subtitle": [string, ...], "when": ISO 8601 time with offset (coming_up only), "action": {"label": string, "target": {"kind": "prompt", "text": string} | {"kind": "link", "url": string}}}]}. Keep titles and subtitle parts short. Say where each item came from in its subtitle. Offer next steps, but do not send or save anything without asking me. 4. If something could not be read, leave it out and say so in the digest instead of guessing.';
+  'Give me my morning brief. 1. Read everything new since my last brief, or the last 24 hours: all of it, page by page, not just the first few. Then today\'s and the next 7 days\' calendar, the lists in my spaces, and what you remember about me. 2. Write one plain-words digest sentence, then the items, most urgent first. Each item is one thing I can act on. Put anything that may be wrong (a conflict, a likely typo, a date or time that does not match) under check_first. Put replies and choices waiting on me under decision. Put calendar items under coming_up, with their start time. Put a due date under deadline only when it is not already a decision. Each item gets one next step: a label and a target, where the target is a prompt for me to send or an https link. 3. Give the answer as one JSON object in a ```json code block, shaped as {"digest": string, "items": [{"section": "check_first" | "decision" | "coming_up" | "deadline", "title": string, "subtitle": [string, ...], "source": "email" | "calendar" | "web" | "memory" | "space", "when": ISO 8601 time with offset (coming_up only), "action": {"label": string, "target": {"kind": "prompt", "text": string} | {"kind": "link", "url": string}}}]}. Keep titles and subtitle parts short, in plain text with no markdown. Say where each item came from in its source. Offer next steps, but do not send or save anything without asking me. 4. If something could not be read, leave it out and say so in the digest instead of guessing.';
 
 const MORNING_BRIEF_OPENING = 'Give me my morning brief.';
 
@@ -30,22 +30,20 @@ const BriefLinkTargetSchema = z.object({
   url: z.url({ protocol: /^https$/ }).max(2000),
 });
 
-export const BriefTargetSchema = z.discriminatedUnion('kind', [BriefPromptTargetSchema, BriefLinkTargetSchema]);
+const BriefTargetSchema = z.discriminatedUnion('kind', [BriefPromptTargetSchema, BriefLinkTargetSchema]);
 
-export type BriefTarget = z.infer<typeof BriefTargetSchema>;
-
-export const BriefActionSchema = z.object({
+const BriefActionSchema = z.object({
   label: z.string().min(1).max(40),
   target: BriefTargetSchema,
 });
-
-export type BriefAction = z.infer<typeof BriefActionSchema>;
 
 const BriefItemBaseSchema = z.object({
   title: z.string().min(1).max(160),
   /** Parts joined with " · " when shown, such as an address and a person. */
   subtitle: z.array(z.string().min(1).max(120)).max(4),
   action: BriefActionSchema,
+  /** Where the item came from, shown as a small label: email, calendar, web. */
+  source: z.string().min(1).max(24).optional(),
   when: z.iso.datetime({ offset: true }).optional(),
 });
 
@@ -65,11 +63,67 @@ export const MorningBriefSchema = z.object({
 
 export type MorningBrief = z.infer<typeof MorningBriefSchema>;
 
-const JSON_BLOCK = /```json\s*\n([\s\S]*?)\n```/g;
+const JSON_BLOCK = /```json[^\S\n]*\n?([\s\S]*?)```/g;
+
+/** Sources the model sometimes writes as a bare subtitle part (often in italics) instead of the source field. */
+const SOURCE_WORDS = new Set(['email', 'mail', 'gmail', 'calendar', 'web', 'memory', 'space', 'spaces', 'notes']);
 
 /**
- * The brief in an answer, from its last ```json block. Null when the block is missing, is not JSON, or does not
- * match the brief shape, so the caller shows the answer as plain text instead.
+ * Inline markdown removed from one line of brief text, so no `**`, `*`, `_`, backticks or link brackets show.
+ * Rows have no room for emphasis, so stripping is simpler and steadier than rendering it.
+ */
+export function plainBriefText(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?![\w*])/g, '$1$2')
+    .replace(/(^|[^\w])_(?!\s)([^_]+?)_(?!\w)/g, '$1$2')
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/, '')
+    .replace(/[*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The brief with markdown stripped from every shown field, and a bare source word in the subtitle moved to `source`. */
+function plainBrief(brief: MorningBrief): MorningBrief | null {
+  const items: BriefItem[] = [];
+  for (const item of brief.items) {
+    const title = plainBriefText(item.title);
+    const label = plainBriefText(item.action.label);
+    if (title === '' || label === '') {
+      return null;
+    }
+    let source = item.source === undefined ? undefined : plainBriefText(item.source).toLowerCase() || undefined;
+    const subtitle: string[] = [];
+    for (const part of item.subtitle) {
+      const plain = plainBriefText(part);
+      if (plain === '') {
+        continue;
+      }
+      if (source === undefined && SOURCE_WORDS.has(plain.toLowerCase())) {
+        source = plain.toLowerCase();
+        continue;
+      }
+      subtitle.push(plain);
+    }
+    const cleaned = { ...item, title, subtitle, action: { ...item.action, label } };
+    if (source === undefined) {
+      delete cleaned.source;
+    } else {
+      cleaned.source = source;
+    }
+    items.push(cleaned);
+  }
+  const digest = plainBriefText(brief.digest);
+  return digest === '' ? null : { digest, items };
+}
+
+/**
+ * The brief in an answer, from its last complete ```json block, with markdown stripped from what shows. Null when
+ * the block is missing or unfinished, is not JSON, or does not match the brief shape, so the caller shows the
+ * answer as plain text instead.
  */
 export function parseMorningBrief(answer: string): MorningBrief | null {
   const blocks = [...answer.matchAll(JSON_BLOCK)];
@@ -84,7 +138,7 @@ export function parseMorningBrief(answer: string): MorningBrief | null {
     return null;
   }
   const parsed = MorningBriefSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? plainBrief(parsed.data) : null;
 }
 
 /**

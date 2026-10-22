@@ -89,6 +89,62 @@ describe('parseMorningBrief', () => {
     expect(parseMorningBrief(answer({ digest: 'One item.', items: [item] }))).toBeNull();
   });
 
+  it('reads a block whose closing fence has no newline before it', () => {
+    expect(parseMorningBrief(`\`\`\`json\n${JSON.stringify(VALID)}\`\`\``)).toEqual(VALID);
+  });
+
+  it('returns null while the block is still unfinished', () => {
+    expect(parseMorningBrief('```json\n{"digest": "One')).toBeNull();
+  });
+
+  it('strips markdown from every shown field and lifts a bare source word into the source label', () => {
+    const marked = {
+      digest: '**Two things** to check, *one* from `mail`.',
+      items: [
+        {
+          section: 'coming_up',
+          title: '**Fri 10/23, 10:00 AM** _Dentist_ at [Oak Clinic](https://clinic.example.com)',
+          subtitle: ['*calendar*', '**Ref PVNQDX6V4FW**', '__bring__ the `form`', '**'],
+          when: '2026-10-23T10:00:00-07:00',
+          action: { label: '[Check the route]', target: { kind: 'link', url: 'https://maps.example.com/r?a=1' } },
+        },
+        {
+          section: 'decision',
+          title: '# Reply to *Wren*',
+          subtitle: ['- from snake_case_list'],
+          source: '*email*',
+          action: { label: '**Draft reply**', target: { kind: 'prompt', text: 'Draft a **reply** to Wren' } },
+        },
+      ],
+    };
+    expect(parseMorningBrief(answer(marked))).toEqual({
+      digest: 'Two things to check, one from mail.',
+      items: [
+        {
+          section: 'coming_up',
+          title: 'Fri 10/23, 10:00 AM Dentist at Oak Clinic',
+          subtitle: ['Ref PVNQDX6V4FW', 'bring the form'],
+          source: 'calendar',
+          when: '2026-10-23T10:00:00-07:00',
+          action: { label: 'Check the route', target: { kind: 'link', url: 'https://maps.example.com/r?a=1' } },
+        },
+        {
+          section: 'decision',
+          title: 'Reply to Wren',
+          subtitle: ['from snake_case_list'],
+          source: 'email',
+          // The prompt is sent, not shown, so it keeps the model's text as written.
+          action: { label: 'Draft reply', target: { kind: 'prompt', text: 'Draft a **reply** to Wren' } },
+        },
+      ],
+    });
+  });
+
+  it('returns null when a title is only markdown, so the answer shows as plain text', () => {
+    const item = { ...VALID.items[0], title: '****' };
+    expect(parseMorningBrief(answer({ digest: 'One item.', items: [item] }))).toBeNull();
+  });
+
   it('requires a when only as an offset ISO time', () => {
     const item = { ...VALID.items[1], when: 'Sunday 3:30pm' };
     expect(parseMorningBrief(answer({ digest: 'One item.', items: [item] }))).toBeNull();

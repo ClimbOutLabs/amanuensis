@@ -1590,6 +1590,16 @@
   cursor: pointer;
 }
 
+/* Where a brief item came from: a small quiet label, not part of the sentence. */
+.aui-brief-source {
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0 0.3125rem;
+  font-size: var(--text-xs);
+  line-height: 1.125rem;
+  color: var(--text-secondary);
+}
+
 .aui-brief-action:hover,
 .aui-brief-action:focus-visible {
   text-decoration: underline;

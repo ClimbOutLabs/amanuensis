@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   briefFooterLine,
-  briefGreeting,
   briefTopBarTitle,
   briefWhenLabel,
   buildBriefView,
@@ -56,14 +55,6 @@ describe('buildBriefView', () => {
     const key = briefItemKey({ section: 'check_first', title: 'Mateo invite says 4:00am' });
     const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set([key]), expanded: true });
     expect(view.sections.some(section => section.section === 'check_first')).toBe(false);
-  });
-});
-
-describe('briefGreeting', () => {
-  it('uses the part of the day by local hour, with the name when there is one', () => {
-    expect(briefGreeting({ now: new Date(2026, 9, 20, 9), name: 'Ana' })).toBe('Good morning, Ana');
-    expect(briefGreeting({ now: new Date(2026, 9, 20, 14), name: 'Ana' })).toBe('Good afternoon, Ana');
-    expect(briefGreeting({ now: new Date(2026, 9, 20, 20), name: undefined })).toBe('Good evening');
   });
 });
 

@@ -6,9 +6,9 @@ import { cn } from '../atoms/lib/cn.js';
 import { GoldTick } from '../atoms/Reward.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { greetingLine } from './AmanTour.js';
 import {
   briefFooterLine,
-  briefGreeting,
   briefWhenLabel,
   buildBriefView,
   summarizeBriefAudit,
@@ -130,13 +130,16 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
   return (
     <div className="flex w-full max-w-[48rem] flex-col gap-4" data-testid="aman-brief">
       <header className="flex flex-col gap-1">
-        <h2 id={`${briefId}-greeting`} className="font-serif text-[1.75rem] font-normal text-text-primary">
-          {briefGreeting({ now: new Date(), name })}
+        <h2
+          id={`${briefId}-greeting`}
+          className="font-serif text-2xl font-normal leading-tight text-text-primary sm:text-[1.75rem]"
+        >
+          {greetingLine({ now: new Date(), name })}
         </h2>
-        <p className="text-text-secondary">{brief.digest}</p>
+        <p className="text-base text-text-secondary">{brief.digest}</p>
       </header>
 
-      <div className="aui-brief-card flex flex-col p-5">
+      <div className="aui-brief-card flex flex-col px-4 py-4 sm:px-5">
         {view.sections.map(section => (
           <BriefSectionBlock
             key={section.section}
@@ -147,7 +150,7 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
             onUndo={undo}
           />
         ))}
-        {total === 0 ? <p className="text-text-secondary">Nothing needs you this morning.</p> : null}
+        {total === 0 ? <p className="text-base text-text-secondary">Nothing needs you this morning.</p> : null}
         {view.hiddenCount > 0 || expanded ? (
           <button
             type="button"
@@ -161,7 +164,7 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
           </button>
         ) : null}
         {failure === null ? null : (
-          <p role="alert" className="mt-2 text-[0.875rem] text-text-secondary">
+          <p role="alert" className="mt-2 text-sm text-text-secondary">
             {failure}
           </p>
         )}
@@ -189,9 +192,7 @@ function BriefSectionBlock({
   const heading = section.section === 'decision' ? `${section.label} · ${String(section.count)}` : section.label;
   return (
     <section className="mt-6 flex flex-col gap-2 first:mt-0" aria-label={heading}>
-      <h3 className={cn('text-[0.8125rem] font-normal', isCheck ? 'text-gold-ink' : 'text-text-secondary')}>
-        {heading}
-      </h3>
+      <h3 className={cn('text-sm font-normal', isCheck ? 'text-gold-ink' : 'text-text-secondary')}>{heading}</h3>
       <ul className="flex flex-col">
         {section.items.map(item => (
           <BriefRow
@@ -222,20 +223,13 @@ function BriefRow({
   onUndo: (key: string) => void;
 }) {
   const sendPrompt = useSendPrompt();
-  const actionRef = useRef<HTMLButtonElement>(null);
   const isCheck = item.section === 'check_first';
-  const isComing = item.section === 'coming_up';
   const subtitle = item.subtitle.join(' · ');
   const when = item.section === 'coming_up' && item.when !== undefined ? briefWhenLabel(item.when) : undefined;
   const { action } = item;
-
-  function runAction() {
-    if (action.target.kind === 'prompt') {
-      sendPrompt(action.target.text);
-    } else {
-      window.open(action.target.url, '_blank', 'noopener,noreferrer');
-    }
-  }
+  const target = action.target;
+  const actionClass =
+    'aui-brief-action col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end';
 
   function onKeyDown(event: KeyboardEvent<HTMLLIElement>) {
     if (event.target !== event.currentTarget || done) return;
@@ -244,7 +238,7 @@ function BriefRow({
       onDone(item);
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      actionRef.current?.click();
+      event.currentTarget.querySelector<HTMLElement>('[data-brief-action]')?.click();
     }
   }
 
@@ -255,74 +249,70 @@ function BriefRow({
       aria-label={item.title}
       onKeyDown={onKeyDown}
       className={cn(
-        'group/row grid items-center gap-x-3 border-t border-border py-2.5 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink',
-        isComing
-          ? 'grid-cols-[1.25rem_3.75rem_minmax(0,1fr)] sm:grid-cols-[1.25rem_3.75rem_minmax(0,1fr)_max-content]'
-          : 'grid-cols-[1.25rem_minmax(0,1fr)] sm:grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
+        'group/row grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 border-t border-border py-2.5 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink sm:grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
         phase === 'fading' && 'opacity-0 transition-opacity duration-[225ms] ease-out',
       )}
     >
-      <span className="relative flex size-[1.25rem] items-center justify-center">
-        {isCheck ? (
+      {isCheck ? (
+        <span className="flex size-[1.25rem] items-center justify-center self-start pt-[0.125rem]">
           <span aria-hidden="true" className="size-[0.6875rem] rounded-full bg-gold ring-1 ring-gold-ink" />
-        ) : (
-          <>
-            <span
-              aria-hidden="true"
-              className={cn(
-                'size-[0.8125rem] rounded-full border border-text-secondary',
-                'group-hover/row:hidden group-focus-visible/row:hidden',
-                done && 'hidden',
-              )}
-            />
-            <span
-              aria-hidden="true"
-              className={cn(
-                'hidden size-[1.25rem] group-hover/row:block group-focus-visible/row:block',
-                done && 'block',
-              )}
-            >
-              <GoldTick play={phase !== undefined} className="size-full" />
-            </span>
-          </>
-        )}
-      </span>
-      {isComing ? <span className="font-receipt text-[0.74rem] text-text-secondary">{when ?? ''}</span> : null}
-      <span className="min-w-0">
+        </span>
+      ) : (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Mark done: ${item.title}`}
+          disabled={done}
+          onClick={() => onDone(item)}
+          className="flex size-[1.25rem] cursor-pointer items-center justify-center self-start border-0 bg-transparent p-0 pt-[0.125rem] disabled:cursor-default"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-[0.8125rem] rounded-full border border-text-secondary',
+              'group-hover/row:hidden group-focus-visible/row:hidden',
+              done && 'hidden',
+            )}
+          />
+          <span
+            aria-hidden="true"
+            className={cn('hidden size-[1.25rem] group-hover/row:block group-focus-visible/row:block', done && 'block')}
+          >
+            <GoldTick play={phase !== undefined} className="size-full" />
+          </span>
+        </button>
+      )}
+      <span className="flex min-w-0 flex-col gap-0.5">
         <span
           className={cn(
-            'line-clamp-2 break-words text-[1.0625rem] font-medium text-text-primary sm:line-clamp-none sm:block sm:truncate',
+            'line-clamp-2 break-words text-base font-medium leading-snug text-text-primary sm:line-clamp-1',
             done && 'text-text-secondary',
           )}
         >
           {item.title}
         </span>
-        {subtitle === '' ? null : (
-          <span className="block truncate text-[0.875rem] text-text-secondary">{subtitle}</span>
+        {when === undefined && subtitle === '' && item.source === undefined ? null : (
+          <span className="flex min-w-0 items-baseline gap-x-2 text-sm leading-snug text-text-secondary">
+            {when === undefined ? null : <span className="shrink-0 font-receipt text-xs">{when}</span>}
+            {subtitle === '' ? null : <span className="min-w-0 truncate">{subtitle}</span>}
+            {item.source === undefined ? null : (
+              <span data-testid="brief-source" className="aui-brief-source shrink-0">
+                {item.source}
+              </span>
+            )}
+          </span>
         )}
       </span>
       {phase === 'undo' ? (
-        <button
-          type="button"
-          className={cn(
-            'aui-brief-action justify-self-start sm:justify-self-end sm:col-start-auto',
-            isComing ? 'col-start-3' : 'col-start-2',
-          )}
-          onClick={() => onUndo(item.key)}
-        >
+        <button type="button" className={actionClass} onClick={() => onUndo(item.key)}>
           Undo
         </button>
+      ) : target.kind === 'link' ? (
+        <a data-brief-action className={actionClass} href={target.url} target="_blank" rel="noopener noreferrer">
+          {action.label}
+        </a>
       ) : (
-        <button
-          ref={actionRef}
-          type="button"
-          className={cn(
-            'aui-brief-action justify-self-start sm:justify-self-end sm:col-start-auto',
-            isComing ? 'col-start-3' : 'col-start-2',
-          )}
-          onClick={runAction}
-          aria-label={action.label}
-        >
+        <button data-brief-action type="button" className={actionClass} onClick={() => sendPrompt(target.text)}>
           {action.label}
         </button>
       )}
@@ -353,5 +343,5 @@ function BriefFooter({ sessionId }: { sessionId: string | undefined }) {
   }, [api, sessionId]);
 
   if (summary === null) return null;
-  return <p className="text-[0.875rem] text-text-secondary">{briefFooterLine(summary)}</p>;
+  return <p className="text-sm text-text-secondary">{briefFooterLine(summary)}</p>;
 }

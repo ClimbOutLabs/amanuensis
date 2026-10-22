@@ -136,6 +136,8 @@ const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
   'waiting-for-approval': 'Waiting for approval',
 };
 
+const BRIEF_WRITING_LINE = 'Putting your brief together…';
+
 export function AssistantMessageContainer() {
   const AssistantMessageBubble = useSlot('AssistantMessageBubble');
   const MessageActionBar = useSlot('MessageActionBar');
@@ -172,8 +174,10 @@ export function AssistantMessageContainer() {
   const messageId = useAuiState(s => s.message.id);
   const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
   const answerText = useAuiState(s => messageText(s.message.content));
-  // A brief replaces the answer once it is done and its JSON block parses; otherwise the answer shows as text.
-  const brief = answersBrief && !isMessageRunning ? parseMorningBrief(answerText) : null;
+  // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
+  // line shows instead of the raw text; a finished answer without a valid block shows as normal markdown.
+  const brief = answersBrief ? parseMorningBrief(answerText) : null;
+  const briefWriting = answersBrief && brief === null && isMessageRunning;
 
   const { runs, hasFinal } = computeAgentStepsSplit(parts);
 
@@ -314,7 +318,7 @@ export function AssistantMessageContainer() {
             case 'group-reasoning':
               return isMessageRunning ? <ReasoningContainer group={part} /> : null;
             case 'text':
-              return <AssistantTextContainer />;
+              return briefWriting ? null : <AssistantTextContainer />;
             case 'reasoning':
               return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
@@ -333,6 +337,11 @@ export function AssistantMessageContainer() {
           }
         }}
       </MessagePrimitive.GroupedParts>
+      {briefWriting ? (
+        <p role="status" className="text-sm text-text-secondary" data-testid="brief-writing">
+          {BRIEF_WRITING_LINE}
+        </p>
+      ) : null}
       <TurnImages />
     </>
   );
