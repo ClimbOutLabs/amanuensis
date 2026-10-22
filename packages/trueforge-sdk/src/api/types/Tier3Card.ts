@@ -15,6 +15,8 @@ export interface Tier3Card {
     email?: TrueForge.Tier3Email | null;
     /** For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null. */
     mailNewRecipients?: string[] | null;
+    /** Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none. */
+    outboundPlumbingText?: string | null;
     /** Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker. */
     outboundText: string | null;
     /** True when part of outbound_text is cut and not shown in full. */
