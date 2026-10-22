@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
+import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { usePrefersReducedMotion } from '../atoms/lib/usePrefersReducedMotion.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
 import { Icon } from '../icons/Icon.js';
@@ -27,6 +28,8 @@ export function ChatHistoryPanel({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const reducedMotion = usePrefersReducedMotion();
+  // The aside is display:none below the md breakpoint, so it has no box to transition and no rules apply.
+  const shown = !useIsMobile();
   const [pinned, setPinned] = useState(readStoredChatHistoryPinned);
   const [exiting, setExiting] = useState(false);
   const pointerInside = useRef(false);
@@ -36,11 +39,15 @@ export function ChatHistoryPanel({
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const close = useCallback(() => {
+    if (!shown) {
+      onClose();
+      return;
+    }
     // The panel is about to lose its focus target, so hand focus back to the button that opened it.
     if (panelRef.current?.contains(document.activeElement ?? null)) returnFocusRef.current?.focus();
     if (reducedMotion) onClose();
     else setExiting(true);
-  }, [onClose, reducedMotion, returnFocusRef]);
+  }, [onClose, reducedMotion, returnFocusRef, shown]);
 
   const closeFromPick = useCallback(() => {
     if (!pinned) close();
@@ -51,13 +58,14 @@ export function ChatHistoryPanel({
       if (event.key !== 'Escape' || event.defaultPrevented || exiting) return;
       close();
     };
+    if (!shown) return;
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, exiting]);
+  }, [close, exiting, shown]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
-    if (conversation == null) return;
+    if (conversation == null || !shown) return;
     const closeFromConversation = () => {
       if (pinned || exiting || pointerInside.current || keyboardFocusInside.current || scrolling.current) return;
       close();
@@ -73,7 +81,7 @@ export function ChatHistoryPanel({
       conversation.removeEventListener('pointerdown', closeFromConversation);
       conversation.removeEventListener('focusin', onFocusIn);
     };
-  }, [close, conversationRef, exiting, pinned]);
+  }, [close, conversationRef, exiting, pinned, shown]);
 
   useEffect(() => () => clearTimeout(scrollTimer.current), []);
 

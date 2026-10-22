@@ -127,3 +127,50 @@ test(
     });
   },
 );
+
+/** Panel and toggle must agree: Show means no visible panel, Hide means a full-width panel. */
+async function assertToggleMatchesPanel(page: Page, message: string): Promise<void> {
+  const showing = (await page.getByRole('button', { name: HIDE }).count()) === 1;
+  const panelBox = await historyPanel(page).boundingBox();
+  if (showing) {
+    assert.ok(
+      panelBox != null && panelBox.width >= 250,
+      `${message}: Hide is shown but the panel is ${panelBox?.width}px`,
+    );
+  } else {
+    assert.ok(panelBox == null || panelBox.width < 1, `${message}: Show is shown but the panel is open`);
+  }
+}
+
+test(
+  'a composer focus at phone width does not leave the panel stuck when the window widens',
+  { timeout: 180_000 },
+  async () => {
+    await withFixturePage(PHONE, async page => {
+      await page.getByRole('button', { name: 'Navigation' }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+      await page.locator('[data-slot="aui_composer-root"] textarea').first().focus();
+      await settle(page);
+
+      await page.setViewportSize(DESKTOP);
+      await settle(page);
+      await assertToggleMatchesPanel(page, 'after a composer focus at phone width');
+    });
+  },
+);
+
+test('Escape at phone width does not leave the panel stuck when the window widens', { timeout: 180_000 }, async () => {
+  await withFixturePage(PHONE, async page => {
+    await page.getByRole('button', { name: 'Navigation' }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+    await page.keyboard.press('Escape');
+    await settle(page);
+
+    await page.setViewportSize(DESKTOP);
+    await page.getByRole('button', { name: HIDE }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+    await settle(page);
+    const panelBox = await historyPanel(page).boundingBox();
+    assert.ok(
+      panelBox != null && panelBox.width >= 250,
+      `The panel is ${panelBox?.width}px after Escape at phone width`,
+    );
+  });
+});
