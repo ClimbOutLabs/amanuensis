@@ -15,7 +15,7 @@ import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import type { MemoryClient } from './memoryClient';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { summarizeTurnContent } from './memorySummarize';
+import { summarizeTurnContent, type SummaryFallbackReason } from './memorySummarize';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -92,6 +92,15 @@ export interface SummarizeTurnContext {
   modelUsage: TurnModelUsage;
 }
 
+/**
+ * Present for an interactive turn, so its memory outcomes are logged at info. Absent for
+ * scheduled turns and recovery resubmissions, which log nothing at info.
+ */
+export interface RetainOutcomeLog {
+  /** The persona whose vault the turn retains into; `shared` when no persona is active. */
+  personaName: string;
+}
+
 export interface SubmitRetainParams {
   client: MemoryClient;
   sessionId: string;
@@ -103,6 +112,7 @@ export interface SubmitRetainParams {
   /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
   origin?: AmanMemoryOrigin | undefined;
   logger: Logger;
+  outcomeLog?: RetainOutcomeLog | undefined;
   /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
@@ -169,6 +179,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       params.logger.debug('Memory summarization failed; falling back to verbatim transcript', {
         reason: result.reason,
       });
+      logFullTextFallback(params, result.fallback);
     } else {
       // `skipped` is an intentional no-op, but the reason must stay observable: a turn
       // that never summarizes (no model configured, overlong exchange) is otherwise
@@ -176,14 +187,32 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       params.logger.debug('Memory summarization skipped; falling back to verbatim transcript', {
         reason: result.reason,
       });
+      // An empty exchange stores nothing, so there is no full text to report.
+      if (result.reason !== 'empty-exchange') {
+        logFullTextFallback(params, result.reason === 'input-too-long' ? 'input_too_long' : 'model_unresolved');
+      }
     }
     return undefined;
   } catch (error) {
     params.logger.debug('Memory summarization threw; falling back to verbatim transcript', {
       reason: error instanceof Error ? error.message : String(error),
     });
+    logFullTextFallback(params, 'model_failed');
     return undefined;
   }
+}
+
+/** Info line for a turn stored verbatim while summarization was on; interactive turns only. */
+function logFullTextFallback(params: SubmitRetainParams, reason: SummaryFallbackReason): void {
+  if (params.outcomeLog === undefined) {
+    return;
+  }
+  params.logger.info('Turn saved as full text instead of a summary', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    reason,
+  });
 }
 
 async function attemptRetainSubmission(
@@ -216,6 +245,14 @@ async function attemptRetainSubmission(
         reason: outcome.reason,
       });
       return 'failed';
+    }
+    if (outcome.dropped !== undefined && params.outcomeLog !== undefined) {
+      params.logger.info('Turn memory not saved: it only described what Aman could not do', {
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        personaName: params.outcomeLog.personaName,
+        reason: outcome.dropped,
+      });
     }
     return 'submitted';
   } catch (error) {

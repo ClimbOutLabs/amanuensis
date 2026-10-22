@@ -83,7 +83,11 @@ import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
+import {
+  submitRetainWithVerification,
+  type RetainOutcomeLog,
+  type SummarizeTurnContext,
+} from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -1004,6 +1008,50 @@ async function resolveAndSubmitArtifactPersistence(params: {
   }
 }
 
+/** Outcome logging for an interactive turn: its retain persona, and the store to read the chat's persona after it. */
+export interface TurnOutcomeLog extends RetainOutcomeLog {
+  personaStore: Pick<IPersonaStore, 'getSessionPersona'>;
+  tenantId: string;
+}
+
+/**
+ * Logs when the turn's memory went to the vault of the persona it started with but the chat
+ * ended under another (a `use_persona` switch during the turn).
+ */
+async function logTurnPersonaSwitch(params: {
+  outcomeLog: TurnOutcomeLog;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { outcomeLog, sessionId, turnId, logger } = params;
+  let activePersonaName: string;
+  try {
+    const active = await outcomeLog.personaStore.getSessionPersona({
+      tenant_id: outcomeLog.tenantId,
+      session_id: sessionId,
+    });
+    activePersonaName = active?.persona_name ?? 'shared';
+  } catch (error) {
+    logger.warn('Could not read the chat persona after a turn; persona switch not checked', {
+      sessionId,
+      turnId,
+      ...extractErrorLogFields(error),
+    });
+    return;
+  }
+  if (activePersonaName === outcomeLog.personaName) {
+    return;
+  }
+  logger.info('Turn memory saved under the persona the turn started with', {
+    sessionId,
+    turnId,
+    personaName: outcomeLog.personaName,
+    activePersonaName,
+    reason: 'persona_switched',
+  });
+}
+
 /**
  * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
  * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
@@ -1032,6 +1080,8 @@ export interface DrainTurnEventsInput {
          * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
          */
         summarize?: SummarizeTurnContext | undefined;
+        /** Present only for interactive turns; scheduled turns log nothing at info. */
+        outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
@@ -1100,6 +1150,9 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
         };
         await flushUsage();
         if (memory !== undefined) {
+          if (memory.outcomeLog !== undefined) {
+            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+          }
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
           await submitRetainWithVerification({
@@ -1113,6 +1166,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
             logger,
             summarize: memory.summarize,
+            outcomeLog: memory.outcomeLog,
           });
         }
         if (profileLearning !== undefined) {
@@ -2428,6 +2482,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,
+              outcomeLog: {
+                personaName: vaultScope?.personaName ?? 'shared',
+                personaStore: deps.personaStore,
+                tenantId: requestContext.tenant_id,
+              },
             },
       profileLearning,
       artifacts: {

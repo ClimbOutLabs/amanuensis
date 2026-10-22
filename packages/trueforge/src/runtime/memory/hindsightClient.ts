@@ -207,6 +207,8 @@ export interface RetainItem {
 export interface RetainOutcome {
   ok: boolean;
   reason?: string;
+  /** Set when the whole item was removed before storage, so nothing was written for it. */
+  dropped?: 'ability_notes_only' | undefined;
 }
 
 export type GetOperationOutcome = { ok: true; status: string } | MemoryFailure;
