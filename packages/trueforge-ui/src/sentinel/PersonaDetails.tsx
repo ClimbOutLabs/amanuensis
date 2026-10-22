@@ -4,8 +4,6 @@ import type { FC } from 'react';
 
 import type { SentinelApprovalPersona } from './types.js';
 
-export const PERSONA_BADGE = 'New specialist';
-
 function Line({ label, value }: { label: string; value: string }) {
   return (
     <p className="break-words text-sm text-text-primary">
