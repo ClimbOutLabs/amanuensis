@@ -14,6 +14,7 @@ import {
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
+import { personDisplayName } from './personDisplayName.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -140,6 +141,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   auditFeed,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
+  // The sign-in name stays out of the rail; only the name the person gave Aman is shown here.
+  const personName = personDisplayName({ profile, signInName: null });
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
@@ -232,7 +235,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             )}
             <div className="aman-runtime-rail__identity aui-panda__caption">
               <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
-              <p className="aui-panda__role">Your chief of staff</p>
+              <p className="aui-panda__role">{personName ? `${personName}'s Chief of Staff` : 'Your Chief of Staff'}</p>
             </div>
           </section>
 

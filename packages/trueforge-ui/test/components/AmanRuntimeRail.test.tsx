@@ -193,8 +193,9 @@ describe('AmanRuntimeRail', () => {
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
     const selector = '.aman-runtime-rail__avatar {';
     // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations.
-    expect(stylesheet.split(selector)).toHaveLength(2);
+    // would let this read an earlier rule and pass on stale declarations. The one extra block
+    // is the dark-mode override, which swaps the feather for a radial mask.
+    expect(stylesheet.split(selector)).toHaveLength(3);
     const rule = stylesheet.slice(stylesheet.indexOf(selector));
     const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
 
@@ -325,6 +326,44 @@ describe('AmanRuntimeRail', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mira' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
+  });
+
+  it('captions the panda with the owner name in sentence case', async () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <PersonalizationProvider
+          api={{
+            getProfile: async () => ({
+              assistant_name: 'Mira',
+              assistant_identity: null,
+              voice_guidance: null,
+              user_name: 'Maya',
+              address_as: null,
+              user_profile: null,
+              pinned_preferences: [],
+              help_areas: [],
+              learned_profile: null,
+            }),
+            updateProfile: async profile => profile,
+            deleteProfile: async () => {},
+          }}
+        >
+          <AmanRuntimeRail />
+        </PersonalizationProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aui-panda__role');
+  });
+
+  it('captions the panda "Your Chief of Staff" when no owner name is known', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aui-panda__role');
   });
 
   it('groups the rail into labeled answering and model sections', () => {
