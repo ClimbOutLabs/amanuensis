@@ -405,6 +405,15 @@ export function privateFingerprintsUsable(state: WebSearchTurnState): boolean {
   );
 }
 
+/**
+ * Whether the chat has read private data that a search or map must not send without asking. The process mark is lost
+ * on a restart, so the saved record answers too: it is incomplete only after a private read Aman could not check.
+ */
+export function chatPrivateReadHeld(input: { state: WebSearchTurnState; markedInProcess: boolean }): boolean {
+  const saved = input.state.chatFingerprints;
+  return input.markedInProcess || saved.secret || (input.state.savedFingerprintsLoaded && !saved.complete);
+}
+
 /** Whether this turn holds private-text fingerprints, or a lost one, that the chat's saved record must take in. */
 export function hasPrivateFingerprintsToSave(state: WebSearchTurnState): boolean {
   return state.privateReadCalls > 0 || state.fingerprintsLost || state.chatFingerprints.secret;
