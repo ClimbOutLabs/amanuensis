@@ -28,6 +28,7 @@ import {
 } from '../permissions/webSearch';
 import {
   isPageReaderTool,
+  isSearchResultTool,
   recordFetchedPages,
   recordSearchResults,
   type FetchedPageScope,
@@ -346,11 +347,18 @@ export class ToolSet implements IToolSet {
       this.pagesScope !== undefined &&
       isCallToolResponseResult(response) &&
       response.result.isError !== true &&
+      isSearchResultTool(params.name) &&
       ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
         (this.searchProvider && this.searchTools.has(params.name)))
     ) {
       // A search's results are sources, one link at a time; its query and any answer it wrote are not.
-      recordSearchResults({ pages: this.pages, scope: this.pagesScope, texts: resultTexts(response.result) });
+      // A provider's search_tools list also holds its page readers, so only named search tools count.
+      recordSearchResults({
+        pages: this.pages,
+        scope: this.pagesScope,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
     }
     if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
       // What a search returned is what a later fetch in this turn may name. A call that itself

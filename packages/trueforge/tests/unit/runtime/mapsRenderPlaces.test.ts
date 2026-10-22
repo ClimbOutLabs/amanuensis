@@ -354,6 +354,7 @@ describe('render_places tool definition', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
       pages_scope: SCOPE,
+      starts_answer: true,
     }).systemToolSets?.[0];
     const listed = await server?.listTools();
     const tools = listed !== undefined && 'result' in listed ? listed.result.tools : [];
@@ -443,15 +444,56 @@ describe('render_places with search results and the retry limit', () => {
     expect(asked).toHaveLength(0);
   });
 
-  it('starts a new turn with a fresh retry for the same place', async () => {
+  it('starts a new answer with a fresh retry for the same place', async () => {
     const { service, pages } = setup(query => hit('38.7', '-9.1', query));
     const retries = new PlaceRefusalLedger();
     const claim = { ...harbour, name: 'Harbour Clinic Lisbon' };
     await ledgerRun(retries, service, pages, claim);
     await ledgerRun(retries, service, pages, claim);
-    retries.startTurn();
+    retries.startAnswer(SCOPE);
     const next = await ledgerRun(retries, service, pages, claim);
     expect(next.body).not.toHaveProperty('stop');
     expect(next.body).toMatchObject({ refused: [{ reason: expect.stringContaining('not on that page') }] });
+  });
+
+  it('counts refusals by place, so a new link or address each time still runs out', async () => {
+    const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
+    const retries = new PlaceRefusalLedger();
+    const bodies = [];
+    for (let at = 0; at < 5; at += 1) {
+      const claim = { ...harbour, address: `${at} Example Street, Lisbon`, source_url: `${HARBOUR_URL}/${at}` };
+      bodies.push((await ledgerRun(retries, service, pages, claim)).body);
+    }
+    expect(bodies[0]).not.toHaveProperty('stop');
+    for (const body of bodies.slice(1)) {
+      expect(body).toHaveProperty('stop');
+    }
+    expect(asked).toHaveLength(0);
+  });
+
+  it('keeps the count across an approval that resumes the same answer', async () => {
+    const scope: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-approval' };
+    const call = async (starts_answer: boolean) => {
+      const server = mapsCapability({
+        tracing: NOOP_AGENT_TRACING,
+        logger: createLogger({ silent: true }),
+        pages_scope: scope,
+        starts_answer,
+      }).systemToolSets?.[0];
+      if (server === undefined) {
+        throw new Error('maps is not offered');
+      }
+      const claim = { ...harbour, source_url: 'https://never-read.example/clinic' };
+      return bodyOf(
+        await server.callTool(
+          { name: 'render_places', arguments: { places: [claim], calendar_locations: [] } },
+          { status: 'allow' },
+        ),
+      ).body;
+    };
+    expect(await call(true)).not.toHaveProperty('stop');
+    // The approved retry arrives as a new request with no new message from the person.
+    expect(await call(false)).toHaveProperty('stop');
+    expect(await call(true)).not.toHaveProperty('stop');
   });
 });

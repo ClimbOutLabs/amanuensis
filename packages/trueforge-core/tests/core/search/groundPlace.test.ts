@@ -346,4 +346,53 @@ describe('groundPlace reads a listing as one block', () => {
       reason: 'address_apart_from_name',
     });
   });
+
+  it.each([
+    [
+      'a Portuguese address with the street word first and the number after',
+      'Casa Azul\nRua Augusta 24, Lisboa\nCafe Ouro\nRua do Ouro 10, Lisboa',
+      'Casa Azul',
+      'Rua do Ouro 10',
+    ],
+    [
+      'an address with no house number',
+      'Sunny Table\nHarbour Road, Riverside\nBlue Door Diner\n7 Mill Lane, Riverside',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'an address on a Terrace',
+      'Sunny Table\n3 Elm Terrace, Riverside\nBlue Door Diner\n7 Mill Lane',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'a Street with no house number',
+      'Sunny Table\nMain Street, Riverside\nBlue Door Diner\n7 Mill Lane',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'a name right after another listing, borrowing the address above it',
+      'Blue Door Diner\n7 Mill Lane, Riverside\nSunny Table\n3 Elm Terrace, Riverside',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+  ])('refuses a name paired across %s of another listing', (_case, text, name, address) => {
+    const pages = blockStore(text);
+    expect(groundPlace({ claim: blockClaim(name, address), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+
+  it.each([
+    ['Casa Azul\nRua Augusta 24, Lisboa\nCafe Ouro\nRua do Ouro 10, Lisboa', 'Cafe Ouro', 'Rua do Ouro 10'],
+    ['Blue Door Diner\n7 Mill Lane, Riverside\nSunny Table\n3 Elm Terrace, Riverside', 'Sunny Table', '3 Elm Terrace'],
+    ['Sunny Table\n40 Harbour Road, Riverside\nBlue Door Diner', 'Sunny Table', 'Harbour Road, Riverside'],
+    ['Dr Ana Ruiz, GP\nRated 4.9\n14 Hidden Orchard Lane, Springfield', 'Dr Ana Ruiz', '14 Hidden Orchard Lane'],
+  ])('keeps the nearest address after the name: %s', (text, name, address) => {
+    const pages = blockStore(text);
+    expect(groundPlace({ claim: blockClaim(name, address), pages, scope: SCOPE })).toMatchObject({ ok: true });
+  });
 });

@@ -25,7 +25,8 @@ export type GroundResult =
         | 'name_not_found'
         | 'address_not_found'
         | 'address_apart_from_name'
-        | 'place_only_in_address';
+        | 'place_only_in_address'
+        | 'place_only_in_search_query';
     };
 
 const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
@@ -57,6 +58,9 @@ const ADDRESS_WORD_FORMS: Readonly<Record<string, string>> = {
   west: 'w',
   mount: 'mt',
   fort: 'ft',
+  terrace: 'ter',
+  circle: 'cir',
+  trail: 'trl',
 };
 
 /**
@@ -64,14 +68,20 @@ const ADDRESS_WORD_FORMS: Readonly<Record<string, string>> = {
  * one spelling, padded so words match whole.
  */
 export function normalizedWords(text: string): string {
-  const folded = text
+  return ` ${unfoldedWords(text)
+    .map(token => ADDRESS_WORD_FORMS[token] ?? token)
+    .join(' ')} `;
+}
+
+/** The words normalizedWords keeps, one for one, before address words are folded. */
+function unfoldedWords(text: string): string[] {
+  const plain = text
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
-  const tokens = folded === '' ? [] : folded.split(' ').map(token => ADDRESS_WORD_FORMS[token] ?? token);
-  return ` ${tokens.join(' ')} `;
+  return plain === '' ? [] : plain.split(' ');
 }
 
 function pageHas({ pageWords, value }: { pageWords: string; value: string }): boolean {
@@ -146,16 +156,15 @@ function occurrences({
 /** A listing's name, rating, reviews, price, cuisine and address fit in about 40 words; more is another block. */
 const MAX_WORDS_IN_LISTING_BLOCK = 40;
 
-/** Street words as normalizedWords folds them, so "Street" and "St" both count. */
+/**
+ * Words that on their own mark a street, as normalizedWords folds them, in English and the other
+ * languages listings commonly use. A line holding one of these is another listing's address.
+ */
 const STREET_WORDS: ReadonlySet<string> = new Set([
-  'st',
   'ave',
   'rd',
   'blvd',
-  'dr',
   'ln',
-  'ct',
-  'pl',
   'sq',
   'hwy',
   'pkwy',
@@ -163,25 +172,80 @@ const STREET_WORDS: ReadonlySet<string> = new Set([
   'ter',
   'cir',
   'trl',
+  'crescent',
+  'alley',
+  'rua',
+  'avenida',
+  'travessa',
+  'largo',
+  'praca',
+  'calle',
+  'carrer',
+  'paseo',
+  'plaza',
+  'via',
+  'viale',
+  'piazza',
+  'corso',
+  'rue',
+  'chemin',
+  'allee',
+  'quai',
+  'strasse',
+  'straße',
+  'platz',
+  'weg',
+  'gasse',
+  'straat',
+  'laan',
+  'plein',
+  'ulica',
 ]);
-const STREET_WORD_LOOKAHEAD = 3;
+
+/** Folded words that are also titles or common words ("Dr", "St", "Place"): they mark a street only next to a number. */
+const STREET_WORDS_NEEDING_A_NUMBER: ReadonlySet<string> = new Set([
+  'st',
+  'dr',
+  'pl',
+  'ct',
+  'mt',
+  'ft',
+  'av',
+  'str',
+  'ul',
+  'row',
+  'close',
+]);
+
+/** German and Dutch street names are one word: "Hauptstrasse", "Bergweg". */
+const STREET_WORD_ENDINGS = ['strasse', 'straße', 'gasse', 'platz', 'straat', 'weg', 'laan'];
+
+/** How far a house number may sit from an ambiguous street word, on either side. */
+const HOUSE_NUMBER_REACH = 3;
 
 /**
- * Where each address-like line starts: a house number, then a word, then a street word within a few
- * words. A rating such as "4.5" is a number too, so a number followed by another number does not count.
+ * Every word position that marks an address line: a street word in any language, in any place on
+ * the line, with or without a house number. Deny by default: a word that might be a street counts.
+ * Takes the words before folding, so "Street" (always a street) stays apart from "St" (maybe Saint).
  */
-function addressLineStarts(tokens: readonly string[]): number[] {
-  const starts: number[] = [];
-  tokens.forEach((token, at) => {
-    const next = tokens[at + 1];
-    if (!/^\d+$/.test(token) || next === undefined || /^\d+$/.test(next)) {
-      return;
-    }
-    if (tokens.slice(at + 1, at + 1 + STREET_WORD_LOOKAHEAD).some(word => STREET_WORDS.has(word))) {
-      starts.push(at);
+function addressMarkers(tokens: readonly string[]): number[] {
+  const hasNumberNear = (at: number): boolean =>
+    tokens
+      .slice(Math.max(0, at - HOUSE_NUMBER_REACH), at + 1 + HOUSE_NUMBER_REACH)
+      .some(word => /^\d+[a-z]?$/.test(word));
+  const markers: number[] = [];
+  tokens.forEach((raw, at) => {
+    const token = ADDRESS_WORD_FORMS[raw] ?? raw;
+    const isStreet =
+      STREET_WORDS.has(token) ||
+      raw === 'street' ||
+      (STREET_WORDS_NEEDING_A_NUMBER.has(token) && hasNumberNear(at)) ||
+      STREET_WORD_ENDINGS.some(ending => token.length > ending.length + 2 && token.endsWith(ending));
+    if (isStreet) {
+      markers.push(at);
     }
   });
-  return starts;
+  return markers;
 }
 
 interface Span {
@@ -189,14 +253,12 @@ interface Span {
   end: number;
 }
 
-/** The words strictly between two spans, in either order. */
-function gapBetween({ first, second }: { first: Span; second: Span }): Span {
-  return first.end <= second.start ? { start: first.end, end: second.start } : { start: second.end, end: first.start };
-}
-
 /**
- * Whether a name and an address sit in one listing block: close enough, and with no other address
- * line between them, so a name cannot borrow the address of the listing next to it.
+ * Whether a name and an address sit in one listing block and belong to each other: the address is
+ * the nearest address line to the name, looking after the name first. An address after the name
+ * must have no other address line before it; an address before the name counts only when no
+ * address line follows the name within the block. So a name cannot borrow the address of the
+ * listing next to it, on either side.
  */
 function closeTogether({
   nameHits,
@@ -205,16 +267,23 @@ function closeTogether({
 }: {
   nameHits: readonly Span[];
   addressHits: readonly Span[];
+  /** The page's words before folding, in the same positions as the hits. */
   tokens: readonly string[];
 }): boolean {
-  const lineStarts = addressLineStarts(tokens);
+  const markers = addressMarkers(tokens);
+  const markerIn = ({ start, end }: Span): boolean => markers.some(at => at >= start && at < end);
   return nameHits.some(name =>
     addressHits.some(address => {
-      const gap = gapBetween({ first: name, second: address });
-      if (gap.end - gap.start > MAX_WORDS_IN_LISTING_BLOCK) {
-        return false;
+      if (address.start >= name.end) {
+        const gap = { start: name.end, end: address.start };
+        return gap.end - gap.start <= MAX_WORDS_IN_LISTING_BLOCK && !markerIn(gap);
       }
-      return !lineStarts.some(at => at >= gap.start && at < gap.end);
+      if (address.end <= name.start) {
+        const gap = { start: address.end, end: name.start };
+        const after = { start: name.end, end: name.end + MAX_WORDS_IN_LISTING_BLOCK };
+        return gap.end - gap.start <= MAX_WORDS_IN_LISTING_BLOCK && !markerIn(gap) && !markerIn(after);
+      }
+      return false;
     }),
   );
 }
@@ -263,7 +332,8 @@ function siteOf(url: string): string {
 
 /**
  * Keeps only what the fetched source page really says. The name and address must be on the page,
- * in one listing block, or the place is refused; any other field it
+ * in one listing block, or the place is refused; a search result whose place was in the chat's own
+ * searches is refused too. Any other field it
  * cannot find is dropped, never guessed. The source must be a page this server fetched for this
  * chat, and the fetch time is the server's.
  */
@@ -297,8 +367,15 @@ export function groundPlace({
   if (addressHits.length === 0) {
     return { ok: false, reason: 'address_not_found' };
   }
-  if (!closeTogether({ nameHits, addressHits, tokens: pageTokens })) {
+  if (!closeTogether({ nameHits, addressHits, tokens: unfoldedWords(page.text) })) {
     return { ok: false, reason: 'address_apart_from_name' };
+  }
+  if (
+    page.is_snippet &&
+    (pages.queriesContain({ scope, text: claim.name }) || pages.queriesContain({ scope, text: claim.address }))
+  ) {
+    // A search result can repeat the words it was searched with; those prove nothing about the place.
+    return { ok: false, reason: 'place_only_in_search_query' };
   }
   const found = (value: string | null): string | null =>
     value !== null && pageHas({ pageWords, value }) ? value : null;

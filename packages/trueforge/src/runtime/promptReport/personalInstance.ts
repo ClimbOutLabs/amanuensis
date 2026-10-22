@@ -239,6 +239,7 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore() : undefined,
     schedules: scheduleContext(logger),
+    startsAnswer: true,
   };
   const resolver = new SpaceTurnResourceResolver(
     {

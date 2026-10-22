@@ -8,7 +8,12 @@ describe('FetchedPageStore', () => {
   it('stamps the fetch time itself and returns the page text as stored', () => {
     const store = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 3 });
     const kept = store.remember({ scope: CHAT_A, url: 'https://a.example/x', text: 'hello' });
-    expect(kept).toEqual({ url: 'https://a.example/x', text: 'hello', fetched_at: '2026-10-17T10:00:00.000Z' });
+    expect(kept).toEqual({
+      url: 'https://a.example/x',
+      text: 'hello',
+      fetched_at: '2026-10-17T10:00:00.000Z',
+      is_snippet: false,
+    });
     expect(store.recall({ scope: CHAT_A, url: 'https://a.example/x' })).toEqual(kept);
     expect(store.recall({ scope: CHAT_A, url: 'https://a.example/other' })).toBeUndefined();
   });

@@ -31,7 +31,6 @@ import {
   type FetchedPageStore,
   type MapsRouteResult as MapsRouteResultBody,
   type MapsTravelMode,
-  type PreSendContextProcessor,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -516,25 +515,50 @@ const TURN_LIMIT_REASON = 'This place was refused twice in this answer. Stop try
 const PLACE_STOP_MESSAGE =
   'The map check refused these places twice in this answer. Stop trying the map. Answer in text instead: give each place with its address and its link, and say the map could not check it.';
 
-/** Refusals per place in the current turn. The next turn starts with a clear count. */
+/** Chats whose refusal counts are kept at once; the oldest chat's count goes first. */
+const MAX_CHATS_WITH_REFUSALS = 500;
+
+/**
+ * Refusals per place in each chat's current answer, keyed by the place's name alone, so a retry
+ * with another link or address still counts. It outlives one request, because an approval resumes
+ * the same answer in a new request; only a new message from the person starts a fresh count.
+ */
 export class PlaceRefusalLedger {
-  readonly #refusals = new Map<string, number>();
+  readonly #chats = new Map<string, Map<string, number>>();
 
-  refusalsOf(key: string): number {
-    return this.#refusals.get(key) ?? 0;
+  refusalsOf({ scope, name }: { scope: FetchedPageScope; name: string }): number {
+    return this.#chats.get(chatKey(scope))?.get(placeKey(name)) ?? 0;
   }
 
-  record(key: string): void {
-    this.#refusals.set(key, this.refusalsOf(key) + 1);
+  record({ scope, name }: { scope: FetchedPageScope; name: string }): void {
+    const key = chatKey(scope);
+    const counts = this.#chats.get(key) ?? new Map<string, number>();
+    this.#chats.delete(key);
+    counts.set(placeKey(name), (counts.get(placeKey(name)) ?? 0) + 1);
+    this.#chats.set(key, counts);
+    while (this.#chats.size > MAX_CHATS_WITH_REFUSALS) {
+      const oldest = this.#chats.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.#chats.delete(oldest);
+    }
   }
 
-  startTurn(): void {
-    this.#refusals.clear();
+  startAnswer(scope: FetchedPageScope): void {
+    this.#chats.delete(chatKey(scope));
   }
 }
 
-function placeKey(place: { name: string; address: string; source_url: string }): string {
-  return `${place.source_url}\u0000${normalizedWords(place.name)}\u0000${normalizedWords(place.address)}`;
+/** The one count every request of a chat shares. */
+export const placeRefusals = new PlaceRefusalLedger();
+
+function chatKey(scope: FetchedPageScope): string {
+  return `${scope.tenant_id}\u0000${scope.conversation_id}`;
+}
+
+function placeKey(name: string): string {
+  return normalizedWords(name).trim();
 }
 
 const REFUSAL_REASONS = {
@@ -546,6 +570,8 @@ const REFUSAL_REASONS = {
     "That place only appears in the page's web address. Read a page that lists it, then try again.",
   address_apart_from_name:
     'The name and address are not together on that page. Copy them from one listing and try again.',
+  place_only_in_search_query:
+    'That place only appears in the words you searched with. Read a page that lists it, then try again.',
 } as const;
 
 const OUT_OF_AREA_REASON =
@@ -732,11 +758,11 @@ export async function renderPlaces({
   const grounded = [];
   // Once a place has been refused twice this turn, it is not checked again.
   const stopIfSpent = (): string | undefined =>
-    input.places.some(claim => retries.refusalsOf(placeKey(claim)) >= MAX_PLACE_REFUSALS_PER_TURN)
+    input.places.some(claim => retries.refusalsOf({ scope, name: claim.name }) >= MAX_PLACE_REFUSALS_PER_TURN)
       ? PLACE_STOP_MESSAGE
       : undefined;
   for (const claim of input.places) {
-    if (retries.refusalsOf(placeKey(claim)) >= MAX_PLACE_REFUSALS_PER_TURN) {
+    if (retries.refusalsOf({ scope, name: claim.name }) >= MAX_PLACE_REFUSALS_PER_TURN) {
       refused.push({ name: claim.name, reason: TURN_LIMIT_REASON });
       continue;
     }
@@ -756,7 +782,7 @@ export async function renderPlaces({
     if (result.ok) {
       grounded.push(result.place);
     } else {
-      retries.record(placeKey(claim));
+      retries.record({ scope, name: claim.name });
       refused.push({ name: claim.name, reason: REFUSAL_REASONS[result.reason] });
     }
   }
@@ -768,7 +794,7 @@ export async function renderPlaces({
     for (const place of grounded) {
       const found = await service.geocode(place.address);
       if (found !== null && !isInRequestedArea({ query: place.address, displayName: found.resolved_name })) {
-        retries.record(placeKey(place));
+        retries.record({ scope, name: place.name });
         refused.push({ name: place.name, reason: OUT_OF_AREA_REASON });
         continue;
       }
@@ -987,18 +1013,8 @@ export interface MapsCapabilityOptions {
   pages_scope: FetchedPageScope;
   /** IANA zone the user's local times are read in; UTC when the client sent none. */
   timezone?: string | undefined;
-}
-
-/** Starts each turn with no place refusals counted, so a new answer gets its own retry. */
-function clearPlaceRefusalsEachTurn(retries: PlaceRefusalLedger): PreSendContextProcessor {
-  return {
-    // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
-    async *processPreSend() {
-      retries.startTurn();
-      // Adds nothing to the context; the generator only has to finish.
-      yield* [];
-    },
-  };
+  /** The request carries a new message from the person, so place refusals start a fresh count. */
+  starts_answer: boolean;
 }
 
 /** Build the maps capability from server config. One instance per server. */
@@ -1029,7 +1045,9 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
       fetch_limited,
     }),
   };
-  const retries = new PlaceRefusalLedger();
+  if (options.starts_answer) {
+    placeRefusals.startAnswer(options.pages_scope);
+  }
   const service = new MapsService({
     geocoder_url: configuration.MAPS_GEOCODER_URL,
     road_providers,
@@ -1044,10 +1062,9 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
         options.pages_scope,
         options.logger,
         resolveLocalTime(new Date(), options.timezone).zone,
-        retries,
+        placeRefusals,
         options.tracing,
       ),
     ],
-    preSendProcessors: [clearPlaceRefusalsEachTurn(retries)],
   };
 }

@@ -167,12 +167,25 @@ describe('ToolSet records pages read through a Tavily shaped server', () => {
   const names = { search: 'tavily_search', fetch: 'tavily_extract' };
 
   it('records a search result, but never the query the search was run with', async () => {
+    const searched = JSON.stringify({
+      query: 'pantry open late uptown',
+      results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }],
+    });
+    const { toolSet, pages, scope } = harness(() => searched, names);
+    await toolSet.callTool(
+      { name: 'tavily_search', arguments: { query: 'pantry open late uptown' } },
+      { status: 'allow' },
+    );
+    const recorded = pages.recall({ scope, url: PAGE_URL })?.text ?? '';
+    expect(recorded).toContain('Hope House');
+    expect(recorded).not.toContain('open late uptown');
+  });
+
+  it('records nothing from a search whose text names a link', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
     const { toolSet, pages, scope } = harness(() => searched, names);
     await toolSet.callTool({ name: 'tavily_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
-    const recorded = pages.recall({ scope, url: PAGE_URL })?.text ?? '';
-    expect(recorded).toContain('Hope House');
-    expect(recorded).not.toContain(PAGE_URL);
+    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
   });
 
   it('records the pages an extract read, so a place from one can be pinned', async () => {
@@ -180,6 +193,41 @@ describe('ToolSet records pages read through a Tavily shaped server', () => {
     const { toolSet, pages, scope } = harness(() => extracted, names);
     await toolSet.callTool({ name: 'tavily_extract', arguments: { urls: [PAGE_URL] } }, { status: 'allow' });
     expect(pages.recall({ scope, url: PAGE_URL })?.text).toBe(PAGE_TEXT);
+  });
+});
+
+describe('a page reader listed as a search tool never records search results', () => {
+  const NAMED_URL = 'https://named.example/';
+  const NEVER_NAMED_URL = 'https://never-named.example/';
+  const readerOutput = JSON.stringify({
+    results: [{ url: NEVER_NAMED_URL, title: 'Hope House', snippet: PAGE_TEXT }],
+  });
+
+  it.each([
+    ['web_fetch_exa', { search: 'web_search_exa', fetch: 'web_fetch_exa' }, { urls: [NAMED_URL] }],
+    ['tavily_extract', { search: 'tavily_search', fetch: 'tavily_extract' }, { urls: [NAMED_URL] }],
+    ['web_fetch', { search: 'web_search', fetch: 'web_fetch' }, { url: NAMED_URL }],
+  ])('%s: a link its output lists but the call never named cannot ground a place', async (name, names, args) => {
+    const { toolSet, pages, scope } = harness(() => readerOutput, names);
+    await toolSet.callTool({ name, arguments: args }, { status: 'allow' });
+    expect(pages.recall({ scope, url: NEVER_NAMED_URL })).toBeUndefined();
+    expect(groundPlace({ claim: { ...hopeClaim, source_url: NEVER_NAMED_URL }, pages, scope })).toEqual({
+      ok: false,
+      reason: 'source_not_fetched',
+    });
+  });
+});
+
+describe('a search result that repeats the query is not a source', () => {
+  it('records no result whose title echoes the query, so its place cannot be pinned', async () => {
+    const echoUrl = 'https://echo.example/results';
+    const query = 'Dr Ana Ruiz 14 Hidden Orchard Lane Springfield';
+    const searched = JSON.stringify({ results: [{ url: echoUrl, title: query, snippet: 'No results found.' }] });
+    const { toolSet, pages, scope } = harness(() => searched);
+    await toolSet.callTool({ name: 'web_search', arguments: { query } }, { status: 'allow' });
+    expect(pages.recall({ scope, url: echoUrl })).toBeUndefined();
+    const claim = { ...hopeClaim, name: 'Dr Ana Ruiz', address: '14 Hidden Orchard Lane', source_url: echoUrl };
+    expect(groundPlace({ claim, pages, scope })).toMatchObject({ ok: false, reason: 'source_not_fetched' });
   });
 });
 

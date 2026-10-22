@@ -1,4 +1,7 @@
-import { TAVILY_EXTRACT_TOOL_NAME } from './TavilyClient';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import { namesUrl } from '../permissions/webSearch';
+import { normalizedWords } from './groundPlace';
+import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 
 /**
  * Short-lived server memory of the pages any page reading tool returned, so a place claim can be
@@ -12,6 +15,8 @@ export interface FetchedPage {
   text: string;
   /** Stamped here, from the server clock. */
   fetched_at: string;
+  /** True when this is one search result's own text rather than a page read in full. */
+  is_snippet: boolean;
 }
 
 /** The tenant and chat a page was read in; a stored page is only visible inside that one chat. */
@@ -28,6 +33,10 @@ export const FETCHED_PAGE_TEXT_MAX_CHARS = 8000;
 
 /** Longest link kept as a store key. A longer link is not recorded; a page a person reads has a far shorter one. */
 const MAX_STORED_URL_CHARS = 2048;
+
+/** Searches remembered per chat, and chats remembered at once, so the query check stays bounded. */
+const MAX_QUERIES_PER_CHAT = 50;
+const MAX_CHATS_WITH_QUERIES = 200;
 
 /**
  * The key a page is stored and looked up under. Spellings that reach the same page count as one:
@@ -47,13 +56,37 @@ function pageUrlKey(raw: string): string {
   return `${scheme}//${url.hostname.toLowerCase()}${port}${path}${url.search}`;
 }
 
+function chatKey(scope: FetchedPageScope): string {
+  return `${scope.tenant_id}\u0000${scope.conversation_id}\u0000`;
+}
+
 /** The store key of one page in one chat: the chat first, so no two chats ever share an entry. */
 function storeKey({ scope, url }: { scope: FetchedPageScope; url: string }): string {
-  return `${scope.tenant_id}\u0000${scope.conversation_id}\u0000${pageUrlKey(url)}`;
+  return `${chatKey(scope)}${pageUrlKey(url)}`;
+}
+
+/** Whether the words appear, in order and side by side, inside the other words. */
+function containsRun({ haystack, needle }: { haystack: readonly string[]; needle: readonly string[] }): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) {
+    return false;
+  }
+  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
+    if (needle.every((word, offset) => haystack[at + offset] === word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function wordsOf(text: string): string[] {
+  const words = normalizedWords(text).trim();
+  return words === '' ? [] : words.split(' ');
 }
 
 export class FetchedPageStore {
-  readonly #pages = new Map<string, FetchedPage & { expires_at: number; is_snippet: boolean }>();
+  readonly #pages = new Map<string, FetchedPage & { expires_at: number }>();
+  /** Each chat's search queries, as words. A snippet never outlives the queries of its chat. */
+  readonly #queries = new Map<string, { queries: string[][]; expires_at: number }>();
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #maxPages: number;
@@ -93,13 +126,13 @@ export class FetchedPageStore {
     is_snippet: boolean;
   }): FetchedPage {
     const now = this.#now();
-    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString() };
+    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString(), is_snippet };
     if (url.length > MAX_STORED_URL_CHARS) {
       return page;
     }
     const key = storeKey({ scope, url });
     this.#pages.delete(key);
-    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs, is_snippet });
+    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs });
     while (this.#pages.size > this.#maxPages) {
       const victim = this.#evictionVictim();
       if (victim === undefined) {
@@ -120,7 +153,7 @@ export class FetchedPageStore {
     return this.#pages.keys().next().value;
   }
 
-  #live({ scope, url }: { scope: FetchedPageScope; url: string }): (FetchedPage & { is_snippet: boolean }) | undefined {
+  #live({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
     if (url.length > MAX_STORED_URL_CHARS) {
       return undefined;
     }
@@ -137,11 +170,62 @@ export class FetchedPageStore {
   }
 
   recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
-    const live = this.#live({ scope, url });
-    if (live === undefined) {
+    return this.#live({ scope, url });
+  }
+
+  /** A search this chat ran, kept so a place copied from the query is never taken as found. */
+  rememberQuery({ scope, query }: { scope: FetchedPageScope; query: string }): void {
+    const words = wordsOf(query);
+    if (words.length === 0) {
+      return;
+    }
+    const key = chatKey(scope);
+    const entry = this.#liveQueries(key) ?? { queries: [], expires_at: 0 };
+    this.#queries.delete(key);
+    entry.queries.push(words);
+    entry.expires_at = this.#now() + this.#ttlMs;
+    if (entry.queries.length > MAX_QUERIES_PER_CHAT) {
+      // A dropped query could have produced a kept snippet, so that chat's snippets go with it.
+      entry.queries.splice(0, entry.queries.length - MAX_QUERIES_PER_CHAT);
+      this.#dropSnippets(key);
+    }
+    this.#queries.set(key, entry);
+    while (this.#queries.size > MAX_CHATS_WITH_QUERIES) {
+      const oldest = this.#queries.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.#queries.delete(oldest);
+      this.#dropSnippets(oldest);
+    }
+  }
+
+  /** Whether any search this chat ran holds these words side by side. */
+  queriesContain({ scope, text }: { scope: FetchedPageScope; text: string }): boolean {
+    const needle = wordsOf(text);
+    const entry = this.#liveQueries(chatKey(scope));
+    return entry?.queries.some(query => containsRun({ haystack: query, needle })) === true;
+  }
+
+  #liveQueries(key: string): { queries: string[][]; expires_at: number } | undefined {
+    const entry = this.#queries.get(key);
+    if (entry === undefined) {
       return undefined;
     }
-    return { url: live.url, text: live.text, fetched_at: live.fetched_at };
+    if (entry.expires_at <= this.#now()) {
+      this.#queries.delete(key);
+      this.#dropSnippets(key);
+      return undefined;
+    }
+    return entry;
+  }
+
+  #dropSnippets(chat: string): void {
+    for (const [key, stored] of this.#pages) {
+      if (stored.is_snippet && key.startsWith(chat)) {
+        this.#pages.delete(key);
+      }
+    }
   }
 }
 
@@ -254,6 +338,22 @@ export function isPageReaderTool(name: string): boolean {
 }
 
 /**
+ * The tools whose results are a list of search hits, by name. Only these record snippets: a page
+ * reader's output links to pages it never showed, so its results are never search hits.
+ */
+const SEARCH_RESULT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  TAVILY_SEARCH_TOOL_NAME,
+  'web_search',
+  'web_search_exa',
+  'web_search_advanced_exa',
+]);
+
+/** Whether a tool's results may be recorded one search hit at a time. */
+export function isSearchResultTool(name: string): boolean {
+  return SEARCH_RESULT_TOOL_NAMES.has(name) && !PAGE_READER_TOOL_NAMES.has(name);
+}
+
+/**
  * Records what a page reading tool actually read, so a later place claim can be checked against it.
  * Only a page the call itself named as the page to read counts: a search names no page, even when
  * its text is itself a link, and a page a result only links to was never read. The caller decides
@@ -318,17 +418,41 @@ function searchResultTextOf(record: Record<string, unknown>): string | undefined
   return unique.length === 0 ? undefined : unique.join('\n');
 }
 
+/** A result that repeats this many query words side by side is an echo of the search, not a source. */
+const QUERY_ECHO_RUN_WORDS = 3;
+
+/** Every run of QUERY_ECHO_RUN_WORDS words in the call's text arguments. */
+function queryRuns(queries: readonly string[]): string[][] {
+  const runs: string[][] = [];
+  for (const query of queries) {
+    const words = wordsOf(query);
+    for (let at = 0; at + QUERY_ECHO_RUN_WORDS <= words.length; at += 1) {
+      runs.push(words.slice(at, at + QUERY_ECHO_RUN_WORDS));
+    }
+  }
+  return runs;
+}
+
 /**
  * Records each result a search tool returned as a source, keyed by that result's own link. Only the
- * results list counts: the call's arguments, the query echoed back, and any answer a provider wrote
- * are never recorded. A snippet only fills in a link no page read has covered. Returns how many
- * results were recorded.
+ * results list counts: the query, a result that repeats it, and any answer a provider wrote are never
+ * recorded. A call whose arguments name a link fetched something, so nothing from it is recorded.
+ * A snippet only fills in a link no page read has covered. Returns how many results were recorded.
  */
 export function recordSearchResults(input: {
   pages: FetchedPageStore;
   scope: FetchedPageScope;
+  toolArguments: unknown;
   texts: readonly string[];
 }): number {
+  const sent = collectOutboundStrings(input.toolArguments);
+  if (sent === undefined || namesUrl(sent.values)) {
+    return 0;
+  }
+  for (const query of sent.values) {
+    input.pages.rememberQuery({ scope: input.scope, query });
+  }
+  const echoes = queryRuns(sent.values);
   let recorded = 0;
   for (const text of input.texts) {
     let parsed: unknown;
@@ -347,6 +471,10 @@ export function recordSearchResults(input: {
       const url = stringField(item, 'url');
       const resultText = searchResultTextOf(item);
       if (url === undefined || resultText === undefined || url.length > MAX_STORED_URL_CHARS) {
+        continue;
+      }
+      const resultWords = wordsOf(resultText);
+      if (echoes.some(run => containsRun({ haystack: resultWords, needle: run }))) {
         continue;
       }
       input.pages.rememberSnippet({
