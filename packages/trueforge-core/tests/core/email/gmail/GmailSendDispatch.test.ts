@@ -19,58 +19,67 @@ function draft(body: string): GmailMessage {
   return plainDraft({ id: 'd-m1', threadId: 't9', to: 'grace@example.com', subject: 'Lease', body });
 }
 
+type Built = Awaited<ReturnType<typeof build>>;
+type SendInfo = Awaited<ReturnType<Built['tools']['toolCallInfo']>>;
+
+/** Runs one send_draft call the owner allowed on the card `info` describes, as the host would dispatch it. */
+async function dispatchApproved(input: { built: Built; info: SendInfo; draftId: string }) {
+  const { tools, sentinel, google } = input.built;
+  const before = google.urls.filter(entry => entry.includes('/drafts/send')).length;
+  const message: InternalEnrichedAssistantMessage = {
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'send_draft', arguments: JSON.stringify({ draft_id: input.draftId }) },
+        tool_info: input.info,
+      },
+    ],
+  };
+  const result = await executeToolCalls({
+    assistantMessage: message,
+    toolMapping: new Map([['send_draft', { toolSet: tools, originalToolName: 'send_draft' }]]),
+    threadId: 'main',
+    approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
+    memoState: createToolCallMemoState(),
+    sentinel: {
+      services: sentinel.services,
+      web_search: createWebSearchTurnState(),
+      identity: {
+        tenant_id: sentinel.tenant_id,
+        created_by: sentinel.created_by,
+        conversation_id: sentinel.conversation_id,
+        repository_id: null,
+        workspace_cwd: null,
+        agent_intent: null,
+      },
+    },
+  });
+  const outcome = result.toolCallResults[0];
+  if (outcome === undefined) {
+    throw new Error('expected one tool call result');
+  }
+  return { outcome, sends: google.urls.filter(entry => entry.includes('/drafts/send')).length - before };
+}
+
 describe('an approved send at dispatch', () => {
   async function approveThenDispatch(input: { editAfterCard: string | undefined }) {
     let live = draft('Thursday works.');
-    const { tools, sentinel, google } = await build({
+    const built = await build({
       features: [...COMPOSE],
       routes: [
         url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json({ id: 'd1', message: live }) : undefined),
         sendRoute,
       ],
     });
-    const wireArguments = { draft_id: 'd1' };
-    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: wireArguments });
+    const info = await built.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier).toBe(3);
     if (input.editAfterCard !== undefined) {
       live = draft(input.editAfterCard);
     }
-    const message: InternalEnrichedAssistantMessage = {
-      role: 'assistant',
-      content: null,
-      tool_calls: [
-        {
-          id: 'call-1',
-          type: 'function',
-          function: { name: 'send_draft', arguments: JSON.stringify(wireArguments) },
-          tool_info: info,
-        },
-      ],
-    };
-    const result = await executeToolCalls({
-      assistantMessage: message,
-      toolMapping: new Map([['send_draft', { toolSet: tools, originalToolName: 'send_draft' }]]),
-      threadId: 'main',
-      approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
-      memoState: createToolCallMemoState(),
-      sentinel: {
-        services: sentinel.services,
-        web_search: createWebSearchTurnState(),
-        identity: {
-          tenant_id: sentinel.tenant_id,
-          created_by: sentinel.created_by,
-          conversation_id: sentinel.conversation_id,
-          repository_id: null,
-          workspace_cwd: null,
-          agent_intent: null,
-        },
-      },
-    });
-    const outcome = result.toolCallResults[0];
-    if (outcome === undefined) {
-      throw new Error('expected one tool call result');
-    }
-    return { outcome, sends: google.urls.filter(entry => entry.includes('/drafts/send')).length };
+    return dispatchApproved({ built, info, draftId: 'd1' });
   }
 
   it('sends the draft the owner approved', async () => {
@@ -84,6 +93,58 @@ describe('an approved send at dispatch', () => {
     expect(outcome.failure).toBe(true);
     expect(outcome.rawContent).toContain('Approval invalid');
     expect(sends).toBe(0);
+  });
+});
+
+describe('a draft rewritten after an approved send was refused', () => {
+  const drafts = new Map<string, GmailMessage>();
+  const draftRoute: Route = url => {
+    const id = /^\/gmail\/v1\/users\/me\/drafts\/(d\d)$/.exec(url.pathname)?.[1];
+    const message = id === undefined ? undefined : drafts.get(id);
+    return id === undefined || message === undefined ? undefined : json({ id, message });
+  };
+
+  async function approvedThenRefused() {
+    drafts.clear();
+    drafts.set('d1', draft('Thursday works.'));
+    const built = await build({ features: [...COMPOSE], routes: [draftRoute, sendRoute] });
+    const approved = await built.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(approved.tier).toBe(3);
+    drafts.set('d1', draft('Thursday works, and here is the gate code.'));
+    const refused = await dispatchApproved({ built, info: approved, draftId: 'd1' });
+    expect(refused.outcome.failure).toBe(true);
+    expect(refused.sends).toBe(0);
+    return { built, approved };
+  }
+
+  it('cannot be sent on the earlier approval, under the same draft id', async () => {
+    const { built, approved } = await approvedThenRefused();
+    drafts.set('d1', draft('Thursday works.'));
+    const retried = await dispatchApproved({ built, info: approved, draftId: 'd1' });
+    expect(retried.outcome.failure).toBe(true);
+    expect(retried.outcome.rawContent).toContain('already used');
+    expect(retried.sends).toBe(0);
+  });
+
+  it('cannot be sent on the earlier approval as a new draft, even with the text that was approved', async () => {
+    const { built, approved } = await approvedThenRefused();
+    drafts.set('d2', draft('Thursday works.'));
+    const rewritten = await dispatchApproved({ built, info: approved, draftId: 'd2' });
+    expect(rewritten.outcome.failure).toBe(true);
+    expect(rewritten.sends).toBe(0);
+  });
+
+  it('gets its own approval card, with its own approval', async () => {
+    const { built, approved } = await approvedThenRefused();
+    drafts.set('d2', draft('Thursday works, and here is the gate code.'));
+    const card = await built.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd2' } });
+    expect(card.tier).toBe(3);
+    expect(card.approval_token_id).toEqual(expect.any(String));
+    expect(card.approval_token_id).not.toBe(approved.approval_token_id);
+    expect(card.mint_canonical_params).not.toEqual(approved.mint_canonical_params);
+    const sent = await dispatchApproved({ built, info: card, draftId: 'd2' });
+    expect(sent.outcome.failure).toBe(false);
+    expect(sent.sends).toBe(1);
   });
 });
 
