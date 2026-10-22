@@ -453,6 +453,13 @@ const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
     external_service: true,
     delivers_message: false,
   },
+  {
+    // Without this entry the word `email` in the name would make an archive an external send with no destination.
+    match: nameIncludes('archive_email'),
+    extract: genericExtractor,
+    external_service: false,
+    delivers_message: false,
+  },
 ];
 
 /**
@@ -547,6 +554,8 @@ const CONNECTOR_READ_WORDS = new Set([
   'header',
   'headers',
   'body',
+  'content',
+  'metadata',
   'folder',
   'folders',
   'by',
@@ -592,9 +601,14 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
-    match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
+    match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft', 'save_draft'),
     sends: 'message',
     describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
+  },
+  {
+    // Archiving only moves mail inside the mailbox, so it carries no recipient and is not an external send.
+    match: words => hasPhrase(words, 'archive'),
+    describe: ({ tool_name, where }) => `Archive emails with ${tool_name}${where}.`,
   },
   {
     match: words =>
@@ -779,23 +793,26 @@ function addressStrings(value: unknown): string[] {
     .flatMap(([, field]) => addressStrings(field));
 }
 
-/** True when the top-level `to` resolves to at least one visible address. */
+/** True when the top-level `to` or `recipients` resolves to at least one visible address. */
 function namesToRecipient(params: Record<string, unknown>): boolean {
-  return Object.entries(params).some(([key, value]) => normalizeKey(key) === 'to' && addressStrings(value).length > 0);
+  return Object.entries(params).some(
+    ([key, value]) => ['to', 'recipients'].includes(normalizeKey(key)) && addressStrings(value).length > 0,
+  );
 }
 
 const REPLY_WORDS = ['reply', 'respond', 'answer', 'forward'];
 const MAIL_WORDS = ['mail', 'email', 'gmail', 'outlook', 'inbox'];
 
 /**
- * A reply or forward through a mail connector goes to its default recipients when `to` is empty, so `to`
- * must name them. Other reply tools (comments, threads in chat apps) have no `to` and are not mail-shaped.
+ * A reply or forward through a mail connector goes to its default recipients when no recipient is named, so
+ * `to` or `recipients` must name them. Other reply tools (comments, threads in chat apps) have neither and are
+ * not mail-shaped.
  */
 function isMailReply({ words, params }: { words: string; params: Record<string, unknown> }): boolean {
   return (
     hasPhrase(words, ...REPLY_WORDS) &&
     (hasPhrase(words, ...MAIL_WORDS) ||
-      Object.keys(params).some(key => ['to', 'cc', 'bcc'].includes(normalizeKey(key))))
+      Object.keys(params).some(key => ['to', 'recipients', 'cc', 'bcc'].includes(normalizeKey(key))))
   );
 }
 

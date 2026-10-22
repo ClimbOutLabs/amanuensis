@@ -1,3 +1,4 @@
+import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import type { SentinelApprovalCard, SentinelApprovalMailbox } from './types.js';
 
 /** The people a card sends to, in plain words: the first name, then how many more. */
@@ -39,6 +40,8 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
 
 /** The verb on the safe button: what "yes" does, in the card's own words. */
 export function approveVerb(card: SentinelApprovalCard): string {
+  // Approving a new-recipient send adds its addresses to the send list, so it says so.
+  if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.approve.label;
   const { email, calendar_event: event, schedule, persona } = card;
   if (email !== null) return email.action === 'send' ? 'Send it' : 'Save it';
   if (event !== null) return event.action === 'create' ? 'Add it' : 'Save it';
@@ -49,6 +52,7 @@ export function approveVerb(card: SentinelApprovalCard): string {
 
 /** The verb on the quiet button that says no. */
 export function declineVerb(card: SentinelApprovalCard): string {
+  if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.cancel.label;
   return card.email !== null && card.email.action === 'send' ? "Don't send" : 'Not now';
 }
 

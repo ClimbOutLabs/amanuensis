@@ -9,7 +9,7 @@ import { StubTear } from '../atoms/Reward.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
   approvalQuestion,
   approvalSentLine,
@@ -189,6 +189,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.destination_host !== null;
 
   const { email, calendar_event: calendarEvent, schedule, persona } = card;
+  // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
+  const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
 
   // The stub tears only for an approval the ledger allows; otherwise it simply goes.
@@ -333,7 +335,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {card.outbound_text !== null && (
               <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />
             )}
-            {onApproveForChat !== undefined && (
+            {onApproveForChat !== undefined && !newRecipients && (
               <Button
                 variant="secondary"
                 size="small"
@@ -344,7 +346,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
                 {APPROVAL_CHOICES.approveForChat.label}
               </Button>
             )}
-            {onApproveAlways !== undefined && (
+            {onApproveAlways !== undefined && !newRecipients && (
               <AlwaysAllowToolControl
                 size="small"
                 disabled={disabled || sentAt !== null}

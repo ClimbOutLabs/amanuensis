@@ -40,7 +40,28 @@ export interface SentinelServices {
   unattended: boolean;
   /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
   demoSendAllowlist: readonly string[] | null;
+  /** Addresses the Email connector may send to without a new-recipient card, lowercased. Empty allows no send. */
+  mail_listed_addresses: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
+  /**
+   * Adds exact addresses to the Email send list, then waits until the sidecar loads it. The default adds nothing,
+   * so a host that does not implement it fails closed.
+   */
+  mail_add_recipients: (
+    input: { tenant_id: string; created_by: string },
+    addresses: readonly string[],
+  ) => Promise<MailAddRecipientsResult>;
+  /**
+   * Waits until the sidecar runs the Email list the server holds. Checked before every approved mail send, so a
+   * send never runs on a list the sidecar has not loaded. Fails closed by default.
+   */
+  mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
 }
+
+/** `loaded`: the sidecar runs the new list. `not_loaded`: it did not in time. `refused`: an address is not allowed. */
+export type MailAddRecipientsResult = 'loaded' | 'not_loaded' | 'refused';
+
+/** `loaded`: the sidecar runs the server's list. `not_loaded`: it does not, or there is no list. */
+export type MailListLoadedResult = 'loaded' | 'not_loaded';
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
 export interface SentinelCallIdentity {
@@ -75,6 +96,9 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
     demoSendAllowlist: null,
+    mail_listed_addresses: () => Promise.resolve([]),
+    mail_add_recipients: () => Promise.resolve('not_loaded'),
+    mail_list_loaded: () => Promise.resolve('not_loaded'),
   };
 }
 

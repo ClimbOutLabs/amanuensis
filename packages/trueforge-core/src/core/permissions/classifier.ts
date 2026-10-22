@@ -25,6 +25,9 @@ import {
   SEND_DRAFT_TOOL_NAME,
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
+import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
+import { isMailSend } from '../email/mailConnector/sendListApproval';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -149,6 +152,7 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
+  markPrivateDataRead,
   namesHostAtFetchLimit,
   privateTextForChecks,
   SEARCH_AFTER_READ_SILENT_REASON,
@@ -2116,6 +2120,24 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The reason a silent Email read is recorded with. */
+const MAIL_READ_REASON = 'mail_read';
+
+/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
+  const { action, ctx } = input;
+  if (
+    action.tool_type !== 'mcp' ||
+    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
+  ) {
+    return [];
+  }
+  return mailRecipientsNotListed({
+    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
+    params: action.canonical_params,
+  });
+}
+
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
@@ -2131,6 +2153,27 @@ function demoRefusesConnector(input: {
     input.action.tool_type === 'mcp' &&
     (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
+}
+
+/**
+ * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
+ * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
+ * connector that happens to be named Email.
+ */
+async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Email needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: MAIL_READ_REASON,
+    reason_detail: `Read your email with \`${action.tool_name}\`.`,
+    sensitive_read: true,
+  });
 }
 
 /**
@@ -2586,6 +2629,43 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
+  // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  const newMailRecipients = await mailNewRecipients({ action, ctx });
+  if (newMailRecipients.length > 0) {
+    const { fields } = extraction;
+    const sentence = externalServiceWhat({
+      tool_name: action.tool_name,
+      destination: fields.destination,
+      recipient: fields.recipient,
+      amount: fields.amount,
+    });
+    return tier3Decision({
+      card: {
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
+      },
+      reason: 'mail_new_recipient',
+      reason_detail: 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
@@ -2810,6 +2890,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
+  }
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    action.mcp_first_party === true &&
+    isMailReadToolName(action.tool_name)
+  ) {
+    return classifyMailRead(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
