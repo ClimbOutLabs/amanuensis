@@ -39,6 +39,7 @@ import {
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import configuration from '../config';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
@@ -48,6 +49,7 @@ import {
   type SpaceMutationResult,
   type SpaceRecord,
 } from '../db/spaceStore';
+import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
@@ -1357,6 +1359,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** The request carries a new message from the person, not an approval resuming the same answer. */
+  startsAnswer: boolean;
 }
 
 /**
@@ -1423,6 +1427,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           logger: this.#space.logger,
           pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
           timezone: this.clientTimezone,
+          starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
@@ -1457,13 +1462,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
   async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
-    if (connections === undefined) {
+    const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
+    if (connections === undefined && evalFixtures === undefined) {
       return undefined;
     }
     try {
       return await googleCapability({
         fetchImpl: undefined,
         connections,
+        evalSources: evalFixtures,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,

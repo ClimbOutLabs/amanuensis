@@ -59,6 +59,8 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { gateEvalApprovals } from '../eval/approvalGate';
+import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -340,6 +342,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
+  /** The turn's input holds a new message from the person, not only approvals or tool responses. */
+  startsAnswer: boolean;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -394,6 +398,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
+    startsAnswer,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -541,6 +546,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
@@ -812,6 +818,7 @@ function createTurnResolver(deps: {
       schedules,
       personas,
       logger,
+      startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
@@ -1326,6 +1333,7 @@ export async function beginTurnExecution(params: {
     userRef,
     session,
     turnId,
+    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
     serverSandboxAvailable: await readServerSandboxAvailable({
       store: deps.sandboxProviderStore,
@@ -1823,7 +1831,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
-    const body = c.req.valid('json');
+    const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
 
     const session = await deps.sessions.get({
@@ -1842,6 +1850,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
+
+    // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
+    const body = configuration.AMAN_EVAL_MODE
+      ? {
+          ...submitted,
+          input: await gateEvalApprovals({
+            session,
+            previous_turn_id: submitted.previous_turn_id,
+            input: submitted.input,
+          }),
+        }
+      : submitted;
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
@@ -2148,6 +2168,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
+      startsAnswer: body.input?.some(isAgentInputUserMessage) ?? false,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,

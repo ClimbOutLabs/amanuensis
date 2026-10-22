@@ -1,5 +1,5 @@
 import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
-import { groundPlace, isInCalendar, type PlaceClaim } from '../../../src/core/search/groundPlace';
+import { groundPlace, hasMixedScriptWord, isInCalendar, type PlaceClaim } from '../../../src/core/search/groundPlace';
 import { GARDEN_TEXT, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL } from './tavilyFixtures';
 
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
@@ -294,5 +294,126 @@ describe('isInCalendar', () => {
     expect(isInCalendar({ place, locations: ['Garden Health Centre, 4 Sample Avenue'] })).toBe(false);
     expect(isInCalendar({ place, locations: ['Lisbon'] })).toBe(false);
     expect(isInCalendar({ place, locations: [] })).toBe(false);
+  });
+});
+
+describe('groundPlace reads a listing as one block', () => {
+  const BLOCK_URL = 'https://listings.example/brunch';
+  const BLOCK_TEXT = [
+    'Sunny Table',
+    'Rated 4.6 from 212 reviews, price $$, American brunch',
+    '40 Harbour Road, Riverside',
+    'Blue Door Diner',
+    '7 Mill Lane, Riverside',
+  ].join('\n');
+
+  function blockStore(text: string): FetchedPageStore {
+    const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+    pages.remember({ scope: SCOPE, url: BLOCK_URL, text });
+    return pages;
+  }
+
+  const blockClaim = (name: string, address: string): PlaceClaim => ({
+    name,
+    address,
+    languages: null,
+    hours: null,
+    price: null,
+    phone: null,
+    source_url: BLOCK_URL,
+  });
+
+  it('keeps a name and address with a rating, review count, price and cuisine between them', () => {
+    const pages = blockStore(BLOCK_TEXT);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '40 Harbour Road'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('refuses a name paired with the address of another listing lying between them', () => {
+    const pages = blockStore(BLOCK_TEXT);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '7 Mill Lane'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+
+  it('refuses a name and address more than one block apart, even with no address line between them', () => {
+    const filler = Array.from({ length: 45 }, () => 'menu').join(' ');
+    const pages = blockStore(`Sunny Table ${filler} 40 Harbour Road, Riverside`);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '40 Harbour Road'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+
+  it.each([
+    [
+      'a Portuguese address with the street word first and the number after',
+      'Casa Azul\nRua Augusta 24, Lisboa\nCafe Ouro\nRua do Ouro 10, Lisboa',
+      'Casa Azul',
+      'Rua do Ouro 10',
+    ],
+    [
+      'an address with no house number',
+      'Sunny Table\nHarbour Road, Riverside\nBlue Door Diner\n7 Mill Lane, Riverside',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'an address on a Terrace',
+      'Sunny Table\n3 Elm Terrace, Riverside\nBlue Door Diner\n7 Mill Lane',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'a Street with no house number',
+      'Sunny Table\nMain Street, Riverside\nBlue Door Diner\n7 Mill Lane',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+    [
+      'a name right after another listing, borrowing the address above it',
+      'Blue Door Diner\n7 Mill Lane, Riverside\nSunny Table\n3 Elm Terrace, Riverside',
+      'Sunny Table',
+      '7 Mill Lane',
+    ],
+  ])('refuses a name paired across %s of another listing', (_case, text, name, address) => {
+    const pages = blockStore(text);
+    expect(groundPlace({ claim: blockClaim(name, address), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+
+  it.each([
+    ['Casa Azul\nRua Augusta 24, Lisboa\nCafe Ouro\nRua do Ouro 10, Lisboa', 'Cafe Ouro', 'Rua do Ouro 10'],
+    ['Blue Door Diner\n7 Mill Lane, Riverside\nSunny Table\n3 Elm Terrace, Riverside', 'Sunny Table', '3 Elm Terrace'],
+    ['Sunny Table\n40 Harbour Road, Riverside\nBlue Door Diner', 'Sunny Table', 'Harbour Road, Riverside'],
+    ['Dr Ana Ruiz, GP\nRated 4.9\n14 Hidden Orchard Lane, Springfield', 'Dr Ana Ruiz', '14 Hidden Orchard Lane'],
+  ])('keeps the nearest address after the name: %s', (text, name, address) => {
+    const pages = blockStore(text);
+    expect(groundPlace({ claim: blockClaim(name, address), pages, scope: SCOPE })).toMatchObject({ ok: true });
+  });
+});
+
+describe('hasMixedScriptWord', () => {
+  it.each(['Dr Anna \u043Aowalski', '42 Elm Road \u0501over', 'K\u03BFwalski', 'Kowal\u200B\u0455ki'])(
+    'finds a word that mixes scripts in %s',
+    text => {
+      expect(hasMixedScriptWord(text)).toBe(true);
+    },
+  );
+
+  it.each([
+    'Harbour Family Clinic, 12 Example Street',
+    'Caf\u00E9 Zur Linde, Hauptstra\u00DFe 5',
+    'Ta\u0301verna \u0395\u03BB\u03B9\u03AC, 3 Mill Lane',
+    '\u041A\u0430\u0444\u0435 \u041C\u043E\u0441\u043A\u0432\u0430',
+    '\u3059\u3057\u6771\u4EAC\u30BF\u30EF\u30FC',
+    'Ｓｕｓｈｉ Bar 12',
+    'ABC\u30DE\u30FC\u30C8, Cafe\u6771\u4EAC',
+  ])('keeps words in one script each: %s', text => {
+    expect(hasMixedScriptWord(text)).toBe(false);
   });
 });

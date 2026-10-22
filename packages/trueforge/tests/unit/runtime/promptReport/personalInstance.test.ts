@@ -237,6 +237,81 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
       },
     },
   },
+  'personal-no-server-sandbox': {
+    'core-only': {
+      total: 1596,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 927,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/no-sandbox': 149,
+        'agent-capabilities/tool-bundles': 161,
+        'agent-capabilities/active-speaker-context': 91,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+      },
+    },
+    calendar: {
+      total: 2327,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 987,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/no-sandbox': 149,
+        'agent-capabilities/tool-bundles': 163,
+        'agent-capabilities/active-speaker-context': 91,
+        'agent-capabilities/schedules': 57,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+        create_schedule: 314,
+        delete_schedule: 91,
+        list_schedules: 75,
+        pause_schedule: 94,
+        resume_schedule: 97,
+      },
+    },
+    web: {
+      total: 2268,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 1335,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/source-discovery': 325,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/web-images': 80,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/no-sandbox': 149,
+        'agent-capabilities/tool-bundles': 163,
+        'agent-capabilities/active-speaker-context': 91,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+        tavily_extract: 130,
+        tavily_search: 134,
+      },
+    },
+  },
 };
 
 /** Most tokens the bundle index section may take in any setup. */
@@ -307,6 +382,19 @@ describe('system prompt sections follow the tools a chat has', () => {
     for (const [section, tools] of Object.entries(SANDBOX_SECTIONS)) {
       expect(offSections.has(section)).toBe(false);
       expect(tools.some(tool => offTools.has(tool))).toBe(false);
+    }
+  });
+
+  it('sends the no-sandbox line, and no sandbox tools, when the server has no sandbox', async () => {
+    const report = await measurePersonalInstance({ name: 'personal-no-server-sandbox', turn: 'core-only' });
+    const sections = new Set(report.sections.map(row => row.name));
+    const tools = new Set(report.tools.map(row => row.name));
+
+    expect(sections.has('agent-capabilities/no-sandbox')).toBe(true);
+    expect(sections.has('agent-capabilities/sandbox-off')).toBe(false);
+    for (const [section, sectionTools] of Object.entries(SANDBOX_SECTIONS)) {
+      expect(sections.has(section)).toBe(false);
+      expect(sectionTools.some(tool => tools.has(tool))).toBe(false);
     }
   });
 });

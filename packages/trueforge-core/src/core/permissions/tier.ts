@@ -37,10 +37,19 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'mcp_destructive_hint',
   'mcp_open_world_hint',
   'connector_send',
-  'calendar_write',
+  'calendar_write_guests',
+  'caldav_calendar_guests',
+  'caldav_invitation_reply',
+  'connector_calendar_write',
   'schedule_write',
   'persona_write',
 ]);
+
+/**
+ * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
+ * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ */
+export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
@@ -53,6 +62,7 @@ export const AUTO_DENY_REASONS = [
   'offline_mode',
   'outbound_guard',
   'private_text_check',
+  'tool_not_prepared',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];

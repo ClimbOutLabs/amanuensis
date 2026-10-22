@@ -50,6 +50,7 @@ function harness(options: { searchWithoutAsking: boolean; secrets?: readonly str
     client,
     pages: new FetchedPageStore({ now: Date.now, ttlMs: 60_000, maxPages: 10 }),
     scope: { tenant_id: 't1', conversation_id: 'c1' },
+    pageFixtures: undefined,
   });
   const toolSet = new ToolSet({
     source,
