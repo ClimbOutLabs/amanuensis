@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import type { AgentCapability } from '../AgentCapability';
 
@@ -54,6 +55,7 @@ export function buildDynamicSubAgentsInstruction(
 export class DynamicSubAgents extends LocalToolMCP {
   readonly name = SUB_AGENTS_SERVER_ID;
   readonly displayName = 'DynamicSubAgents';
+  protected override readonly bundle: ToolBundleName = 'sub_agents';
   override readonly tracingEnabled = false;
   private tools: ToolDefinition[];
 
@@ -174,5 +176,6 @@ export function dynamicSubAgents(options: {
         buildDynamicSubAgentsInstruction(builder, { sandboxAvailable: options.sandboxAvailable });
       },
     ],
+    bundle: 'sub_agents',
   };
 }

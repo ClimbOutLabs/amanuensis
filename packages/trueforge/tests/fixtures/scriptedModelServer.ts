@@ -8,7 +8,8 @@
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
  * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
- * a tool that takes one (default `inert`).
+ * a tool that takes one (default `inert`). A tool the request does not send is reached the way a
+ * model would: it loads the tool's bundle with `load_bundle` first.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
@@ -117,6 +118,26 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
+/** A text part that is one whole host-written block, such as `<aman-memory>…</aman-memory>`. */
+const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
+
+/**
+ * What the person wrote in a user message. The host puts per-reply context (the reply block,
+ * recalled memory) into the same message as labelled blocks; like a real model, the script
+ * reads directives only from the person's own words, never from recalled chat titles.
+ */
+function personText(content: unknown): string {
+  const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
+  const own: string[] = [];
+  for (const part of parts) {
+    const text = typeof part === 'string' ? part : isRecord(part) ? part['text'] : undefined;
+    if (typeof text === 'string' && !HOST_BLOCK.test(text)) {
+      own.push(text);
+    }
+  }
+  return own.join(' ');
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -126,6 +147,39 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
     }
   }
   return undefined;
+}
+
+/**
+ * The bundle a model would load for a tool it cannot see, read from the tool's name as a model reads
+ * the bundle index. A connector's other tools ride with the search connector, so `inert` is web.
+ */
+const BUNDLE_FOR_TOOL: [match: string, bundle: string][] = [
+  ['tavily', 'web'],
+  ['web_search', 'web'],
+  ['inert', 'web'],
+  ['render_', 'maps'],
+  ['list_inbox', 'google'],
+  ['usage_summary', 'extras'],
+  ['exec', 'sandbox'],
+];
+
+/** A `load_bundle` result, which answers the load, not the scripted step. */
+function isBundleLoadResult(message: ChatMessage): boolean {
+  return (
+    message.role === 'tool' &&
+    /\b[a-z_]+ is (already )?loaded\. Its (tools|guidance)/.test(messageText(message.content))
+  );
+}
+
+/** The bundle to load before calling `match`, when the tool is not sent and its bundle is not loaded yet. */
+function bundleToLoad({ match, request }: { match: string; request: ChatCompletionRequest }): string | undefined {
+  if (resolveToolName({ directive: 'load_bundle', tools: request.tools }) === undefined) {
+    return undefined;
+  }
+  const bundle = BUNDLE_FOR_TOOL.find(([part]) => match.includes(part))?.[1];
+  const system = messageText(request.messages.find(message => message.role === 'system')?.content);
+  const offered = new RegExp(`^- ${bundle ?? ''}: .*$`, 'm').exec(system)?.[0];
+  return bundle === undefined || offered === undefined || offered.endsWith('(loaded)') ? undefined : bundle;
 }
 
 /** The text of the last tool result in the conversation, if a tool has answered. */
@@ -139,6 +193,9 @@ function lastToolResultText(messages: ChatMessage[]): string | undefined {
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
   for (const message of messages) {
+    if (isBundleLoadResult(message)) {
+      continue;
+    }
     if (message.role === 'tool') {
       directive = undefined;
       continue;
@@ -146,7 +203,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text);
     directive = match?.[1];
   }
@@ -207,7 +264,7 @@ function textArgument(messages: ChatMessage[]): string {
   for (const message of messages) {
     if (message.role === 'user') {
       text =
-        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(personText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
     }
   }
   return text;
@@ -220,7 +277,7 @@ function callToolServer(messages: ChatMessage[]): string {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     if (new RegExp(`${RUN_DIRECTIVE_PREFIX}[A-Za-z0-9_-]+`).test(text)) {
       server = new RegExp(`${SERVER_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text)?.[1] ?? DEFAULT_CALL_TOOL_SERVER;
     }
@@ -233,7 +290,7 @@ function searchDirectiveText(messages: ChatMessage[]): string {
   let text = '';
   for (const message of messages) {
     if (message.role === 'user') {
-      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(messageText(message.content))?.[1]?.trim() ?? '';
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(personText(message.content))?.[1]?.trim() ?? '';
     }
   }
   return text;
@@ -261,14 +318,14 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
   let toolResults = 0;
   for (const message of messages) {
     if (message.role === 'user') {
-      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(messageText(message.content));
+      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(personText(message.content));
       if (match?.[1] !== undefined) {
         directive = match[1];
         toolResults = 0;
       }
       continue;
     }
-    if (directive !== undefined && message.role === 'tool') {
+    if (directive !== undefined && message.role === 'tool' && !isBundleLoadResult(message)) {
       toolResults += 1;
     }
   }
@@ -413,6 +470,16 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
           argumentsJson: JSON.stringify({ text }),
         });
       }
+    } else if (toolName === undefined && requestedTool !== undefined) {
+      const bundle = bundleToLoad({ match: requestedTool.match, request: parsed });
+      if (bundle !== undefined) {
+        callCounter += 1;
+        toolCalls.push({
+          name: 'load_bundle',
+          callId: `call_${String(callCounter)}`,
+          argumentsJson: JSON.stringify({ name: bundle }),
+        });
+      }
     } else if (toolName !== undefined) {
       callCounter += 1;
       toolCalls.push({
@@ -433,7 +500,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
     const quoteToolResult = parsed.messages.some(message =>
-      messageText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+      personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
     );
     const replyText = rejectingJudge
       ? '{"helpful":[]}'

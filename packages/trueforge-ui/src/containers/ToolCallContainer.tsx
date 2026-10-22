@@ -51,11 +51,13 @@ import {
   hasPendingAskUserResponse,
   hasPendingToolApproval,
   mcpDisplayName,
+  notDoneText,
   parseAskUserQuestionArgs,
   parseMapsResult,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseToolNotDoneReason,
   parseToolOutputScreen,
   parseToolResultDisposition,
   resolveSubAgentMeta,
@@ -479,7 +481,12 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       ? toStatus(part.status?.type)
       : disposition.tone;
   const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
-  const outcomeText = outputWasWithheld ? outputScreen.label : buildOutcomeText(disposition, failureReason);
+  const notDoneReason = outputWasWithheld ? undefined : parseToolNotDoneReason(part.result);
+  const outcomeText = outputWasWithheld
+    ? outputScreen.label
+    : notDoneReason !== undefined
+      ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
+      : buildOutcomeText(disposition, failureReason);
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);

@@ -74,11 +74,6 @@ export function amanFirstRunItems(input: {
   return items;
 }
 
-/** Whether every checklist line is done; the tour stops showing the checklist once it is. */
-export function isFirstRunSetupComplete(input: Parameters<typeof amanFirstRunItems>[0]): boolean {
-  return amanFirstRunItems(input).every(item => item.done);
-}
-
 /** Whether the card is on screen: the host either has not wired dismissal, or the owner has not used it. */
 export function isFirstRunGuideVisible(setup: AmanSetupState | null): boolean {
   return setup !== null && setup.firstRunGuide?.dismissed !== true;
@@ -94,7 +89,9 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
   children,
 }) => {
   const shell = useOptionalShellMode();
-  const className = 'text-text-primary underline underline-offset-2 hover:text-primary-button-bg';
+  // A button takes the browser's own box and colour unless reset, which hides its text on dark paper.
+  const className =
+    'cursor-pointer appearance-none border-0 bg-transparent p-0 font-[inherit] text-text-primary underline underline-offset-2 hover:text-primary-button-bg';
   if (shell !== null) {
     return (
       <button
@@ -120,6 +117,43 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
     );
   }
   return <span className="text-text-primary">{children}</span>;
+};
+
+/**
+ * The compact setup line the first frame keeps under its quietly watching ticket: "2 of 3 set up →",
+ * linking to the first unfinished line. Nothing shows once setup is done or the guide is put away.
+ */
+export const AmanFirstRunSummary: FC<{ placement: FirstRunPlacement }> = ({ placement }) => {
+  const setup = useOptionalAmanSetup();
+  const personalization = useOptionalPersonalization();
+  if (setup === null || !isFirstRunGuideVisible(setup)) {
+    return null;
+  }
+  if (personalization !== null && personalization.loading) {
+    return null;
+  }
+  const items = amanFirstRunItems({
+    modelName: setup.modelName,
+    userName: personalization?.profile?.user_name,
+    hasChatted: setup.hasChatted,
+    placement,
+  });
+  const next = items.find(item => !item.done);
+  if (next === undefined) {
+    return null;
+  }
+  const label = `${items.filter(item => item.done).length} of ${items.length} set up →`;
+  return (
+    <p className="text-sm text-text-secondary" data-testid="aman-first-run-summary">
+      {next.action === undefined ? (
+        label
+      ) : (
+        <FirstRunLink target={next.action.target} settingsHref={setup.settingsHref}>
+          {label}
+        </FirstRunLink>
+      )}
+    </p>
+  );
 };
 
 /**
@@ -163,14 +197,12 @@ const TourHelpQuestion: FC<{
 /**
  * The first-run card: what to set up and where, ticking itself off from real state. It renders
  * only inside an `AmanSetupProvider`, hides once the owner dismisses it, and never nags again:
- * the dismissal lives on the server, not in this browser. `hideWhenComplete` drops it once every
- * line is done, for screens that only need it while setup is still open.
+ * the dismissal lives on the server, not in this browser.
  */
 export const AmanFirstRunGuide: FC<{
   placement: FirstRunPlacement;
   className?: string;
-  hideWhenComplete?: boolean;
-}> = ({ placement, className, hideWhenComplete = false }) => {
+}> = ({ placement, className }) => {
   const setup = useOptionalAmanSetup();
   const personalization = useOptionalPersonalization();
   if (!isFirstRunGuideVisible(setup) || setup === null) {
@@ -188,9 +220,6 @@ export const AmanFirstRunGuide: FC<{
   });
   const doneCount = items.filter(item => item.done).length;
   const allDone = doneCount === items.length;
-  if (hideWhenComplete && allDone) {
-    return null;
-  }
   const dismiss = setup.firstRunGuide?.dismiss;
   return (
     <section

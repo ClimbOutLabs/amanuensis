@@ -596,20 +596,20 @@ describe('persona switching inside one conversation', () => {
     async () => {
       const sessionId = await createSession(server);
       await createPersona(server, {
-        display_name: 'Iris',
+        display_name: 'Ivy',
         aliases: [],
         instructions: 'Answer as a cartographer.',
         model_name: ALT_MODEL_FQN,
       });
 
-      const turnId = await runTurn(server, sessionId, 'Iris, where does this road go?');
+      const turnId = await runTurn(server, sessionId, 'Ivy, where does this road go?');
       const log = (await (await server.request(`/api/v1/sessions/${sessionId}/persona-activations`)).json()) as {
         data: { turn_id: string | null; persona_name: string | null; model_name: string | null }[];
       };
 
       expect(log.data[0]).toMatchObject({
         turn_id: turnId,
-        persona_name: 'Iris',
+        persona_name: 'Ivy',
         model_name: ALT_MODEL_FQN,
       });
     },

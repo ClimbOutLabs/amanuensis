@@ -259,9 +259,29 @@ describe('ToolCallContainer', () => {
 
     expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        outcomeText: 'Blocked by policy: Inspect the current workspace state before choosing another action.',
+        outcomeText: 'Not done: Inspect the current workspace state before choosing another action.',
       }),
     );
+  });
+
+  it('labels a refused send and a refused calendar create as not done, never finished', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const denied = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'denied' },
+      result: {},
+    });
+
+    renderToolCallMessage(
+      [
+        { type: 'tool-call', toolCallId: 'send-1', toolName: 'send_draft', args: {}, result: denied },
+        { type: 'tool-call', toolCallId: 'event-1', toolName: 'create_event', args: {}, result: denied },
+      ],
+      { ToolCallCard },
+    );
+
+    const outcomes = ToolCallCard.mock.calls.map(call => call[0]?.outcomeText);
+    expect(outcomes).toEqual(['Not sent: you said no', 'Not done: you said no']);
   });
 
   it('routes sandbox calls with parsed command and result details', () => {

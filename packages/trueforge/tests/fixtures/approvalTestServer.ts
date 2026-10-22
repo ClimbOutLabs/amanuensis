@@ -98,7 +98,7 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
-}): OpenAPIHono {
+}): ReturnType<typeof createServerApp> {
   const { db, sandboxProvider, authenticator } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
@@ -151,6 +151,7 @@ function buildApp(input: {
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
     personaStore: new SqlitePersonaStore(db),
+    modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
     scheduleStore: new SqliteScheduleStore(db),
@@ -294,6 +295,7 @@ export async function startApprovalTestServer(options?: {
     // contract is uniformly async, so normalise here rather than at every call.
     request: async (path, init) => await app.request(path, init),
     restart: async () => {
+      await app.guidesSettled();
       await db.destroy();
       db = createSqliteDb(databaseFile);
       app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
@@ -308,6 +310,8 @@ export async function startApprovalTestServer(options?: {
     },
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      // The guide installs write into the temp directory removed below, so they finish first.
+      await app.guidesSettled();
       await db.destroy();
       await model.close();
       await mcp.close();

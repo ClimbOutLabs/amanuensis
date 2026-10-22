@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** The one place the Tavily wire facts live: host, endpoints, request shape, credit rules. */
 export const TAVILY_API_HOST = 'api.tavily.com';
 /** Host of the Tavily preset connector; choosing it as the search provider selects this client. */
-const TAVILY_CONNECTOR_HOST = 'mcp.tavily.com';
+export const TAVILY_CONNECTOR_HOST = 'mcp.tavily.com';
 export const TAVILY_SEARCH_ENDPOINT = '/search';
 export const TAVILY_EXTRACT_ENDPOINT = '/extract';
 

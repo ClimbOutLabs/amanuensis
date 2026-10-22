@@ -21,6 +21,7 @@ import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import configuration from '../../../src/config';
+import { MEMORY_FRAMING_SENTENCE } from '../../../src/runtime/memory/memoryCapability';
 import { MEMORY_PROBE_QUERY } from '../../../src/runtime/memory/memoryProbe';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
@@ -381,6 +382,13 @@ function contentText(content: unknown): string {
   return '';
 }
 
+/** The line that opens a recalled-memory block; the static instruction only names the tag. */
+const MEMORY_BLOCK_OPENING = '<aman-memory>\n';
+
+function memoryBlockMessages(messages: readonly { role: string; content?: unknown }[]) {
+  return messages.filter(message => contentText(message.content).includes(MEMORY_BLOCK_OPENING));
+}
+
 function lastUserMessageIndex(messages: readonly { role: string; content?: unknown }[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.role === 'user') {
@@ -455,7 +463,7 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(recallBody.query).toBe(USER_MESSAGE_1);
 
       // (b) the scripted model saw the `<aman-memory>` block, carrying the canned memory text,
-      // spliced in immediately before the real final user message.
+      // placed before the real final user message.
       const modelRequests = server.model.requests();
       const turn1ModelRequest = modelRequests[modelRequests.length - 1];
       if (!turn1ModelRequest) {
@@ -464,12 +472,17 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const finalUserIndex = lastUserMessageIndex(turn1ModelRequest.messages);
       expect(finalUserIndex).toBeGreaterThan(0);
       const finalUserMessage = turn1ModelRequest.messages[finalUserIndex];
-      const injectedMessage = turn1ModelRequest.messages[finalUserIndex - 1];
       expect(contentText(finalUserMessage?.content)).toContain(USER_MESSAGE_1);
-      expect(injectedMessage?.role).toBe('user');
-      const injectedText = contentText(injectedMessage?.content);
-      expect(injectedText).toContain('<aman-memory>');
-      expect(injectedText).toContain(CANNED_ITEM_TEXT);
+      // The block is host context, so it rides on the final user message: after the date, before the
+      // person's words. It never appears in a system message, since recalled text is data, not instructions.
+      expect(memoryBlockMessages(turn1ModelRequest.messages)).toEqual([finalUserMessage]);
+      const finalText = contentText(finalUserMessage?.content);
+      expect(finalText.indexOf("Today's date")).toBeGreaterThan(-1);
+      expect(finalText.indexOf("Today's date")).toBeLessThan(finalText.indexOf(MEMORY_BLOCK_OPENING));
+      expect(finalText.indexOf(MEMORY_BLOCK_OPENING)).toBeLessThan(finalText.indexOf(USER_MESSAGE_1));
+      expect(finalText).toContain(CANNED_ITEM_TEXT);
+      // The framing that marks recalled text as data stays inside the block the model reads.
+      expect(finalText).toContain(MEMORY_FRAMING_SENTENCE);
 
       // (c) the turn's own persisted events carry the recall outcome, injected_block included
       // verbatim.
@@ -538,11 +551,8 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
         throw new Error('expected the scripted model server to have received a request for turn 2');
       }
       // The system prompt's own memory instructions mention the `<aman-memory>` tag by name, so
-      // this only counts *user*-role messages — the only role the ephemeral splice ever uses.
-      const amanMemoryUserMessages = turn2ModelRequest.messages.filter(
-        message => message.role === 'user' && contentText(message.content).includes('<aman-memory>'),
-      );
-      expect(amanMemoryUserMessages).toHaveLength(1);
+      // this counts only messages that carry the block's opening line.
+      expect(memoryBlockMessages(turn2ModelRequest.messages)).toHaveLength(1);
 
       const turn1HistoryMessages = turn2ModelRequest.messages.filter(
         message => message.role === 'user' && contentText(message.content).includes(USER_MESSAGE_1),
@@ -553,7 +563,6 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const finalUserIndex = lastUserMessageIndex(turn2ModelRequest.messages);
       expect(finalUserIndex).toBeGreaterThan(0);
       expect(contentText(turn2ModelRequest.messages[finalUserIndex]?.content)).toContain(USER_MESSAGE_2);
-      expect(contentText(turn2ModelRequest.messages[finalUserIndex - 1]?.content)).toContain('<aman-memory>');
     },
     TURN_TIMEOUT_MS,
   );

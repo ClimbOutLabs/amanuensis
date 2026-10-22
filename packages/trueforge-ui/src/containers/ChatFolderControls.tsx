@@ -1,6 +1,6 @@
 'use client';
 
-import { ThreadListItemMorePrimitive, ThreadListItemPrimitive, useAui } from '@assistant-ui/react';
+import { ThreadListItemMorePrimitive, useAui } from '@assistant-ui/react';
 import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 
 import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
@@ -9,10 +9,12 @@ import { useCompactLayout } from '../atoms/lib/CompactLayoutContext.js';
 import { auiInputClass } from '../atoms/lib/inputClasses.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { BottomSheet } from '../atoms/primitives/BottomSheet.js';
+import { Button } from '../atoms/primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../atoms/primitives/Dialog.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { useToasterOptional } from './ToasterContainer.js';
 
 /** Max chat title length; mirrors `UpdateSessionRequestSchema.title` in packages/trueforge. */
 const CHAT_TITLE_MAX_LENGTH = 200;
@@ -252,6 +254,80 @@ function RenameChatDialog({
   );
 }
 
+/**
+ * Confirms before the runtime deletes this row (`adapter.delete` → `server.deleteSession`).
+ * The server deletes at once, so the success toast offers no undo.
+ */
+function ChatDeleteDialog({
+  title,
+  open,
+  onOpenChange,
+}: {
+  title: string;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+}) {
+  const aui = useAui();
+  const toaster = useToasterOptional();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+  }, [open]);
+
+  const trimmedTitle = title.trim();
+  const body = trimmedTitle.length > 0 ? `${trimmedTitle} will be gone for good.` : 'This chat will be gone for good.';
+
+  const deleteChat = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // This may unmount the row that owns the dialog, so the toast is shown from the provider above it.
+      await aui.threadListItem().delete();
+      toaster?.showSuccess({ title: 'Chat deleted.' });
+      onOpenChange(false);
+    } catch {
+      setError('Could not delete this chat. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={next => {
+        if (!busy) onOpenChange(next);
+      }}
+      aria-label="Delete chat"
+      className="max-w-md"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete this chat?</DialogTitle>
+          <p className="text-text-secondary text-sm">{body}</p>
+        </DialogHeader>
+        {error !== null ? (
+          <p role="alert" className="text-sm text-failure-bg">
+            {error}
+          </p>
+        ) : null}
+      </DialogContent>
+      <DialogFooter>
+        <Button.Secondary type="button" disabled={busy} onClick={() => onOpenChange(false)}>
+          Keep
+        </Button.Secondary>
+        <Button.Destructive type="button" disabled={busy} onClick={() => void deleteChat()}>
+          Delete
+        </Button.Destructive>
+      </DialogFooter>
+    </Dialog>
+  );
+}
+
 export function ThreadListItemActions({
   sessionId,
   currentFolderId,
@@ -271,6 +347,7 @@ export function ThreadListItemActions({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [portalContainer, setPortalContainer] = useState<HTMLElement>();
   const useSheet = isMobile || compact;
   const setTriggerElement = useCallback((element: HTMLButtonElement | null) => {
@@ -294,6 +371,9 @@ export function ThreadListItemActions({
   );
   const renameDialog = canRename ? (
     <RenameChatDialog sessionId={sessionId} currentTitle={title} open={renameOpen} onOpenChange={setRenameOpen} />
+  ) : null;
+  const deleteDialog = canDelete ? (
+    <ChatDeleteDialog title={title} open={deleteOpen} onOpenChange={setDeleteOpen} />
   ) : null;
 
   if (useSheet) {
@@ -342,16 +422,25 @@ export function ThreadListItemActions({
                 </button>
               ) : null}
               {canDelete ? (
-                <ThreadListItemPrimitive.Delete className={deleteItemClass} onClick={() => setSheetOpen(false)}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={deleteItemClass}
+                  onClick={() => {
+                    setSheetOpen(false);
+                    setDeleteOpen(true);
+                  }}
+                >
                   <Icon name="trash" className="size-3.5" />
                   Delete
-                </ThreadListItemPrimitive.Delete>
+                </button>
               ) : null}
             </div>
           </BottomSheet>
         ) : null}
         {folderDialog}
         {renameDialog}
+        {deleteDialog}
       </>
     );
   }
@@ -386,17 +475,16 @@ export function ThreadListItemActions({
             </ThreadListItemMorePrimitive.Item>
           ) : null}
           {canDelete ? (
-            <ThreadListItemPrimitive.Delete asChild>
-              <ThreadListItemMorePrimitive.Item className={deleteItemClass}>
-                <Icon name="trash" className="size-3.5" />
-                Delete
-              </ThreadListItemMorePrimitive.Item>
-            </ThreadListItemPrimitive.Delete>
+            <ThreadListItemMorePrimitive.Item className={deleteItemClass} onSelect={() => setDeleteOpen(true)}>
+              <Icon name="trash" className="size-3.5" />
+              Delete
+            </ThreadListItemMorePrimitive.Item>
           ) : null}
         </ThreadListItemMorePrimitive.Content>
       </ThreadListItemMorePrimitive.Root>
       {folderDialog}
       {renameDialog}
+      {deleteDialog}
     </>
   );
 }

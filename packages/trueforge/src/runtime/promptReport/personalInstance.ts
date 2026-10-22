@@ -6,10 +6,21 @@
  * are the real ones. Stand-ins sit only where they do not change either: stores and the sandbox
  * provider are never called while a request is measured.
  */
-import { AgentSpecSchema, threadCapabilities, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentSpecSchema,
+  threadCapabilities,
+  type AgentSpec,
+  type ResolvedAgentDefinition,
+} from '@truefoundry/trueforge-core/agent-session';
 import { measurePromptRequest, type PromptReport } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability } from '@truefoundry/trueforge-core/core/capabilities/AgentCapability';
 import type { GoogleConnectionRecord, GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
 import type { ILLM } from '@truefoundry/trueforge-core/core/llm/ILLM';
+import {
+  createSentinelHostContext,
+  type SentinelHostContext,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core/permissions/context';
 import type { SearchProviderGrant } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { SandboxProvider } from '@truefoundry/trueforge-core/core/sandbox/provider/Provider';
 import { Sandbox } from '@truefoundry/trueforge-core/core/sandbox/Sandbox';
@@ -23,10 +34,25 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
-export type PersonalInstanceName = 'personal' | 'personal-with-google';
+export type PersonalInstanceName = 'personal' | 'personal-with-google' | 'personal-no-sandbox';
 
 /** Every standard setup the report measures, in report order. */
-export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
+export const PERSONAL_INSTANCE_NAMES = [
+  'personal',
+  'personal-with-google',
+  'personal-no-sandbox',
+] satisfies PersonalInstanceName[];
+
+export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
+
+/** Typical turns, each a message the person sends: what it asks for decides which tool bundles go out. */
+export const PROMPT_REPORT_TURNS: Record<PromptReportTurn, string> = {
+  'core-only': 'Thanks, that is all for now.',
+  calendar: 'Add a reminder to my calendar for Thursday at 9:00: dentist.',
+  web: "Search the web for this week's opening hours of the Lisbon Oceanarium.",
+};
+
+export const PROMPT_REPORT_TURN_NAMES = ['core-only', 'calendar', 'web'] satisfies PromptReportTurn[];
 
 const MODEL_NAME = 'personal/model';
 /** Never sent anywhere: stands in for a credential field the report does not read. */
@@ -36,13 +62,20 @@ const WEB_SEARCH_URL = 'https://mcp.tavily.com/mcp/';
 const TENANT_ID = 'prompt-report';
 const CREATED_BY = 'prompt-report-user';
 const SESSION_ID = 'prompt-report-session';
-const GOOGLE_SCOPES = [
+const GOOGLE_READ_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
+const GOOGLE_WRITE_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/calendar.events',
+];
+
+/** What the connected Google login may do: the report measures reads; writes add the Gmail and Calendar write tools. */
+export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
+  recallMaxTokens: 600,
   recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
@@ -108,7 +141,7 @@ function unusedTokenFactoryBudget(): TokenFactoryBudget {
   };
 }
 
-function connectedGoogleStore(): GoogleConnectionStore {
+function connectedGoogleStore(access: GoogleAccess): GoogleConnectionStore {
   const record: GoogleConnectionRecord = {
     tenant_id: TENANT_ID,
     created_by: CREATED_BY,
@@ -118,7 +151,7 @@ function connectedGoogleStore(): GoogleConnectionStore {
     client_secret: STAND_IN,
     client_type: 'web',
     refresh_token: STAND_IN,
-    granted_scopes: GOOGLE_SCOPES,
+    granted_scopes: access === 'read' ? GOOGLE_READ_SCOPES : [...GOOGLE_READ_SCOPES, ...GOOGLE_WRITE_SCOPES],
     account_email: null,
     status: 'connected',
   };
@@ -200,20 +233,34 @@ function webSearchConnector(): { url: string; headers: Record<string, string>; s
   };
 }
 
-function personalSpec(): AgentSpec {
+function personalSpec(input: { sandbox: boolean }): AgentSpec {
   return AgentSpecSchema.parse({
     model: { name: MODEL_NAME },
     instructions: '',
-    config: { sandbox: { enabled: true } },
+    config: { sandbox: { enabled: input.sandbox } },
     mcp_servers: [{ name: WEB_SEARCH_SERVER }],
   });
 }
 
+/** What a thread of one standard configuration is built from, as a turn builds it. */
+export interface PersonalInstance {
+  definition: ResolvedAgentDefinition['definition'];
+  capabilities: AgentCapability[];
+  /** Absent for a configuration whose spec turns the sandbox off. */
+  sandbox: Sandbox | undefined;
+  /** The permission context the turn's own thread gets, sharing the resolver's search state. */
+  sentinel: SentinelHostContext;
+}
+
 /**
- * Measures one standard configuration. The resolver assembles the host capabilities exactly as a turn does;
+ * Builds one standard configuration. The resolver assembles the host capabilities exactly as a turn does;
  * the web search tools come from the search connector's own tool source, which the host also mounts per turn.
  */
-export async function measurePersonalInstance(input: { name: PersonalInstanceName }): Promise<PromptReport> {
+export async function buildPersonalInstance(input: {
+  name: PersonalInstanceName;
+  googleAccess: GoogleAccess;
+  sentinelServices: SentinelServices | undefined;
+}): Promise<PersonalInstance> {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
   const sandbox = new Sandbox({
@@ -237,7 +284,7 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
     authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     sessionId: SESSION_ID,
     logger,
-    googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore() : undefined,
+    googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
     schedules: scheduleContext(logger),
   };
   const resolver = new SpaceTurnResourceResolver(
@@ -275,7 +322,9 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  const spec = personalSpec();
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name !== 'personal-no-sandbox';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,
@@ -283,6 +332,7 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
     session_id: SESSION_ID,
     signal: new AbortController().signal,
     tracing,
+    sentinel_services: input.sentinelServices,
   });
   const definition = resolved.definition;
   const capabilities = threadCapabilities({
@@ -290,11 +340,38 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
     definition,
     compactionModel: resolved.compactionModel,
     isChild: false,
-    sandbox,
-    sandboxAvailable: true,
+    sandbox: sandboxEnabled ? sandbox : undefined,
+    sandboxAvailable: sandboxEnabled,
     tracing,
     logger,
     extraCapabilities: resolved.extraCapabilities,
   });
-  return measurePromptRequest({ definition, capabilities, sandbox });
+  const sentinel = createSentinelHostContext({
+    services: input.sentinelServices,
+    tenant_id: TENANT_ID,
+    created_by: CREATED_BY,
+    conversation_id: SESSION_ID,
+    web_search: resolver.webSearchTurn,
+  });
+  return { definition, capabilities, sandbox: sandboxEnabled ? sandbox : undefined, sentinel };
+}
+
+/** Measures one standard configuration answering one typical turn. */
+export async function measurePersonalInstance(input: {
+  name: PersonalInstanceName;
+  turn: PromptReportTurn;
+}): Promise<PromptReport> {
+  const { definition, capabilities, sandbox } = await buildPersonalInstance({
+    name: input.name,
+    googleAccess: 'read',
+    sentinelServices: undefined,
+  });
+  // The server has a sandbox; the no-sandbox setup turns it off for this chat, so the report shows the sandbox-off line.
+  return measurePromptRequest({
+    definition,
+    capabilities,
+    sandbox,
+    serverSandboxAvailable: true,
+    message: PROMPT_REPORT_TURNS[input.turn],
+  });
 }

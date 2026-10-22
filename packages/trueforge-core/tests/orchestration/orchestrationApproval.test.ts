@@ -104,6 +104,7 @@ const EXPECTED_TURN_1_LLM_INPUT = [
     tools: WRITE_NOTE_TOOLS,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
   },
@@ -142,6 +143,7 @@ describe('orchestration: pause then resume on tool approval', () => {
       tools: WRITE_NOTE_TOOLS,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
           role: 'assistant',
@@ -201,25 +203,35 @@ describe('orchestration: pause then resume on tool approval', () => {
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
         thread_id: ROOT_ID,
-        context: [{ role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT }],
+        context: [
+          { role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT },
+          { role: 'user', content: expect.stringContaining('The person declined write note') },
+        ],
       },
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
       {
+        type: EventType.MODEL_MESSAGE_DELTA,
+        thread_id: ROOT_ID,
+        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
+      },
+      {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
         thread_id: ROOT_ID,
-        context: [{ role: 'assistant', content: ROOT_FINAL }],
+        context: [{ role: 'assistant', content: expect.stringContaining(ROOT_FINAL) }],
       },
       { type: InternalEventType.AGENT_DONE, thread_id: ROOT_ID, status: 'done' },
     ];
 
     const TURN_2_OUTPUT = {
-      output: { thread_id: ROOT_ID, content: ROOT_FINAL },
+      output: {
+        thread_id: ROOT_ID,
+        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
+      },
       required_actions: [],
     };
 
     const EXPECTED_TURN_2_INPUT = {
-      tools: WRITE_NOTE_TOOLS,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
         { role: 'user', content: 'hello' },
@@ -235,6 +247,8 @@ describe('orchestration: pause then resume on tool approval', () => {
           ],
         },
         { role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT },
+        { role: 'system', content: expect.stringContaining('<reply-context>') },
+        { role: 'user', content: expect.stringContaining('The person declined write note') },
       ],
     };
 
@@ -401,6 +415,7 @@ function makeApprovalHarness(
     ],
     capabilityState: undefined,
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

@@ -107,11 +107,42 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
  */
 export function parseToolRefusalNotice(content: unknown): string | undefined {
   const outcome = parseToolResultEnvelope(content)?.outcome;
-  if (!isUnknownRecord(outcome) || outcome.disposition !== 'policy_blocked' || !isUnknownRecord(outcome.remediation)) {
+  if (!isUnknownRecord(outcome) || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  // A call refused before it started (the reply guard, the search budget) carries the same plain line as a policy block.
+  const refusedBeforeStart =
+    outcome.disposition === 'never_ran' && outcome.remediation.reason_code === 'tool_pre_dispatch_failed';
+  if (outcome.disposition !== 'policy_blocked' && !refusedBeforeStart) {
     return undefined;
   }
   const { suggested_action: action, message } = outcome.remediation;
   return action === 'contact_user' && typeof message === 'string' ? message : undefined;
+}
+
+const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
+
+/**
+ * The short plain reason a call did not run (refused, denied, or never started), or undefined when it ran.
+ * Refused calls must never read as finished, so every step label is built from this.
+ */
+export function parseToolNotDoneReason(content: unknown): string | undefined {
+  const disposition = parseToolResultDisposition(content);
+  switch (disposition?.disposition) {
+    case 'denied':
+      return 'you said no';
+    case 'policy_blocked':
+      return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
+    case 'never_ran':
+      return parseToolRefusalNotice(content) ?? 'it never started';
+    default:
+      return undefined;
+  }
+}
+
+/** Step wording for a call that did not run: email sends say "Not sent", everything else "Not done". */
+export function notDoneText({ toolName, reason }: { toolName: string; reason: string }): string {
+  return `${EMAIL_SEND_TOOL_NAMES.has(toolName) ? 'Not sent' : 'Not done'}: ${reason}`;
 }
 
 export function parseToolResultDisposition(content: unknown): ToolDispositionView | undefined {
