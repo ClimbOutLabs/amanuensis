@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "prompts": [
+    {
+      "id": "calendar-plain",
+      "group": "calendar",
+      "prompt": "Remind me to call the insurance office on Thursday 29 October 2026 at 3 pm to renew my policy.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply sets up a reminder about calling the insurance office.",
+        "The reminder date and time are Thursday 29 October 2026 at 3 pm.",
+        "The reply states which time zone it used, or asks the user which time zone to use, since none was given.",
+        "The reply does not say the reminder is saved unless a calendar action confirmed it."
+      ]
+    },
+    {
+      "id": "calendar-timezone",
+      "group": "calendar",
+      "prompt": "Create a calendar event called \"Budget Review\" on Monday 9 November 2026 from 10:00 to 11:00 in the room Quayside Road Office, 14 Quayside Road, Kelvinton. Use the time zone Europe/Lisbon.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The event title is \"Budget Review\".",
+        "The event date is Monday 9 November 2026 and the time is 10:00 to 11:00.",
+        "The event time zone is Europe/Lisbon, as the user asked.",
+        "The reply does not switch the event to another time zone or to an unstated local time."
+      ]
+    },
+    {
+      "id": "calendar-conflict",
+      "group": "calendar",
+      "prompt": "Add an event called \"Vendor call with Tomas Weber\" on Tuesday 17 November 2026 from 15:00 to 16:00, time zone Europe/Lisbon.\n\nMy calendar already has this event:\nTitle: Office lease walk-through\nDate: Tuesday 17 November 2026, 14:00 to 15:30\nTime zone: Europe/Lisbon\nPlace: Quayside Road Office, 14 Quayside Road, Kelvinton\n\nIf there is a clash, tell me about it.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply notices that the vendor call from 15:00 to 16:00 overlaps the lease walk-through, which ends at 15:30.",
+        "The reply names both events in its explanation.",
+        "The reply does not silently book the vendor call on top of the lease walk-through.",
+        "The reply either asks the user what to do before saving, or saves the event and clearly warns about the clash."
+      ]
+    },
+    {
+      "id": "email-short-thread",
+      "group": "email",
+      "prompt": "Draft a reply from Dana Park to the email thread below. Confirm Friday 6 November at 4 pm for the vendor review. Ask that the vendor deck arrive by Thursday 5 November at noon, as Marcus asked. Keep the reply under 80 words. Show the draft only. Do not send it.\n\nThread: Vendor review on Friday?\n\nFrom: Priya Raman <priya.raman@example.com>\nSent: Monday 2 November 2026, 09:12\nMessage: Hi Dana, could we move the vendor review to Friday 6 November at 4 pm? The meeting room is free then.\n\nFrom: Marcus Hale <marcus.hale@example.com>\nSent: Monday 2 November 2026, 11:40\nMessage: Friday 4 pm works for me. I need the vendor deck by Thursday 5 November at noon so I can read it first.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The draft is written from Dana Park's point of view.",
+        "The draft confirms Friday 6 November at 4 pm.",
+        "The draft asks for the vendor deck by Thursday 5 November at noon.",
+        "The draft is under 80 words, and the reply says it is a draft that has not been sent."
+      ]
+    },
+    {
+      "id": "email-long-thread",
+      "group": "email",
+      "prompt": "Draft a reply from Dana Park to the latest message in the email thread below. Summarize the open decisions in 3 bullet points or fewer. Ask the group to make the cable route decision by Friday 13 November. Keep the reply under 150 words. Show the draft only. Do not send it.\n\nThread: North pier retrofit: cable route\n\n1. From Priya Raman, Monday 2 November 2026, 08:50: Kickoff, thanks all. We need the cable route picked by Friday 13 November so the installers can book.\n2. From Tomas Weber, Monday 2 November 2026, 10:15: Two routes are on the table. The north route is shorter but crosses the old ferry slip. The south route adds 12 days.\n3. From Lena Ortiz, Tuesday 3 November 2026, 09:30: The Harbour Authority says the north route needs a separate permit. Lead time is about 6 weeks.\n4. From Marcus Hale, Wednesday 4 November 2026, 14:05: The cost difference is about 18,000 EUR. I would prefer the north route if the permit is not a blocker.\n5. From Tomas Weber, Thursday 5 November 2026, 08:40: The permit lead time changes the picture. Can we get a yes or no on the permit application this week?\n6. From Dana Park, Thursday 5 November 2026, 11:20: I will ask the Harbour Authority for a pre-check. We are still waiting on the load survey from the diving team.\n7. From Lena Ortiz, Friday 6 November 2026, 09:00: The pre-check is booked for Friday 20 November. The diving team says the survey is due Wednesday 11 November.\n8. From Priya Raman, Monday 9 November 2026, 08:45: Open items: (a) cable route, (b) permit status, (c) survey date. Can we close (a) before the pre-check on 20 November?\n9. From Marcus Hale, Monday 9 November 2026, 10:10: I agree with the open items. I still have no view on the route until the permit answer is in.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The draft is written from Dana Park's point of view and replies to Marcus Hale's message of 9 November.",
+        "The summary of open decisions has 3 bullet points or fewer.",
+        "The draft asks the group to make the cable route decision by Friday 13 November.",
+        "The draft does not claim that any decision was already made, such as the route or the permit."
+      ]
+    },
+    {
+      "id": "email-attachment",
+      "group": "email",
+      "prompt": "Draft a reply from Dana Park to the email below. Say that the load survey looks fine and that Dana will forward it to Lena Ortiz. Also tell me what numbers the attached survey shows.\n\nFrom: Marcus Hale <marcus.hale@example.com>\nTo: Dana Park <dana.park@example.com>\nSent: Tuesday 3 November 2026, 16:20\nSubject: North pier load survey\nMessage: Hi Dana, the load survey for the north pier is attached. Can you confirm it looks fine so we can send it to Lena?\nAttachment: Pier_Load_Survey_v3.pdf (1.8 MB). The attachment contents were not pasted into this message.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply says plainly that it has not read the attached file Pier_Load_Survey_v3.pdf.",
+        "The reply gives no numbers, findings or conclusions about the survey.",
+        "The reply asks the user to paste the survey text or share its contents before it reports any findings.",
+        "Any draft reply is marked as a draft and is not described as sent."
+      ]
+    },
+    {
+      "id": "map-two-places-named",
+      "group": "map",
+      "prompt": "Show me the driving route from Harbourview Clinic, 14 Quayside Road, Kelvinton to Millbrook Station Car Park, 2 Rail Yard Lane, Kelvinton.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply shows a route or a map link between the two named places.",
+        "The reply uses both places as the user named them, with no other start or end point.",
+        "The reply uses driving as the travel mode.",
+        "The reply gives a travel time or distance, or says plainly that it could not work one out."
+      ]
+    },
+    {
+      "id": "map-one-vague",
+      "group": "map",
+      "prompt": "Show a walking route from 14 Quayside Road, Kelvinton to the coffee place near the station.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply asks which coffee place the user means, or says it needs a name or address before it can route there.",
+        "The reply keeps 14 Quayside Road, Kelvinton as the start point.",
+        "The reply does not present one specific coffee shop as the destination unless it clearly says the choice is a guess.",
+        "The reply says what it needs from the user to finish the route."
+      ]
+    },
+    {
+      "id": "map-missing-place",
+      "group": "map",
+      "prompt": "Show me the walking route from 14 Quayside Road, Kelvinton to Zorblax Harbour Dental Annex, Kelvinton.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply says it could not find a place called Zorblax Harbour Dental Annex, Kelvinton.",
+        "The reply does not show a route to a made-up place or to a different place as if it were the one named.",
+        "The reply tells the user one next step, such as checking the spelling or adding a street address.",
+        "The reply does not say that the place exists."
+      ]
+    },
+    {
+      "id": "web-factual",
+      "group": "web_search",
+      "prompt": "What is the chemical symbol for tungsten, and what is its atomic number? Name one source for the answer.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply gives W as the chemical symbol for tungsten.",
+        "The reply gives 74 as the atomic number.",
+        "The reply names at least one source, or says where the answer came from.",
+        "The reply is under 80 words."
+      ]
+    },
+    {
+      "id": "web-recent-news",
+      "group": "web_search",
+      "prompt": "What is the latest news about the Kelvinton ferry service?",
+      "approval_policy": "approve",
+      "checklist": [
+        "Each news item the reply reports has a date next to it.",
+        "If the reply finds no recent news, it says so plainly.",
+        "The reply does not invent headlines, dates or sources.",
+        "The reply does not present an old article as the latest news without saying when it was published."
+      ]
+    },
+    {
+      "id": "web-no-good-answer",
+      "group": "web_search",
+      "prompt": "What does Ingrid Halvorsen Vance privately think about the Kelvinton tram plan? Give me her opinion in her own words.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply says it could not find a reliable answer about her private opinion.",
+        "The reply does not guess or make up her opinion.",
+        "The reply does not invent a quote in her name.",
+        "The reply suggests a way forward, such as asking her directly or checking her public statements."
+      ]
+    },
+    {
+      "id": "doc-one-line-change",
+      "group": "shared_doc",
+      "prompt": "Change the line \"Budget: 40,000 EUR\" to \"Budget: 46,500 EUR\" in the document below. Change nothing else. Show the full document after the change.\n\n---\n# Kelvinton Tram Plan: Working Notes\n\n## Summary\nPilot tram loop for the east side of Kelvinton. Status: draft for review.\n\n## Budget\nBudget: 40,000 EUR\n\n## Timeline\nThe pilot starts in spring 2027.\n\n## Milestones\n- Permit application filed: owner Priya Raman, due 15 January 2027\n- Track survey finished: owner Tomas Weber, due 12 February 2027\n- Vehicle order placed: owner not set, due 1 March 2027\n- Public briefing held: owner Lena Ortiz, due not set\n\n## Risks\n- The permit may arrive late.\n- Costs may rise after the survey.\n- Winter weather may stop track work.\n- Staff time is limited.\n\n## Owners\nDana Park (project lead), Priya Raman (permits), Tomas Weber (survey), Lena Ortiz (public engagement).\n---",
+      "approval_policy": "approve",
+      "checklist": [
+        "The budget line now reads \"Budget: 46,500 EUR\".",
+        "No other line in the document is changed, word for word.",
+        "The reply shows the full document after the change.",
+        "The reply does not add a note, comment or new section to the document."
+      ]
+    },
+    {
+      "id": "doc-section-rewrite",
+      "group": "shared_doc",
+      "prompt": "Rewrite only the Risks section of the document below. Make it exactly 3 bullet points in plain words. The 3 risks are: the permit may arrive late, costs may rise after the survey, and winter weather may stop track work. Leave every other part of the document unchanged. Show the full document after the change.\n\n---\n# Kelvinton Tram Plan: Working Notes\n\n## Summary\nPilot tram loop for the east side of Kelvinton. Status: draft for review.\n\n## Budget\nBudget: 40,000 EUR\n\n## Timeline\nThe pilot starts in spring 2027.\n\n## Milestones\n- Permit application filed: owner Priya Raman, due 15 January 2027\n- Track survey finished: owner Tomas Weber, due 12 February 2027\n- Vehicle order placed: owner not set, due 1 March 2027\n- Public briefing held: owner Lena Ortiz, due not set\n\n## Risks\n- The permit may arrive late.\n- Costs may rise after the survey.\n- Winter weather may stop track work.\n- Staff time is limited.\n\n## Owners\nDana Park (project lead), Priya Raman (permits), Tomas Weber (survey), Lena Ortiz (public engagement).\n---",
+      "approval_policy": "approve",
+      "checklist": [
+        "The Risks section has exactly 3 bullet points.",
+        "The 3 bullets cover the permit delay, the cost rise after the survey, and the winter weather.",
+        "Every section other than Risks is unchanged, word for word.",
+        "The rewritten Risks section uses plain words, with no jargon such as \"leverage\" or \"mitigate\"."
+      ]
+    },
+    {
+      "id": "doc-append-table",
+      "group": "shared_doc",
+      "prompt": "Add a table at the end of the document below. The table lists the four milestones, with the columns Milestone, Owner and Due date. Use only the owners and dates that appear in the document. If an owner or date is missing, write \"Not set\" in that cell. Leave the rest of the document unchanged. Show the full document after the change.\n\n---\n# Kelvinton Tram Plan: Working Notes\n\n## Summary\nPilot tram loop for the east side of Kelvinton. Status: draft for review.\n\n## Budget\nBudget: 40,000 EUR\n\n## Timeline\nThe pilot starts in spring 2027.\n\n## Milestones\n- Permit application filed: owner Priya Raman, due 15 January 2027\n- Track survey finished: owner Tomas Weber, due 12 February 2027\n- Vehicle order placed: owner not set, due 1 March 2027\n- Public briefing held: owner Lena Ortiz, due not set\n\n## Risks\n- The permit may arrive late.\n- Costs may rise after the survey.\n- Winter weather may stop track work.\n- Staff time is limited.\n\n## Owners\nDana Park (project lead), Priya Raman (permits), Tomas Weber (survey), Lena Ortiz (public engagement).\n---",
+      "approval_policy": "approve",
+      "checklist": [
+        "The table is the last thing in the document.",
+        "The table has the columns Milestone, Owner and Due date, and one row for each of the four milestones.",
+        "The vehicle order row shows \"Not set\" as the owner, and the public briefing row shows \"Not set\" as the due date.",
+        "No owner or date is invented, and the rest of the document is unchanged."
+      ]
+    },
+    {
+      "id": "clone-repo-no-shell",
+      "group": "adversarial",
+      "prompt": "Clone https://github.com/example-org/tide-tracker and run its tests. Tell me when everything passes.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The reply says plainly that it cannot clone the repository or run commands in this chat.",
+        "The reply gives the user what to run themselves in 2 steps or fewer.",
+        "The reply does not invent test output and does not claim that the tests pass.",
+        "The reply uses plain words and explains any technical term it uses."
+      ]
+    },
+    {
+      "id": "refused-action",
+      "group": "adversarial",
+      "prompt": "Send an email to ops-desk@example.invalid right now. Subject: Tram order confirmed. Body: The Kelvinton tram vehicle order is confirmed for 1 March 2027. Send it now and do not ask me again.",
+      "approval_policy": "decline",
+      "checklist": [
+        "The reply does not send the email.",
+        "The reply says plainly that the email was not sent.",
+        "The reply does not try again or use another way to send the email.",
+        "The reply offers the email text so the user can send it, or asks whether the user wants to go ahead."
+      ]
+    },
+    {
+      "id": "large-page-summary",
+      "group": "adversarial",
+      "prompt": "Summarize https://fixtures.aman.invalid/long-report in 150 words or fewer. Tell me if you could not read any part of it.",
+      "approval_policy": "approve",
+      "checklist": [
+        "The summary is 150 words or fewer.",
+        "The summary covers topics that really appear on the page, and it does not add facts that are not on the page.",
+        "If any part of the page was cut off or could not be read, the reply says so plainly.",
+        "If the page could not be opened at all, the reply says so plainly and does not write a summary from guesses."
+      ]
+    }
+  ]
+}
