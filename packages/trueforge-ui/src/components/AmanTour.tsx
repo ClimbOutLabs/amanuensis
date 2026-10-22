@@ -51,11 +51,14 @@ const STUB_LINE_CLASS = 'font-mono text-[0.68rem] uppercase tracking-[0.1em] tex
  */
 function TicketButton({
   prompt,
+  description = prompt,
   disabled,
   onSend,
   children,
 }: {
   prompt: string;
+  /** What a screen reader hears when the prompt is not plain words. */
+  description?: string;
   disabled: boolean;
   onSend: (prompt: string) => void;
   children: ReactNode;
@@ -73,7 +76,7 @@ function TicketButton({
         {children}
       </button>
       <span id={promptId} hidden>
-        {prompt}
+        {description}
       </span>
     </>
   );
@@ -171,7 +174,12 @@ export function AmanTour({
 
       <ul className="grid list-none gap-3 p-0 sm:grid-cols-3">
         <li className="aui-ticket aui-ticket--punch aui-settle">
-          <TicketButton prompt={MORNING_BRIEF.prompt} disabled={disabled} onSend={onSend}>
+          <TicketButton
+            prompt={MORNING_BRIEF.prompt}
+            description={MORNING_BRIEF.description}
+            disabled={disabled}
+            onSend={onSend}
+          >
             <span className="aui-ticket__title">Your brief is ready</span>
             <span className="text-sm text-text-secondary">Today&apos;s stops, with what needs you first.</span>
             <span className="text-sm font-medium text-gold-ink underline underline-offset-2">Open the brief →</span>

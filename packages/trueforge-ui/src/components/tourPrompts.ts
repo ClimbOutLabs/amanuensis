@@ -38,6 +38,8 @@ export type TourPrompt = {
   /** Capabilities that unlock the prompt; it shows when any one of them is present. Absent when it works on any instance. */
   needs?: readonly (keyof TourCapabilities)[];
   illustration?: TourIllustrationKey;
+  /** What a screen reader hears for the card when the prompt itself is not plain words. Defaults to the prompt. */
+  description?: string;
 };
 
 /** The prompts whose capability this instance has; the rest are left out, not greyed out. */
@@ -62,6 +64,9 @@ export const MORNING_BRIEF: TourPrompt = {
   key: 'brief',
   label: 'Your morning brief',
   prompt: MORNING_BRIEF_PROMPT,
+  // The prompt spells out the answer's format for the model, which is not something to read aloud.
+  description:
+    'Asks for your morning brief: what to check first, decisions waiting on you, what is coming up, and what is due.',
 };
 
 const CLEAR_HEAD: TourPrompt = {
