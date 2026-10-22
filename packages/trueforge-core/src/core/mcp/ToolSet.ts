@@ -29,9 +29,11 @@ import {
 import {
   isPageReaderTool,
   recordFetchedPages,
+  recordSearchResults,
   type FetchedPageScope,
   type FetchedPageStore,
 } from '../search/fetchedPages';
+import { TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -338,6 +340,17 @@ export class ToolSet implements IToolSet {
         toolArguments: params.arguments ?? {},
         texts: resultTexts(response.result),
       });
+    }
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true &&
+      ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
+        (this.searchProvider && this.searchTools.has(params.name)))
+    ) {
+      // A search's results are sources, one link at a time; its query and any answer it wrote are not.
+      recordSearchResults({ pages: this.pages, scope: this.pagesScope, texts: resultTexts(response.result) });
     }
     if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
       // What a search returned is what a later fetch in this turn may name. A call that itself

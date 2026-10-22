@@ -143,24 +143,78 @@ function occurrences({
   return found;
 }
 
-/**
- * How far apart a place's name and its address may sit on the page, in words between the two.
- * A listing prints them together, a word or two apart at most ("is at"); a name from one listing
- * and the address of the next sit a whole address apart, far beyond this.
- */
-const MAX_WORDS_BETWEEN_NAME_AND_ADDRESS = 4;
+/** A listing's name, rating, reviews, price, cuisine and address fit in about 40 words; more is another block. */
+const MAX_WORDS_IN_LISTING_BLOCK = 40;
 
+/** Street words as normalizedWords folds them, so "Street" and "St" both count. */
+const STREET_WORDS: ReadonlySet<string> = new Set([
+  'st',
+  'ave',
+  'rd',
+  'blvd',
+  'dr',
+  'ln',
+  'ct',
+  'pl',
+  'sq',
+  'hwy',
+  'pkwy',
+  'way',
+  'ter',
+  'cir',
+  'trl',
+]);
+const STREET_WORD_LOOKAHEAD = 3;
+
+/**
+ * Where each address-like line starts: a house number, then a word, then a street word within a few
+ * words. A rating such as "4.5" is a number too, so a number followed by another number does not count.
+ */
+function addressLineStarts(tokens: readonly string[]): number[] {
+  const starts: number[] = [];
+  tokens.forEach((token, at) => {
+    const next = tokens[at + 1];
+    if (!/^\d+$/.test(token) || next === undefined || /^\d+$/.test(next)) {
+      return;
+    }
+    if (tokens.slice(at + 1, at + 1 + STREET_WORD_LOOKAHEAD).some(word => STREET_WORDS.has(word))) {
+      starts.push(at);
+    }
+  });
+  return starts;
+}
+
+interface Span {
+  start: number;
+  end: number;
+}
+
+/** The words strictly between two spans, in either order. */
+function gapBetween({ first, second }: { first: Span; second: Span }): Span {
+  return first.end <= second.start ? { start: first.end, end: second.start } : { start: second.end, end: first.start };
+}
+
+/**
+ * Whether a name and an address sit in one listing block: close enough, and with no other address
+ * line between them, so a name cannot borrow the address of the listing next to it.
+ */
 function closeTogether({
   nameHits,
   addressHits,
+  tokens,
 }: {
-  nameHits: readonly { start: number; end: number }[];
-  addressHits: readonly { start: number; end: number }[];
+  nameHits: readonly Span[];
+  addressHits: readonly Span[];
+  tokens: readonly string[];
 }): boolean {
+  const lineStarts = addressLineStarts(tokens);
   return nameHits.some(name =>
     addressHits.some(address => {
-      const between = Math.max(address.start - name.end, name.start - address.end, 0);
-      return between <= MAX_WORDS_BETWEEN_NAME_AND_ADDRESS;
+      const gap = gapBetween({ first: name, second: address });
+      if (gap.end - gap.start > MAX_WORDS_IN_LISTING_BLOCK) {
+        return false;
+      }
+      return !lineStarts.some(at => at >= gap.start && at < gap.end);
     }),
   );
 }
@@ -209,7 +263,7 @@ function siteOf(url: string): string {
 
 /**
  * Keeps only what the fetched source page really says. The name and address must be on the page,
- * close together the way a listing prints them, or the place is refused; any other field it
+ * in one listing block, or the place is refused; any other field it
  * cannot find is dropped, never guessed. The source must be a page this server fetched for this
  * chat, and the fetch time is the server's.
  */
@@ -243,7 +297,7 @@ export function groundPlace({
   if (addressHits.length === 0) {
     return { ok: false, reason: 'address_not_found' };
   }
-  if (!closeTogether({ nameHits, addressHits })) {
+  if (!closeTogether({ nameHits, addressHits, tokens: pageTokens })) {
     return { ok: false, reason: 'address_apart_from_name' };
   }
   const found = (value: string | null): string | null =>

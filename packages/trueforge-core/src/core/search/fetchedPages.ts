@@ -53,7 +53,7 @@ function storeKey({ scope, url }: { scope: FetchedPageScope; url: string }): str
 }
 
 export class FetchedPageStore {
-  readonly #pages = new Map<string, FetchedPage & { expires_at: number }>();
+  readonly #pages = new Map<string, FetchedPage & { expires_at: number; is_snippet: boolean }>();
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #maxPages: number;
@@ -64,7 +64,34 @@ export class FetchedPageStore {
     this.#maxPages = input.maxPages;
   }
 
+  /** A page the person's read tool returned. It replaces any search snippet kept for the same link. */
   remember({ scope, url, text }: { scope: FetchedPageScope; url: string; text: string }): FetchedPage {
+    return this.#store({ scope, url, text, is_snippet: false });
+  }
+
+  /**
+   * A search result's own text, kept as a source. It never replaces a page already read for the same
+   * link, so a snippet cannot weaken a page.
+   */
+  rememberSnippet({ scope, url, text }: { scope: FetchedPageScope; url: string; text: string }): FetchedPage {
+    const existing = this.#live({ scope, url });
+    if (existing !== undefined && !existing.is_snippet) {
+      return existing;
+    }
+    return this.#store({ scope, url, text, is_snippet: true });
+  }
+
+  #store({
+    scope,
+    url,
+    text,
+    is_snippet,
+  }: {
+    scope: FetchedPageScope;
+    url: string;
+    text: string;
+    is_snippet: boolean;
+  }): FetchedPage {
     const now = this.#now();
     const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString() };
     if (url.length > MAX_STORED_URL_CHARS) {
@@ -72,18 +99,28 @@ export class FetchedPageStore {
     }
     const key = storeKey({ scope, url });
     this.#pages.delete(key);
-    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs });
+    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs, is_snippet });
     while (this.#pages.size > this.#maxPages) {
-      const oldest = this.#pages.keys().next();
-      if (oldest.done) {
+      const victim = this.#evictionVictim();
+      if (victim === undefined) {
         break;
       }
-      this.#pages.delete(oldest.value);
+      this.#pages.delete(victim);
     }
     return page;
   }
 
-  recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
+  /** Snippets go first, so a search never pushes out a page a person's read tool fetched. */
+  #evictionVictim(): string | undefined {
+    for (const [key, stored] of this.#pages) {
+      if (stored.is_snippet) {
+        return key;
+      }
+    }
+    return this.#pages.keys().next().value;
+  }
+
+  #live({ scope, url }: { scope: FetchedPageScope; url: string }): (FetchedPage & { is_snippet: boolean }) | undefined {
     if (url.length > MAX_STORED_URL_CHARS) {
       return undefined;
     }
@@ -96,7 +133,15 @@ export class FetchedPageStore {
       this.#pages.delete(key);
       return undefined;
     }
-    return { url: stored.url, text: stored.text, fetched_at: stored.fetched_at };
+    return { url: stored.url, text: stored.text, fetched_at: stored.fetched_at, is_snippet: stored.is_snippet };
+  }
+
+  recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
+    const live = this.#live({ scope, url });
+    if (live === undefined) {
+      return undefined;
+    }
+    return { url: live.url, text: live.text, fetched_at: live.fetched_at };
   }
 }
 
@@ -259,4 +304,58 @@ export function recordFetchedPages(input: {
     }
   }
   return recorded.size;
+}
+
+/**
+ * The words one search result carries about itself: its title, its snippet, and any page text it
+ * has. Only these fields, so a provider's summary or the call's own query never reaches the store.
+ */
+function searchResultTextOf(record: Record<string, unknown>): string | undefined {
+  const parts = [stringField(record, 'title'), stringField(record, 'snippet'), pageTextOf(record)].filter(
+    (part): part is string => part !== undefined,
+  );
+  const unique = [...new Set(parts)];
+  return unique.length === 0 ? undefined : unique.join('\n');
+}
+
+/**
+ * Records each result a search tool returned as a source, keyed by that result's own link. Only the
+ * results list counts: the call's arguments, the query echoed back, and any answer a provider wrote
+ * are never recorded. A snippet only fills in a link no page read has covered. Returns how many
+ * results were recorded.
+ */
+export function recordSearchResults(input: {
+  pages: FetchedPageStore;
+  scope: FetchedPageScope;
+  texts: readonly string[];
+}): number {
+  let recorded = 0;
+  for (const text of input.texts) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed) || !Array.isArray(parsed['results'])) {
+      continue;
+    }
+    for (const item of parsed['results']) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const url = stringField(item, 'url');
+      const resultText = searchResultTextOf(item);
+      if (url === undefined || resultText === undefined || url.length > MAX_STORED_URL_CHARS) {
+        continue;
+      }
+      input.pages.rememberSnippet({
+        scope: input.scope,
+        url,
+        text: resultText.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS),
+      });
+      recorded += 1;
+    }
+  }
+  return recorded;
 }

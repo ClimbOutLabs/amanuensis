@@ -2,7 +2,7 @@ import { FetchedPageStore, type FetchedPageScope } from '@truefoundry/trueforge-
 import { isCallToolResponseResult, type CallToolResponse } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
-import { MapsService, mapsCapability, renderPlaces } from '../../../src/runtime/mapsCapability';
+import { mapsCapability, MapsService, PlaceRefusalLedger, renderPlaces } from '../../../src/runtime/mapsCapability';
 import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
 
 const HARBOUR_URL = 'https://harbour-clinic.example/en';
@@ -72,7 +72,13 @@ describe('render_places', () => {
   it('pins each grounded place with its checked details, source, server fetch time and no calendar mark', async () => {
     const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
     const { body, isError } = bodyOf(
-      await renderPlaces({ service, pages, scope: SCOPE, input: { places: [harbour], calendar_locations: [] } }),
+      await renderPlaces({
+        retries: new PlaceRefusalLedger(),
+        service,
+        pages,
+        scope: SCOPE,
+        input: { places: [harbour], calendar_locations: [] },
+      }),
     );
     expect(isError).toBe(false);
     expect(asked).toEqual(['12 Example Street, Lisbon 1100-000']);
@@ -93,6 +99,7 @@ describe('render_places', () => {
   it('leaves out a detail the page does not state, and never shows the invented one', async () => {
     const { service, pages } = setup(query => hit('38.7', '-9.1', query));
     const response = await renderPlaces({
+      retries: new PlaceRefusalLedger(),
       service,
       pages,
       scope: SCOPE,
@@ -110,6 +117,7 @@ describe('render_places', () => {
     const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
     const { body } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -131,6 +139,7 @@ describe('render_places', () => {
     pages.remember({ scope: OTHER_SCOPE, url: 'https://elsewhere.example/', text: HARBOUR_TEXT });
     const { body } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -151,6 +160,7 @@ describe('render_places', () => {
     const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
     const { body, isError } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -166,6 +176,7 @@ describe('render_places', () => {
     const { service, pages } = setup(query => hit('38.7', '-9.1', query));
     const { body, isError } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -190,6 +201,7 @@ describe('render_places', () => {
     });
     const { body, isError } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -212,7 +224,13 @@ describe('render_places', () => {
   it('refuses a geocoder result in a different city than the address', async () => {
     const { service, pages } = setup(() => hit('40.6', '-73.9', 'Harbour Family Clinic, Brooklyn, New York'));
     const { body, isError } = bodyOf(
-      await renderPlaces({ service, pages, scope: SCOPE, input: { places: [harbour], calendar_locations: [] } }),
+      await renderPlaces({
+        retries: new PlaceRefusalLedger(),
+        service,
+        pages,
+        scope: SCOPE,
+        input: { places: [harbour], calendar_locations: [] },
+      }),
     );
     expect(isError).toBe(true);
     expect(body).toMatchObject({ status: 'error', code: 'not_grounded' });
@@ -236,6 +254,7 @@ describe('render_places', () => {
     pages.remember({ scope: SCOPE, url: ilUrl, text: 'Springfield Clinic\n102 Main St, Springfield, Illinois' });
     const { body, isError } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -263,6 +282,7 @@ describe('render_places', () => {
     );
     const { body } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -277,6 +297,7 @@ describe('render_places', () => {
     const { service, pages } = setup(query => hit('38.7', '-9.1', query));
     const { body } = bodyOf(
       await renderPlaces({
+        retries: new PlaceRefusalLedger(),
         service,
         pages,
         scope: SCOPE,
@@ -292,7 +313,13 @@ describe('render_places', () => {
   it('keeps a place the geocoder cannot find, without a pin', async () => {
     const { service, pages } = setup(() => []);
     const { body } = bodyOf(
-      await renderPlaces({ service, pages, scope: SCOPE, input: { places: [harbour], calendar_locations: [] } }),
+      await renderPlaces({
+        retries: new PlaceRefusalLedger(),
+        service,
+        pages,
+        scope: SCOPE,
+        input: { places: [harbour], calendar_locations: [] },
+      }),
     );
     expect(body['places']).toEqual([expect.objectContaining({ name: 'Harbour Family Clinic', lat: null, lng: null })]);
   });
@@ -308,7 +335,13 @@ describe('render_places', () => {
     const pages = new FetchedPageStore({ now: Date.now, ttlMs: 60_000, maxPages: 10 });
     pages.remember({ scope: SCOPE, url: HARBOUR_URL, text: HARBOUR_TEXT });
     const { body, isError } = bodyOf(
-      await renderPlaces({ service, pages, scope: SCOPE, input: { places: [harbour], calendar_locations: [] } }),
+      await renderPlaces({
+        retries: new PlaceRefusalLedger(),
+        service,
+        pages,
+        scope: SCOPE,
+        input: { places: [harbour], calendar_locations: [] },
+      }),
     );
     expect(isError).toBe(true);
     expect(body).toMatchObject({ status: 'error', code: 'service_unavailable', service: 'geocoder' });
@@ -353,5 +386,72 @@ describe('render_places tool definition', () => {
       const { isError } = bodyOf(await server.callTool({ name: 'render_places', arguments: args }));
       expect(isError).toBe(true);
     }
+  });
+});
+
+describe('render_places with search results and the retry limit', () => {
+  const SEARCH_URL = 'https://listings.example/harbour-clinic';
+  const ledgerRun = (
+    retries: PlaceRefusalLedger,
+    service: MapsService,
+    pages: FetchedPageStore,
+    claim: typeof harbour,
+  ) =>
+    renderPlaces({ service, pages, scope: SCOPE, retries, input: { places: [claim], calendar_locations: [] } }).then(
+      bodyOf,
+    );
+
+  it('pins a place whose name and address are in one search result', async () => {
+    const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
+    pages.rememberSnippet({
+      scope: SCOPE,
+      url: SEARCH_URL,
+      text: 'Harbour Family Clinic\nRated 4.5. 12 Example Street, Lisbon 1100-000.',
+    });
+    const { body } = await bodyOf(
+      await renderPlaces({
+        retries: new PlaceRefusalLedger(),
+        service,
+        pages,
+        scope: SCOPE,
+        input: {
+          places: [{ name: harbour.name, address: harbour.address, source_url: SEARCH_URL }],
+          calendar_locations: [],
+        },
+      }),
+    );
+    expect(body).toMatchObject({ status: 'ok', places: [{ name: 'Harbour Family Clinic', source_url: SEARCH_URL }] });
+    expect(asked).toHaveLength(1);
+  });
+
+  it('lets a refused place go once more, then tells the model to stop trying the map', async () => {
+    const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
+    const retries = new PlaceRefusalLedger();
+    const claim = { ...harbour, name: 'Harbour Clinic Lisbon' };
+    const first = await ledgerRun(retries, service, pages, claim);
+    expect(first.body).toMatchObject({ status: 'error', refused: [{ name: claim.name }] });
+    expect(first.body).not.toHaveProperty('stop');
+    const second = await ledgerRun(retries, service, pages, claim);
+    expect(second.body).toHaveProperty('stop');
+    const third = await ledgerRun(retries, service, pages, claim);
+    expect(third.body).toMatchObject({
+      refused: [
+        { name: claim.name, reason: 'This place was refused twice in this answer. Stop trying the map for it.' },
+      ],
+    });
+    expect(third.body).toHaveProperty('stop');
+    expect(asked).toHaveLength(0);
+  });
+
+  it('starts a new turn with a fresh retry for the same place', async () => {
+    const { service, pages } = setup(query => hit('38.7', '-9.1', query));
+    const retries = new PlaceRefusalLedger();
+    const claim = { ...harbour, name: 'Harbour Clinic Lisbon' };
+    await ledgerRun(retries, service, pages, claim);
+    await ledgerRun(retries, service, pages, claim);
+    retries.startTurn();
+    const next = await ledgerRun(retries, service, pages, claim);
+    expect(next.body).not.toHaveProperty('stop');
+    expect(next.body).toMatchObject({ refused: [{ reason: expect.stringContaining('not on that page') }] });
   });
 });

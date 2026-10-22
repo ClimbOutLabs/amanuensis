@@ -31,6 +31,7 @@ import {
   type FetchedPageStore,
   type MapsRouteResult as MapsRouteResultBody,
   type MapsTravelMode,
+  type PreSendContextProcessor,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -477,15 +478,20 @@ function mapsErrorResult({
   field,
   mode,
   refused,
+  stop,
 }: {
   error: MapsUpstreamError;
   field?: string;
   mode?: MapsTravelMode;
   refused?: { name: string; reason: string }[];
+  stop?: string | undefined;
 }): ReturnType<typeof toolResultResponse> {
   const body: MapsErrorBody = { status: 'error', code: error.code };
   if (refused !== undefined) {
     body.refused = refused;
+  }
+  if (stop !== undefined) {
+    body.stop = stop;
   }
   if (field !== undefined) {
     body.field = field;
@@ -500,6 +506,35 @@ function mapsErrorResult({
     }
   }
   return toolResultResponse({ text: JSON.stringify(body), isError: true });
+}
+
+/** A refused place may be sent once more in the same turn; a second refusal ends the map for it. */
+const MAX_PLACE_REFUSALS_PER_TURN = 2;
+
+const TURN_LIMIT_REASON = 'This place was refused twice in this answer. Stop trying the map for it.';
+
+const PLACE_STOP_MESSAGE =
+  'The map check refused these places twice in this answer. Stop trying the map. Answer in text instead: give each place with its address and its link, and say the map could not check it.';
+
+/** Refusals per place in the current turn. The next turn starts with a clear count. */
+export class PlaceRefusalLedger {
+  readonly #refusals = new Map<string, number>();
+
+  refusalsOf(key: string): number {
+    return this.#refusals.get(key) ?? 0;
+  }
+
+  record(key: string): void {
+    this.#refusals.set(key, this.refusalsOf(key) + 1);
+  }
+
+  startTurn(): void {
+    this.#refusals.clear();
+  }
+}
+
+function placeKey(place: { name: string; address: string; source_url: string }): string {
+  return `${place.source_url}\u0000${normalizedWords(place.name)}\u0000${normalizedWords(place.address)}`;
 }
 
 const REFUSAL_REASONS = {
@@ -684,16 +719,27 @@ export async function renderPlaces({
   service,
   pages,
   scope,
+  retries,
   input,
 }: {
   service: MapsService;
   pages: FetchedPageStore;
   scope: FetchedPageScope;
+  retries: PlaceRefusalLedger;
   input: RenderPlacesInput;
 }): Promise<ReturnType<typeof toolResultResponse>> {
   const refused: { name: string; reason: string }[] = [];
   const grounded = [];
+  // Once a place has been refused twice this turn, it is not checked again.
+  const stopIfSpent = (): string | undefined =>
+    input.places.some(claim => retries.refusalsOf(placeKey(claim)) >= MAX_PLACE_REFUSALS_PER_TURN)
+      ? PLACE_STOP_MESSAGE
+      : undefined;
   for (const claim of input.places) {
+    if (retries.refusalsOf(placeKey(claim)) >= MAX_PLACE_REFUSALS_PER_TURN) {
+      refused.push({ name: claim.name, reason: TURN_LIMIT_REASON });
+      continue;
+    }
     const result = groundPlace({
       claim: {
         name: claim.name,
@@ -710,17 +756,19 @@ export async function renderPlaces({
     if (result.ok) {
       grounded.push(result.place);
     } else {
+      retries.record(placeKey(claim));
       refused.push({ name: claim.name, reason: REFUSAL_REASONS[result.reason] });
     }
   }
   if (grounded.length === 0) {
-    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
+    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused, stop: stopIfSpent() });
   }
   try {
     const places = [];
     for (const place of grounded) {
       const found = await service.geocode(place.address);
       if (found !== null && !isInRequestedArea({ query: place.address, displayName: found.resolved_name })) {
+        retries.record(placeKey(place));
         refused.push({ name: place.name, reason: OUT_OF_AREA_REASON });
         continue;
       }
@@ -731,11 +779,18 @@ export async function renderPlaces({
         already_in_calendar: isInCalendar({ place, locations: input.calendar_locations }),
       });
     }
+    const stop = stopIfSpent();
     if (places.length === 0) {
-      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
+      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused, stop });
     }
     return toolResultResponse({
-      text: JSON.stringify({ status: 'ok', places, refused, attribution: MAPS_ATTRIBUTION }),
+      text: JSON.stringify({
+        status: 'ok',
+        places,
+        refused,
+        attribution: MAPS_ATTRIBUTION,
+        ...(stop === undefined ? {} : { stop }),
+      }),
     });
   } catch (error) {
     if (error instanceof MapsUpstreamError) {
@@ -754,6 +809,7 @@ class MapsTool extends LocalToolMCP {
     private readonly pagesScope: FetchedPageScope,
     private readonly logger: Logger,
     private readonly timezone: string,
+    private readonly retries: PlaceRefusalLedger,
     tracing: AgentTracing,
   ) {
     super({ tracing });
@@ -805,10 +861,16 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
       description:
-        "Pin places on one map card, each with the details found on the page it came from. Use after a page reading tool has read the pages, whichever one it was: tavily_extract, web_fetch, or another provider's fetch tool all count. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Short forms such as St for Street are fine. Pass the page's own link as source_url. Every refused place comes back with its name and the reason, so fix that one detail and call again for it. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
+        "Pin places on one map card, each with the details found on the page it came from. Use after a page reading tool has read the pages, whichever one it was: tavily_extract, web_fetch, or another provider's fetch tool all count. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Short forms such as St for Street are fine. Pass the page's own link as source_url. Every refused place comes back with its name and the reason, so fix that one detail and call again for it, once. If a place is refused a second time in the same answer, the tool says to stop trying the map: answer in text with the places and their links instead. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
       handler: async input =>
-        renderPlaces({ service: this.service, pages: fetchedPages, scope: this.pagesScope, input }),
+        renderPlaces({
+          service: this.service,
+          pages: fetchedPages,
+          scope: this.pagesScope,
+          retries: this.retries,
+          input,
+        }),
     }),
   ];
 
@@ -927,6 +989,18 @@ export interface MapsCapabilityOptions {
   timezone?: string | undefined;
 }
 
+/** Starts each turn with no place refusals counted, so a new answer gets its own retry. */
+function clearPlaceRefusalsEachTurn(retries: PlaceRefusalLedger): PreSendContextProcessor {
+  return {
+    // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
+    async *processPreSend() {
+      retries.startTurn();
+      // Adds nothing to the context; the generator only has to finish.
+      yield* [];
+    },
+  };
+}
+
 /** Build the maps capability from server config. One instance per server. */
 export function mapsCapability(options: MapsCapabilityOptions): AgentCapability {
   const user_agent = configuration.MAPS_USER_AGENT;
@@ -955,6 +1029,7 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
       fetch_limited,
     }),
   };
+  const retries = new PlaceRefusalLedger();
   const service = new MapsService({
     geocoder_url: configuration.MAPS_GEOCODER_URL,
     road_providers,
@@ -969,8 +1044,10 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
         options.pages_scope,
         options.logger,
         resolveLocalTime(new Date(), options.timezone).zone,
+        retries,
         options.tracing,
       ),
     ],
+    preSendProcessors: [clearPlaceRefusalsEachTurn(retries)],
   };
 }

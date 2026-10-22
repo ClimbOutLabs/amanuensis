@@ -296,3 +296,54 @@ describe('isInCalendar', () => {
     expect(isInCalendar({ place, locations: [] })).toBe(false);
   });
 });
+
+describe('groundPlace reads a listing as one block', () => {
+  const BLOCK_URL = 'https://listings.example/brunch';
+  const BLOCK_TEXT = [
+    'Sunny Table',
+    'Rated 4.6 from 212 reviews, price $$, American brunch',
+    '40 Harbour Road, Riverside',
+    'Blue Door Diner',
+    '7 Mill Lane, Riverside',
+  ].join('\n');
+
+  function blockStore(text: string): FetchedPageStore {
+    const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+    pages.remember({ scope: SCOPE, url: BLOCK_URL, text });
+    return pages;
+  }
+
+  const blockClaim = (name: string, address: string): PlaceClaim => ({
+    name,
+    address,
+    languages: null,
+    hours: null,
+    price: null,
+    phone: null,
+    source_url: BLOCK_URL,
+  });
+
+  it('keeps a name and address with a rating, review count, price and cuisine between them', () => {
+    const pages = blockStore(BLOCK_TEXT);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '40 Harbour Road'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('refuses a name paired with the address of another listing lying between them', () => {
+    const pages = blockStore(BLOCK_TEXT);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '7 Mill Lane'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+
+  it('refuses a name and address more than one block apart, even with no address line between them', () => {
+    const filler = Array.from({ length: 45 }, () => 'menu').join(' ');
+    const pages = blockStore(`Sunny Table ${filler} 40 Harbour Road, Riverside`);
+    expect(groundPlace({ claim: blockClaim('Sunny Table', '40 Harbour Road'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_apart_from_name',
+    });
+  });
+});

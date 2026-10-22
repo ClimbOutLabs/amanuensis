@@ -72,3 +72,16 @@ describe('FetchedPageStore', () => {
     expect(store.recall({ scope: CHAT_A, url: tooLong })).toBeUndefined();
   });
 });
+
+describe('FetchedPageStore snippets', () => {
+  const scope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
+
+  it('pushes out a search snippet before a page a person read', () => {
+    const pages = new FetchedPageStore({ now: () => 0, ttlMs: 60_000, maxPages: 2 });
+    pages.remember({ scope, url: 'https://a.example/page', text: 'Full page A' });
+    pages.rememberSnippet({ scope, url: 'https://b.example/result', text: 'Snippet B' });
+    pages.rememberSnippet({ scope, url: 'https://c.example/result', text: 'Snippet C' });
+    expect(pages.recall({ scope, url: 'https://a.example/page' })?.text).toBe('Full page A');
+    expect(pages.recall({ scope, url: 'https://b.example/result' })).toBeUndefined();
+  });
+});

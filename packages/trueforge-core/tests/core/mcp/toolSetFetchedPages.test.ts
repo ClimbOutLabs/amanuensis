@@ -141,14 +141,14 @@ describe('ToolSet records pages read through the search provider', () => {
     expect(groundPlace({ claim: hopeClaim, pages: sharedPages, scope: CHAT_SCOPE })).toMatchObject({ ok: true });
   });
 
-  it('does not record search results as read pages', async () => {
+  it('records search results as sources, each under its own link', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
     const { toolSet, pages, scope } = harness(() => searched);
     await toolSet.callTool(
       { name: 'web_search', arguments: { query: 'food pantry New Orleans' } },
       { status: 'allow' },
     );
-    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
+    expect(pages.recall({ scope, url: PAGE_URL })?.text).toContain('A food pantry open to everyone.');
   });
 
   it('does not record a search result when the search text is itself the link', async () => {
@@ -166,11 +166,13 @@ describe('ToolSet records pages read through the search provider', () => {
 describe('ToolSet records pages read through a Tavily shaped server', () => {
   const names = { search: 'tavily_search', fetch: 'tavily_extract' };
 
-  it('does not record a search result when the search text is itself the link', async () => {
+  it('records a search result, but never the query the search was run with', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
     const { toolSet, pages, scope } = harness(() => searched, names);
     await toolSet.callTool({ name: 'tavily_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
-    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
+    const recorded = pages.recall({ scope, url: PAGE_URL })?.text ?? '';
+    expect(recorded).toContain('Hope House');
+    expect(recorded).not.toContain(PAGE_URL);
   });
 
   it('records the pages an extract read, so a place from one can be pinned', async () => {
