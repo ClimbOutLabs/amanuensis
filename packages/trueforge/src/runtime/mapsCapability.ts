@@ -33,6 +33,7 @@ import {
   type MapsTravelMode,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
@@ -748,6 +749,7 @@ export async function renderPlaces({
 class MapsTool extends LocalToolMCP {
   readonly name = MAPS_SERVER_ID;
   readonly displayName = 'Maps';
+  protected override readonly bundle: ToolBundleName = 'maps';
 
   constructor(
     private readonly service: MapsService,

@@ -45,6 +45,7 @@ async function persistThroughTurnBoundary(event: ToolResponseEvent | ToolRespons
     orchestrator: {
       execute: () => resultStream(event),
       getMetrics: createEmptyAgentThreadMetrics,
+      getLastCallInputTokens: () => null,
     },
     resolver: makeTestResolver(),
     signal: new AbortController().signal,
@@ -159,6 +160,7 @@ describe('TurnHandle tool response persistence boundary', () => {
       orchestrator: {
         execute: events,
         getMetrics: createEmptyAgentThreadMetrics,
+        getLastCallInputTokens: () => null,
       },
       resolver: makeTestResolver(),
       signal: new AbortController().signal,

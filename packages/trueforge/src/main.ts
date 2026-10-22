@@ -111,7 +111,7 @@ import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
-import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
+import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
@@ -652,6 +652,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     }
   }
   const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
+  // Runs before the default seed, so an instance set to Tavily never also gets the Parallel connector as its provider.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    await designateTavilyAtBoot({
+      choice: configuration.SEARCH_PROVIDER,
+      tavilyApiKey: configuration.TAVILY_API_KEY,
+      catalog: mcpCatalog,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
   // Offered once so the first search needs no setup.
   await seedDefaultSearchProviderAtBoot({
     trueFoundryMode: isTrueFoundryModeEnabled(configuration),
@@ -818,6 +829,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sandboxProviderStore,
     personalizationStore,
     personaStore,
+    modelProviderStore,
     spaceStore,
     repositoryStore,
     turnArtifactStore,

@@ -4,6 +4,8 @@
  * Optional billable aggregate for work done before cancel.
  */
 export interface TurnStateCancelledMetrics {
+    /** Input tokens of the last model call in this turn: the context size the model last saw. */
+    lastCallInputTokens?: number;
     /** Total cache-read tokens across model calls in this turn. */
     totalCacheReadTokens?: number;
     /** Total cache-write tokens across model calls in this turn. */

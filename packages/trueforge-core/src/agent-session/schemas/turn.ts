@@ -71,6 +71,12 @@ export const TurnMetricsSchema = z
       .optional()
       .describe('Total reasoning tokens across model calls in this turn.'),
     total_cost_in_usd: z.number().nonnegative().optional().describe('Estimated total cost in USD for this turn.'),
+    last_call_input_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Input tokens of the last model call in this turn: the context size the model last saw.'),
   })
   .openapi('TurnMetrics');
 

@@ -12,6 +12,7 @@ describe('source discovery contract at the model request boundary', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -23,7 +24,7 @@ describe('source discovery contract at the model request boundary', () => {
         instruction: 'test',
         toolSets: [],
       },
-      context: [{ role: 'user', content: 'hi' }],
+      context: [{ role: 'user', content: 'Look up the release notes.' }],
     });
 
     const execution = thread.execute({ signal: new AbortController().signal });

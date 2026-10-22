@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../../tracing/NoopAgentTracing';
 import type { AgentCapability } from '../AgentCapability';
@@ -294,6 +295,7 @@ function buildOpenUIDeferredInstruction(builder: InstructionBuilder): void {
 export class OpenUIInstructions extends LocalToolMCP {
   readonly name = OPENUI_SERVER_ID;
   readonly displayName = 'OpenUI';
+  protected override readonly bundle: ToolBundleName = 'extras';
 
   constructor(tracing: AgentTracing) {
     super({ tracing });
@@ -322,10 +324,12 @@ export function openUI(options?: { preload?: boolean; tracing?: AgentTracing }):
   if (preload) {
     return {
       instructionBuilders: [buildOpenUIInstruction],
+      bundle: 'extras',
     };
   }
   return {
     systemToolSets: [new OpenUIInstructions(options?.tracing ?? NOOP_AGENT_TRACING)],
     instructionBuilders: [buildOpenUIDeferredInstruction],
+    bundle: 'extras',
   };
 }

@@ -46,12 +46,13 @@ async function firstSystemMessage(sandbox: Sandbox | undefined): Promise<string 
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test', toolSets: [] },
-    context: [{ role: 'user', content: 'Summarize this document.' }],
+    context: [{ role: 'user', content: 'Summarize this file.' }],
     sandbox,
   });
 
