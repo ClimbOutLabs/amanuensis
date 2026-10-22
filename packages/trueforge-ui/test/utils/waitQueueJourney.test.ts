@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { parseToolNotDoneReason } from '@/utils/toolCallParsing.js';
 import {
   buildLongWaitAnnouncement,
   buildLongWaitNote,
@@ -326,5 +327,61 @@ describe('long-wait show', () => {
     expect(first).toBe(second);
     expect(first).not.toMatch(/\d+s/);
     expect(first).toBe('Still searching the web — this is taking longer than usual.');
+  });
+});
+
+/** A tool result envelope as the server writes it, for one disposition. */
+function toolResult(outcome: Record<string, unknown>): string {
+  return JSON.stringify({ schema_version: 'tool.response.v2', outcome, result: {} });
+}
+
+describe('refused and not-run tool calls in progress lines', () => {
+  it('says a refused send_draft was not sent, using the owner line the chat shows', () => {
+    const result = toolResult({
+      disposition: 'policy_blocked',
+      remediation: { suggested_action: 'contact_user', message: 'Sending mail needs your approval first.' },
+    });
+    const snapshot = deriveWaitQueue(
+      input({
+        parts: [
+          part({
+            type: 'tool-call',
+            toolName: 'send_draft',
+            statusType: 'complete',
+            notDoneReason: parseToolNotDoneReason(result),
+          }),
+        ],
+      }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Not sent: Sending mail needs your approval first.']);
+  });
+
+  it('says a refused create_event was not done, and never shows it as finished', () => {
+    const snapshot = deriveWaitQueue(
+      input({
+        parts: [
+          part({
+            type: 'tool-call',
+            toolName: 'create_event',
+            statusType: 'complete',
+            notDoneReason: parseToolNotDoneReason(toolResult({ disposition: 'denied' })),
+          }),
+        ],
+      }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Not done: you said no']);
+    expect(snapshot.ticks.some(tick => tick.startsWith('Finished'))).toBe(false);
+  });
+
+  it('keeps the normal tick for a call that ran', () => {
+    const result = toolResult({ disposition: 'executed_ok' });
+    expect(parseToolNotDoneReason(result)).toBeUndefined();
+    const snapshot = deriveWaitQueue(
+      input({ parts: [part({ type: 'tool-call', toolName: 'send_draft', statusType: 'complete' })] }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Finished Send draft']);
   });
 });
