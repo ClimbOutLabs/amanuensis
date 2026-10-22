@@ -13,12 +13,14 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import {
+  createToolCallMemoState,
   createTurnToolCallLedger,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
+  mergeTurnToolCallLedgers,
   type TurnToolCallLedger,
 } from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
@@ -638,6 +640,66 @@ describe('per-turn tool loop guard', () => {
   });
 });
 
+describe('turn-wide counts across a resumed turn', () => {
+  /** One create_event call per reply, with the given titles, then a plain final answer. */
+  function scriptedWrites(titles: string[]): ILLM['create'] {
+    let round = 0;
+    return jest.fn((_request: LLMCreateParamsStreaming) => {
+      const title = titles[round];
+      round += 1;
+      return title === undefined
+        ? finalAnswerStream()
+        : replyStream({ calls: [{ id: `call-${String(round)}`, name: 'create_event', args: createArgs(title) }] });
+    });
+  }
+
+  it('keeps the write cap when a sub-agent resumes after an approval pause', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const paused = makeThread({
+      toolSet,
+      create: scriptedWrites(['Main 1', 'Main 2', 'Main 3']),
+      turnToolCallLedger: createTurnToolCallLedger(),
+    });
+    await drain(paused);
+    const resumedLedger = mergeTurnToolCallLedgers([createToolCallMemoState(paused.toSnapshot().tool_call_memo).turn]);
+    const resumedSub = makeThread({
+      toolSet,
+      create: scriptedWrites(['A 1', 'A 2', 'A 3']),
+      turnToolCallLedger: resumedLedger,
+    });
+
+    const events = await drain(resumedSub);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(resumedLedger.writeCallsThisTurn).toBe(MAX_WRITE_CALLS_PER_TURN);
+    expect(resumedLedger.stoppedForWriteCap).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+});
+
+describe('mergeTurnToolCallLedgers', () => {
+  it('takes the largest count from each snapshot and the root thread last call', () => {
+    const root = createTurnToolCallLedger();
+    root.writeCallsThisTurn = 2;
+    root.lastCallSignature = 'root-call';
+    root.callSignatures.set('shared', { count: 1, writesAtLastRun: 1 });
+    const child = createTurnToolCallLedger();
+    child.writeCallsThisTurn = 4;
+    child.lastCallSignature = 'child-call';
+    child.callSignatures.set('shared', { count: 2, writesAtLastRun: 4 });
+
+    const merged = mergeTurnToolCallLedgers([root, child]);
+
+    expect(merged.writeCallsThisTurn).toBe(4);
+    expect(merged.lastCallSignature).toBe('root-call');
+    expect(merged.callSignatures.get('shared')).toEqual({ count: 2, writesAtLastRun: 4 });
+  });
+});
+
 describe('turn-wide counts across threads', () => {
   /** One create_event call per reply, with the given titles, then a plain final answer. */
   function scriptedWrites({ prefix, titles }: { prefix: string; titles: string[] }): ILLM['create'] {
@@ -687,7 +749,28 @@ describe('turn-wide counts across threads', () => {
     });
   });
 
-  it('refuses an identical call that a sibling thread already ran in the same turn', async () => {
+  it('refuses an identical call that a sibling thread already ran when no write ran since', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+    const sub = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'sub', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    await drain(sub);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+  });
+
+  it('runs an identical call again when a sibling thread has run a write since it last ran', async () => {
     const toolSet = makeTier3WriteToolSet();
     const turnToolCallLedger = createTurnToolCallLedger();
     const main = makeThread({
@@ -702,10 +785,9 @@ describe('turn-wide counts across threads', () => {
     });
 
     await drain(main);
-    const subEvents = await drain(sub);
+    await drain(sub);
 
-    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event']);
-    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
-    expect(subEvents).not.toContainEqual(expect.objectContaining({ error: REPEAT_STOP_NOTE }));
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event', 'create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
   });
 });

@@ -1595,7 +1595,7 @@ export class AgentThread {
     }
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     this.callSignatureCountsThisTurn = input.isRequestContinuation
-      ? new Map(this.toolCallMemo.turn.callSignatures)
+      ? new Map([...this.toolCallMemo.turn.callSignatures].map(([signature, record]) => [signature, record.count]))
       : new Map<string, number>();
 
     const capabilities = input.capabilities ?? [];
@@ -3634,7 +3634,10 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       const consecutive = signature === previous;
       previous = signature;
-      const alreadySeen = (turn.callSignatures.get(signature) ?? 0) > 0 || seenInBatch.has(signature);
+      // An identical call may run again once a write has run since it last ran, since the state may have changed.
+      const lastRun = turn.callSignatures.get(signature);
+      const alreadySeen =
+        seenInBatch.has(signature) || (lastRun !== undefined && lastRun.writesAtLastRun >= turn.writeCallsThisTurn);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
@@ -4283,10 +4286,10 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       // Durable count: kept for the persistence contract and any other consumer of the
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
-      nextToolCallMemo.turn.callSignatures.set(
-        signature,
-        (nextToolCallMemo.turn.callSignatures.get(signature) ?? 0) + 1,
-      );
+      nextToolCallMemo.turn.callSignatures.set(signature, {
+        count: (nextToolCallMemo.turn.callSignatures.get(signature)?.count ?? 0) + 1,
+        writesAtLastRun: nextToolCallMemo.turn.writeCallsThisTurn,
+      });
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
       if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
@@ -4407,6 +4410,8 @@ export class AgentThread {
     }
     if (loopGuard.writeCapHit) {
       yield this.generateErrorEvent(WRITE_CAP_STOP_MESSAGE, undefined, 'model_stream_fault');
+      // Set after the yield: the orchestrator reads it once this thread's terminal event arrives.
+      nextToolCallMemo.turn.stoppedForWriteCap = true;
       return 'exit';
     }
     if (loopGuard.repeatStop) {

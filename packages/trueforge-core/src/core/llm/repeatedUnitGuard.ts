@@ -1,10 +1,20 @@
-/** A reply is stopped before a sentence or line that has already come this many times. */
+/** A reply is stopped before a sentence that has already come this many times. */
 const STOP_AT_COPY = 3;
+/** Shorter sentences ("Done.", "Yes.") repeat in ordinary answers, so they are never counted. */
+const MIN_SENTENCE_WORDS = 6;
 /** A unit with no sentence end is released once it reaches this length, so text never waits long. */
 const MAX_UNIT_CHARS = 400;
 
 /** A unit ends at a line break, or at a sentence end that is followed by whitespace. */
 const UNIT_END = /[.!?](?=\s)|\n/;
+/** A fence line opens or closes a code block. */
+const FENCE = /^\s*(`{3,}|~{3,})/;
+/**
+ * List items, headings, table rows and quotes repeat by design, so their lines are not counted. A marker
+ * can reach here alone (a sentence end splits "1. " into "1."), hence the end-of-unit alternative.
+ */
+const STRUCTURED_LINE = /^\s*(?:\||(?:[-*+]|\d+[.)]|#{1,6}|>)(?:\s|$))/;
+const INLINE_CODE = /`[^`\n]*`/g;
 
 /** One complete unit of streamed text. */
 interface UnitText {
@@ -21,17 +31,18 @@ export interface RepeatedUnitsStep {
   stopped: boolean;
 }
 
-function normalize(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+/** Lowercased, single-spaced prose: the form in which two sentences are compared. */
+function proseKey(raw: string): string {
+  return raw.replace(INLINE_CODE, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-/** Rules, fences and other markup with no letters or digits are not sentences, so they never repeat. */
 function isSentence(key: string): boolean {
-  return /[\p{L}\p{N}]/u.test(key);
+  return key.split(' ').length >= MIN_SENTENCE_WORDS && /[\p{L}\p{N}]/u.test(key);
 }
 
 /**
- * Stops streamed answer text once one whole sentence or line has come STOP_AT_COPY times. Each unit is
+ * Stops streamed answer text once one whole prose sentence has come STOP_AT_COPY times. Text in code
+ * fences, inline code, list items, headings, tables and short sentences is never counted. Each unit is
  * shown as it completes, and a copy that would be the last one is not shown: the reply ends before it.
  * Text that starts like a sentence already seen twice is held until it is clear it is not that sentence.
  */
@@ -40,8 +51,12 @@ export class RepeatedUnitGuard {
   #partial = '';
   /** How much of #partial was already shown while it was still arriving. */
   #partialShown = 0;
-  /** How many times each normalized sentence has been shown. */
+  /** How many times each prose sentence has been shown. */
   #copies = new Map<string, number>();
+  #atLineStart = true;
+  #inFence = false;
+  /** Whether the line being read is code or structure, so its units are never counted. */
+  #lineUncounted = false;
   #stopped = false;
 
   /** Feed one streamed piece; returns the text that is safe to show now. */
@@ -92,8 +107,8 @@ export class RepeatedUnitGuard {
 
   #addUnit(unit: UnitText): RepeatedUnitsStep {
     const shown = unit.raw.slice(unit.shown);
-    const key = normalize(unit.raw);
-    if (!isSentence(key)) {
+    const key = this.#countedKey(unit.raw);
+    if (key === undefined) {
       return { text: shown, stopped: false };
     }
     const copies = this.#copies.get(key) ?? 0;
@@ -105,12 +120,33 @@ export class RepeatedUnitGuard {
   }
 
   /**
+   * The prose key of a completed unit when it counts as a sentence, otherwise undefined. Also advances
+   * the line state: a fence toggles code, and the first unit of a line decides whether the line counts.
+   */
+  #countedKey(raw: string): string | undefined {
+    if (this.#atLineStart) {
+      if (FENCE.test(raw)) {
+        this.#inFence = !this.#inFence;
+        this.#lineUncounted = true;
+      } else {
+        this.#lineUncounted = this.#inFence || STRUCTURED_LINE.test(raw);
+      }
+    }
+    this.#atLineStart = raw.endsWith('\n');
+    if (this.#lineUncounted) {
+      return undefined;
+    }
+    const key = proseKey(raw);
+    return isSentence(key) ? key : undefined;
+  }
+
+  /**
    * Decides the text still arriving. It streams as it comes unless it starts like a sentence already
    * seen twice, since that copy may be the one the reply must stop before.
    */
   #settlePartial(): string {
     const unshown = this.#partial.slice(this.#partialShown);
-    if (unshown === '' || this.#startsRepeatedSentence(normalize(this.#partial))) {
+    if (unshown === '' || this.#startsRepeatedSentence(proseKey(this.#partial))) {
       return '';
     }
     this.#partialShown = this.#partial.length;

@@ -310,7 +310,7 @@ describe('mapStreamToChunks', () => {
   });
 
   it('stops a closing-line loop before its third copy, so two copies and the stop line remain', async () => {
-    const closing = 'Done. ✅ All set for tomorrow.\n';
+    const closing = 'All set for the calendar work tomorrow, see you then.\n';
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-delta', id: 't1', text: 'Here is the summary of the calendar work.\n' },
       ...Array.from({ length: 6 }, () => ({ type: 'text-delta' as const, id: 't1', text: closing })),
@@ -350,15 +350,16 @@ describe('mapStreamToChunks', () => {
     expect(final.output.content).toBe('Done.\nDone.\n');
   });
 
-  it('stops a third identical short line and says so', async () => {
+  it('stops a third identical line of six or more words and says so', async () => {
+    const line = 'Please check the build output again.\n';
     const parts: TextStreamPart<ToolSet>[] = [
-      { type: 'text-delta', id: 't1', text: 'Done.\nDone.\nDone.\n' },
+      { type: 'text-delta', id: 't1', text: line.repeat(3) },
       makeFinishStep('stop'),
     ];
 
     const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
     expect(final.repetition_stopped).toBe(true);
-    expect(final.output.content).toBe('Done.\nDone.\n\nStopped: the reply was repeating itself.');
+    expect(final.output.content).toBe(`${line.repeat(2)}\nStopped: the reply was repeating itself.`);
   });
 
   it('does not stop repetitive reasoning while the turn keeps issuing tool calls', async () => {

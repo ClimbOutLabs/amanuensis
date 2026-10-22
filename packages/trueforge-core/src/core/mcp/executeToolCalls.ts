@@ -191,8 +191,11 @@ export interface ToolCallMemoSnapshot {
    * upload that errors, then an exec that never runs) cannot reset the count.
    */
   consecutive_failed_batches: number;
-  /** How many times each distinct call (tool plus arguments) was made this turn. */
-  call_signatures: { key: string; count: number }[];
+  /**
+   * How many times each distinct call (tool plus arguments) ran this turn, and the write count at its last
+   * run. A snapshot written before the re-run rule omits the latter.
+   */
+  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[];
   denied_approval_identities: string[];
   repeated_denied_approval: boolean;
   inspection_calls_before_edit: number;
@@ -290,7 +293,9 @@ type LegacyToolCallMemoSnapshot = Omit<
   workspace_mutation_epoch?: number | undefined;
   consecutive_no_progress_batches?: number | undefined;
   consecutive_failed_batches: number | undefined;
-  call_signatures: { key: string; count: number }[] | undefined;
+  // `writes_at_last_run` is absent in snapshots written before the re-run rule; hydration treats the
+  // call as not re-runnable until a write runs, the same as a call recorded in this turn.
+  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[] | undefined;
   pending_identical_call_nudges?: (string | SnapshotPendingHostNote)[] | undefined;
   failed_batch_nudge_generation?: number | undefined;
   empty_inspection_nudge_generation?: number | undefined;
@@ -310,9 +315,16 @@ type LegacyToolCallMemoSnapshot = Omit<
  * Tool-call counts for one user turn. The main thread and every sub-agent it starts share one
  * instance by reference, so the repeat and write limits hold across the whole turn.
  */
+export interface CallSignatureRecord {
+  /** How many times the call ran this turn. */
+  count: number;
+  /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
+  writesAtLastRun: number;
+}
+
 export interface TurnToolCallLedger {
-  /** Exact-call signatures run or refused this turn, with how many times each. */
-  callSignatures: Map<string, number>;
+  /** Exact-call signatures that ran this turn, with the count and the write count at their last run. */
+  callSignatures: Map<string, CallSignatureRecord>;
   /** Signature of the call made last, across every thread; undefined before the first call. */
   lastCallSignature: string | undefined;
   /** Write calls (tier 3) admitted to dispatch this turn. Enforces the per-turn write cap. */
@@ -323,6 +335,8 @@ export interface TurnToolCallLedger {
   toolMarkupLeaksThisTurn: number;
   /** Retries sent to the model for tool calls written as text this turn. */
   toolMarkupRetriesThisTurn: number;
+  /** Set when the write cap stopped the turn; the turn ends whichever thread hit it. */
+  stoppedForWriteCap: boolean;
 }
 
 export function createTurnToolCallLedger(): TurnToolCallLedger {
@@ -333,7 +347,32 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     successfulWritesThisTurn: 0,
     toolMarkupLeaksThisTurn: 0,
     toolMarkupRetriesThisTurn: 0,
+    stoppedForWriteCap: false,
   };
+}
+
+/**
+ * One turn's ledger from the ledgers its in-flight threads were snapshotted with. Every counter only
+ * rises within a turn, so the largest value any snapshot holds is the latest one. `ledgers[0]` is the
+ * root thread, whose last call is the one that counts as consecutive.
+ */
+export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[]): TurnToolCallLedger {
+  const merged = createTurnToolCallLedger();
+  merged.lastCallSignature = ledgers[0]?.lastCallSignature;
+  for (const ledger of ledgers) {
+    for (const [signature, record] of ledger.callSignatures) {
+      const existing = merged.callSignatures.get(signature);
+      merged.callSignatures.set(signature, {
+        count: Math.max(existing?.count ?? 0, record.count),
+        writesAtLastRun: Math.max(existing?.writesAtLastRun ?? 0, record.writesAtLastRun),
+      });
+    }
+    merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
+    merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
+    merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
+  }
+  return merged;
 }
 
 export interface ToolCallMemoState {
@@ -450,7 +489,10 @@ export function createToolCallMemoState(
   state.consecutiveNoProgressBatches = snapshot.consecutive_no_progress_batches ?? 0;
   state.consecutiveFailedBatches = snapshot.consecutive_failed_batches ?? 0;
   for (const entry of snapshot.call_signatures ?? []) {
-    state.turn.callSignatures.set(entry.key, entry.count);
+    state.turn.callSignatures.set(entry.key, {
+      count: entry.count,
+      writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+    });
   }
   // Legacy snapshots stored a bare tool name, or a {signature, tool_name} pair with no `kind` or
   // `message` — both predate this generalization, when every entry was necessarily an
@@ -532,7 +574,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     consecutive_failed_batches: state.consecutiveFailedBatches,
     call_signatures: [...state.turn.callSignatures.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, count]) => ({ key, count })),
+      .map(([key, record]) => ({ key, count: record.count, writes_at_last_run: record.writesAtLastRun })),
     denied_approval_identities: [...state.deniedApprovalIdentities].sort(),
     repeated_denied_approval: state.repeatedDeniedApproval,
     inspection_calls_before_edit: state.inspectionCallsBeforeEdit,
