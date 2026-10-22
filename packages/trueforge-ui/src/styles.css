@@ -1679,7 +1679,6 @@
   border-top: 0.0625rem dotted var(--border);
 }
 
-/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
 /* The rail is too narrow for verb and state side by side: the state sits under its verb. */
 .aman-runtime-rail .aui-receipt .aui-row--2 {
   grid-template-columns: minmax(0, 1fr);
@@ -1690,6 +1689,7 @@
   justify-self: start;
 }
 
+/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
 .aui-panda {
   display: grid;
   justify-items: center;
@@ -1712,6 +1712,24 @@
   font-size: 0.68rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
+.aui-brief-display {
+  font-family: var(--font-display);
+}
+
+.aui-brief-mono {
+  font-family: var(--font-receipt);
+}
+
+/* An action in a row is a button; it keeps the look of the link it replaces. */
+.aui-row > button.action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* Phone: the chapter label stacks above its rows and the when column narrows. */

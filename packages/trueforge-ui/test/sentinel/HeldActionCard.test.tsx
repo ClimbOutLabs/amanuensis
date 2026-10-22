@@ -74,7 +74,7 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
   });
 
   it('offers Always allow this tool only when the server said it may', () => {
