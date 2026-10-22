@@ -3,7 +3,10 @@ import { HTTPException } from 'hono/http-exception';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
-import { BriefItemCompletionSchema, ListBriefItemCompletionsResponseSchema } from '../../../src/schemas/briefItems';
+import {
+  ListBriefItemCompletionsResponseSchema,
+  MarkBriefItemDoneResponseSchema,
+} from '../../../src/schemas/briefItems';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
 const BASE = '/api/v1/user/brief-items';
@@ -108,8 +111,8 @@ describe('morning brief completions route', () => {
     const chat = await createChat(alice);
 
     const response = await markDone(alice, itemIn(chat, 'bi_done_1'));
-    expect(response.status).toBe(200);
-    const completion = BriefItemCompletionSchema.parse(await response.json());
+    expect(response.status).toBe(201);
+    const { data: completion } = MarkBriefItemDoneResponseSchema.parse(await response.json());
     expect(completion).toMatchObject({ item_key: 'bi_done_1', section: 'decision', title: 'Reply to Dana' });
 
     expect(await listFor(alice)).toEqual([completion]);
@@ -146,15 +149,15 @@ describe('morning brief completions route', () => {
     expect(response.status).toBe(400);
   });
 
-  it('undo removes the item for its owner, returns 204, and audits brief.item_undone once', async () => {
+  it('undo removes the item for its owner, returns 200, and audits brief.item_undone once', async () => {
     const alice = uniqueName('alice');
     const chat = await createChat(alice);
     await markDone(alice, itemIn(chat, 'bi_undo'));
 
     const undo = await server.request(`${BASE}/completions/bi_undo`, asUser(alice, { method: 'DELETE' }));
-    expect(undo.status).toBe(204);
+    expect(undo.status).toBe(200);
     const again = await server.request(`${BASE}/completions/bi_undo`, asUser(alice, { method: 'DELETE' }));
-    expect(again.status).toBe(204);
+    expect(again.status).toBe(200);
 
     expect(await listFor(alice)).toEqual([]);
     const rows = await auditRows(alice);
