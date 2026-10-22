@@ -14,7 +14,7 @@ import {
   isPlainTextContentType,
   MAX_IDEOGRAPHIC_SELECTORS,
 } from './mimeText';
-import { addressListIsPlain, mailboxesIn } from './results';
+import { addressListIsPlain, mailboxesIn, mailboxesOf } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
 const MAX_SENDABLE_BODY_CHARS = 20_000;
@@ -86,6 +86,14 @@ export function fromAddress(raw: string): string | null {
   }
   const inner = value.slice(value.indexOf('<') + 1, -1).trim();
   return PLAIN_ASCII_ADDRESS.test(inner) ? inner.toLowerCase() : null;
+}
+
+/**
+ * The one address of a Reply-To or Sender header, or null unless it is a single plain mailbox. Read as a list first,
+ * so an extra address before the brackets, a group or a comment cannot hide behind the account's own address.
+ */
+function singleMailboxAddress(raw: string): string | null {
+  return addressListIsPlain(raw) && mailboxesOf(raw).length === 1 ? fromAddress(raw) : null;
 }
 
 const MAX_FROM_NAME_CHARS = 200;
@@ -169,7 +177,7 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
       continue;
     }
     const shown = name === 'sender' ? 'Sender' : 'Reply-To';
-    const address = fromAddress(rawHeaderOf({ part: payload, name }));
+    const address = singleMailboxAddress(rawHeaderOf({ part: payload, name }));
     if (address === null) {
       return { ok: false, reason: unknownHeaderRefusal(shown) };
     }

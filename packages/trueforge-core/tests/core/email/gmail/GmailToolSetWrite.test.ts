@@ -656,6 +656,26 @@ describe('send_draft', () => {
         says: 'Sender',
       },
       {
+        name: 'a Reply-To that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Reply-To',
+      },
+      {
+        name: 'a Sender that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Sender', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Sender',
+      },
+      {
         name: 'a header Aman cannot check',
         mail: plainDraft({
           id: 'd-m1',

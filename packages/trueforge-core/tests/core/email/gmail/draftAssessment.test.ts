@@ -111,6 +111,29 @@ describe('assessDraft', () => {
     expect(forSend(mail)).toMatchObject({ ok: true, draft: { replyTo: 'mallory@example.com' } });
   });
 
+  it.each([
+    'mallory@example.com, <ada@example.com>',
+    'mallory@example.com, Ada <ada@example.com>',
+    'mallory@example.com <ada@example.com>',
+    'Team: mallory@example.com, <ada@example.com>',
+    '(mallory@example.com) <ada@example.com>',
+    'mallory@example.com,<grace@example.com>',
+  ])('refuses a Reply-To or Sender that is not one plain mailbox: %s', value => {
+    for (const name of ['Reply-To', 'Sender']) {
+      const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name, value }] });
+      expect(reasonOf(forSend(mail))).toContain(`(${name})`);
+    }
+  });
+
+  it('reads a quoted name with a comma in a Reply-To as one mailbox', () => {
+    const mail = plainDraft({
+      id: 'd1',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: '"Lovelace, Ada" <ada@example.com>' }],
+    });
+    expect(forSend(mail)).toMatchObject({ ok: true, draft: { replyTo: null } });
+  });
+
   it('will not change a saved draft that replies elsewhere, since the change would drop that reply address', () => {
     const elsewhere = plainDraft({
       id: 'd1',
