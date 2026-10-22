@@ -281,7 +281,7 @@ describe('ThemeProvider', () => {
           '--card-bg': '#1e1f20',
           '--primary-button-bg': '#a8c7fa',
           '--primary-button-text': '#062e6f',
-          '--focus-ring': '#a8c7fa',
+          '--focus-ring': 'oklch(0.809 0.138 85.2)',
           '--user-message-bg': '#222327',
         },
       },

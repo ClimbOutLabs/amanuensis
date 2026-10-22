@@ -36,13 +36,13 @@ export function ApprovalNavBanner({
       aria-label={`${label}. Click to go to approval ${String(current)} of ${String(total)}.`}
       onClick={onFocusCurrent}
       className={cn(
-        'aui-approval-nav-banner border-approval-banner-border bg-approval-banner-bg text-approval-banner-fg flex w-full cursor-pointer items-center justify-between gap-2 border-t px-4 py-1.5 text-sm',
+        'aui-approval-nav-banner border-gold-line bg-gold-soft text-text-primary flex w-full cursor-pointer items-center justify-between gap-2 border-t px-4 py-1.5 text-sm',
         'rounded-t-[var(--composer-radius,1.5rem)]',
         className,
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <span className="bg-approval-banner-accent size-2 shrink-0 rounded-full" aria-hidden />
+        <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
         <span className="truncate font-medium leading-[1.4]">{label}</span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -57,7 +57,7 @@ export function ApprovalNavBanner({
             event.stopPropagation();
             onNext();
           }}
-          className="text-approval-banner-fg hover:bg-approval-banner-border/10 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
+          className="text-gold-ink hover:bg-gold-line/20 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
         >
           <Icon name="arrow-down" size="0.875rem" />
         </button>
@@ -69,7 +69,7 @@ export function ApprovalNavBanner({
             event.stopPropagation();
             onPrev();
           }}
-          className="text-approval-banner-fg hover:bg-approval-banner-border/10 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
+          className="text-gold-ink hover:bg-gold-line/20 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
         >
           <Icon name="arrow-up" size="0.875rem" />
         </button>

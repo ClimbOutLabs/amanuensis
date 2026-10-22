@@ -14,6 +14,7 @@
 import { isRedirectStatus, redirectTargetOrigin, type RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
 import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
+import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import { readBodyWithinCap } from './boundedBodyReader';
 import type {
   DeleteMemoryVaultEntryOutcome,
@@ -490,11 +491,18 @@ export class HindsightClient implements MemoryClient {
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    // Ability notes about Aman never reach the provider (see assistantAbilityNotes).
+    const items = params.items
+      .map(item => ({ ...item, content: stripAssistantAbilityNotes(item.content) }))
+      .filter(item => item.content !== '');
+    if (items.length === 0) {
+      return { ok: true };
+    }
     const sent = await this.send({
       path: '/memories',
       method: 'POST',
       timeoutMs: params.timeoutMs,
-      body: { items: params.items, async: true, operation_id: params.operationId },
+      body: { items, async: true, operation_id: params.operationId },
     });
     if (!sent.ok) {
       return { ok: false, reason: sent.reason };
