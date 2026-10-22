@@ -478,6 +478,20 @@ describe('actions that leave the sandbox still ask, with the switch on', () => {
   );
 
   test(
+    'a script run from outside the workspace asks',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'demo.py', authored: true });
+      const decision = await classifyTier(
+        action('exec', { command: `python3 ${join(workspace, 'demo.py')}`, cwd: '/' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('tracked_executable_unapproved');
+    }),
+  );
+
+  test(
     'an unplaceable command asks when there is no workspace',
     withWorkspace(async () => {
       const decision = await classifyTier(
