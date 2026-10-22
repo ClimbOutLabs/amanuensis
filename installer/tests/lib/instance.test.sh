@@ -562,7 +562,7 @@ test_speech_service_is_hardened_and_cannot_reach_the_instance() {
   assert_contains "$machine" "mem_limit: 2g"
   assert_contains "$machine" "pids_limit: 256"
   local voice_block
-  voice_block=$(printf '%s\n' "$machine" | sed -n '/^  aman-tts:/,/^volumes:/p')
+  voice_block=$(printf '%s\n' "$machine" | sed -n '/^  aman-tts:/,/^volumes:/p' | sed '$d')
   assert_contains "$voice_block" "user: '10001:10001'" "the voice is not root"
   assert_contains "$voice_block" "- ALL" "the voice has no capabilities"
   assert_contains "$voice_block" "read_only: true"
