@@ -180,9 +180,12 @@ describe('HelpChatPanel', () => {
     expect(message).toContain('Last error: Request failed (500).');
     expect(message).toContain('- Your model: ok. The model answered.');
     expect(await screen.findByTestId('help-choices')).toBeInTheDocument();
-    expect(
-      screen.getByText('You were on: Settings, Connectors. Last error: Request failed (500).'),
-    ).toBeInTheDocument();
+    const disclosure = screen.getByText('What Iris was told').closest('details');
+    expect(disclosure).toHaveTextContent('You were on: Settings, Connectors. Last error: Request failed (500).');
+    const shownOutside = Array.from(screen.getByTestId('help-chat-results').querySelectorAll('p')).filter(
+      paragraph => paragraph.closest('details') === null,
+    );
+    expect(shownOutside.some(paragraph => paragraph.textContent?.includes('You were on'))).toBe(false);
   });
 
   it('sends one hidden message only, even if the run is started twice', async () => {
@@ -201,7 +204,7 @@ describe('HelpChatPanel', () => {
 
     expect(
       await screen.findByText(
-        'Iris could not join this chat. Run aman doctor on your computer, then press Check again.',
+        'Iris could not join this chat. Open a terminal on the computer running Aman and type: aman doctor. Then press Check again.',
       ),
     ).toBeInTheDocument();
     expect(composerSend).not.toHaveBeenCalled();

@@ -99,10 +99,11 @@ import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
+import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
-import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
+import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
@@ -444,6 +445,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
+        googleConnectionStore: deps.googleConnectionStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -744,8 +746,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   );
   // Installs the Aman guide for a person on first sight and refreshes it on upgrade. It waits for a
   // default model, since the guide answers with one.
-  const ensureAmanGuideFor = async ({ userId }: { userId: string }): Promise<void> => {
-    const modelName = await readDefaultChatModel({
+  const ensureAmanGuideFor = async ({
+    userId,
+    modelProviderStore,
+  }: {
+    userId: string;
+    modelProviderStore: IModelProviderStore;
+  }): Promise<void> => {
+    const modelName = await resolveDefaultChatModel({
+      tenantId: TENANT_ID,
+      modelProviderStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });

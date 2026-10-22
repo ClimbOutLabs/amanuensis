@@ -34,6 +34,7 @@ function results(overrides: Partial<HelpProbeResults> = {}): HelpProbeResults {
   return {
     model: HEALTHY_MODEL,
     connectors: [{ name: 'linear', ok: true }],
+    google: 'not_set_up',
     sandboxReady: true,
     scheduler: 'running',
     hostReport: { state: 'ok', report: REPORT },
@@ -135,11 +136,41 @@ describe('buildHelpHealthCheck', () => {
     expect(item(build({ scheduler: 'elsewhere' }), 'schedules')).toMatchObject({ status: 'not_set_up' });
   });
 
-  it('reports mail and calendar as not set up', () => {
+  it('reports mail and calendar as not set up only when no Google login or mail connector is configured', () => {
     expect(item(build(), 'mail_calendar')).toMatchObject({
       status: 'not_set_up',
-      message: 'Email and calendar services are not set up on this server.',
+      message: 'Email and calendar are not set up yet.',
     });
+  });
+
+  it('reports mail and calendar OK when a configured mail or calendar connector answers', () => {
+    const check = build({ connectors: [{ name: 'Email', ok: true }] });
+
+    expect(item(check, 'mail_calendar')).toMatchObject({ status: 'pass', message: 'Email and calendar answered.' });
+  });
+
+  it('reports mail and calendar OK when the built-in Google login answers, with no connector', () => {
+    expect(item(build({ google: 'answered' }), 'mail_calendar')).toMatchObject({ status: 'pass' });
+  });
+
+  it('reports mail and calendar as failed, not as not set up, when a configured connector does not answer', () => {
+    const check = build({ connectors: [{ name: 'Calendar', ok: false }] });
+
+    expect(item(check, 'mail_calendar')).toMatchObject({
+      status: 'fail',
+      message: 'Email and calendar did not answer.',
+    });
+  });
+
+  it('asks for a new sign-in when the Google login needs connecting again', () => {
+    expect(item(build({ google: 'needs_reconnect' }), 'mail_calendar')).toMatchObject({
+      status: 'fail',
+      message: 'Google needs to be connected again.',
+    });
+  });
+
+  it('shows the model test answering as OK in the first item', () => {
+    expect(build().items[0]).toMatchObject({ id: 'model', status: 'pass', message: 'The model answered.' });
   });
 
   it('maps failed and warned host report checks into the same list, and leaves passes out', () => {
@@ -166,7 +197,8 @@ describe('buildHelpHealthCheck', () => {
     expect(build({ hostReport: missing }).host_report).toEqual({
       state: 'missing',
       checked_at: null,
-      message: 'No full check has been run yet. Run aman doctor on your computer.',
+      message:
+        'A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
       next_step: null,
     });
   });
@@ -176,7 +208,7 @@ describe('buildHelpHealthCheck', () => {
 
     expect(section.state).toBe('invalid');
     expect(section.message).toBe(
-      'The last full check could not be read, so it is treated as missing. Run aman doctor on your computer.',
+      'The last full check could not be read, so it is treated as missing. A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
     );
   });
 
@@ -186,7 +218,7 @@ describe('buildHelpHealthCheck', () => {
     expect(section.state).toBe('stale');
     expect(section.checked_at).toBe('2026-10-20T08:30:00Z');
     expect(section.message).toBe(
-      'The last full check is more than 7 days old. Run aman doctor on your computer again.',
+      'The last full check is more than 7 days old. A deeper check has not been run yet. To run one, open a terminal on the computer running Aman and type: aman doctor',
     );
   });
 });

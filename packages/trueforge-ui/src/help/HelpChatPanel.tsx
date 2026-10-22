@@ -12,7 +12,6 @@ import {
   formatLastFullCheck,
   IRIS_HELP_CHOICES,
   sortHelpItems,
-  youWereOnLine,
   type HelpHealthCheck,
   type HelpHealthItem,
   type HelpHealthStatus,
@@ -159,7 +158,7 @@ function phaseLine(session: HelpSession): string | null {
     case 'joining':
       return 'Iris is joining this chat.';
     case 'unavailable':
-      return 'Iris could not join this chat. Run aman doctor on your computer, then press Check again.';
+      return 'Iris could not join this chat. Open a terminal on the computer running Aman and type: aman doctor. Then press Check again.';
     case 'check_failed':
       return 'The check could not run. Check your connection, then press Check again.';
     case 'no_model':
@@ -201,9 +200,12 @@ export function HelpChatPanel() {
             <HostReportLine help={help} />
           </>
         )}
-        <p className="text-sm text-text-secondary">
-          {youWereOnLine({ screen: session.screen, lastError: session.lastError })}
-        </p>
+        {session.sentMessage === null ? null : (
+          <details className="text-sm text-text-secondary">
+            <summary className="cursor-pointer">What Iris was told</summary>
+            <p className="mt-2 whitespace-pre-wrap">{session.sentMessage}</p>
+          </details>
+        )}
         {showCheckAgain ? (
           <div>
             <Button type="button" variant="secondary" size="small" onClick={help.checkAgain}>
