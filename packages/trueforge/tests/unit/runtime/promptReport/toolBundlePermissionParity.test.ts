@@ -313,7 +313,9 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
   // Clock readings differ between two runs; nothing else in a result may.
   const timeless = result
     ?.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '<time>')
-    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0');
+    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0')
+    .replace(/"date":"\d{4}-\d{2}-\d{2}"/g, '"date":"<date>"')
+    .replace(/"time":"\d{2}:\d{2}:\d{2}"/g, '"time":"<time>"');
   return {
     judged: {
       name: call.function.name,
