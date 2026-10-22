@@ -76,6 +76,15 @@ describe('computeAgentStepsSplit', () => {
     expect(result.hasFinal).toBe(true);
   });
 
+  it('marks visible text before a later folded step as in-between, never the trailing answer', () => {
+    const parts = [text('Let me look.'), tool(), text('Now the details.'), reasoning(), tool(), text('Answer.')];
+    expect(computeAgentStepsSplit(parts).interimTextIndices).toEqual([0, 2]);
+  });
+
+  it('does not mark text before a map call as in-between, since the map is the answer', () => {
+    expect(computeAgentStepsSplit([text('Here is the route.'), mapsTool()]).interimTextIndices).toEqual([]);
+  });
+
   it('folds whitespace-only text into the surrounding steps', () => {
     const parts = [tool(), text('\n'), tool(), text('Final.')];
     expect(computeAgentStepsSplit(parts).runs).toEqual([run(0, 3, { tools: 2 })]);

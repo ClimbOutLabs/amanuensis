@@ -84,12 +84,13 @@ function getNotice(): HTMLElement {
   return screen.getByTestId('run-code-setup-notice');
 }
 
-function getAgentInternals(): HTMLElement {
-  return screen.getByTestId('assistant-message-agent-internals');
+/** Agent details are off by default, so no step row shows; the notice must show anyway. */
+function expectNoAgentInternals(): void {
+  expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
 }
 
 describe('AssistantMessageContainer run_code setup failures', () => {
-  it('shows the exact server text with a working link while the agent details stay collapsed', () => {
+  it('shows the exact server text with a working link while agent details are off', () => {
     renderMessages([
       {
         role: 'assistant',
@@ -97,12 +98,8 @@ describe('AssistantMessageContainer run_code setup failures', () => {
       },
     ]);
 
-    // The details are collapsed, and the notice is not inside them.
-    const internals = getAgentInternals();
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
+    expectNoAgentInternals();
     const notice = getNotice();
-    expect(internals).not.toContainElement(notice);
-    expect(notice.closest('[hidden]')).toBeNull();
     expect(notice).toBeVisible();
 
     expect(notice).toHaveAttribute('role', 'status');
@@ -198,7 +195,7 @@ describe('AssistantMessageContainer run_code setup failures', () => {
     ]);
 
     expect(getNotice()).toBeVisible();
-    expect(getAgentInternals()).not.toContainElement(getNotice());
+    expectNoAgentInternals();
   });
 
   describe('when it is not a setup failure', () => {
@@ -430,8 +427,7 @@ describe('AssistantMessageContainer run_code setup failures after a reload', () 
     renderMessages(await reloadedMessages(server));
     const notice = getNotice();
     expect(notice).toBeVisible();
-    expect(getAgentInternals()).not.toContainElement(notice);
-    expect(getAgentInternals().querySelector('[hidden]')).not.toBeNull();
+    expectNoAgentInternals();
     expect(within(notice).getByTestId('run-code-setup-notice-message').textContent).toBe(DOCKER_MISSING);
     expect(within(notice).getByRole('link', { name: 'https://docs.docker.com/engine/install/' })).toHaveAttribute(
       'href',

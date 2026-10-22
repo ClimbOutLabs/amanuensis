@@ -18,6 +18,8 @@ export interface AgentStepsRun {
 export interface AgentStepsSplitResult {
   /** Folded runs in part order; every part outside them renders in the main flow. */
   runs: readonly AgentStepsRun[];
+  /** Indices of visible text parts written before a later folded step: the model's in-between lines. */
+  interimTextIndices: readonly number[];
   hasFinal: boolean;
   toolCount: number;
   thinkingCount: number;
@@ -63,8 +65,13 @@ export function computeAgentStepsSplit(parts: readonly AgentStepPart[]): AgentSt
   });
 
   const runs = collectRuns({ parts, folded });
+  const lastRunEnd = runs.at(-1)?.end ?? 0;
+  const interimTextIndices = parts.flatMap((part, index) =>
+    index < lastRunEnd && !folded[index] && part.type === 'text' ? [index] : [],
+  );
   return {
     runs,
+    interimTextIndices,
     hasFinal,
     toolCount: runs.reduce((sum, run) => sum + run.toolCount, 0),
     thinkingCount: runs.reduce((sum, run) => sum + run.thinkingCount, 0),

@@ -91,12 +91,12 @@ function renderChat(server: AgentUIServer, messages: ThreadMessageLike[]) {
 }
 
 describe('AgentDetailsPreferenceContext', () => {
-  it('toggling the chat-level switch expands the existing turn', async () => {
+  it("toggling the chat-level switch shows the existing turn's steps", async () => {
     const server = createMetadataBackedServer();
     renderChat(server, [completedToolTurn('turn-1')]);
 
-    // Starts collapsed (no stored preference yet).
-    expect(screen.getByTestId('assistant-message-agent-internals').querySelector('[hidden]')).not.toBeNull();
+    // Starts off (no stored preference yet): no step row at all.
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('menuitemcheckbox')).toHaveAttribute('aria-checked', 'false'));
 
     act(() => screen.getByRole('menuitemcheckbox').click());
@@ -120,7 +120,7 @@ describe('AgentDetailsPreferenceContext', () => {
     }
   });
 
-  it('turning the switch off collapses every turn', async () => {
+  it("turning the switch off removes every turn's step row", async () => {
     const server = createMetadataBackedServer({ agent_details: 'expanded' });
     renderChat(server, [completedToolTurn('turn-1'), { role: 'user', content: 'thanks' }, completedToolTurn('turn-2')]);
 
@@ -133,9 +133,7 @@ describe('AgentDetailsPreferenceContext', () => {
 
     act(() => screen.getByRole('menuitemcheckbox').click());
     await waitFor(() => expect(screen.getByRole('menuitemcheckbox')).toHaveAttribute('aria-checked', 'false'));
-    for (const row of screen.getAllByTestId('assistant-message-agent-internals')) {
-      expect(row.querySelector('[hidden]')).not.toBeNull();
-    }
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
   it('persists across a remount: a fresh provider re-reads the stored preference', async () => {
