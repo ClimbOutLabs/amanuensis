@@ -244,6 +244,7 @@ describe('TurnHandle.stream()', () => {
       status: 'done',
       metrics: {
         total_input_tokens: 12,
+        last_call_input_tokens: 12,
         total_output_tokens: 5,
         total_tokens: 17,
         total_cache_read_tokens: 4,

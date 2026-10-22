@@ -168,7 +168,7 @@ async function toolTable(): Promise<ToolRow[]> {
   const instance = await instanceFor({ mode: 'online', audit: [] });
   const builtIns: IToolSet[] = [
     ...instance.capabilities.flatMap(capability => capability.systemToolSets ?? []),
-    instance.sandbox,
+    ...(instance.sandbox === undefined ? [] : [instance.sandbox]),
   ];
   const { convertedTools } = await convertMCPServersToTools({
     tfyManagedServers: builtIns,
@@ -277,6 +277,7 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
     definition: { ...instance.definition, modelClient },
     threadId: 'main',
     title: 'Main',
+    turnToolCallLedger: undefined,
     sandbox: instance.sandbox,
     capabilities,
     // A message that asks for no bundle, so only the loading under test decides what is sent.
@@ -312,7 +313,9 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
   // Clock readings differ between two runs; nothing else in a result may.
   const timeless = result
     ?.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '<time>')
-    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0');
+    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0')
+    .replace(/"date":"\d{4}-\d{2}-\d{2}"/g, '"date":"<date>"')
+    .replace(/"time":"\d{2}:\d{2}:\d{2}"/g, '"time":"<time>"');
   return {
     judged: {
       name: call.function.name,

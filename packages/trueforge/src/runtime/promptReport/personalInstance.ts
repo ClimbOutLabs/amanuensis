@@ -34,10 +34,14 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
-export type PersonalInstanceName = 'personal' | 'personal-with-google';
+export type PersonalInstanceName = 'personal' | 'personal-with-google' | 'personal-no-sandbox';
 
 /** Every standard setup the report measures, in report order. */
-export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
+export const PERSONAL_INSTANCE_NAMES = [
+  'personal',
+  'personal-with-google',
+  'personal-no-sandbox',
+] satisfies PersonalInstanceName[];
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
 
@@ -229,11 +233,11 @@ function webSearchConnector(): { url: string; headers: Record<string, string>; s
   };
 }
 
-function personalSpec(): AgentSpec {
+function personalSpec(input: { sandbox: boolean }): AgentSpec {
   return AgentSpecSchema.parse({
     model: { name: MODEL_NAME },
     instructions: '',
-    config: { sandbox: { enabled: true } },
+    config: { sandbox: { enabled: input.sandbox } },
     mcp_servers: [{ name: WEB_SEARCH_SERVER }],
   });
 }
@@ -242,7 +246,8 @@ function personalSpec(): AgentSpec {
 export interface PersonalInstance {
   definition: ResolvedAgentDefinition['definition'];
   capabilities: AgentCapability[];
-  sandbox: Sandbox;
+  /** Absent for a configuration whose spec turns the sandbox off. */
+  sandbox: Sandbox | undefined;
   /** The permission context the turn's own thread gets, sharing the resolver's search state. */
   sentinel: SentinelHostContext;
 }
@@ -317,7 +322,9 @@ export async function buildPersonalInstance(input: {
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  const spec = personalSpec();
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name !== 'personal-no-sandbox';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,
@@ -333,8 +340,8 @@ export async function buildPersonalInstance(input: {
     definition,
     compactionModel: resolved.compactionModel,
     isChild: false,
-    sandbox,
-    sandboxAvailable: true,
+    sandbox: sandboxEnabled ? sandbox : undefined,
+    sandboxAvailable: sandboxEnabled,
     tracing,
     logger,
     extraCapabilities: resolved.extraCapabilities,
@@ -346,7 +353,7 @@ export async function buildPersonalInstance(input: {
     conversation_id: SESSION_ID,
     web_search: resolver.webSearchTurn,
   });
-  return { definition, capabilities, sandbox, sentinel };
+  return { definition, capabilities, sandbox: sandboxEnabled ? sandbox : undefined, sentinel };
 }
 
 /** Measures one standard configuration answering one typical turn. */
@@ -359,5 +366,12 @@ export async function measurePersonalInstance(input: {
     googleAccess: 'read',
     sentinelServices: undefined,
   });
-  return measurePromptRequest({ definition, capabilities, sandbox, message: PROMPT_REPORT_TURNS[input.turn] });
+  // The server has a sandbox; the no-sandbox setup turns it off for this chat, so the report shows the sandbox-off line.
+  return measurePromptRequest({
+    definition,
+    capabilities,
+    sandbox,
+    serverSandboxAvailable: true,
+    message: PROMPT_REPORT_TURNS[input.turn],
+  });
 }

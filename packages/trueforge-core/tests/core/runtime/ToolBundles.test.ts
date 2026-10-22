@@ -95,6 +95,7 @@ async function runTurn(input: {
   const thread = new AgentThread({
     threadId: 'main',
     title: 'Main',
+    turnToolCallLedger: undefined,
     definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test' },
     context: [...(input.history ?? []), { role: 'user', content: input.message ?? 'Thanks!' }],
     capabilities,

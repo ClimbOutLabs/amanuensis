@@ -162,6 +162,81 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
       },
     },
   },
+  'personal-no-sandbox': {
+    'core-only': {
+      total: 1548,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 879,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/sandbox-off': 101,
+        'agent-capabilities/tool-bundles': 161,
+        'agent-capabilities/active-speaker-context': 91,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+      },
+    },
+    calendar: {
+      total: 2279,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 939,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/sandbox-off': 101,
+        'agent-capabilities/tool-bundles': 163,
+        'agent-capabilities/active-speaker-context': 91,
+        'agent-capabilities/schedules': 57,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+        create_schedule: 314,
+        delete_schedule: 91,
+        list_schedules: 75,
+        pause_schedule: 94,
+        resume_schedule: 97,
+      },
+    },
+    web: {
+      total: 2220,
+      rows: {
+        'agent-identity': 97,
+        'current-date': 36,
+        'model-identity': 79,
+        'agent-capabilities': 1287,
+        'agent-capabilities/internal-messages': 59,
+        'agent-capabilities/untrusted-tool-output': 104,
+        'agent-capabilities/source-discovery': 325,
+        'agent-capabilities/ability-boundaries': 91,
+        'agent-capabilities/web-images': 80,
+        'agent-capabilities/no-task-no-tools': 75,
+        'agent-capabilities/check-before-asking': 69,
+        'agent-capabilities/plain-speech': 114,
+        'agent-capabilities/sandbox-off': 101,
+        'agent-capabilities/tool-bundles': 163,
+        'agent-capabilities/active-speaker-context': 91,
+        ask_user_question: 261,
+        load_bundle: 96,
+        get_current_datetime: 100,
+        tavily_extract: 130,
+        tavily_search: 134,
+      },
+    },
+  },
 };
 
 /** Most tokens the bundle index section may take in any setup. */
@@ -206,5 +281,32 @@ describe('personal instance prompt budget', () => {
     const index = report.sections.find(row => row.name === 'agent-capabilities/tool-bundles');
     expect(index?.tokens).toBeGreaterThan(0);
     expect(index?.tokens).toBeLessThanOrEqual(BUNDLE_INDEX_BUDGET);
+  });
+});
+
+/** Each sandbox-backed section and the tools it describes; with the sandbox off, neither may be sent. */
+const SANDBOX_SECTIONS: Record<string, string[]> = {
+  'agent-capabilities/sandbox': ['exec', 'run_code', 'apply_patch', 'replace_text', 'write_file'],
+  'agent-capabilities/sandbox/repository-work': ['exec', 'apply_patch', 'replace_text', 'write_file'],
+  'agent-capabilities/sandbox/sandbox-schema-infer': ['exec'],
+  'agent-capabilities/sandbox/sandbox-file-uploads': ['exec'],
+  'agent-capabilities/documents': ['create_document_report', 'extract_document_text', 'summarize_net_worth'],
+};
+
+describe('system prompt sections follow the tools a chat has', () => {
+  it('sends the sandbox-off line, and no sandbox tools, when the sandbox is off for the chat', async () => {
+    const on = await measurePersonalInstance({ name: 'personal', turn: 'core-only' });
+    const off = await measurePersonalInstance({ name: 'personal-no-sandbox', turn: 'core-only' });
+    const onSections = new Set(on.sections.map(row => row.name));
+    const offSections = new Set(off.sections.map(row => row.name));
+    const offTools = new Set(off.tools.map(row => row.name));
+
+    expect(offSections.has('agent-capabilities/sandbox-off')).toBe(true);
+    expect(offSections.has('agent-capabilities/no-sandbox')).toBe(false);
+    expect(onSections.has('agent-capabilities/sandbox-off')).toBe(false);
+    for (const [section, tools] of Object.entries(SANDBOX_SECTIONS)) {
+      expect(offSections.has(section)).toBe(false);
+      expect(tools.some(tool => offTools.has(tool))).toBe(false);
+    }
   });
 });
