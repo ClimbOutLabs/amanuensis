@@ -1,13 +1,11 @@
 import dedent from 'dedent';
 import type { Logger } from 'winston';
-import { CALENDAR_SERVER_ID, LIST_EVENTS_TOOL_NAME } from '../../calendar/toolContract';
 import { estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
 import { createSandboxLargeToolResponseGuidance, SANDBOX_SCHEMA_INFER_TAG } from '../../sandbox/Sandbox';
 import { TAVILY_EXTRACT_TOOL_NAME } from '../../search/TavilyClient';
-import { SPACE_READ_TOOL_NAMES, SPACE_SERVER_ID } from '../../spaces/toolContract';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { extractErrorLogFields } from '../../util/errorLogFields';
 import type { AgentCapability } from '../AgentCapability';
@@ -196,14 +194,15 @@ function sandboxRawOutputStorageGuidance(content: string): string {
 /**
  * Ingestion budgets. Each one bounds what a tool result contributes to the history the model
  * resends on every later step. The full result is never changed upstream: grounding records fetched
- * page text in ToolSet before this pass runs.
+ * page text in ToolSet before this pass runs. Space bodies are not budgeted: a shortened body could be
+ * written back over the whole space by update_space.
  */
 export const PAGE_READ_TOKEN_BUDGET = 2_500;
-export const SPACE_READ_TOKEN_BUDGET = 3_000;
 export const SANDBOX_OUTPUT_EDGE_LINES = 40;
-export const CALENDAR_LIST_EVENT_BUDGET = 20;
 
-const SPACE_READ_TOOL_NAME_SET: ReadonlySet<string> = new Set<string>(SPACE_READ_TOOL_NAMES);
+const EXEC_OUTPUT_HINT =
+  'To see other lines, call exec again with output.head_lines, output.tail_lines or output.grep.';
+const RUN_CODE_OUTPUT_HINT = 'The other lines are not available from this result.';
 
 /** Words of at least four letters or digits, lowercased: the terms a page section may be kept for. */
 function wordsOf(text: string): string[] {
@@ -239,9 +238,15 @@ function mentionsRequest(block: string, request: ReadonlySet<string>): boolean {
   return wordsOf(block).some(word => request.has(word));
 }
 
+/** Cuts text to about maxTokens. estimateTokensForString counts four characters per token. */
+function cutToTokens(text: string, maxTokens: number): string {
+  return text.slice(0, Math.floor(maxTokens * 4));
+}
+
 /**
- * Keeps each heading with its first paragraph, and any paragraph that mentions a word from the
- * request, in page order, until the token budget is spent. The note says how much was left out.
+ * Keeps the opening block, then each heading with its first paragraph, and any paragraph that mentions a
+ * word from the request, in page order, until the token budget is spent. The opening block is always kept,
+ * cut to the budget if it alone is larger, so a page never comes back as only its note.
  */
 export function budgetPageText(input: { text: string; request: ReadonlySet<string>; maxTokens: number }): string {
   const { text, request, maxTokens } = input;
@@ -270,22 +275,26 @@ export function budgetPageText(input: { text: string; request: ReadonlySet<strin
     }
   });
 
-  const kept = new Set<number>();
-  let keptTokens = 0;
+  const kept = new Map<number, string>([[0, cutToTokens(blocks[0] ?? '', maxTokens)]]);
+  let keptTokens = estimateTokensForString(kept.get(0) ?? '');
   for (const group of [...structural, ...requested]) {
-    const cost = group.reduce((sum, index) => sum + estimateTokensForString(blocks[index] ?? ''), 0);
-    if (keptTokens + cost > maxTokens) {
+    const pending = group.filter(index => !kept.has(index));
+    const cost = pending.reduce((sum, index) => sum + estimateTokensForString(blocks[index] ?? ''), 0);
+    if (pending.length === 0 || keptTokens + cost > maxTokens) {
       continue;
     }
-    for (const index of group) {
-      kept.add(index);
+    for (const index of pending) {
+      kept.set(index, blocks[index] ?? '');
     }
     keptTokens += cost;
   }
 
-  const body = blocks.filter((_block, index) => kept.has(index)).join('\n\n');
+  const body = [...kept.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, block]) => block)
+    .join('\n\n');
   const omitted = Math.max(0, Math.round(totalTokens - estimateTokensForString(body)));
-  return `${body}\n\n(shortened: ${String(omitted)} more tokens; ask to read a named section to see more)`;
+  return `${body}\n\n(Only part of this page is shown: about ${String(omitted)} more tokens were left out, and no tool can show them.)`;
 }
 
 /** Trims each page's text in a Tavily extract result to the page budget. The JSON shape stays. */
@@ -315,7 +324,7 @@ export function budgetExtractPages(input: { content: string; request: ReadonlySe
 }
 
 /** Keeps the first and last lines of a long stream; a short one is returned unchanged. */
-function keepEdgeLines(text: string): string {
+function keepEdgeLines(text: string, hint: string): string {
   const lines = text.split('\n');
   if (lines.length <= SANDBOX_OUTPUT_EDGE_LINES * 2) {
     return text;
@@ -323,12 +332,15 @@ function keepEdgeLines(text: string): string {
   const omitted = lines.length - SANDBOX_OUTPUT_EDGE_LINES * 2;
   return [
     ...lines.slice(0, SANDBOX_OUTPUT_EDGE_LINES),
-    `... ${String(omitted)} lines omitted; the first and last ${String(SANDBOX_OUTPUT_EDGE_LINES)} lines are kept ...`,
+    `... ${String(omitted)} lines left out. ${hint} ...`,
     ...lines.slice(-SANDBOX_OUTPUT_EDGE_LINES),
   ].join('\n');
 }
 
-/** Trims long stdout and stderr in a sandbox result. The exit code is a separate field and stays. */
+/**
+ * Trims long output in a sandbox result: exec keeps it in response.result, run_code at the top-level stdout
+ * and stderr. The exit code is a separate field and stays.
+ */
 export function budgetSandboxOutput(content: string): string | undefined {
   let parsed: unknown;
   try {
@@ -344,56 +356,22 @@ export function budgetSandboxOutput(content: string): string | undefined {
   for (const key of ['stdout', 'stderr']) {
     const value = parsed[key];
     if (typeof value === 'string') {
-      const trimmed = keepEdgeLines(value);
+      const trimmed = keepEdgeLines(value, RUN_CODE_OUTPUT_HINT);
       if (trimmed !== value) {
         next[key] = trimmed;
         changed = true;
       }
     }
   }
+  const response = parsed['response'];
+  if (isRecord(response) && typeof response['result'] === 'string') {
+    const trimmed = keepEdgeLines(response['result'], EXEC_OUTPUT_HINT);
+    if (trimmed !== response['result']) {
+      next['response'] = { ...response, result: trimmed };
+      changed = true;
+    }
+  }
   return changed ? JSON.stringify(next) : undefined;
-}
-
-/** Trims a get_space result's body to the space budget. List and block reads carry no body and pass through. */
-export function budgetSpaceRead(input: { content: string; request: ReadonlySet<string> }): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(input.content);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(parsed)) {
-    return undefined;
-  }
-  const space = parsed['space'];
-  if (!isRecord(space) || typeof space['body'] !== 'string') {
-    return undefined;
-  }
-  const original = space['body'];
-  const body = budgetPageText({ text: original, request: input.request, maxTokens: SPACE_READ_TOKEN_BUDGET });
-  return body === original ? undefined : JSON.stringify({ ...parsed, space: { ...space, body } });
-}
-
-/** Keeps the first calendar events in start order and counts the rest. */
-export function budgetCalendarList(content: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed['events'])) {
-    return undefined;
-  }
-  const events = parsed['events'];
-  if (events.length <= CALENDAR_LIST_EVENT_BUDGET) {
-    return undefined;
-  }
-  return JSON.stringify({
-    ...parsed,
-    events: events.slice(0, CALENDAR_LIST_EVENT_BUDGET),
-    events_omitted: events.length - CALENDAR_LIST_EVENT_BUDGET,
-  });
 }
 
 /**
@@ -413,7 +391,6 @@ function applyIngestionBudgets(input: {
     }
     const content = result.message.content;
     const toolName = result.info.originalToolName;
-    const serverId = result.info.toolSet.id;
     let budgeted: string | undefined;
     if (input.sandbox && result.info.toolSet === input.sandbox) {
       budgeted = budgetSandboxOutput(content);
@@ -424,11 +401,6 @@ function applyIngestionBudgets(input: {
       request ??= requestWordsOf(input.context);
       const text = budgetPageText({ text: content, request, maxTokens: PAGE_READ_TOKEN_BUDGET });
       budgeted = text === content ? undefined : text;
-    } else if (SPACE_READ_TOOL_NAME_SET.has(toolName) && serverId === SPACE_SERVER_ID) {
-      request ??= requestWordsOf(input.context);
-      budgeted = budgetSpaceRead({ content, request });
-    } else if (toolName === LIST_EVENTS_TOOL_NAME && serverId === CALENDAR_SERVER_ID) {
-      budgeted = budgetCalendarList(content);
     }
     if (budgeted !== undefined) {
       result.message.content = budgeted;
