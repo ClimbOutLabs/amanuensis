@@ -79,7 +79,7 @@ export function AmanTour({ capabilities, helpAreas, onSend, canSend, onHide, set
       )}
       <section aria-labelledby="aman-tour-day-heading" className="flex flex-col gap-3">
         <div>
-          <h2 id="aman-tour-day-heading" className="text-base font-semibold tracking-tight text-text-primary">
+          <h2 id="aman-tour-day-heading" className="font-serif text-[1.75rem] font-normal text-text-primary">
             Try a day with Aman
           </h2>
           <p className="text-sm text-text-secondary">Tap a card and Aman starts a chat with that message.</p>
@@ -96,7 +96,7 @@ export function AmanTour({ capabilities, helpAreas, onSend, canSend, onHide, set
         </ul>
       </section>
       <section aria-labelledby="aman-tour-can-heading" className="flex flex-col gap-3">
-        <h2 id="aman-tour-can-heading" className="text-base font-semibold tracking-tight text-text-primary">
+        <h2 id="aman-tour-can-heading" className="font-serif text-[1.75rem] font-normal text-text-primary">
           What Aman can do
         </h2>
         <ul className="grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2 md:grid-cols-3">

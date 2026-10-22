@@ -16,6 +16,7 @@
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
+import type { BriefSection } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -279,6 +280,9 @@ export type SentinelUserSettings = {
  * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
+ * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
+ * - `POST /api/v1/user/brief-items/completions` -> marks a brief item done
+ * - `DELETE /api/v1/user/brief-items/completions/{item_key}` -> removes the mark
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
@@ -295,6 +299,17 @@ export type SentinelApi = {
    * stream already delivered.
    */
   listSentinelSessionContext: (sessionId: string) => Promise<SentinelSessionContext>;
+  /** Keys of the morning brief items this person marked done in the last 7 days. */
+  listBriefItemCompletions: () => Promise<string[]>;
+  /** Saves a brief item as done, and writes it to the audit log for `sessionId`. */
+  markBriefItemDone: (input: {
+    itemKey: string;
+    section: BriefSection;
+    title: string;
+    sessionId: string;
+  }) => Promise<void>;
+  /** Removes a done mark again (the Undo on a brief row). */
+  unmarkBriefItemDone: (itemKey: string) => Promise<void>;
 };
 
 /** Durable per-tool-call Sentinel state for one session. */

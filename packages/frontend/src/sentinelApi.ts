@@ -14,6 +14,21 @@ import {
 const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
 const USER_AUDIT_LOG_URL = '/api/v1/user/audit-log';
+const BRIEF_ITEM_COMPLETIONS_URL = '/api/v1/user/brief-items/completions';
+
+/** Keys from the completions list body. Rows without a string key are dropped, never asserted. */
+function parseBriefItemCompletionKeys(body: unknown): string[] {
+  if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
+    return [];
+  }
+  const keys: string[] = [];
+  for (const row of body.data) {
+    if (typeof row === 'object' && row !== null && 'item_key' in row && typeof row.item_key === 'string') {
+      keys.push(row.item_key);
+    }
+  }
+  return keys;
+}
 
 async function readError(response: Response): Promise<Error> {
   const body: unknown = await response.json().catch(() => null);
@@ -127,6 +142,34 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
 
     async listSentinelSessionContext(sessionId: string): Promise<SentinelSessionContext> {
       return extractSentinelSessionContext(await listSessionEvents(sessionId));
+    },
+
+    async listBriefItemCompletions() {
+      const response = await fetcher(BRIEF_ITEM_COMPLETIONS_URL);
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseBriefItemCompletionKeys(await response.json());
+    },
+
+    async markBriefItemDone({ itemKey, section, title, sessionId }) {
+      const response = await fetcher(BRIEF_ITEM_COMPLETIONS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_key: itemKey, section, title, session_id: sessionId }),
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
+    },
+
+    async unmarkBriefItemDone(itemKey: string) {
+      const response = await fetcher(`${BRIEF_ITEM_COMPLETIONS_URL}/${encodeURIComponent(itemKey)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
     },
   };
 }

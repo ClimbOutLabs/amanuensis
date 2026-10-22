@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Regenerates `src/fonts.css` from the installed `@fontsource/inter-tight`
- * package (latin subset, weights 400/500/600/700) as data-URI @font-face rules.
+ * package (latin subset, weights 400/500/600/700) and `@fontsource/newsreader`
+ * (latin subset, weight 400, normal and italic) as data-URI @font-face rules.
  *
  * The SDK stylesheet is injected at runtime via a `<style>` tag, so relative
  * font-file URLs would resolve against the host document and break — inlining
@@ -14,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const pkgDir = dirname(require.resolve('@fontsource/inter-tight/package.json'));
+const serifPkgDir = dirname(require.resolve('@fontsource/newsreader/package.json'));
 const outPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'fonts.css');
 
 const WEIGHTS = [400, 500, 600, 700];
@@ -31,22 +33,23 @@ const UNICODE_RANGE_PRETTY = [
 
 const blocks = [
   '/*',
-  ' * Bundled Inter Tight (latin subset) as data URIs.',
+  ' * Bundled Inter Tight (latin subset) and Newsreader (latin subset, display serif)',
+  ' * as data URIs.',
   ' * The SDK stylesheet is injected at runtime via a <style> tag, so relative',
   ' * font-file URLs would resolve against the host document and break; inlining',
   ' * keeps the font genuinely bundled. Regenerate with `pnpm build:fonts`.',
-  ' * Source: @fontsource/inter-tight (OFL-1.1).',
+  ' * Source: @fontsource/inter-tight (OFL-1.1); @fontsource/newsreader (OFL-1.1).',
   ' */',
 ];
 
-for (const weight of WEIGHTS) {
-  const file = join(pkgDir, 'files', `inter-tight-latin-${weight}-normal.woff2`);
-  const base64 = readFileSync(file).toString('base64');
-  blocks.push(
+/** One @font-face block with the shared latin unicode-range, data-URI src. */
+function fontFaceBlock({ family, pkgRoot, file, weight, style }) {
+  const base64 = readFileSync(join(pkgRoot, 'files', file)).toString('base64');
+  return [
     '',
     '@font-face {',
-    "  font-family: 'Inter Tight';",
-    '  font-style: normal;',
+    `  font-family: '${family}';`,
+    `  font-style: ${style};`,
     '  font-display: swap;',
     `  font-weight: ${weight};`,
     `  src: url(data:font/woff2;base64,${base64})`,
@@ -54,6 +57,30 @@ for (const weight of WEIGHTS) {
     '  unicode-range:',
     ...UNICODE_RANGE_PRETTY,
     '}',
+  ];
+}
+
+for (const weight of WEIGHTS) {
+  blocks.push(
+    ...fontFaceBlock({
+      family: 'Inter Tight',
+      pkgRoot: pkgDir,
+      file: `inter-tight-latin-${weight}-normal.woff2`,
+      weight,
+      style: 'normal',
+    }),
+  );
+}
+
+for (const style of ['normal', 'italic']) {
+  blocks.push(
+    ...fontFaceBlock({
+      family: 'Newsreader',
+      pkgRoot: serifPkgDir,
+      file: `newsreader-latin-400-${style}.woff2`,
+      weight: 400,
+      style,
+    }),
   );
 }
 

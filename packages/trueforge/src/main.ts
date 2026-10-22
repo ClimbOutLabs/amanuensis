@@ -75,6 +75,7 @@ import { SkillCatalog } from './catalog/SkillCatalog';
 import { type DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -181,6 +182,7 @@ interface ServerPersistence<TTransaction> {
   googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  briefItemStore: IBriefItemCompletionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -414,6 +416,7 @@ async function createStandalonePersistence(options: {
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -583,6 +586,7 @@ async function createDistributedPersistence(options: {
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -623,6 +627,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -827,6 +832,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     sessions,
     chatImages,
     activeTurns,

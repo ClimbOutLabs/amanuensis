@@ -13,6 +13,7 @@ import { createAgentImportRouter } from './apis/agentImport';
 import { createAgentsRouter } from './apis/agents';
 import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
+import { createBriefItemsRouter } from './apis/briefItems';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
@@ -69,6 +70,7 @@ import configuration, {
   TrueForgeAuthMode,
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
@@ -276,6 +278,7 @@ export interface ServerDeps<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  briefItemStore: IBriefItemCompletionStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -321,6 +324,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const scheduleTurnDeps = {
     mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
+    briefItemStore: deps.briefItemStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -686,6 +690,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createAuditLogRouter({
         sentinelAuditStore: deps.sentinelAuditStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/brief-items',
+    withAuth(
+      createBriefItemsRouter({
+        briefItemStore: deps.briefItemStore,
+        audit: deps.sentinelAuditStore,
+        sessionStore: deps.sessionStore,
         resolveRequestContext,
       }),
       authMiddleware,

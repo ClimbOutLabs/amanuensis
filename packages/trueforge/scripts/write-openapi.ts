@@ -24,6 +24,7 @@ import { SandboxCatalog } from '../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../src/catalog/SkillCatalog';
 import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
+import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
@@ -120,6 +121,7 @@ const app = createServerApp({
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+  briefItemStore: new BriefItemCompletionStore(db),
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
     store: new SqliteChatImageStore(db),

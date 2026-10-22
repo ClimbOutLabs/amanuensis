@@ -690,6 +690,41 @@
         ],
         "type": "object"
       },
+      "BriefItemCompletion": {
+        "properties": {
+          "completed_at": {
+            "description": "When the item was marked done, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "completed_at"
+        ],
+        "type": "object"
+      },
       "BugReportBundle": {
         "properties": {
           "build": {
@@ -4529,6 +4564,21 @@
         ],
         "type": "object"
       },
+      "ListBriefItemCompletionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Completed brief items, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/BriefItemCompletion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5477,6 +5527,42 @@
           "server_id",
           "server_name",
           "name"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneRequest": {
+        "properties": {
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat the brief was shown in.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "session_id"
         ],
         "type": "object"
       },
@@ -22653,6 +22739,182 @@
           "auditLog"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/brief-items/completions": {
+      "get": {
+        "description": "Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.",
+        "parameters": [
+          {
+            "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBriefItemCompletionsResponse"
+                }
+              }
+            },
+            "description": "Completed brief items."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List morning brief items marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "description": "Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkBriefItemDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefItemCompletion"
+                }
+              }
+            },
+            "description": "The item as marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          }
+        },
+        "summary": "Mark a morning brief item done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "markDone"
+      }
+    },
+    "/api/v1/user/brief-items/completions/{item_key}": {
+      "delete": {
+        "description": "Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.",
+        "parameters": [
+          {
+            "description": "Client key of the brief item.",
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "description": "Client key of the brief item.",
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The item is no longer marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid item key."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Undo a morning brief item marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "undo"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

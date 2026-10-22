@@ -1,85 +1,103 @@
+import { briefItemKey, type MorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { describe, expect, it } from 'vitest';
 
-import { parseBrief, summarizeBriefAudit } from '@/components/briefSections.js';
+import {
+  briefFooterLine,
+  briefGreeting,
+  briefTopBarTitle,
+  briefWhenLabel,
+  buildBriefView,
+  summarizeBriefAudit,
+} from '@/components/briefSections.js';
 
-const ANSWER = `Here is your brief.
+function item(section: MorningBrief['items'][number]['section'], title: string) {
+  const action = { label: 'Open', target: { kind: 'prompt' as const, text: `Open ${title}` } };
+  return { section, title, subtitle: ['Part one', 'Part two'], action };
+}
 
-## Coming up
-- Dentist, Tuesday 10:00 at Rua Augusta, bring the insurance card [Add it to my calendar]
-- Team lunch, Friday 12:30 [Reply to Rui]
+const BRIEF: MorningBrief = {
+  digest: 'One thing to check.',
+  items: [
+    item('decision', 'Reply to Ines'),
+    item('check_first', 'Mateo invite says 4:00am'),
+    item('decision', 'Pick a dentist slot'),
+    item('deadline', 'Permit form due'),
+    item('decision', 'Sign the lease'),
+    item('decision', 'Confirm the cake order'),
+    item('decision', 'Book the van'),
+    item('decision', 'Ask about the parking pass'),
+  ],
+};
 
-**Deadlines:**
-- Residence permit form due 31 Oct [Start the form]
-
-Needs doing
-1. Reply to Sofia about the lease [Draft a reply]
-- Pay the water bill
-
-### Watch out
-- Email from "bank-secure" asks for your password [Show the warning signs]
-- A parcel SMS with a link [Explain]
-- Unknown caller asked for a code
-- A fourth warning with no action
-`;
-
-describe('parseBrief', () => {
-  it('returns the four sections in order, whatever heading style the answer used', () => {
-    const sections = parseBrief(ANSWER);
-    expect(sections?.map(section => section.id)).toEqual(['coming_up', 'deadlines', 'needs_doing', 'watch_out']);
-    expect(sections?.map(section => section.title)).toEqual(['Coming up', 'Deadlines', 'Needs doing', 'Watch out']);
+describe('buildBriefView', () => {
+  it('shows the sections in order and leaves out empty ones', () => {
+    const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set(), expanded: true });
+    expect(view.sections.map(section => section.label)).toEqual(['Check first', 'Needs a decision', 'Deadlines']);
   });
 
-  it('splits each line into its text and its one bracketed next step', () => {
-    const coming = parseBrief(ANSWER)?.[0]?.lines;
-    expect(coming).toEqual([
-      {
-        id: 'coming_up-0',
-        text: 'Dentist, Tuesday 10:00 at Rua Augusta, bring the insurance card',
-        action: 'Add it to my calendar',
-      },
-      { id: 'coming_up-1', text: 'Team lunch, Friday 12:30', action: 'Reply to Rui' },
-    ]);
+  it('shows at most six items by default and says how many are hidden', () => {
+    const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set(), expanded: false });
+    const shown = view.sections.reduce((total, section) => total + section.items.length, 0);
+    expect(shown).toBe(6);
+    expect(view.hiddenCount).toBe(2);
   });
 
-  it('reads plain list lines without a bullet marker and keeps lines with no action', () => {
-    const needs = parseBrief(ANSWER)?.[2]?.lines;
-    expect(needs).toEqual([
-      { id: 'needs_doing-0', text: 'Reply to Sofia about the lease', action: 'Draft a reply' },
-      { id: 'needs_doing-1', text: 'Pay the water bill', action: null },
-    ]);
+  it('keeps each section count equal to its real items, even when some are hidden behind the limit', () => {
+    const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set(), expanded: false });
+    expect(view.sections.find(section => section.section === 'decision')?.count).toBe(6);
   });
 
-  it('gives an empty section no lines', () => {
-    const sections = parseBrief('## Coming up\n- Lunch [Remind me]\n');
-    expect(sections?.find(section => section.id === 'deadlines')?.lines).toEqual([]);
+  it('shows every item once expanded', () => {
+    const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set(), expanded: true });
+    expect(view.hiddenCount).toBe(0);
   });
 
-  it('returns null when the answer has none of the four headings, so it renders as a normal answer', () => {
-    expect(parseBrief('Good morning. Nothing urgent today.')).toBeNull();
-  });
-
-  it('ignores text before the first heading', () => {
-    const sections = parseBrief('Intro line [Not an action]\n## Watch out\n- A scam email');
-    expect(sections?.find(section => section.id === 'coming_up')?.lines).toEqual([]);
-    expect(sections?.find(section => section.id === 'watch_out')?.lines).toEqual([
-      { id: 'watch_out-0', text: 'A scam email', action: null },
-    ]);
+  it('leaves out items whose keys are hidden, such as ones already done', () => {
+    const key = briefItemKey({ section: 'check_first', title: 'Mateo invite says 4:00am' });
+    const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set([key]), expanded: true });
+    expect(view.sections.some(section => section.section === 'check_first')).toBe(false);
   });
 });
 
-describe('summarizeBriefAudit', () => {
-  it('counts quiet reads and actions that ran or were approved', () => {
-    expect(
-      summarizeBriefAudit([
-        { outcome: 'logged' },
-        { outcome: 'logged' },
-        { outcome: 'approved' },
-        { outcome: 'denied' },
-      ]),
-    ).toEqual({ readQuietly: 2, actionsRan: 1 });
+describe('briefGreeting', () => {
+  it('uses the part of the day by local hour, with the name when there is one', () => {
+    expect(briefGreeting({ now: new Date(2026, 9, 20, 9), name: 'Ana' })).toBe('Good morning, Ana');
+    expect(briefGreeting({ now: new Date(2026, 9, 20, 14), name: 'Ana' })).toBe('Good afternoon, Ana');
+    expect(briefGreeting({ now: new Date(2026, 9, 20, 20), name: undefined })).toBe('Good evening');
+  });
+});
+
+describe('briefTopBarTitle', () => {
+  it('names the weekday, day and month', () => {
+    expect(briefTopBarTitle(new Date(2026, 9, 20))).toBe('Brief · Tuesday 20 October');
+  });
+});
+
+describe('briefWhenLabel', () => {
+  it('shows the day, day of month, and time in the browser time zone', () => {
+    expect(briefWhenLabel(new Date(2026, 9, 25, 15, 30).toISOString())).toBe('Sun 25 / 3:30pm');
   });
 
-  it('reports nothing for an empty log', () => {
-    expect(summarizeBriefAudit([])).toEqual({ readQuietly: 0, actionsRan: 0 });
+  it('is undefined for a time that does not parse', () => {
+    expect(briefWhenLabel('not a time')).toBeUndefined();
+  });
+});
+
+describe('summarizeBriefAudit and briefFooterLine', () => {
+  it('leaves out brief item marks from the counts', () => {
+    const summary = summarizeBriefAudit([
+      { outcome: 'logged', action_type: 'mail.read' },
+      { outcome: 'logged', action_type: 'brief.item_done' },
+      { outcome: 'ran', action_type: 'mail.send' },
+    ]);
+    expect(summary).toEqual({ readQuietly: 1, actionsRan: 1 });
+  });
+
+  it('says what was read and that nothing was sent when no action ran', () => {
+    expect(briefFooterLine({ readQuietly: 12, actionsRan: 0 })).toBe('Read 12 things quietly. Sent nothing.');
+  });
+
+  it('counts the actions that ran instead of claiming nothing was sent', () => {
+    expect(briefFooterLine({ readQuietly: 1, actionsRan: 2 })).toBe('Read 1 thing quietly. 2 actions ran.');
   });
 });

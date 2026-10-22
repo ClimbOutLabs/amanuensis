@@ -1,7 +1,7 @@
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { describe, expect, it } from 'vitest';
 
-import { answersBriefPrompt, messageText } from '@/containers/briefTurn.js';
+import { answersBriefPrompt, briefRequestDate, messageText } from '@/containers/briefTurn.js';
 
 const user = (id: string, text: string) => ({ id, role: 'user', content: [{ type: 'text', text }] });
 const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: 'Answer' }] });
@@ -27,5 +27,17 @@ describe('answersBriefPrompt', () => {
 
   it('is false when the message is not found', () => {
     expect(answersBriefPrompt([user('u1', MORNING_BRIEF_PROMPT)], 'missing')).toBe(false);
+  });
+});
+
+describe('briefRequestDate', () => {
+  it('gives the day of the first brief request in the thread, and null for other chats', () => {
+    const when = new Date(2026, 9, 20, 7, 30);
+    const withBrief = [
+      { ...user('u1', MORNING_BRIEF_PROMPT), createdAt: when },
+      { ...assistant('a1'), createdAt: new Date(2026, 9, 20, 7, 31) },
+    ];
+    expect(briefRequestDate(withBrief)).toBe(when);
+    expect(briefRequestDate([{ ...user('u2', 'Plan my week'), createdAt: when }])).toBeNull();
   });
 });

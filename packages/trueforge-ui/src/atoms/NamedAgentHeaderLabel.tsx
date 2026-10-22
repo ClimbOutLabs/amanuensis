@@ -1,6 +1,8 @@
 'use client';
 
 import { useAuiState } from '../assistant-ui.js';
+import { briefTopBarTitle } from '../components/briefSections.js';
+import { briefRequestDate } from '../containers/briefTurn.js';
 import { useNamedAgentHeaderState } from '../hooks/useChatChromeActionsVisible.js';
 import { Icon } from '../icons/Icon.js';
 import { cn } from './lib/cn.js';
@@ -11,6 +13,14 @@ import { Tooltip } from './primitives/Tooltip.js';
 export function NamedAgentHeaderLabel({ className }: { className?: string }) {
   const state = useNamedAgentHeaderState();
   const threadTitle = useAuiState(s => s.threadListItem.title);
+  const briefDate = useAuiState(s => briefRequestDate(s.thread.messages));
+  if (briefDate !== null) {
+    return (
+      <h1 className={cn('flex min-w-0 items-center', pageHeaderTitleClassName, className)}>
+        {briefTopBarTitle(briefDate)}
+      </h1>
+    );
+  }
   if (state === null) return null;
 
   const syncedTitle = threadTitle?.trim() ?? '';
