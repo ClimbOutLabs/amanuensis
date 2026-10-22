@@ -199,6 +199,7 @@ test_answering_yes_on_a_terminal() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -218,6 +219,7 @@ test_declining_on_a_terminal() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
