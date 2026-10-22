@@ -700,8 +700,9 @@ export class SessionHandle<
 
   /**
    * True when every item answers a request that already ended: the session issued it on an earlier
-   * turn, and the turn the caller names no longer waits on it. An ended request can be cleared but
-   * never run. A request this session never issued is not ended, so it keeps its refusal.
+   * turn, and neither the turn the caller names nor the session tip still waits on it. An ended
+   * request can be cleared but never run. A request this session never issued is not ended, so it
+   * keeps its refusal.
    */
   async answersOnlyEndedApprovals(input: {
     previous_turn_id?: string | undefined;
@@ -712,14 +713,18 @@ export class SessionHandle<
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
       return false;
     }
-    const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
-    if (previous === undefined) {
-      return false;
-    }
     const wanted = new Set(items.map(item => approvalKey(item.thread_id, item.tool_call_id)));
-    const waiting = pendingApprovalKeysOf(previous);
-    if ([...wanted].some(key => waiting.has(key))) {
-      return false;
+    // Naming an older turn must not clear a card the tip still waits on.
+    const tipTurnId = this.session.last_turn_id;
+    for (const turnId of new Set(tipTurnId === null ? [previousTurnId] : [previousTurnId, tipTurnId])) {
+      const turn = await this.store.getTurn({ session_id: this.session.session_id, turn_id: turnId });
+      if (turn === undefined) {
+        return false;
+      }
+      const waiting = pendingApprovalKeysOf(turn);
+      if ([...wanted].some(key => waiting.has(key))) {
+        return false;
+      }
     }
     const issued = await this.issuedApprovalKeys({ wanted });
     if (issued.size !== wanted.size) {

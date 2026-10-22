@@ -180,7 +180,13 @@ function turnInput({
  */
 async function buildApp(
   recordedApproval: RecordedApproval | undefined,
-  options: { pausedFirstTurn?: boolean; heldAction?: boolean; endedCard?: boolean; requester?: RequestContext } = {},
+  options: {
+    pausedFirstTurn?: boolean;
+    heldAction?: boolean;
+    endedCard?: boolean;
+    liveCardOnTip?: boolean;
+    requester?: RequestContext;
+  } = {},
 ) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -203,7 +209,13 @@ async function buildApp(
       }),
     },
   });
-  if (options.endedCard === true) {
+  if (options.liveCardOnTip === true) {
+    // The tip is paused on the child's card right now; the first turn never asked for it.
+    await sessionStore.createTurn(turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [] }));
+    await sessionStore.createTurn(
+      turnInput({ turnId: TIP_TURN_ID, previousTurnId: FIRST_TURN_ID, appends: [], requiredActions: CHILD_CARD }),
+    );
+  } else if (options.endedCard === true) {
     // The child paused on its card on the first turn; the person then chatted on, so the tip no longer waits.
     await sessionStore.createTurn(
       turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [], requiredActions: CHILD_CARD }),
@@ -645,5 +657,16 @@ describe('POST /{session_id}/turns for a card whose request ended', () => {
 
     expect(response.status).toBe(422);
     expect(await turnCount(app)).toBe(before);
+  });
+
+  it('does not clear a card the tip still waits on when an older turn is named', async () => {
+    const app = await buildApp(undefined, { liveCardOnTip: true });
+    rejectCreateTurnWith(new StaleApprovalContinuationError(FIRST_TURN_ID, TIP_TURN_ID));
+
+    const response = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }), FIRST_TURN_ID);
+
+    expect(response.status).toBe(409);
+    const tip = await app.request(`/${SESSION_ID}/turns/${TIP_TURN_ID}`, { method: 'GET' });
+    expect(await tip.json()).toMatchObject({ data: { state: { required_actions: CHILD_CARD } } });
   });
 });

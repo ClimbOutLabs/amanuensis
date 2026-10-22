@@ -59,11 +59,13 @@ function renderCard(messages: ThreadMessageLike[]) {
 }
 
 /** A server whose tip read names the cards still waiting; the rest of the chat port is not used here. */
-function fakeServer(waitingIds: string[]) {
+function fakeServer(waitingIds: string[], statuses: string[] = ['done']) {
+  let reads = 0;
   return {
     peekSessionTip: vi.fn(async () => ({
       turnId: 'turn-tip',
-      status: 'done',
+      // Each read takes the next status; the last one repeats.
+      status: statuses[Math.min(reads++, statuses.length - 1)],
       pendingApprovals: waitingIds.map(toolCallId => ({
         toolCallId,
         threadId: 'main',
@@ -111,6 +113,19 @@ describe('a card whose request ended', () => {
       toolCallId: CARD_ID,
     });
     expect(state.reload).toHaveBeenCalledOnce();
+  });
+
+  it('does not judge a card while its turn is still being saved, then keeps Approve once it is paused', async () => {
+    // The card streams in before the turn is saved as paused, so the first read finds the tip running.
+    const server = fakeServer([CARD_ID], ['running', 'done']);
+    state.server = server;
+    renderCard(newestPendingCard);
+
+    expect(await screen.findByRole('radio', { name: 'Approve' })).toBeInTheDocument();
+    await waitFor(() => expect(server.peekSessionTip).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.queryByText('This request ended. Ask again if you still need it.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   });
 
   it('keeps Approve and Deny on a request the server still lists as waiting', async () => {
