@@ -286,6 +286,7 @@ export async function buildPersonalInstance(input: {
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
     schedules: scheduleContext(logger),
+    startsAnswer: true,
   };
   const resolver = new SpaceTurnResourceResolver(
     {
