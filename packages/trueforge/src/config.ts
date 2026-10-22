@@ -1134,13 +1134,26 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
+   * Bound in milliseconds on waiting for a model call's first output, on every
+   * step. A provider that accepts the request and then says nothing would
+   * otherwise hold the turn open. Also the default first-chunk deadline for a
+   * provider whose `stream_timeout` does not set one.
+   * Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default 90000 (90 seconds).
    */
   MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks once it has
+   * started answering. Also the default per-chunk deadline for a provider
+   * whose `stream_timeout` does not set one.
+   * Env: `MODEL_STREAM_IDLE_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  MODEL_STREAM_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -1993,7 +2006,18 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
     // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
+    defaultValue: 90_000,
+  }),
+  MODEL_STREAM_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',

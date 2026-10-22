@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
-import { render } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { act, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuiState } from '@/assistant-ui.js';
 import { resetWaitQueueTurnClocks, useWaitQueue, type WaitQueueView } from '@/hooks/useWaitQueue.js';
@@ -98,5 +98,74 @@ describe('useWaitQueue', () => {
     expect(view.snapshot.activeStation).toBeNull();
     expect(view.snapshot.stations.find(s => s.id === 'writing')?.state).toBe('done');
     expect(view.snapshot.stations.find(s => s.id === 'doing')?.state).toBe('skipped');
+  });
+
+  describe('the long-wait clock', () => {
+    const messages: ThreadMessageLike[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', toolCallId: 'call-1', toolName: 'web_search', args: {}, result: 'done' }],
+      },
+    ];
+
+    function renderTurn(isRunning: boolean) {
+      const captured: Captured[] = [];
+      const view = render(
+        <RuntimeHarness messages={messages} isRunning={isRunning}>
+          <ThreadPrimitive.Messages>{() => <Probe captured={captured} />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>,
+      );
+      const latest = () => {
+        const found = captured.filter(entry => entry.role === 'assistant').at(-1);
+        if (!found) throw new Error('no assistant message rendered');
+        return found.view;
+      };
+      const rerender = (running: boolean) => {
+        view.rerender(
+          <RuntimeHarness messages={messages} isRunning={running}>
+            <ThreadPrimitive.Messages>{() => <Probe captured={captured} />}</ThreadPrimitive.Messages>
+          </RuntimeHarness>,
+        );
+      };
+      return { latest, rerender };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps counting real elapsed time while the model is thought to be working', async () => {
+      const { latest } = renderTurn(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(17_000);
+      });
+      expect(latest().elapsedMs).toBeGreaterThanOrEqual(17_000);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(43_000);
+      });
+      expect(latest().elapsedMs).toBeGreaterThanOrEqual(60_000);
+      expect(latest().longWait).toBe(true);
+    });
+
+    it('drops the count when the turn stops instead of freezing on the last value', async () => {
+      const { latest, rerender } = renderTurn(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(17_000);
+      });
+      expect(latest().elapsedMs).toBeGreaterThanOrEqual(17_000);
+
+      await act(async () => {
+        rerender(false);
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(latest().elapsedMs).toBe(0);
+      expect(latest().longWait).toBe(false);
+    });
   });
 });
