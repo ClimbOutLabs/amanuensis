@@ -24,6 +24,7 @@ test_a_default_install_is_served_over_https() {
   install_machine
   assert_rc 0
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_eq "$(env_value main TRUST_PAGE_URL)" "http://192.168.1.20:8791/trust" "the app is told the trust page address the installer prints"
   assert_eq "$(reg_value main tls)" local
   assert_eq "$(reg_value main tls_port)" 8443
   local file
@@ -457,6 +458,55 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   sandbox_drop
 }
 
+test_purging_the_last_instance_keeps_the_authority() {
+  t_begin "purging the last instance keeps this computer's authority, and a later install is signed by it, so devices keep trusting it"
+  sandbox_new
+  lan
+  install_machine
+  local fp_before key_before
+  fp_before=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
+  key_before=$(cat "$AMAN_HOME/tls/ca/root.key")
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_file "$AMAN_HOME/tls/ca/root.crt"
+  assert_file "$AMAN_HOME/tls/ca/root.key"
+  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" "$fp_before" "the purge leaves the authority unchanged"
+  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.key")" "$key_before"
+  assert_no_path "$AMAN_HOME/tls/leaf/main"
+  assert_no_path "$AMAN_HOME/tls/trust/main"
+  assert_no_path "$AMAN_HOME/instances"
+  assert_flat_contains "$OUT" "trust certificate was kept"
+  assert_flat_contains "$OUT" "kept in $AMAN_HOME/tls/ca"
+  assert_flat_contains "$OUT" "To delete it too: rm -r $AMAN_HOME/tls/ca"
+  install_machine
+  assert_rc 0
+  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" "$fp_before" "the install after the purge uses the same authority"
+  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.key")" "$key_before"
+  assert_not_contains "$OUT" "made again"
+  sandbox_drop
+}
+
+test_a_kept_authority_that_lost_its_key_is_made_again_and_says_so() {
+  t_begin "an authority whose private key is gone is made again, and the ending says each device must trust it again"
+  sandbox_new
+  lan
+  install_machine
+  local fp_before
+  fp_before=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
+  rm -f "$AMAN_HOME/tls/ca/root.key"
+  run_install tls
+  assert_rc 0
+  if [ "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" != "$fp_before" ]; then
+    t_pass
+  else
+    t_fail "the authority was not made again"
+  fi
+  assert_flat_contains "$OUT" "root certificate was made again"
+  assert_flat_contains "$OUT" "each device must trust it again"
+  assert_flat_contains "$OUT" "open this page once on that device"
+  sandbox_drop
+}
+
 test_an_authority_made_under_older_limits_is_replaced_once() {
   t_begin "an authority whose limits were the public-suffix kind is replaced on the next re-run, and then kept"
   sandbox_new
@@ -497,6 +547,8 @@ test_the_front_end_is_locked_down
 test_the_fingerprint_is_shown_where_trust_is_given
 test_the_authority_is_limited
 test_a_new_name_makes_the_authority_again_and_says_so
+test_purging_the_last_instance_keeps_the_authority
+test_a_kept_authority_that_lost_its_key_is_made_again_and_says_so
 test_an_authority_from_before_it_had_limits_is_replaced_once
 test_an_authority_made_under_older_limits_is_replaced_once
 test_the_authority_and_the_certificate

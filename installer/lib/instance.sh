@@ -475,6 +475,7 @@ instance_derive() {
   fi
   I_ORIGINS=
   I_TLS_PORT=
+  I_TRUST_URL=
   I_PUBLIC_ADDRESSES=
   if [ -z "$I_PUBLIC_URL" ]; then
     # The sign-in service is only ever reached on this computer: other devices go through the app.
@@ -491,6 +492,8 @@ instance_derive() {
         I_TLS_PORT=$(pick_port 8443 "$all_reserved $I_PORT $I_LOGIN_PORT") || die "No free port was found on this computer for https near 8443."
         # shellcheck disable=SC2086
         I_ORIGINS=$(network_origin_list "$I_PORT" "$I_TLS_PORT" $OPT_ADDRESSES)
+        # The app shows this same link when a device does not trust this computer yet.
+        I_TRUST_URL=$(tls_trust_link_for "$I_ORIGINS" "$I_PORT")
       fi
       I_PUBLIC_ADDRESSES=$(network_public_addresses | tr '\n' ' ')
     fi
@@ -555,13 +558,18 @@ instance_apply_addresses() { # name open|close|refresh
   reg_set "$name" origins "$origins"
   reg_set "$name" extra_hosts "$extras"
   env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+  if tls_active "$name"; then
+    env_managed_set "$env" TRUST_PAGE_URL "$(tls_trust_link "$name")"
+  elif grep -q '^TRUST_PAGE_URL=' "$env"; then
+    env_managed_set "$env" TRUST_PAGE_URL ""
+  fi
   log_event "instance $name addresses $mode"
 }
 
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
+  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0 trust_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists. Making sure it is running."
@@ -572,6 +580,7 @@ instance_create() {
   fi
   issuer_check "$I_ISSUER"
   if [ -n "$I_ORIGINS" ]; then network_on=1; fi
+  if [ -n "$I_TRUST_URL" ]; then trust_on=1; fi
   INSTANCE_PENDING=$I_NAME
   if [ "$I_SANDBOX" = slots ]; then sandbox_ensure "$I_NAME"; fi
   remove_instance_dir "$I_NAME"
@@ -590,7 +599,8 @@ instance_create() {
     "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "IF_GATEWAY=$(gateway_flag "$I_ORIGINS" "$I_PUBLIC_URL")" "LOGIN_PORT=$I_LOGIN_PORT" \
     "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "OWNER_NAME=$I_OWNER_NAME" "API_KEY=$api_key" \
-    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
+    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" \
+    "IF_TRUST_URL=$trust_on" "TRUST_URL=$I_TRUST_URL" |
     write_if_changed "$dir/.env" 600 || true
   AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
@@ -783,11 +793,15 @@ gateway_flag() { # origins public_url
 # still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
 # service both read from this file. The Token Factory key cannot be made again and is skipped.
 instance_env_repair() {
-  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
+  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0 trust_on=0 trust_url=
   env="$(instance_dir "$name")/.env"
   # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
   owner_name_backfill "$name"
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
+  if tls_active "$name"; then
+    trust_on=1
+    trust_url=$(tls_trust_link "$name")
+  fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
@@ -812,7 +826,8 @@ instance_env_repair() {
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
     "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
     "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
-    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
+    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on" \
+    "IF_TRUST_URL=$trust_on" "TRUST_URL=$trust_url")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
@@ -1139,9 +1154,13 @@ installer_state_remove() {
   # A --home that points at a source checkout must keep its own lib, bin and release folders.
   [ -e "$AMAN_HOME/.git" ] || [ -d "$AMAN_HOME/installer" ] && return 0
   [ -d "$STATE_DIR" ] && [ ! -L "$AMAN_HOME" ] && [ ! -L "$STATE_DIR" ] || return 0
-  for entry in instances machine tls lib bin release runtime; do
+  for entry in instances machine lib bin release runtime; do
     rm -rf -- "${AMAN_HOME:?}/$entry"
   done
+  # The authority belongs to this computer, not to the instances, so it stays: a device that trusts this
+  # computer keeps trusting it when an instance is installed again. Only the instances' own certificates
+  # and trust pages go.
+  rm -rf -- "${AMAN_HOME:?}/tls/leaf" "${AMAN_HOME:?}/tls/trust"
   find "$STATE_DIR" -mindepth 1 -maxdepth 1 ! -name install.log ! -name lock -exec rm -rf -- {} +
 }
 
@@ -1270,6 +1289,10 @@ cmd_instance_remove() {
     line="$line; this was the last instance, so the shared speech-to-text service with its model and the installer's files in $AMAN_HOME were removed too"
   fi
   say "$line."
+  if [ "$last_one" = 1 ] && [ -f "$(tls_ca_dir)/root.crt" ]; then
+    say "This computer's trust certificate was kept in $(ui_path "$(tls_ca_dir)"), so your devices will still trust Aman when you install it again."
+    say "To delete it too: rm -r $(ui_path "$(tls_ca_dir)")"
+  fi
   if [ "$last_one" = 1 ] && [ -d "$BACKUPS_DIR" ]; then
     say "Your backups in $BACKUPS_DIR were kept. To delete them: rm -r $BACKUPS_DIR"
   fi

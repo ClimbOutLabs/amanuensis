@@ -94,6 +94,11 @@ export type TrueFoundryChatProviderProps = {
   agentName?: string;
   /** Forwarded to `listSessions({ agentId })` for history filtering. */
   listSessionsAgentId?: string;
+  /**
+   * The full address of the page where a device learns to trust this computer, as the
+   * installer prints it. Shown in the connection-lost message so the person can open it.
+   */
+  trustPageUrl?: string;
 };
 
 function ChatRuntimeScope({
@@ -196,12 +201,13 @@ export function TrueFoundryChatProvider(props: TrueFoundryChatProviderProps) {
     agent,
     agentName,
     listSessionsAgentId,
+    trustPageUrl,
   } = props;
 
   const stableServer = useMemo(() => server, [server]);
 
   return (
-    <ToasterProvider>
+    <ToasterProvider trustPageUrl={trustPageUrl}>
       <AvatarActivityProvider onActivity={onAgentActivity}>
         <ComposerBusyScopeProvider>
           <ChatRuntimeScope

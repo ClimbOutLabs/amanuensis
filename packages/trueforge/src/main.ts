@@ -1004,6 +1004,7 @@ try {
     mountFrontend(app, {
       dir: configuration.FRONTEND_DIR,
       uiBasePath: getPublicUiBasePath(),
+      trustPageUrl: configuration.TRUST_PAGE_URL,
     })
   ) {
     logger.info(`Serving frontend from ${configuration.FRONTEND_DIR}`);

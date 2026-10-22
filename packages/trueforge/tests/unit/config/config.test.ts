@@ -15,6 +15,7 @@ import {
   parseSearchProviderChoice,
   parseTokenFactoryMode,
   parseTrustedProxyAddresses,
+  parseTrustPageUrl,
   TrueForgeAuthMode,
   type PublicUrlConfig,
   type ServerConfiguration,
@@ -507,6 +508,21 @@ describe('parseLoginUpstreamUrl', () => {
     'refuses %s',
     value => {
       expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
+});
+
+describe('parseTrustPageUrl', () => {
+  it('is empty when unset and keeps a plain http address', () => {
+    expect(parseTrustPageUrl(undefined)).toBe('');
+    expect(parseTrustPageUrl(' ')).toBe('');
+    expect(parseTrustPageUrl('http://192.168.1.20:8791/trust/')).toBe('http://192.168.1.20:8791/trust');
+  });
+
+  it.each(['https://192.168.1.20:8791/trust', 'http://192.168.1.20:8791/trust?x=1', 'nonsense'])(
+    'refuses %s',
+    value => {
+      expect(() => parseTrustPageUrl(value)).toThrow(/TRUST_PAGE_URL/);
     },
   );
 });

@@ -19,6 +19,9 @@ const REVALIDATE_CACHE_CONTROL = 'no-cache';
 /** Vite writes this into the production shell; replaced once at process start. Must not appear in JS identifiers. */
 const SHELL_BASE_TOKEN = '%%TRUEFORGE_BASE_PATH%%';
 
+/** The trust page token in the production shell; replaced with the installer's address, or empty. */
+const SHELL_TRUST_PAGE_TOKEN = '%%TRUEFORGE_TRUST_PAGE_URL%%';
+
 function isServerPath(pathname: string): boolean {
   return SERVER_PATH_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
@@ -27,8 +30,10 @@ function isAppShellPath(pathname: string): boolean {
   return pathname === '/' || pathname === '/index.html';
 }
 
-function applyShellTokens(options: { html: string; uiBasePath: string }): string {
-  return options.html.replaceAll(SHELL_BASE_TOKEN, options.uiBasePath);
+function applyShellTokens(options: { html: string; uiBasePath: string; trustPageUrl: string }): string {
+  return options.html
+    .replaceAll(SHELL_BASE_TOKEN, options.uiBasePath)
+    .replaceAll(SHELL_TRUST_PAGE_TOKEN, options.trustPageUrl);
 }
 
 /**
@@ -61,7 +66,10 @@ function createShellResponse(options: { html: string; method: string }): Respons
  * Must be called after the API routes are registered, so those always win over the static handler.
  * Returns false when `dir` holds no build, leaving the server API-only for UI work behind Vite.
  */
-export function mountFrontend(app: OpenAPIHono, options: { dir: string; uiBasePath: string }): boolean {
+export function mountFrontend(
+  app: OpenAPIHono,
+  options: { dir: string; uiBasePath: string; trustPageUrl: string },
+): boolean {
   const indexPath = path.join(options.dir, 'index.html');
   if (!existsSync(indexPath)) {
     return false;
@@ -70,6 +78,7 @@ export function mountFrontend(app: OpenAPIHono, options: { dir: string; uiBasePa
   const shellHtml = applyShellTokens({
     html: readFileSync(indexPath, 'utf8'),
     uiBasePath: options.uiBasePath,
+    trustPageUrl: options.trustPageUrl,
   });
 
   // serveStatic joins `root` with the request path, so an absolute dir is working-directory proof.

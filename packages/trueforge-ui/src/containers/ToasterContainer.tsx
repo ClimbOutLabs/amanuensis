@@ -44,7 +44,7 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
   return error instanceof Error && ('statusCode' in error || 'body' in error);
 }
 
-function normalizeError(error: unknown): ToastContent {
+function normalizeError(error: unknown, options?: { trustPageUrl?: string }): ToastContent {
   if (isStaleApprovalError(error)) {
     return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
   }
@@ -60,13 +60,18 @@ function normalizeError(error: unknown): ToastContent {
     }
   }
 
-  // A dropped transport (sleeping phone, network change) is not a mystery:
-  // name it so the user knows the chat will re-sync on its own.
+  // A dropped transport (sleeping phone, network change) is not a mystery, and neither is a device
+  // that does not trust this computer's certificate yet: the browser reports both the same way,
+  // so the words name the checks for both.
   const message = getErrorMessage(error, '');
   if (isNetworkFailureMessage(message)) {
+    const trustPageUrl = options?.trustPageUrl;
     return {
       title: 'Connection lost',
-      description: 'Check your connection. The chat re-syncs automatically when it returns.',
+      description:
+        trustPageUrl !== undefined && trustPageUrl !== ''
+          ? `Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open ${trustPageUrl} on this device and follow its steps.`
+          : 'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open the /trust page on this device and follow its steps.',
     };
   }
 
@@ -86,7 +91,7 @@ function isNetworkFailureMessage(message: string): boolean {
   );
 }
 
-export function ToasterProvider({ children }: { children: ReactNode }) {
+export function ToasterProvider({ children, trustPageUrl }: { children: ReactNode; trustPageUrl?: string }) {
   const Toast = useSlot('Toast');
   const ToastStack = useSlot('ToastStack');
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -95,18 +100,21 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const showError = useCallback((error: unknown, options?: { title: string }) => {
-    console.error('[trueforge-ui]', error);
-    const content = normalizeError(error);
-    const item: ToastItem = {
-      id: nextToastId(),
-      variant: 'error',
-      ...content,
-      ...(options === undefined ? {} : { title: options.title }),
-    };
-    rememberErrorText([item.title, item.description].filter(Boolean).join(': '));
-    setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
-  }, []);
+  const showError = useCallback(
+    (error: unknown, options?: { title: string }) => {
+      console.error('[trueforge-ui]', error);
+      const content = normalizeError(error, { trustPageUrl });
+      const item: ToastItem = {
+        id: nextToastId(),
+        variant: 'error',
+        ...content,
+        ...(options === undefined ? {} : { title: options.title }),
+      };
+      rememberErrorText([item.title, item.description].filter(Boolean).join(': '));
+      setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
+    },
+    [trustPageUrl],
+  );
 
   const showSuccess = useCallback(
     (content: ToastContent) => {

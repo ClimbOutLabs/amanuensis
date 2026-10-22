@@ -68,7 +68,7 @@ tls_all_names() { # name of the instance being set up
 
 # Makes the authority (once for this computer) and the certificate for the instance's addresses (again when they
 # change or it is close to its end). The authority is made again, with every device needing to trust it again, only
-# when it lacks a name that is now needed or has older limits (from an earlier version); TLS_AUTHORITY_REPLACED says
+# when it lacks a name that is now needed, has older limits (from an earlier version), or is broken; TLS_AUTHORITY_REPLACED says
 # so for the closing lines, and every other instance gets a certificate under the new one. A failure is fatal because
 # the instance would be unreachable.
 TLS_AUTHORITY_REPLACED=0
@@ -128,18 +128,28 @@ uuid_from_hex() { printf '%s-%s-%s-%s-%s' "${1:0:8}" "${1:8:4}" "${1:12:4}" "${1
 
 # The https address people should open, the first address of this computer on the network.
 tls_open_url() { # name
+  tls_open_url_for "$(reg_get "$1" origins)"
+}
+
+# The first https address in an origin list, in the order addresses are shown to people.
+tls_open_url_for() { # origins
   local origin
   while IFS= read -r origin; do
     case "$origin" in https://*) printf '%s' "$origin"; return 0 ;; esac
-  done < <(origins_display_order "$(reg_get "$1" origins)")
+  done < <(origins_display_order "$1")
 }
 
 # The short link a device opens over plain http to trust this computer.
 tls_trust_link() { # name
+  tls_trust_link_for "$(reg_get "$1" origins)" "$(reg_get "$1" app_port)"
+}
+
+# The trust link for an origin list and the app port on the plain http port.
+tls_trust_link_for() { # origins app_port
   local origin host
-  origin=$(tls_open_url "$1")
+  origin=$(tls_open_url_for "$1")
   host=$(origin_host "$origin")
-  printf 'http://%s:%s/trust' "$host" "$(reg_get "$1" app_port)"
+  printf 'http://%s:%s/trust' "$host" "$2"
 }
 
 # The instance's front end configuration.

@@ -197,6 +197,44 @@ describe('ToasterProvider', () => {
     expect(screen.getByText('Slow down')).toBeInTheDocument();
   });
 
+  it('tells the user to reload and to check trust when a fetch fails outright', async () => {
+    render(
+      <SlotsProvider>
+        <ToasterProvider>
+          <Trigger errors={[new Error('Failed to fetch')]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('Connection lost')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open the /trust page on this device and follow its steps.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the full trust page address when the host passes one', async () => {
+    render(
+      <SlotsProvider>
+        <ToasterProvider trustPageUrl="http://192.168.1.20:8791/trust">
+          <Trigger errors={[new Error('Failed to fetch')]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('Connection lost')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open http://192.168.1.20:8791/trust on this device and follow its steps.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('keeps only the five most recent errors visible', async () => {
     const errors = Array.from({ length: 6 }, (_, index) => new Error(`error-${index + 1}`));
 

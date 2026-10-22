@@ -601,6 +601,30 @@ export function parseLoginUpstreamUrl(raw: string | undefined): string {
   return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
 }
 
+/** The plain http page where a device learns to trust this computer, or empty when the installer did not set one. */
+export function parseTrustPageUrl(raw: string | undefined): string {
+  const text = (raw ?? '').trim();
+  if (text === '') {
+    return '';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch (error) {
+    throw new Error('TRUST_PAGE_URL must be a valid URL', { cause: error });
+  }
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    throw new Error('TRUST_PAGE_URL must be a plain http address with nothing after the path');
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
+}
+
 /** True for a host written like an address but not as four plain decimal parts, which URL parsing would quietly rewrite. */
 function writesAddressInAnotherBase(text: string): boolean {
   const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]*)/i.exec(text)?.[1] ?? '';
@@ -1380,6 +1404,12 @@ export interface SharedServerConfiguration {
    * password guessing. Empty leaves the issuer's address to answer for itself. Env: `LOGIN_UPSTREAM_URL`.
    */
   LOGIN_UPSTREAM_URL: string;
+  /**
+   * The address of the page where a device learns to trust this computer, as the installer prints it. The app
+   * shows it when a device cannot connect because it does not trust this computer yet. Empty when the instance
+   * is not opened on the local network with this computer's own certificate. Env: `TRUST_PAGE_URL`.
+   */
+  TRUST_PAGE_URL: string;
   /**
    * Addresses of a reverse proxy in front of the app, besides this computer's own, whose X-Forwarded-For says which
    * visitor a request came from (so password guessing is limited per visitor, not per proxy). Comma separated IP
@@ -2399,6 +2429,7 @@ const shared: SharedServerConfiguration = {
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
+  TRUST_PAGE_URL: parseTrustPageUrl(getEnv('TRUST_PAGE_URL', { defaultValue: '' })),
   TRUSTED_PROXY_ADDRESSES: parseTrustedProxyAddresses(getEnv('TRUSTED_PROXY_ADDRESSES', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,

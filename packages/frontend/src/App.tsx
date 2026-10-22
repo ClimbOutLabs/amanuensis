@@ -61,6 +61,7 @@ import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
+import { TRUST_PAGE_URL } from './trustPageUrl';
 import { createVoiceInputApi } from './voiceInputApi';
 
 /** Shared cookie/OIDC fetch for boot helpers and `<TrueForgeUI server />`. */
@@ -182,6 +183,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
         currentUser={currentUser}
+        trustPageUrl={TRUST_PAGE_URL}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
         onPendingApprovalsChange={onPendingApprovalsChange}
