@@ -4,7 +4,8 @@ import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
+import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -28,7 +29,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow": the server only accepts it for some tools. */
+  /** Show "Always allow this tool": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
@@ -112,6 +113,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
   const [changing, setChanging] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
+  // Approving a new-recipient send adds its addresses, so it never offers "Always allow" and its labels say so.
+  const newRecipients = isNewRecipientCard(card);
+  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
+  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -173,23 +178,20 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             <Button
               variant="primary"
               size="large"
-              title={APPROVAL_CHOICES.approve.hint}
+              title={approveChoice.hint}
               onClick={onApprove}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.approve.label}
+              {approveChoice.label}
             </Button>
-            {alwaysAllowOffered && (
-              <Button
-                variant="secondary"
+            {alwaysAllowOffered && !newRecipients && (
+              <AlwaysAllowToolControl
                 size="large"
-                title={APPROVAL_CHOICES.alwaysAllow.hint}
-                onClick={onAlwaysAllow}
                 disabled={disabled}
-              >
-                {APPROVAL_CHOICES.alwaysAllow.label}
-              </Button>
+                description="The agent will run this tool on this connector without asking, in every chat."
+                onConfirm={onAlwaysAllow}
+              />
             )}
             {onChangeRequest !== undefined && (
               <Button
@@ -209,12 +211,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             <Button
               variant="secondary"
               size="large"
-              title={APPROVAL_CHOICES.deny.hint}
+              title={denyChoice.hint}
               onClick={onDeny}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.deny.label}
+              {denyChoice.label}
             </Button>
           </div>
         )}

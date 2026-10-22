@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 import {
   CAPABILITY_PROMPTS,
@@ -30,13 +30,14 @@ describe('tryADayPrompts', () => {
     ]);
   });
 
-  it('keeps only the general cards this instance can run when no area is chosen', () => {
+  it('fills the general row to six cards without mail or calendar, from another area', () => {
     expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual([
       'clear-head',
       'break-task',
       'plan-day',
       'meals',
       'self-care',
+      'get-started',
     ]);
   });
 
@@ -136,6 +137,19 @@ describe('tryADayPrompts', () => {
       'meeting',
       'tricky-email',
     ]);
+  });
+
+  it('keeps the general row full with calendar but no email, and with email but no calendar', () => {
+    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, calendar: true } })).toContain('appointment');
+    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, email: true } })).toContain('appointment');
+    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, email: true } })).toHaveLength(6);
+  });
+
+  it.each(HELP_AREA_IDS.map(id => [id]))('always fills six distinct cards for %s without mail or calendar', id => {
+    const keys = keysFor({ helpAreas: [id], capabilities: NONE });
+
+    expect(keys).toHaveLength(6);
+    expect(new Set(keys).size).toBe(6);
   });
 
   it('fills the work and money row from the general set when calendar and email are missing', () => {

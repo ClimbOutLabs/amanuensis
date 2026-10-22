@@ -1,12 +1,9 @@
 'use client';
 
-import { useAui } from '@assistant-ui/react';
-import { useCallback } from 'react';
-
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
-import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
+import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useServerCapabilities } from '../server/ServerContext.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import {
@@ -48,24 +45,6 @@ function useTourCapabilities(): TourCapabilities {
     // Tour runs. It stays a capability so that a future off switch hides its card without a change here.
     maps: true,
   };
-}
-
-/** Puts a prompt in the composer and sends it, through the same busy-state wrapper the send button uses. */
-function useSendPrompt(): (prompt: string) => void {
-  const aui = useAui();
-  const busy = useOptionalComposerBusyState();
-  return useCallback(
-    (prompt: string) => {
-      aui.composer().setText(prompt);
-      const send = () => aui.composer().send();
-      if (busy === null) {
-        send();
-      } else {
-        busy.send(send);
-      }
-    },
-    [aui, busy],
-  );
 }
 
 /**

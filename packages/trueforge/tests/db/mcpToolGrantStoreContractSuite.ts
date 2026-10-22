@@ -11,6 +11,7 @@ const grant = {
   created_by: 'user-a',
   mcp_server_name: 'notes',
   tool_name: 'lookup_note',
+  mcp_server_host: 'notes.example.com',
 };
 
 export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantStore): void {
@@ -43,6 +44,33 @@ export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantS
     expect(await store.hasToolGrant({ ...grant, created_by: 'user-b' })).toBe(false);
     expect(await store.hasToolGrant({ ...grant, tenant_id: 'tenant-b' })).toBe(false);
     expect(await store.listToolGrants({ ...grant, created_by: 'user-b' })).toEqual([]);
+  });
+
+  it('matches a grant only for the connector host it was recorded for', async () => {
+    const store = getStore();
+    await store.recordToolGrant(grant);
+
+    expect(await store.hasToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' })).toBe(false);
+    expect(await store.hasToolGrant({ ...grant, mcp_server_host: null })).toBe(false);
+    expect(await store.hasToolGrant(grant)).toBe(true);
+  });
+
+  it('rebinds a grant to a new host when it is recorded again for that host', async () => {
+    const store = getStore();
+    await store.recordToolGrant(grant);
+    await store.recordToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' });
+
+    expect(await store.hasToolGrant(grant)).toBe(false);
+    expect(await store.hasToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' })).toBe(true);
+    expect(await store.listToolGrants(grant)).toHaveLength(1);
+  });
+
+  it('keeps a grant for a connector with no URL apart from one that has a host', async () => {
+    const store = getStore();
+    await store.recordToolGrant({ ...grant, mcp_server_host: null });
+
+    expect(await store.hasToolGrant({ ...grant, mcp_server_host: null })).toBe(true);
+    expect(await store.hasToolGrant(grant)).toBe(false);
   });
 
   it('revoking one grant leaves the other grants of that user in place', async () => {

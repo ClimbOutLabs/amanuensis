@@ -144,6 +144,7 @@ describe('sends are never trusted by a hint or a standing grant', () => {
       created_by: 'u1',
       mcp_server_name: 'mail',
       tool_name: name,
+      mcp_server_host: null,
     });
     const decision = await classifyTier({ ...mailCall(name, params), mcp_hints: readOnlyClosedWorld }, ctx);
     expect(decision.tier).toBe(3);

@@ -31,6 +31,8 @@ function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
   return createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: new SentinelAuditStore(db),
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -66,6 +68,8 @@ describe('createSentinelServices', () => {
       const services = createSentinelServices({
         demoMode: true,
         demoSendAllowlist: ['maya@demo.example'],
+        mailPolicyPath: undefined,
+        mailPolicyStatusPath: undefined,
         audit: new SentinelAuditStore(db),
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
@@ -133,6 +137,8 @@ describe('createSentinelServices', () => {
       try {
         return createSentinelServices({
           ...input,
+          mailPolicyPath: undefined,
+          mailPolicyStatusPath: undefined,
           audit: new SentinelAuditStore(db),
           settings: new SqliteSentinelSettingsStore(db),
           approvalTokens: new SqliteApprovalTokenStore(db),

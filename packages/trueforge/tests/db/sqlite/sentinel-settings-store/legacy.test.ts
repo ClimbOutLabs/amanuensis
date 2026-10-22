@@ -25,6 +25,7 @@ describe('SqliteSentinelSettingsStore with a legacy stored row', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 

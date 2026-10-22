@@ -601,10 +601,11 @@ export const ImportModelProviderRecordSchema = z
 export type ImportModelProviderRecord = z.infer<typeof ImportModelProviderRecordSchema>;
 export const ImportModelProvidersFileSchema = z.array(ImportModelProviderRecordSchema);
 
-/** Permission settings as an export wrote them. Exports from before the maps switch lack it, so it reads as off. */
+/** Permission settings as an export wrote them. Exports from before a switch lack its field, so it reads as the default. */
 const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
   maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(false),
+  sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
 });
 
 export const ImportSettingsFileSchema = z.object({

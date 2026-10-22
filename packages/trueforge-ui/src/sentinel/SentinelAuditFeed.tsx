@@ -7,7 +7,7 @@ import { Icon } from '../icons/Icon.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
 import {
-  SENTINEL_AUDIT_OUTCOME_LABELS,
+  sentinelAuditLabel,
   TIER2_ACTION_KINDS,
   TIER2_ACTION_LABELS,
   type SentinelAuditEntry,
@@ -39,7 +39,7 @@ const AuditEntryRow: FC<{ entry: SentinelAuditEntry }> = ({ entry }) => (
     </div>
     <p className="mt-0.5 text-xs text-text-primary">{entry.description}</p>
     <p className={`mt-0.5 text-[0.6875rem] font-medium ${outcomeTone(entry.outcome)}`}>
-      {SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome]}
+      {sentinelAuditLabel(entry)}
       {entry.reason !== undefined && entry.reason !== '' && (
         <span className="font-normal text-text-secondary"> · {entry.reason}</span>
       )}

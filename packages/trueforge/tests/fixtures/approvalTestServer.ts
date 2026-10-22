@@ -127,6 +127,8 @@ function buildApp(input: {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -176,6 +178,7 @@ function buildApp(input: {
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,

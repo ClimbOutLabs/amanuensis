@@ -577,6 +577,12 @@ case "$cmd" in
         fi
         exit 0
         ;;
+      *host-report*)
+        # The app's saved check result, written into the data volume.
+        cat >"$S/host_report_$vol"
+        echo "host-report $vol" >>"$S/host_reports"
+        exit 0
+        ;;
       *"sh -c"*)
         cat >"$S/restored_$vol"
         echo "restore $vol" >>"$S/restores"
