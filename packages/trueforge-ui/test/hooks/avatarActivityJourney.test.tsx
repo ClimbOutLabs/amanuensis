@@ -4,7 +4,7 @@ import { act, render, screen } from '@testing-library/react';
 import { useCallback, useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
+import { AVATAR_ALT, AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
 import {
   AVATAR_ACTIVITY_ERROR_AUTO_CLEAR_MS,
   AvatarActivityProvider,
@@ -72,7 +72,7 @@ function setup(): JourneyControl {
 }
 
 function avatar(): HTMLElement {
-  return screen.getByRole('img', { name: /Amanuensis avatar/ });
+  return screen.getByRole('img', { name: AVATAR_ALT });
 }
 
 function displayedActivity(): AmanAvatarActivity {
