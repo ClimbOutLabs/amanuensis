@@ -7,6 +7,7 @@ import { useAuiState } from '../assistant-ui.js';
 import { usePrefersReducedMotion } from '../atoms/lib/usePrefersReducedMotion.js';
 import { useOptionalMemoryRecall } from '../components/MemoryRecallContext.js';
 import { useMemoryTurnContext } from '../containers/MemoryTurnContextProvider.js';
+import { parseToolNotDoneReason } from '../utils/toolCallParsing.js';
 import {
   deriveWaitQueue,
   LONG_WAIT_MS,
@@ -29,7 +30,13 @@ function toQueuePart(part: PartState): WaitQueuePart {
     case 'text':
       return { type: 'text', statusType };
     case 'tool-call':
-      return { type: 'tool-call', statusType, toolName: part.toolName, argsText: part.argsText };
+      return {
+        type: 'tool-call',
+        statusType,
+        toolName: part.toolName,
+        argsText: part.argsText,
+        notDoneReason: parseToolNotDoneReason(part.result),
+      };
     default:
       return { type: part.type, statusType };
   }
