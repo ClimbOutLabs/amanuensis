@@ -12,11 +12,15 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
-import { useCallback, useState } from 'react';
+import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
+import { useCallback, useEffect, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
+import { useOptionalPersonas } from '../components/PersonaContext.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -157,6 +161,16 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     });
   };
 
+  // A standing grant rides the runtime's option path; the runtime maps this option id to scope "always".
+  const respondAlwaysAllow = () => {
+    if (part.approval == null) return;
+    respondToNestedApproval({
+      approvalId: part.approval.id,
+      approved: true,
+      optionId: ALWAYS_ALLOW_TOOL_OPTION_ID,
+    });
+  };
+
   const onSelectOption = (optionId: string, reason?: string) => {
     if (optionId === 'allow-once') return respond({ optionId, approved: true });
     if (optionId === 'allow-chat') return respond({ optionId, approved: true });
@@ -219,7 +233,14 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         tier={approvalInfo.tier}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
+        onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+        onChangeRequest={
+          offersChangeIt(approvalInfo.card)
+            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+            : undefined
+        }
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
@@ -319,11 +340,34 @@ function RequestResponseSlots({
   };
 }
 
+/**
+ * A "Change it" answer shows the person's words as their own message right after the call, so the
+ * history reads in order. The call itself stays declined.
+ */
 export const ToolCallContainer: ToolCallMessagePartComponent = part => {
+  const UserMessageBubble = useSlot('UserMessageBubble');
+  const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
+  const approval = stateApproval ?? part.approval;
+  const changeText = approval?.approved === false ? changeRequestText(approval.reason) : undefined;
+  return (
+    <>
+      <ToolCallPart {...part} />
+      {changeText === undefined ? null : <UserMessageBubble text={changeText} />}
+    </>
+  );
+};
+
+function ToolCallPart(part: ToolCallMessagePartProps) {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
+  // A specialist added in this chat shows in the persona list without a page reload.
+  const reloadPersonas = useOptionalPersonas()?.reload;
+  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  useEffect(() => {
+    if (specialistAdded) void reloadPersonas?.();
+  }, [specialistAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -546,4 +590,4 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-};
+}

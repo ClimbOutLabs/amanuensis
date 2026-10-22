@@ -25,6 +25,7 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
     tier2_auto_allow: [],
     search_without_asking: true,
     maps_without_asking: false,
+    sandbox_without_asking: true,
     ...patch,
   }));
   const api: SentinelApi = {
@@ -35,6 +36,7 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
@@ -76,6 +78,13 @@ describe('SentinelAuditFeed', () => {
         tier: 1,
         action_type: 'file_read',
       }),
+      makeEntry({
+        id: 'entry-6',
+        outcome: 'logged',
+        description: 'Wrote the release notes',
+        tier: 3,
+        action_type: 'file_write',
+      }),
     ]);
     render(
       <SentinelApiProvider api={api}>
@@ -89,7 +98,8 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText('Refused')).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === ' · Offline mode was on.')).toBeInTheDocument();
     expect(screen.getByText('Ran')).toBeInTheDocument();
-    expect(screen.getByText('Held or noted')).toBeInTheDocument();
+    expect(screen.getByText('Done without asking')).toBeInTheDocument();
+    expect(screen.getByText('Held for you')).toBeInTheDocument();
   });
 
   it('renders an Always allow toggle for each Tier 2 kind, off by default', async () => {
@@ -123,6 +133,7 @@ describe('SentinelAuditFeed', () => {
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>
@@ -146,6 +157,7 @@ describe('SentinelAuditFeed', () => {
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>

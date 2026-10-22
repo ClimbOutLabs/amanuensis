@@ -1,10 +1,12 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability, ILLM, ModelMessageEvent } from '@truefoundry/trueforge-core/core';
 import { EventType, InstructionBuilder, ModelMessageEventSchema } from '@truefoundry/trueforge-core/core';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { createLogger } from 'winston';
 import { findUsedKnowledgeHits } from '../../../src/personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
 import { personalizationDigest, type PersonalizationProfile } from '../../../src/personalization/profile';
+import { amanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { buildPersonaContext, type Persona } from '../../../src/personas/persona';
 import {
   PersonaTurnResourceResolver,
@@ -65,6 +67,7 @@ const PERSONALIZATION: PersonalizationProfile = {
   address_as: null,
   user_profile: 'Prefers plain English.',
   pinned_preferences: ['Keep advice practical.'],
+  help_areas: [],
   learned_profile: 'The user values calm explanations.',
   learning_enabled: false,
   revision: 3,
@@ -453,5 +456,15 @@ describe('PersonaTurnResourceResolver', () => {
     const resolved = await resolve(resolver, makeSpec(), true);
 
     expect(resolved.extraCapabilities ?? []).toHaveLength(0);
+  });
+  it('makes an Iris turn read-only, and leaves a persona the person named free to use tools', async () => {
+    const iris: Persona = { ...PERSONA, id: amanGuidePersonaId('u1'), created_by: 'u1', display_name: AMAN_GUIDE_NAME };
+    const irisResolver = makeResolver(iris).resolver;
+    const irisResolved = await resolve(irisResolver, makeSpec());
+    expect(irisResolved.definition.readOnly).toBe(true);
+
+    const named = makeResolver(PERSONA).resolver;
+    const namedResolved = await resolve(named, makeSpec());
+    expect(namedResolved.definition.readOnly).toBe(false);
   });
 });

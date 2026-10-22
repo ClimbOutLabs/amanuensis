@@ -6,6 +6,9 @@ import {
   createWebSearchTurnState,
   hasReadPrivateData,
   markPrivateDataRead,
+  privateTextForChecks,
+  recordPrivateReadText,
+  recordPrivateToolResult,
 } from '../../../../src/core/permissions/webSearch';
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
@@ -19,6 +22,23 @@ function assistantCalling(name: string): ContextMessage {
       { id: 'call-1', type: 'function', function: { name, arguments: '{}' }, tool_info: makeUnknownToolInfo(name) },
     ],
   };
+}
+
+function assistantCallingWithArguments(name: string, args: string): ContextMessage {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      { id: 'call-1', type: 'function', function: { name, arguments: args }, tool_info: makeUnknownToolInfo(name) },
+    ],
+  };
+}
+
+function assistantCallingThroughWrapper(input: { server: string; tool: string }): ContextMessage {
+  return assistantCallingWithArguments(
+    'call_tool',
+    JSON.stringify({ mcp_server: input.server, tool_name: input.tool, input: {} }),
+  );
 }
 
 async function collect(iterable: Iterable<unknown> | AsyncIterable<unknown>): Promise<unknown[]> {
@@ -90,6 +110,98 @@ describe('privateDataReadCapability', () => {
       const { turn, run } = preLLM([assistantCalling('web_search')]);
       expect(await run()).toEqual([]);
       expect(hasReadPrivateData(turn)).toBe(false);
+    });
+
+    it('also counts a mail read the model reached through the call_tool wrapper', async () => {
+      const { turn, run } = preLLM([assistantCallingThroughWrapper({ server: 'gmail', tool: 'read_email' })]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('also counts a calendar read the model reached through the call_tool wrapper', async () => {
+      const { turn, run } = preLLM([
+        assistantCallingThroughWrapper({ server: 'google_calendar', tool: 'list_events' }),
+      ]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('also counts a wrapped read when the wrapper name is qualified by its server', async () => {
+      const wrapped = assistantCallingWithArguments(
+        'deferred-tools__call_tool',
+        JSON.stringify({ mcp_server: 'gmail', tool_name: 'list_inbox_threads', input: {} }),
+      );
+      const { turn, run } = preLLM([wrapped]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('does nothing for a wrapped call naming a tool that does not read private data', async () => {
+      const { turn, run } = preLLM([assistantCallingThroughWrapper({ server: 'search', tool: 'web_search' })]);
+      expect(await run()).toEqual([]);
+      expect(hasReadPrivateData(turn)).toBe(false);
+    });
+
+    it('does nothing for a wrapper whose arguments name no tool or do not parse', async () => {
+      for (const message of [assistantCalling('call_tool'), assistantCallingWithArguments('call_tool', '{not json')]) {
+        const { turn, run } = preLLM([message]);
+        expect(await run()).toEqual([]);
+        expect(hasReadPrivateData(turn)).toBe(false);
+      }
+    });
+  });
+
+  describe('the checks on the text of mail and calendar calls', () => {
+    const MAIL = 'From: Maria Costa <maria.costa@harbour-clinic.example>';
+
+    it('has no text to check against when the mark was only restored from saved state', async () => {
+      const turn = createWebSearchTurnState();
+      privateDataReadCapability({ turn }).state?.load(true);
+      expect(privateTextForChecks(turn)).toBeUndefined();
+    });
+
+    it('has no text to check against when the mail call was only in the context before this turn', async () => {
+      const turn = createWebSearchTurnState();
+      const [preLLM] = privateDataReadCapability({ turn }).preLLMProcessors ?? [];
+      await collect(preLLM?.processPreLLM(execution([assistantCalling('read_email')])) ?? []);
+      expect(privateTextForChecks(turn)).toBeUndefined();
+    });
+
+    it('has the text of every dispatched call once each result is kept', () => {
+      const turn = createWebSearchTurnState();
+      markPrivateDataRead(turn);
+      recordPrivateReadText({ state: turn, text: MAIL });
+      markPrivateDataRead(turn);
+      recordPrivateReadText({ state: turn, text: '{"summary":"Dinner"}' });
+      expect(privateTextForChecks(turn)).toEqual([MAIL, '{"summary":"Dinner"}']);
+    });
+
+    it('keeps no text from a read that returns nothing, errors or returns a block it cannot scan, so the next search asks', () => {
+      const turn = createWebSearchTurnState();
+      recordPrivateToolResult({ state: turn, tool_name: 'read_email', result: { content: [] } });
+      expect(privateTextForChecks(turn)).toBeUndefined();
+      const failed = createWebSearchTurnState();
+      recordPrivateToolResult({
+        state: failed,
+        tool_name: 'read_email',
+        result: { isError: true, content: [{ type: 'text', text: MAIL }] },
+      });
+      expect(privateTextForChecks(failed)).toBeUndefined();
+      const image = createWebSearchTurnState();
+      recordPrivateToolResult({
+        state: image,
+        tool_name: 'read_email',
+        result: { content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] },
+      });
+      expect(privateTextForChecks(image)).toBeUndefined();
+    });
+
+    it('asks when a second dispatched call has no text kept, even under the same tool name', () => {
+      const turn = createWebSearchTurnState();
+      markPrivateDataRead(turn);
+      recordPrivateReadText({ state: turn, text: MAIL });
+      markPrivateDataRead(turn);
+      expect(privateTextForChecks(turn)).toBeUndefined();
     });
   });
 });

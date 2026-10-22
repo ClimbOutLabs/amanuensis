@@ -112,8 +112,10 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
+import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -658,6 +660,26 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tenant_id: TENANT_ID,
     logger,
   });
+  // Registered at boot when the mail sidecar is configured; a no-op otherwise.
+  await registerMailConnectorAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await prepareMailPolicyAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    policyPath: configuration.MAIL_POLICY_FILE,
+    logger,
+  });
+  await seedOwnerNameAtBoot({
+    owner_name: configuration.OWNER_NAME,
+    oidc: configuration.OIDC,
+    globalSettingsStore,
+    personalizationStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -697,6 +719,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    mailPolicyPath: configuration.MAIL_POLICY_FILE,
+    mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({
@@ -807,6 +831,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authenticator,
     authorizer,
     outboundSecrets,
+    schedulerStatus: () => {
+      if (controller === undefined) {
+        return 'elsewhere';
+      }
+      return controller.isRunning() ? 'running' : 'stopped';
+    },
   });
 
   return {

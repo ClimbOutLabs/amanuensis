@@ -1,11 +1,13 @@
 'use client';
 
-import type { FC } from 'react';
+import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
+import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
+import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
 import type { SentinelApprovalCard } from './types.js';
@@ -27,13 +29,17 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow": the server only accepts it for some tools. */
+  /** Show "Always allow this tool": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
   onApprove: () => void;
   onAlwaysAllow: () => void;
   onDeny: () => void;
+  /** Only passed for a card with editable content. Gets the text the person typed. */
+  onChangeRequest?: ((text: string) => void) | undefined;
+  /** The owner's own words after a "Change it" answer, shown under the card. */
+  changeRequestNote?: ReactNode;
 };
 
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -95,6 +101,8 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   onApprove,
   onAlwaysAllow,
   onDeny,
+  onChangeRequest,
+  changeRequestNote,
 }) => {
   const hasDetails =
     card.recipient !== null ||
@@ -103,6 +111,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
     card.amount !== null ||
     card.parsed_command !== null;
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
+  const [changing, setChanging] = useState(false);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  // Approving a new-recipient send adds its addresses, so it never offers "Always allow" and its labels say so.
+  const newRecipients = isNewRecipientCard(card);
+  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
+  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -164,36 +178,62 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             <Button
               variant="primary"
               size="large"
-              title={APPROVAL_CHOICES.approve.hint}
+              title={approveChoice.hint}
               onClick={onApprove}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.approve.label}
+              {approveChoice.label}
             </Button>
-            {alwaysAllowOffered && (
+            {alwaysAllowOffered && !newRecipients && (
+              <AlwaysAllowToolControl
+                size="large"
+                disabled={disabled}
+                description="The agent will run this tool on this connector without asking, in every chat."
+                onConfirm={onAlwaysAllow}
+              />
+            )}
+            {onChangeRequest !== undefined && (
               <Button
+                ref={changeButtonRef}
                 variant="secondary"
                 size="large"
-                title={APPROVAL_CHOICES.alwaysAllow.hint}
-                onClick={onAlwaysAllow}
+                title={APPROVAL_CHOICES.changeIt.hint}
+                aria-expanded={changing}
+                onClick={() => {
+                  setChanging(true);
+                }}
                 disabled={disabled}
               >
-                {APPROVAL_CHOICES.alwaysAllow.label}
+                {APPROVAL_CHOICES.changeIt.label}
               </Button>
             )}
             <Button
               variant="secondary"
               size="large"
-              title={APPROVAL_CHOICES.deny.hint}
+              title={denyChoice.hint}
               onClick={onDeny}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.deny.label}
+              {denyChoice.label}
             </Button>
           </div>
         )}
+        {canAnswer && changing && onChangeRequest !== undefined && (
+          <ChangeRequestBox
+            disabled={disabled}
+            onSend={text => {
+              setChanging(false);
+              onChangeRequest(text);
+            }}
+            onCancel={() => {
+              setChanging(false);
+              changeButtonRef.current?.focus();
+            }}
+          />
+        )}
+        {changeRequestNote}
       </div>
     </li>
   );

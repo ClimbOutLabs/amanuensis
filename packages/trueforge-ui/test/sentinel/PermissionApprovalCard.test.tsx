@@ -22,6 +22,7 @@ function baseCard(): SentinelApprovalCard {
     email: null,
     calendar_event: null,
     schedule: null,
+    persona: null,
   };
 }
 
@@ -425,5 +426,150 @@ describe('PermissionApprovalCard for mail', () => {
       expect(screen.getByText('None')).toBeInTheDocument();
       expect(screen.queryByText(/Google will/)).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('PermissionApprovalCard always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers the option only when an always-allow handler is passed', () => {
+    renderCard({}, { onApproveAlways: vi.fn() });
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('does not offer the option without a handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks the owner to confirm before it records anything', () => {
+    const onApproveAlways = vi.fn();
+    renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
+    expect(onApproveAlways).not.toHaveBeenCalled();
+  });
+
+  it('calls nothing when the owner cancels the confirm step', () => {
+    const onApproveAlways = vi.fn();
+    const { onApprove } = renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+
+    expect(onApproveAlways).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('calls the handler once when the owner confirms', () => {
+    const onApproveAlways = vi.fn();
+    renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+
+    expect(onApproveAlways).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PermissionApprovalCard "Change it"', () => {
+  const mailCard: SentinelApprovalCard = {
+    ...baseCard(),
+    email: {
+      action: 'send',
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: 'Lunch',
+      body: 'Lunch at noon?',
+      replaces: null,
+      reply_in_thread: null,
+    },
+  };
+
+  function renderChangeable(props: Partial<PermissionApprovalCardProps> = {}) {
+    const handlers = { onApprove: vi.fn(), onDeny: vi.fn(), onChangeRequest: vi.fn() };
+    render(
+      <PermissionApprovalCard
+        toolName="send_email"
+        card={mailCard}
+        tier={2}
+        onApprove={handlers.onApprove}
+        onDeny={handlers.onDeny}
+        onChangeRequest={handlers.onChangeRequest}
+        {...props}
+      />,
+    );
+    return handlers;
+  }
+
+  it('shows Change it between Approve and Deny when the container passes a handler', () => {
+    renderChangeable();
+    const labels = screen.getAllByRole('button').map(button => button.textContent);
+    expect(labels).toEqual(['Approve', 'Change it', 'Deny']);
+  });
+
+  it('shows no Change it when the container passes no handler', () => {
+    render(
+      <PermissionApprovalCard toolName="payment" card={baseCard()} tier={3} onApprove={vi.fn()} onDeny={vi.fn()} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
+  });
+
+  it('opens a labelled text box with focus in it, and Send waits for some text', () => {
+    renderChangeable();
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    const input = screen.getByLabelText('What should change?');
+    expect(input).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('sends the trimmed text once, and never approves or denies the call', () => {
+    const { onApprove, onDeny, onChangeRequest } = renderChangeable();
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: '  make it shorter ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onChangeRequest).toHaveBeenCalledTimes(1);
+    expect(onChangeRequest).toHaveBeenCalledWith('make it shorter');
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onDeny).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('What should change?')).not.toBeInTheDocument();
+  });
+
+  it('sends the text when Enter is pressed in the box', () => {
+    const { onChangeRequest } = renderChangeable();
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    const input = screen.getByLabelText('What should change?');
+    fireEvent.change(input, { target: { value: 'add a greeting' } });
+    const form = input.closest('form');
+    if (form === null) throw new Error('the change box is not inside a form');
+    fireEvent.submit(form);
+    expect(onChangeRequest).toHaveBeenCalledWith('add a greeting');
+  });
+
+  it('closes on Cancel without sending, and gives focus back to Change it', () => {
+    const { onChangeRequest } = renderChangeable();
+    const changeButton = screen.getByRole('button', { name: 'Change it' });
+    fireEvent.click(changeButton);
+    fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onChangeRequest).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('What should change?')).not.toBeInTheDocument();
+    expect(changeButton).toHaveFocus();
+  });
+
+  it('closes on Escape like Cancel', () => {
+    const { onChangeRequest } = renderChangeable();
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.keyDown(screen.getByLabelText('What should change?'), { key: 'Escape' });
+    expect(onChangeRequest).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('What should change?')).not.toBeInTheDocument();
+  });
+
+  it('disables Change it while the card cannot be answered', () => {
+    renderChangeable({ disabled: true });
+    expect(screen.getByRole('button', { name: 'Change it' })).toBeDisabled();
   });
 });

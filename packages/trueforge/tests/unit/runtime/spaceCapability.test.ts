@@ -5,7 +5,7 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
-import { InstructionBuilder, isAuthRequired } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState, InstructionBuilder, isAuthRequired } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
@@ -90,6 +90,7 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
     store,
     authority: { tenantId: 'default', userRef: 'user-a' },
     tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
@@ -104,6 +105,7 @@ describe('space capability', () => {
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     expect(capability.instructionBuilders?.length).toBe(1);
     expect(capability.preLLMProcessors).toBeUndefined();
@@ -114,6 +116,7 @@ describe('space capability', () => {
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     capability.instructionBuilders?.[0]?.(builder);
@@ -128,11 +131,12 @@ describe('space capability', () => {
     expect(rendered).not.toContain('If the web-artifacts-builder skill is available');
   });
 
-  it('instructs the model that emoji are fine and web images are cheaper than data URIs', () => {
+  it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     const firstBuilder = capability.instructionBuilders?.[0];
@@ -141,10 +145,9 @@ describe('space capability', () => {
     const rendered = builder.build();
 
     const expectedSubstrings: string[] = [
-      'Emoji are fine in spaces',
-      'plain Unicode text',
-      'Prefer web images by https URL over data URIs',
-      'the browser fetches the bytes at render time',
+      'use only picture links that a search or page result in this chat returned',
+      'never one you made up',
+      'The host refuses any other link.',
     ];
     expectedSubstrings.forEach(substring => expect(rendered).toContain(substring));
   });
@@ -154,6 +157,7 @@ describe('space capability', () => {
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     capability.instructionBuilders?.[0]?.(builder);
@@ -194,6 +198,7 @@ describe('space capability', () => {
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -229,6 +234,7 @@ describe('space capability', () => {
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -281,6 +287,7 @@ describe('space capability', () => {
       store: makeStore({ updateSpace, getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })) }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -318,6 +325,7 @@ describe('space capability', () => {
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -362,6 +370,7 @@ describe('space capability', () => {
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -406,6 +415,7 @@ describe('space capability', () => {
       store: makeStore({ updateSpace, getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })) }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -451,6 +461,7 @@ describe('space capability', () => {
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -474,6 +485,7 @@ describe('space capability', () => {
     expect(text).not.toContain('default');
     expect(text).not.toContain('user-a');
     expect(JSON.parse(text)).toEqual({
+      summary: 'Created space "Spain houses" (id: space-1, revision 1).',
       space: {
         id: 'space-1',
         name: 'Spain houses',
@@ -897,6 +909,7 @@ describe('space tool model-facing schemas', () => {
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -919,9 +932,10 @@ describe('space tool model-facing schemas', () => {
 
   it.each([
     [LIST_SPACES_TOOL_NAME, []],
-    [GET_SPACE_TOOL_NAME, ['space_id']],
+    // space_id or space_name: one of the two is required, which the schema refine enforces.
+    [GET_SPACE_TOOL_NAME, []],
     [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [UPDATE_SPACE_TOOL_NAME, ['space_id']],
+    [UPDATE_SPACE_TOOL_NAME, []],
     [REVERT_SPACE_TOOL_NAME, ['revision', 'space_id']],
     [LIST_BLOCKS_TOOL_NAME, ['space_id']],
   ])('%s keeps the required fields the model must send', async (name, required) => {

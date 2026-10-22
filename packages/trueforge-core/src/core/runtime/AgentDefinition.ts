@@ -1,3 +1,4 @@
+import type { RootAgentNames } from '../InstructionBuilder';
 import type { ILLM } from '../llm/ILLM';
 import type { LLMUserMessage } from '../llm/LLMTypes';
 import type { ResponseFormat } from '../llm/responseFormat';
@@ -65,6 +66,11 @@ export interface AgentDefinition {
    * to UTC.
    */
   clientTimezone?: string | undefined;
+  /**
+   * Names for the root assistant's identity section. Omitted or empty values use the default assistant name and
+   * the neutral "person you work for" wording. Sub-agent threads ignore it.
+   */
+  identity?: RootAgentNames | undefined;
   instruction?: string | undefined;
   messages?: readonly LLMUserMessage[] | undefined;
   modelParams?: ModelParams | undefined;
@@ -91,4 +97,9 @@ export interface AgentDefinition {
   budgetedTools?: readonly string[] | undefined;
 
   toolSets?: readonly IToolSet[] | undefined;
+  /**
+   * Offers the model no tools at all, neither connector tools nor built-in ones such as
+   * schedules, files or checklists. For an agent that may only answer from what it already knows.
+   */
+  readOnly?: boolean | undefined;
 }

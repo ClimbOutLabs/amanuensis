@@ -15,6 +15,11 @@ export const SentinelUserSettingsSchema = z
     maps_without_asking: z
       .boolean()
       .describe('While on, map requests run without asking unless private data was read in this chat.'),
+    sandbox_without_asking: z
+      .boolean()
+      .describe(
+        'While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.',
+      ),
   })
   .openapi('SentinelUserSettings');
 
@@ -26,6 +31,7 @@ export const UpdateSentinelUserSettingsRequestSchema = z
     ),
     search_without_asking: z.boolean().optional().describe('New search setting; omitted keeps the current value.'),
     maps_without_asking: z.boolean().optional().describe('New maps setting; omitted keeps the current value.'),
+    sandbox_without_asking: z.boolean().optional().describe('New sandbox setting; omitted keeps the current value.'),
   })
   .openapi('UpdateSentinelUserSettingsRequest');
 

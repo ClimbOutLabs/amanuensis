@@ -13,6 +13,18 @@ export type Tier = 1 | 2 | 3;
 
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
 
+/** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
+export const SANDBOX_COMMAND_REASON = 'sandbox_command';
+export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
+export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
+export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
+export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
+  SANDBOX_COMMAND_REASON,
+  SANDBOX_PACKAGE_INSTALL_REASON,
+  SANDBOX_FILE_WRITE_REASON,
+  SANDBOX_RUN_CODE_REASON,
+]);
+
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
  * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
@@ -27,6 +39,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_send',
   'calendar_write',
   'schedule_write',
+  'persona_write',
 ]);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
@@ -39,6 +52,7 @@ export const AUTO_DENY_REASONS = [
   'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
+  'private_text_check',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
@@ -115,6 +129,17 @@ export const Tier3ScheduleSchema = z
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
 
+/** A specialist that a chat call adds, shown in full. Existing personas are never changed by a call. */
+export const Tier3PersonaSchema = z
+  .object({
+    name: z.string().describe('Specialist name in plain words.'),
+    description: z.string().describe('One line on what the specialist is for.'),
+    instructions: z.string().describe('The whole instruction text the specialist follows.'),
+    model_name: z.string().describe('The model the specialist answers with.'),
+  })
+  .describe('The specialist a chat call adds, shown in full.')
+  .openapi('Tier3Persona');
+
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
@@ -145,11 +170,18 @@ export const Tier3CardSchema = z
     email: Tier3EmailSchema.nullable().optional(),
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
+    persona: Tier3PersonaSchema.nullable().optional(),
+    mail_new_recipients: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe('For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.'),
   })
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
+export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {
@@ -187,6 +219,15 @@ export interface TierDecision {
    * Re-verified byte-for-byte immediately before invocation.
    */
   shell_binding: ShellApprovalBinding | null;
+  /**
+   * True for a connector read that may be granted "Always allow" like an annotated read-only tool. The call
+   * is stamped as inspection, so the grant and chat scope both apply to it.
+   */
+  inspection: boolean;
+  /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
+  grant_host: string | null;
+  /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
+  secret_path_read: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -221,6 +262,9 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     silent_search_query: null,
     audit_description: null,
     shell_binding: null,
+    inspection: false,
+    grant_host: null,
+    secret_path_read: false,
   };
 }
 
@@ -237,6 +281,9 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     silent_search_query: null,
     audit_description: null,
     shell_binding: null,
+    inspection: false,
+    grant_host: null,
+    secret_path_read: false,
   };
 }
 
@@ -246,6 +293,7 @@ export function tier1Decision(input: {
   reason_detail: string | null;
   sensitive_read: boolean;
   silent_search_query?: string | null | undefined;
+  inspection?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -254,6 +302,7 @@ export function tier1Decision(input: {
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
     silent_search_query: input.silent_search_query ?? null,
+    inspection: input.inspection === true,
   };
 }
 
@@ -292,6 +341,9 @@ export function tier3Decision(input: {
   approval_binding?: TrackedExecutionBinding | null | undefined;
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
+  inspection?: boolean | undefined;
+  grant_host?: string | null | undefined;
+  secret_path_read?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -305,6 +357,9 @@ export function tier3Decision(input: {
     approval_binding: input.approval_binding ?? null,
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
+    inspection: input.inspection === true,
+    grant_host: input.grant_host ?? null,
+    secret_path_read: input.secret_path_read === true,
   };
 }
 

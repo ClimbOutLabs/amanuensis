@@ -3,6 +3,8 @@ import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
@@ -39,6 +41,7 @@ function card(plain_what: string): SentinelApprovalCard {
     email: null,
     calendar_event: null,
     schedule: null,
+    persona: null,
   };
 }
 
@@ -81,6 +84,8 @@ type PendingCall = {
   options?: ApprovalOptions;
   /** What the server said about chat scope; absent from older servers. */
   chatAllowOffered?: boolean;
+  /** What the server said about a standing "Always allow this tool"; absent when it did not say. */
+  alwaysAllowOffered?: boolean;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
@@ -108,6 +113,7 @@ function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) 
         eventId: call.event ?? 'evt-1',
         threadId: call.thread ?? 'main',
         ...(call.chatAllowOffered === undefined ? {} : { chatAllowOffered: call.chatAllowOffered }),
+        ...(call.alwaysAllowOffered === undefined ? {} : { alwaysAllowOffered: call.alwaysAllowOffered }),
       });
     }
   });
@@ -313,6 +319,153 @@ describe('ToolCallContainer Sentinel approvals', () => {
     it('follows the declared options when an older server says nothing', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
       expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('ToolCallContainer always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers Always allow this tool only on a card the server says may be always allowed', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('never offers it when the server did not say so, or said no', () => {
+    renderPending([
+      { id: 'send', tier: 3 },
+      { id: 'write', tier: 3, alwaysAllowOffered: false },
+    ]);
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation, and records nothing when the owner cancels', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(respondToApproval).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it('approves the call with the standing option once the owner confirms', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+    expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'read', approved: true, optionId: 'allow-standing' }],
+    ]);
+  });
+});
+
+describe('ToolCallContainer "Change it"', () => {
+  const REASON = changeRequestReason('make it shorter');
+
+  function renderMessage(message: ThreadMessageLike) {
+    render(
+      <RuntimeHarness messages={[message]}>
+        <SentinelStateProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </SentinelStateProvider>
+      </RuntimeHarness>,
+    );
+  }
+
+  it('shows the words the person typed as their own user message after the change request', () => {
+    renderMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call-mail',
+          toolName: 'send_email',
+          args: {},
+          approval: { id: 'call-mail', approved: false, reason: REASON },
+          result: { error: REASON },
+          isError: true,
+        },
+      ],
+      status: { type: 'complete', reason: 'stop' },
+    });
+
+    expect(screen.getByText('make it shorter')).toHaveAttribute('data-slot', 'aui_user-message-content');
+  });
+
+  it('shows no user message for an ordinary denial', () => {
+    renderMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call-mail',
+          toolName: 'send_email',
+          args: {},
+          approval: { id: 'call-mail', approved: false, reason: 'not now' },
+          result: { error: 'not now' },
+          isError: true,
+        },
+      ],
+      status: { type: 'complete', reason: 'stop' },
+    });
+
+    expect(document.querySelector('[data-slot="aui_user-message-content"]')).toBeNull();
+  });
+
+  describe('add a specialist card', () => {
+    const personaCard: SentinelApprovalCard = {
+      ...card('Add a specialist: Tutor. Helps with maths.'),
+      persona: { name: 'Tutor', description: 'Helps with maths.', instructions: 'Be patient.', model_name: 'model-a' },
+    };
+
+    function renderPersonaApproval(onRespondToToolApproval = vi.fn()) {
+      pendingApprovals.current = [{ approvalId: 'persona-1', threadId: 'main' }];
+      const message: ThreadMessageLike = {
+        role: 'assistant',
+        content: [pendingCall('persona-1', 'create_persona')],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      };
+      render(
+        <RuntimeHarness messages={[message]} onRespondToToolApproval={onRespondToToolApproval}>
+          <SentinelStateProvider>
+            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+          </SentinelStateProvider>
+        </RuntimeHarness>,
+      );
+      act(() => {
+        publishSentinelEvent({
+          toolCallId: 'persona-1',
+          tier: 3,
+          card: personaCard,
+          eventId: 'evt-persona',
+          threadId: 'main',
+        });
+      });
+      return { onRespondToToolApproval };
+    }
+
+    it('offers Change it between Approve and Deny', () => {
+      renderPersonaApproval();
+      const labels = screen
+        .getAllByRole('button')
+        .map(button => button.textContent)
+        .filter(text => text === 'Approve' || text === 'Change it' || text === 'Deny');
+      expect(labels).toEqual(['Approve', 'Change it', 'Deny']);
+    });
+
+    it('sends the words as the reason, declines the call, and never grants it', () => {
+      const { onRespondToToolApproval } = renderPersonaApproval();
+      fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'What should change?' }), {
+        target: { value: 'make it shorter' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onRespondToToolApproval).toHaveBeenCalledTimes(1);
+      expect(onRespondToToolApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ approvalId: 'persona-1', approved: false, reason: REASON }),
+      );
+      expect(respondToApproval).not.toHaveBeenCalled();
     });
   });
 });

@@ -176,6 +176,13 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  grant_host: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+    ),
   audit_description: z
     .string()
     .optional()
@@ -190,6 +197,12 @@ export const InternalToolCallInfoSchema = z.object({
     .literal(true)
     .optional()
     .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
+  secret_path_read: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
@@ -385,7 +398,7 @@ export interface RawAssistantMessageWithUsage {
    * 'broken' means the markup could not be rebuilt and the runtime must stop the answer without
    * running or trusting anything in it. Absent when the reply had no markup.
    */
-  tool_markup?: 'recovered' | 'broken';
+  tool_markup?: 'recovered';
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

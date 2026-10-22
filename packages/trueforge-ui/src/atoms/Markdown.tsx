@@ -186,9 +186,9 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
 
 /**
  * Inside a chat turn, only re-encoded images from this chat's image route render; a web link goes to
- * the server, which loads it silently where a search would and otherwise asks with a card; any other
- * source (data:, blob:, another same-origin path), and every image of a turn without image access, is
- * not rendered. Alt text is always plain text.
+ * the server and stays hidden until the person asks to see it; any other source (data:, blob:, another
+ * same-origin path), and every image of a turn without image access, is not rendered. Alt text is
+ * always plain text.
  *
  * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
  * private data in an image URL. They show as a thumbnail that loads on request; same-origin, data:

@@ -133,6 +133,31 @@ describe('ToolCallContainer', () => {
     expect(screen.getByTestId('searched-chip')).toHaveTextContent('Searched: tallest building in Lisbon');
   });
 
+  it('keeps the chip to the query and shows the full sent arguments, plumbing included, once expanded', () => {
+    const argsText = JSON.stringify({
+      mcp_server: 'finder',
+      tool_name: 'lookup',
+      input: { query: 'tallest building', session_id: 'sess-7f3a', model_name: 'model-x9' },
+    });
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: 'search-2',
+        toolName: 'call_tool',
+        args: {},
+        argsText,
+        artifact: { silentSearchQuery: 'tallest building' },
+        result: 'ok',
+      },
+    ]);
+    expect(screen.getByTestId('searched-chip')).toHaveTextContent('Searched: tallest building');
+    expect(screen.getByTestId('searched-chip')).not.toHaveTextContent('sess-7f3a');
+    fireEvent.click(screen.getByTestId('searched-chip'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('sess-7f3a'));
+    expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('model-x9'));
+  });
+
   it('shows no chip when the host did not mark the call, even if the model put a query in the arguments', () => {
     renderToolCallMessage([
       {
@@ -888,6 +913,7 @@ describe('ToolCallContainer', () => {
         email: null,
         calendar_event: null,
         schedule: null,
+        persona: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -904,12 +930,14 @@ describe('ToolCallContainer', () => {
           tier2_auto_allow: [],
           search_without_asking: true,
           maps_without_asking: false,
+          sandbox_without_asking: true,
         })),
         updateUserSettings: vi.fn(async () => ({
           offline_mode: false,
           tier2_auto_allow: [],
           search_without_asking: true,
           maps_without_asking: false,
+          sandbox_without_asking: true,
         })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
@@ -957,7 +985,7 @@ describe('ToolCallContainer: held search request', () => {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
-        why: "it contains one of this computer's keys",
+        say: 'This search contains something that looks like a password or key.',
       }),
       plain_why: null,
       cannot_be_undone: null,
@@ -972,6 +1000,7 @@ describe('ToolCallContainer: held search request', () => {
       email: null,
       calendar_event: null,
       schedule: null,
+      persona: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
@@ -982,12 +1011,14 @@ describe('ToolCallContainer: held search request', () => {
         tier2_auto_allow: [],
         search_without_asking: true,
         maps_without_asking: false,
+        sandbox_without_asking: true,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
         maps_without_asking: false,
+        sandbox_without_asking: true,
       })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
     };
