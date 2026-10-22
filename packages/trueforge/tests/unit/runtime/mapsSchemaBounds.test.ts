@@ -22,6 +22,7 @@ describe('maps tool schema bounds', () => {
       tracing,
       logger,
       pages_scope: { tenant_id: 'tenant-1', conversation_id: 'chat-a' },
+      starts_answer: true,
     });
     const server = capability.systemToolSets?.[0];
     if (server === undefined) {

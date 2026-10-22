@@ -5,6 +5,7 @@
  */
 import {
   checkToolArguments,
+  dropUnnamedArguments,
   toolArgumentProblemMessage,
   toParameterSchema,
 } from '../../../src/core/mcp/toolArgumentCheck';
@@ -103,14 +104,9 @@ describe('checkToolArguments', () => {
       },
     });
     // zone_typo dropped, optional coerced; the second attendee has no email: one problem.
-    expect(outcome.problems).toEqual([
-      { path: 'attendees[1].email', expected: 'text (this one is required)' },
-    ]);
+    expect(outcome.problems).toEqual([{ path: 'attendees[1].email', expected: 'text (this one is required)' }]);
     expect(outcome.args['start']).toEqual({ date_time: '2026-10-27T14:30:00' });
-    expect(outcome.args['attendees']).toEqual([
-      { email: 'sam@example.com', optional: false },
-      { optional: true },
-    ]);
+    expect(outcome.args['attendees']).toEqual([{ email: 'sam@example.com', optional: false }, { optional: true }]);
   });
 
   it('leaves a free-form object schema untouched', () => {
@@ -200,5 +196,22 @@ describe('checkToolArguments', () => {
     ]);
     // Leaving the forbidden argument out is fine.
     expect(checkToolArguments({ schema, args: { name: 'x' } }).problems).toEqual([]);
+  });
+});
+
+describe('dropUnnamedArguments', () => {
+  const named = { type: 'object', properties: { query: { type: 'string' } } };
+
+  it('drops only the arguments a named-fields schema does not name', () => {
+    expect(dropUnnamedArguments({ schema: named, args: { query: 'agenda', session_id: 'x' } })).toEqual({
+      args: { query: 'agenda' },
+      dropped: ['session_id'],
+    });
+  });
+
+  it('keeps everything when the schema allows extra arguments or names none', () => {
+    const args = { query: 'agenda', session_id: 'x' };
+    expect(dropUnnamedArguments({ schema: { ...named, additionalProperties: true }, args }).dropped).toEqual([]);
+    expect(dropUnnamedArguments({ schema: { type: 'object' }, args }).dropped).toEqual([]);
   });
 });

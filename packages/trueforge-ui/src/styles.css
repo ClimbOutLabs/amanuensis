@@ -514,19 +514,6 @@
   line-height: 1.75rem;
 }
 
-/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
-.aman-runtime-rail__needs-you {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.75rem;
-}
-
-.aman-runtime-rail__needs-body {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-}
-
 .aman-runtime-rail__rules {
   display: grid;
   gap: 0.25rem;
@@ -1786,7 +1773,7 @@
 }
 
 /* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
-   instead of a white card. The hairline stays gold; the rail's one gold card stays Needs you. */
+   instead of a white card. The hairline stays gold. */
 .aui-panda {
   display: grid;
   justify-items: center;
@@ -2112,7 +2099,7 @@
   color: var(--text-primary);
 }
 
-/* First frame: the day ticket's display title, and the small caps line each ticket carries. */
+/* First frame: the day ticket's display title. */
 .aui-day-title {
   font-family: var(--font-display);
   font-size: 2.5rem;
@@ -2129,10 +2116,22 @@
   letter-spacing: -0.01em;
 }
 
-.aui-ticket__sub {
-  font-size: 0.75rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* Tour card titles: the display face at the theme's text-xl, so a title takes a line or two. */
+.aui-tour-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* Every label on the Tour: the UI sans in secondary text. Monospace stays for code and data. */
+.aui-tour-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
   color: var(--text-secondary);
 }
 

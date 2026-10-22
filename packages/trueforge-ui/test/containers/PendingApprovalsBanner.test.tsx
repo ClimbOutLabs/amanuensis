@@ -21,6 +21,11 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => ({ pending: pendingApprovals, respond: vi.fn() }),
 }));
 
+let placement: ApprovalCardPlacement = 'missing';
+vi.mock('@/hooks/useApprovalCardPlacement.js', () => ({
+  useApprovalCardPlacement: () => placement,
+}));
+
 const showSuccess = vi.fn();
 const showError = vi.fn();
 vi.mock('@/containers/ToasterContainer.js', () => ({
@@ -28,6 +33,7 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
 }));
 
 import { PendingApprovalsBanner } from '@/containers/PendingApprovalsBanner.js';
+import type { ApprovalCardPlacement } from '@/hooks/useApprovalCardPlacement.js';
 import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 
@@ -68,6 +74,7 @@ describe('PendingApprovalsBanner journeys', () => {
   afterEach(() => {
     threadMessages.current = [];
     pendingApprovals = [];
+    placement = 'missing';
     reload.mockClear();
     showSuccess.mockClear();
     showError.mockClear();
@@ -111,6 +118,22 @@ describe('PendingApprovalsBanner journeys', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Action needed');
     expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
+  });
+
+  it('shows one pending signal: no banner while the approval card is on screen', () => {
+    placement = 'on-screen';
+    setPending({ id: 'a1', onNewest: true });
+    renderBanner(fakeServer());
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('leaves the stand-in to the composer banner while the card is off screen', () => {
+    placement = 'off-screen';
+    setPending({ id: 'a1', onNewest: true });
+    renderBanner(fakeServer());
+
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows no banner for a card left pending on an older turn', () => {

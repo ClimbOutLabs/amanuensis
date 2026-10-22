@@ -102,14 +102,18 @@ export const ModelProviderStreamTimeoutSchema = z
       .min(STREAM_TIMEOUT_MS_MIN)
       .max(STREAM_TIMEOUT_MS_MAX)
       .optional()
-      .describe('Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.'),
+      .describe(
+        'Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).',
+      ),
     chunk_ms: z
       .number()
       .int()
       .min(STREAM_TIMEOUT_MS_MIN)
       .max(STREAM_TIMEOUT_MS_MAX)
       .optional()
-      .describe('Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.'),
+      .describe(
+        'Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).',
+      ),
   })
   .strict()
   .describe('Optional per-provider override of the server-wide stream progress deadlines.')

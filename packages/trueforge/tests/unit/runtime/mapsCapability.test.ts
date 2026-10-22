@@ -283,6 +283,7 @@ describe('maps connector binding', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
       pages_scope: PAGES_SCOPE,
+      starts_answer: true,
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -301,6 +302,7 @@ describe('maps connector binding', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
       pages_scope: PAGES_SCOPE,
+      starts_answer: true,
     });
     const binding = capability.systemToolSets?.[0]?.resolveConnector?.({
       name: 'render_route',
