@@ -328,6 +328,44 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
   });
 
+  it('captions the panda with the owner name in sentence case', async () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <PersonalizationProvider
+          api={{
+            getProfile: async () => ({
+              assistant_name: 'Mira',
+              assistant_identity: null,
+              voice_guidance: null,
+              user_name: 'Sidd',
+              address_as: null,
+              user_profile: null,
+              pinned_preferences: [],
+              help_areas: [],
+              learned_profile: null,
+            }),
+            updateProfile: async profile => profile,
+            deleteProfile: async () => {},
+          }}
+        >
+          <AmanRuntimeRail />
+        </PersonalizationProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByText("Sidd's Chief of Staff")).toHaveClass('aui-panda__role');
+  });
+
+  it('captions the panda "Your Chief of Staff" when no owner name is known', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aui-panda__role');
+  });
+
   it('groups the rail into labeled answering and model sections', () => {
     render(
       <RuntimeHarness messages={[]}>
