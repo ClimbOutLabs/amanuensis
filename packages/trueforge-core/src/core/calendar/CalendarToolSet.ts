@@ -12,6 +12,7 @@ import { stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { extractErrorLogFields } from '../util/errorLogFields';
@@ -79,6 +80,7 @@ interface CalendarToolSetOptions {
 export class CalendarToolSet extends LocalToolMCP {
   readonly name = CALENDAR_SERVER_ID;
   readonly displayName = 'Google Calendar';
+  protected override readonly bundle: ToolBundleName = 'google';
   readonly #options: CalendarToolSetOptions;
   readonly #tools: ToolDefinition[];
 

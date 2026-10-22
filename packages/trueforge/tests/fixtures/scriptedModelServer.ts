@@ -8,7 +8,8 @@
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
  * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
- * a tool that takes one (default `inert`).
+ * a tool that takes one (default `inert`). A tool the request does not send is reached the way a
+ * model would: it loads the tool's bundle with `load_bundle` first.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
@@ -117,15 +118,6 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
-/** Every tool the model may call: those sent in full, and those the tool index in the system prompt lists by name. */
-function callableTools(request: ChatCompletionRequest): AdvertisedTool[] {
-  const system = request.messages.find(message => message.role === 'system');
-  const listed = [...messageText(system?.content).matchAll(/^- ([A-Za-z0-9_-]+): /gm)].flatMap(match =>
-    match[1] === undefined ? [] : [{ function: { name: match[1] } }],
-  );
-  return [...request.tools, ...listed];
-}
-
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -135,6 +127,39 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
     }
   }
   return undefined;
+}
+
+/**
+ * The bundle a model would load for a tool it cannot see, read from the tool's name as a model reads
+ * the bundle index. A connector's other tools ride with the search connector, so `inert` is web.
+ */
+const BUNDLE_FOR_TOOL: [match: string, bundle: string][] = [
+  ['tavily', 'web'],
+  ['web_search', 'web'],
+  ['inert', 'web'],
+  ['render_', 'maps'],
+  ['list_inbox', 'google'],
+  ['usage_summary', 'extras'],
+  ['exec', 'sandbox'],
+];
+
+/** A `load_bundle` result, which answers the load, not the scripted step. */
+function isBundleLoadResult(message: ChatMessage): boolean {
+  return (
+    message.role === 'tool' &&
+    /\b[a-z_]+ is (already )?loaded\. Its (tools|guidance)/.test(messageText(message.content))
+  );
+}
+
+/** The bundle to load before calling `match`, when the tool is not sent and its bundle is not loaded yet. */
+function bundleToLoad({ match, request }: { match: string; request: ChatCompletionRequest }): string | undefined {
+  if (resolveToolName({ directive: 'load_bundle', tools: request.tools }) === undefined) {
+    return undefined;
+  }
+  const bundle = BUNDLE_FOR_TOOL.find(([part]) => match.includes(part))?.[1];
+  const system = messageText(request.messages.find(message => message.role === 'system')?.content);
+  const offered = new RegExp(`^- ${bundle ?? ''}: .*$`, 'm').exec(system)?.[0];
+  return bundle === undefined || offered === undefined || offered.endsWith('(loaded)') ? undefined : bundle;
 }
 
 /** The text of the last tool result in the conversation, if a tool has answered. */
@@ -148,6 +173,9 @@ function lastToolResultText(messages: ChatMessage[]): string | undefined {
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
   for (const message of messages) {
+    if (isBundleLoadResult(message)) {
+      continue;
+    }
     if (message.role === 'tool') {
       directive = undefined;
       continue;
@@ -277,7 +305,7 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
       }
       continue;
     }
-    if (directive !== undefined && message.role === 'tool') {
+    if (directive !== undefined && message.role === 'tool' && !isBundleLoadResult(message)) {
       toolResults += 1;
     }
   }
@@ -407,11 +435,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const toolName =
       requestedTool === undefined
         ? undefined
-        : resolveToolName({ directive: requestedTool.match, tools: callableTools(parsed) });
+        : resolveToolName({ directive: requestedTool.match, tools: parsed.tools });
     const toolCalls: ScriptedToolCall[] = [];
     const threeAtOnceName =
       progress.directive === THREE_AT_ONCE_DIRECTIVE && progress.toolResults === 0
-        ? resolveToolName({ directive: 'inert_unannotated', tools: callableTools(parsed) })
+        ? resolveToolName({ directive: 'inert_unannotated', tools: parsed.tools })
         : undefined;
     if (threeAtOnceName !== undefined) {
       for (const text of THREE_AT_ONCE_TEXTS) {
@@ -420,6 +448,16 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
           name: threeAtOnceName,
           callId: `call_${String(callCounter)}`,
           argumentsJson: JSON.stringify({ text }),
+        });
+      }
+    } else if (toolName === undefined && requestedTool !== undefined) {
+      const bundle = bundleToLoad({ match: requestedTool.match, request: parsed });
+      if (bundle !== undefined) {
+        callCounter += 1;
+        toolCalls.push({
+          name: 'load_bundle',
+          callId: `call_${String(callCounter)}`,
+          argumentsJson: JSON.stringify({ name: bundle }),
         });
       }
     } else if (toolName !== undefined) {

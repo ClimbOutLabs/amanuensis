@@ -39,6 +39,17 @@ export type PersonalInstanceName = 'personal' | 'personal-with-google';
 /** Every standard setup the report measures, in report order. */
 export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
 
+export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
+
+/** Typical turns, each a message the person sends: what it asks for decides which tool bundles go out. */
+export const PROMPT_REPORT_TURNS: Record<PromptReportTurn, string> = {
+  'core-only': 'Thanks, that is all for now.',
+  calendar: 'Add a reminder to my calendar for Thursday at 9:00: dentist.',
+  web: "Search the web for this week's opening hours of the Lisbon Oceanarium.",
+};
+
+export const PROMPT_REPORT_TURN_NAMES = ['core-only', 'calendar', 'web'] satisfies PromptReportTurn[];
+
 const MODEL_NAME = 'personal/model';
 /** Never sent anywhere: stands in for a credential field the report does not read. */
 const STAND_IN = 'stand-in';
@@ -338,12 +349,15 @@ export async function buildPersonalInstance(input: {
   return { definition, capabilities, sandbox, sentinel };
 }
 
-/** Measures one standard configuration. */
-export async function measurePersonalInstance(input: { name: PersonalInstanceName }): Promise<PromptReport> {
+/** Measures one standard configuration answering one typical turn. */
+export async function measurePersonalInstance(input: {
+  name: PersonalInstanceName;
+  turn: PromptReportTurn;
+}): Promise<PromptReport> {
   const { definition, capabilities, sandbox } = await buildPersonalInstance({
     name: input.name,
     googleAccess: 'read',
     sentinelServices: undefined,
   });
-  return measurePromptRequest({ definition, capabilities, sandbox });
+  return measurePromptRequest({ definition, capabilities, sandbox, message: PROMPT_REPORT_TURNS[input.turn] });
 }

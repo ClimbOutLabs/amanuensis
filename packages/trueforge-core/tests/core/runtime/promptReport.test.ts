@@ -16,6 +16,7 @@ describe('measurePromptRequest', () => {
           }),
         ],
       },
+      message: 'Report.',
     });
 
     const names = report.sections.map(row => row.name);
@@ -23,19 +24,14 @@ describe('measurePromptRequest', () => {
     expect(names).toContain('agent-capabilities');
     expect(names).toContain('agent-capabilities/plain-speech');
     expect(names).toContain('user-instructions');
-    // The tool is listed in the index section and sent only once used; the lookup tools are sent.
-    expect(names).toContain('agent-capabilities/deferred-tools-instructions');
-    expect(report.tools.map(row => row.name)).toEqual([
-      'call_tool',
-      'get_tool_info',
-      'get_tool_output_schema',
-      'list_tools',
-    ]);
+    // Non-preloaded tool sets add the deferred dispatchers ahead of the listed tools.
+    expect(report.tools.map(row => row.name)).toContain('read_note');
   });
 
   it('counts each top-level section once and adds the tools to the total', async () => {
     const report = await measurePromptRequest({
       definition: { modelId: undefined, configuredModels: undefined, instruction: 'Be brief.', toolSets: [] },
+      message: 'Report.',
     });
 
     const topLevel = report.sections.filter(row => !row.name.includes('/'));
@@ -57,6 +53,7 @@ describe('measurePromptRequest', () => {
         instruction: 'Use <agent-identity>this</agent-identity> literally.',
         toolSets: [],
       },
+      message: 'Report.',
     });
 
     expect(report.sections.map(row => row.name)).toContain('user-instructions');

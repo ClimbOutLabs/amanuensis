@@ -3,7 +3,6 @@ import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions/context';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { offeredTools } from '../fixtures/offeredTools';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 function toolSetNamed(input: { name: string; tool: string }): IToolSet {
@@ -61,8 +60,7 @@ async function offeredToolNames({ offline }: { offline: boolean }): Promise<stri
   for await (const event of thread.execute({ signal: new AbortController().signal })) {
     void event;
   }
-  const request = requests[0];
-  const tools = request === undefined ? [] : offeredTools(request);
+  const tools = requests[0]?.tools ?? [];
   return tools.flatMap(tool => (tool.type === 'function' ? [tool.function.name] : []));
 }
 

@@ -6,7 +6,6 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { offeredTools } from '../fixtures/offeredTools';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 /**
@@ -143,8 +142,8 @@ describe('host-owned task state and tool-call budget', () => {
     expect(create).toHaveBeenCalledTimes(4);
 
     // record_finding is offered alongside the research tools…
-    const firstTools = offeredTools(create.mock.calls[0]?.[0]);
-    expect(firstTools.some(t => t.type === 'function' && t.function.name.includes('record_finding'))).toBe(true);
+    const firstTools = requestOf(create, 0).tools ?? [];
+    expect(firstTools.some(t => t.function.name.includes('record_finding'))).toBe(true);
 
     // …a fresh <task_state> block precedes every model call…
     for (let i = 0; i < 4; i++) {

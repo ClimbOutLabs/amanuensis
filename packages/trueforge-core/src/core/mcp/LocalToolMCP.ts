@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { AgentTracing } from '../tracing/AgentTracing';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
   type CallToolResponse,
   isCallToolResponseResult,
@@ -89,6 +90,8 @@ export abstract class LocalToolMCP implements IToolSet {
   readonly preload: boolean = true;
   readonly hasPreloadedTools: boolean = true;
   readonly tracingEnabled: boolean = true;
+  /** The bundle every tool of this set is sent with; undefined sends them on every request. */
+  protected readonly bundle: ToolBundleName | undefined = undefined;
 
   private readonly tracing: AgentTracing;
 
@@ -105,6 +108,11 @@ export abstract class LocalToolMCP implements IToolSet {
   }
 
   protected abstract getTools(): ToolDefinition[];
+
+  bundleOf(_toolName: string): ToolBundleName | undefined {
+    void _toolName;
+    return this.bundle;
+  }
 
   listTools(): Promise<ListToolsResolvedResponse> {
     return Promise.resolve({

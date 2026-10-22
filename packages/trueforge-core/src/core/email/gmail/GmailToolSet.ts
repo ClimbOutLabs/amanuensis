@@ -14,6 +14,7 @@ import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
@@ -114,6 +115,7 @@ function jsonResult(value: unknown, sandboxCreated?: SandboxInfo) {
 export class GmailToolSet extends LocalToolMCP {
   readonly name = GMAIL_SERVER_ID;
   readonly displayName = 'Gmail';
+  protected override readonly bundle: ToolBundleName = 'google';
   readonly #options: GmailToolSetOptions;
   readonly #tools: ToolDefinition[];
   /** Sizes of the attachments placed so far this turn: they number the next one and count against the shared caps. */

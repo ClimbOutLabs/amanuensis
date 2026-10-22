@@ -32,6 +32,7 @@ import type { ApprovalDecision } from '../../events/schema';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import type { Sandbox, SandboxDocumentSnapshot } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { throwIfSignalAborted } from '../../util/abort';
@@ -313,6 +314,12 @@ export async function extractDocumentsFromSandbox(
 export class DocumentTools extends LocalToolMCP {
   readonly name = DOCUMENTS_SERVER_ID;
   readonly displayName = 'Documents';
+  protected override readonly bundle: ToolBundleName = 'documents';
+
+  // The net-worth mode is asked for by name, so it rides with the other on-request tools.
+  override bundleOf(toolName: string): ToolBundleName {
+    return toolName === SUMMARIZE_NET_WORTH_TOOL_NAME ? 'extras' : this.bundle;
+  }
 
   /**
    * Session-scale extraction budget: repeated extract_document_text calls
@@ -469,5 +476,6 @@ export function documentCapability(options: { sandbox: Sandbox; tracing: AgentTr
   return {
     systemToolSets: [new DocumentTools(options.sandbox, options.tracing)],
     instructionBuilders: [buildDocumentsInstruction],
+    bundle: 'documents',
   };
 }

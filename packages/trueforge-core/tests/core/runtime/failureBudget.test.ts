@@ -24,7 +24,6 @@ import { identicalCallSignatureMarker } from '../../../src/core/runtime/contextU
 import type { CreateDynamicSubAgentThread } from '../../../src/core/runtime/CreateDynamicSubAgentThread';
 import { EXITED_NOTE } from '../../../src/core/sandbox/execResultSemantics';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { offeredTools } from '../fixtures/offeredTools';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 /**
@@ -776,7 +775,7 @@ describe('repeat budget', () => {
     const rootModel: ILLM = {
       create: jest.fn(body => {
         round += 1;
-        const tool = offeredTools(body).find(
+        const tool = (body.tools ?? []).find(
           candidate => 'function' in candidate && candidate.function.name.includes('create_sub_agent'),
         );
         if (tool === undefined || !('function' in tool)) {
@@ -859,7 +858,7 @@ describe('repeat budget', () => {
         return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
       }
       if (round === 2) {
-        const questionTool = offeredTools(request).find(
+        const questionTool = request.tools?.find(
           tool => tool.type === 'function' && tool.function.name.endsWith(ASK_USER_QUESTION_TOOL_NAME),
         );
         const questionToolName =
@@ -890,7 +889,7 @@ describe('repeat budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition,
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [askUserQuestion()],
     });
 
@@ -970,7 +969,7 @@ describe('repeat budget', () => {
           return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
         }
         if (round === 2) {
-          const spawnTool = offeredTools(request).find(
+          const spawnTool = request.tools?.find(
             tool => tool.type === 'function' && tool.function.name.includes('create_sub_agent'),
           );
           if (spawnTool === undefined || !('function' in spawnTool)) {
@@ -1009,7 +1008,7 @@ describe('repeat budget', () => {
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities,
     });
     const agentThreads = new Map<string, AgentThread>([['main', root]]);
@@ -1101,7 +1100,7 @@ describe('repeat budget', () => {
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [{ preLLMProcessors: [compaction] }],
     });
 

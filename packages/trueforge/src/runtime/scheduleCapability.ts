@@ -17,6 +17,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/ToolSet';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import {
   CREATE_SCHEDULE_TOOL_NAME,
@@ -275,6 +276,7 @@ function errorResult(message: string) {
 export class ScheduleToolSet extends LocalToolMCP {
   readonly name = SCHEDULE_SERVER_ID;
   readonly displayName = 'Schedules';
+  protected override readonly bundle: ToolBundleName = 'schedules';
   readonly #options: ScheduleToolSetOptions;
   readonly #tools: ToolDefinition[];
 
@@ -690,5 +692,9 @@ function buildScheduleInstruction(builder: InstructionBuilder): void {
 
 /** Attaches the schedule tools, and the rule that they are the only way to schedule, to one chat turn's root thread. */
 export function scheduleCapability(options: ScheduleToolSetOptions): AgentCapability {
-  return { systemToolSets: [new ScheduleToolSet(options)], instructionBuilders: [buildScheduleInstruction] };
+  return {
+    systemToolSets: [new ScheduleToolSet(options)],
+    instructionBuilders: [buildScheduleInstruction],
+    bundle: 'schedules',
+  };
 }

@@ -199,7 +199,7 @@ import {
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
-import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput, withToolSchema } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
@@ -230,7 +230,8 @@ import {
   type TaskState,
 } from './taskState';
 import { TaskStateToolSet } from './TaskStateToolSet';
-import { ToolIndex, type ToolIndexEntry } from './ToolIndex';
+import type { ToolBundleName } from './toolBundleCatalog';
+import { ToolBundles } from './ToolBundles';
 import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
@@ -1445,11 +1446,14 @@ export class AgentThread {
   private instructionDateUtc: string | undefined;
   private toolResponseProcessors: ToolResponseProcessor[];
   private untrustedTextScreens: readonly UntrustedTextScreen[];
-  private instructionBuilders: readonly ((builder: InstructionBuilder) => void)[];
+  private instructionBuilders: readonly {
+    bundle: ToolBundleName | undefined;
+    build: (builder: InstructionBuilder) => void;
+  }[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
-  // Tools listed by name only until the chat first uses them. Absent for a read-only definition, which offers no tools.
-  private readonly toolIndex: ToolIndex | undefined;
+  // Built-in tools sent only when a turn needs them. Absent for a read-only definition, which offers no tools.
+  private readonly toolBundles: ToolBundles | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
   // Messages send() added for held-action decisions. They reach the stream at the start of execute(),
@@ -1585,9 +1589,15 @@ export class AgentThread {
       ? new Map(this.toolCallMemo.callSignatures)
       : new Map<string, number>();
 
-    this.toolIndex = this.definition.readOnly ? undefined : new ToolIndex();
+    this.toolBundles = this.definition.readOnly
+      ? undefined
+      : new ToolBundles({
+          tracing: this.tracing,
+          sectionBundles: new Set((input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle]))),
+          routeSignals: () => ({ repositoryAttached: this.sandbox?.getBoundRepositoryContext() !== undefined }),
+        });
     const capabilities = [
-      ...(this.toolIndex === undefined ? [] : [this.toolIndex.capability()]),
+      ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
       ...(input.capabilities ?? []),
     ];
     // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
@@ -1597,7 +1607,9 @@ export class AgentThread {
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
     this.toolResponseProcessors = capabilities.flatMap(c => c.toolResponseProcessors ?? []);
     this.untrustedTextScreens = capabilities.flatMap(c => c.untrustedTextScreens ?? []);
-    this.instructionBuilders = capabilities.flatMap(c => c.instructionBuilders ?? []);
+    this.instructionBuilders = capabilities.flatMap(c =>
+      (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })),
+    );
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [new OpenToolCallCloser(), ...capabilityPreSend];
@@ -1618,11 +1630,11 @@ export class AgentThread {
       }
     }
 
-    if (this.toolIndex !== undefined) {
-      this.deferredTool = new DeferredTool(this.definition.toolSets ?? [], {
+    const connectorToolSets = this.definition.readOnly ? [] : (this.definition.toolSets ?? []);
+    if (connectorToolSets.length) {
+      this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
-        index: this.toolIndex,
       });
     }
 
@@ -1680,27 +1692,37 @@ export class AgentThread {
         `You are running as the model "${modelId}". Your training data ends before this model was released, so newer models, tools and events exist that you have never read about. When the question is what is newest or whether something exists, trust search results and the user over your memory.${configuredModelsClause}`,
       );
     }
+    // A bundle's sections go out with its tools. A thread without bundles sends every section.
+    const loaded = (bundle: ToolBundleName | undefined) =>
+      bundle === undefined || this.toolBundles === undefined || this.toolBundles.isLoaded(bundle);
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
-    capabilities.addSection(
-      'source-discovery',
-      createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
-    );
+    if (loaded('web')) {
+      capabilities.addSection(
+        'source-discovery',
+        createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
+      );
+    }
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
-    capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
+    if (loaded('web')) {
+      capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
+    }
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
-    if (this.sandbox) {
+    if (this.sandbox && loaded('sandbox')) {
       this.sandbox.buildInstruction(capabilities);
     }
+    this.toolBundles?.buildInstruction(capabilities);
     if (this.deferredTool) {
       this.deferredTool.buildInstruction(capabilities);
     }
-    for (const build of this.instructionBuilders) {
-      build(capabilities);
+    for (const { bundle, build } of this.instructionBuilders) {
+      if (loaded(bundle)) {
+        build(capabilities);
+      }
     }
     if (!this.parent && userInstruction?.trim()) {
       builder.addSection('user-instructions', userInstruction.trim(), true);
@@ -2687,13 +2709,13 @@ export class AgentThread {
     });
     this.convertedTools = convertedTools;
     this.tfyManagedServerNames = new Set(tfyManagedServers.map(s => s.name));
-    if (this.toolIndex !== undefined) {
-      this.toolIndex.load({
+    if (this.toolBundles !== undefined) {
+      this.toolBundles.load({
         converted: convertedTools,
         metaToolSet: this.deferredTool,
         deferredServers: userServers.some(server => !server.preload),
       });
-      // The index lists tools the thread only knows once they are listed, so the prompt is built again with it.
+      // The bundle index lists bundles the thread only knows once its tools are listed, so the prompt is built again with it.
       this.instruction = this.buildInstruction(this.definition.instruction);
     }
     return { initializationInfo, authRequirementInfo };
@@ -3251,33 +3273,19 @@ export class AgentThread {
     // every call, but calls that will be held for the owner's approval do not count toward
     // the cap there, and which ones those are is only known once each call is classified.
     const unattended = this.sentinel?.services.unattended === true;
-    const uniqueIdReply: RawAssistantMessage = {
-      ...result.value.output,
-      ...(result.value.output.tool_calls === undefined
-        ? {}
-        : {
-            tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
-          }),
-    };
-    // A call_tool call naming an indexed tool becomes a direct call before anything checks it,
-    // so its arguments, approval, run and record are exactly those of a direct call.
-    const direct =
-      this.deferredTool === undefined
-        ? { message: uniqueIdReply, rewritten: new Map<string, ToolIndexEntry>() }
-        : await this.deferredTool.toDirectCalls(uniqueIdReply);
     const replyGuard = guardModelReply({
-      message: direct.message,
-      // Every tool's schema, not only the ones sent: an indexed tool can be called before it is promoted.
+      message: {
+        ...result.value.output,
+        ...(result.value.output.tool_calls === undefined
+          ? {}
+          : {
+              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
+            }),
+      },
+      // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
     });
-    // Its schema goes with the correction, so a model that has not loaded the tool can fix the call in one step.
-    for (const [id, problem] of replyGuard.invalidCalls) {
-      const entry = direct.rewritten.get(id);
-      if (entry !== undefined) {
-        replyGuard.invalidCalls.set(id, withToolSchema({ problem, entry }));
-      }
-    }
     if (replyGuard.tooManyCalls && !unattended) {
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -4608,12 +4616,12 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
-            if (this.toolIndex?.withhold(available) === true) {
-              // A tool withheld while offline leaves the index too, so the model is not told it can use it.
+            if (this.toolBundles?.refresh(this.context) === true) {
+              // Routing and loads add bundles, and a bundle's prompt sections go out with its tools.
               this.instruction = this.buildInstruction(this.definition.instruction);
             }
-            const tools = this.toolIndex?.requestTools(available) ?? available;
+            const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
+            const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;
             const finalAnswerPhase = taskBudget !== undefined && this.taskState.phase === 'final_answer';
             const budgetedTools = this.definition.budgetedTools ?? [];
