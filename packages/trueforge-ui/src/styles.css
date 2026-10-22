@@ -394,12 +394,9 @@
   display: flex;
 }
 
-/* Static avatar, no box or tint: a plain image at the rail button hit-area footprint,
-   centered horizontally in the runtime rail (owner decision — no motion, no container). */
+/* The panda sits in a ticket frame at the top of the rail: the picture, then its caption. */
 .aman-runtime-rail__avatar-card {
-  display: flex;
   width: 100%;
-  justify-content: center;
 }
 
 /* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
@@ -507,6 +504,29 @@
   line-height: 1.75rem;
 }
 
+/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
+.aman-runtime-rail__needs-you {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.75rem;
+}
+
+.aman-runtime-rail__needs-body {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.aman-runtime-rail__rules {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  list-style: none;
+}
+
 /* Grouped rail sections: small-caps label over one value line. The top border carries
  * the separation the old identity divider used to provide. */
 .aman-runtime-rail__section {
@@ -532,6 +552,14 @@
   font-size: 0.85rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.aman-runtime-rail__link {
+  justify-self: start;
+  color: var(--gold-ink);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
 }
 
 .aman-runtime-rail__section-value a {
@@ -1649,6 +1677,59 @@
 
 .aui-receipt .aui-row + .aui-row {
   border-top: 0.0625rem dotted var(--border);
+}
+
+/* The rail is too narrow for verb and state side by side: the state sits under its verb. */
+.aman-runtime-rail .aui-receipt .aui-row--2 {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.1rem;
+}
+
+.aman-runtime-rail .aui-receipt .aui-row--2 > .state {
+  justify-self: start;
+}
+
+/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
+.aui-panda {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border-color: var(--gold-line);
+}
+
+.aui-panda__caption {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0 0.25rem 0.25rem;
+}
+
+.aui-panda__role {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-receipt);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
+.aui-brief-display {
+  font-family: var(--font-display);
+}
+
+.aui-brief-mono {
+  font-family: var(--font-receipt);
+}
+
+/* An action in a row is a button; it keeps the look of the link it replaces. */
+.aui-row > button.action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* Phone: the chapter label stacks above its rows and the when column narrows. */

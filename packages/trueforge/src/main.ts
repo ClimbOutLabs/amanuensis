@@ -106,12 +106,14 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
+import { registerCalendarConnectorAtBoot } from './runtime/calendarConnector';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
@@ -659,6 +661,25 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tenant_id: TENANT_ID,
     logger,
   });
+  // Registered at boot when the mail sidecar is configured; a no-op otherwise.
+  await registerMailConnectorAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await prepareMailPolicyAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    policyPath: configuration.MAIL_POLICY_FILE,
+    logger,
+  });
+  // Registered at boot when the calendar sidecar is configured; a no-op otherwise.
+  await registerCalendarConnectorAtBoot({
+    url: configuration.CALENDAR_CONNECTOR_URL,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   await seedOwnerNameAtBoot({
     owner_name: configuration.OWNER_NAME,
     oidc: configuration.OIDC,
@@ -706,6 +727,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    mailPolicyPath: configuration.MAIL_POLICY_FILE,
+    mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({

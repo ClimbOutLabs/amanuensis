@@ -10,6 +10,7 @@ import {
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
+  sentinelAuditLabel,
 } from '@/sentinel/types.js';
 
 describe('parseToolTier', () => {
@@ -57,6 +58,22 @@ describe('extractSentinelFromEvent', () => {
       },
     ],
   };
+
+  it('keeps the new recipients of a mail send, and reads none from any other card', () => {
+    const [mail, other] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-mail',
+          tier: 3,
+          tier3_card: { plain_what: 'Send.', mail_new_recipients: ['stranger@example.net', 7] },
+        },
+        { tool_call_id: 'call-other', tier: 2, tier3_card: { plain_what: 'Read.' } },
+      ],
+    });
+    expect(mail?.card.mail_new_recipients).toEqual(['stranger@example.net']);
+    expect(other?.card.mail_new_recipients).toBeNull();
+  });
 
   it('parses per-tool-call approval cards with the backend field names', () => {
     const approvals = extractSentinelFromEvent(approvalEvent);
@@ -641,6 +658,19 @@ describe('parseAuditEntries', () => {
     }
     expect(parseAuditEntries([{ ...entry, outcome: 'maybe' }])).toEqual([]);
     expect(parseAuditEntries([{ ...entry, outcome: 'undone' }])).toEqual([]);
+  });
+});
+
+describe('sentinelAuditLabel', () => {
+  it('says a silent Tier 1 run went ahead without asking, and a held Tier 2 or 3 call is held', () => {
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done without asking');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Held for you');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Held for you');
+  });
+
+  it('keeps the plain label for every other outcome', () => {
+    expect(sentinelAuditLabel({ outcome: 'ran', tier: 2 })).toBe('Ran');
+    expect(sentinelAuditLabel({ outcome: 'auto_denied', tier: 3 })).toBe('Refused');
   });
 });
 

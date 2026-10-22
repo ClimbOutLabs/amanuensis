@@ -25,6 +25,9 @@ import {
   SEND_DRAFT_TOOL_NAME,
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
+import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
+import { isMailSend } from '../email/mailConnector/sendListApproval';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -149,6 +152,7 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
+  markPrivateDataRead,
   namesHostAtFetchLimit,
   privateTextForChecks,
   SEARCH_AFTER_READ_SILENT_REASON,
@@ -158,6 +162,9 @@ import {
   type SearchAskReason,
   type WebSearchTurnState,
 } from './webSearch';
+
+import type { CaldavEventReview } from '../calendar/caldav/eventReview';
+import { classifyCaldavTool } from './caldavTier';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -176,6 +183,8 @@ export interface SentinelAction {
   mcp_server_host?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
+  /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
+  caldav_event?: CaldavEventReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
@@ -1698,8 +1707,9 @@ const HIDDEN_QUERY = '(hidden)';
 /** Most characters of query text an approval card shows. */
 const SEARCH_CARD_TEXT_MAX = 1000;
 
-function searchQueryText(strings: OutboundStrings): string {
-  return [...strings.values, ...strings.plumbing]
+/** The query texts joined for one line. Callers pass only what a person reads, never provider plumbing. */
+function searchQueryText(texts: readonly string[]): string {
+  return texts
     .map(value => value.trim())
     .filter(value => value !== '')
     .join(' | ');
@@ -1819,7 +1829,7 @@ async function classifySearchProviderTool(input: {
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
-  const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
     holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
@@ -2116,6 +2126,24 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The reason a silent Email read is recorded with. */
+const MAIL_READ_REASON = 'mail_read';
+
+/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
+  const { action, ctx } = input;
+  if (
+    action.tool_type !== 'mcp' ||
+    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
+  ) {
+    return [];
+  }
+  return mailRecipientsNotListed({
+    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
+    params: action.canonical_params,
+  });
+}
+
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
@@ -2131,6 +2159,27 @@ function demoRefusesConnector(input: {
     input.action.tool_type === 'mcp' &&
     (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
+}
+
+/**
+ * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
+ * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
+ * connector that happens to be named Email.
+ */
+async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Email needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: MAIL_READ_REASON,
+    reason_detail: `Read your email with \`${action.tool_name}\`.`,
+    sensitive_read: true,
+  });
 }
 
 /**
@@ -2503,6 +2552,24 @@ function spaceWriteLine(action: SentinelAction): string {
   return 'Restored a space to an earlier version.';
 }
 
+/**
+ * The arguments a card shows: any server key the computer holds is masked, so no card carries it raw. The
+ * approval token still binds the call's own arguments, so only the display changes.
+ */
+async function cardArguments(action: SentinelAction, ctx: ClassifyContext): Promise<Record<string, unknown>> {
+  const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  if (secrets.length === 0) {
+    return action.canonical_params;
+  }
+  const masked = maskServerSecrets({
+    params: action.canonical_params,
+    secrets,
+    earlier: ctx.web_search.sentText,
+    plumbingFields: action.mcp_search_plumbing_fields,
+  });
+  return masked ?? { details: HIDDEN_QUERY };
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -2512,7 +2579,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
   const extraction = extractCardFields({
     tool_name: action.tool_name,
-    canonical_params: action.canonical_params,
+    canonical_params: await cardArguments(action, ctx),
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
@@ -2584,6 +2651,43 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   if (demoRefusesConnector({ action, ctx, extraction })) {
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+  }
+
+  // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  const newMailRecipients = await mailNewRecipients({ action, ctx });
+  if (newMailRecipients.length > 0) {
+    const { fields } = extraction;
+    const sentence = externalServiceWhat({
+      tool_name: action.tool_name,
+      destination: fields.destination,
+      recipient: fields.recipient,
+      amount: fields.amount,
+    });
+    return tier3Decision({
+      card: {
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
+      },
+      reason: 'mail_new_recipient',
+      reason_detail: 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
@@ -2809,6 +2913,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
   }
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    action.mcp_first_party === true &&
+    isMailReadToolName(action.tool_name)
+  ) {
+    return classifyMailRead(action, ctx);
+  }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
   }
@@ -2921,6 +3033,26 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           connector: connectorBindingFor(action),
         }),
       });
+    }
+  }
+
+  if (action.tool_type === 'mcp') {
+    const caldav = await classifyCaldavTool({
+      action,
+      review: action.caldav_event ?? null,
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
+        }),
+    });
+    if (caldav !== undefined) {
+      if (caldav.tier === 1 && caldav.sensitive_read) {
+        markPrivateDataRead(ctx.web_search);
+      }
+      return caldav;
     }
   }
 

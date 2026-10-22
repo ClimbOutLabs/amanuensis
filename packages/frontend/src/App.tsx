@@ -158,6 +158,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides,
   onAgentActivity,
   onActiveSessionChange,
+  onPendingApprovalsChange,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
@@ -165,6 +166,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
   onActiveSessionChange: (sessionId: string | undefined) => void;
+  onPendingApprovalsChange: (approvalIds: readonly string[]) => void;
 }) {
   const agentConfig = useMemo(
     (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
@@ -186,6 +188,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
+        onPendingApprovalsChange={onPendingApprovalsChange}
         overrides={overrides}
         className="app-assistant"
       />
@@ -224,6 +227,8 @@ function AmanShell({
   // Active session id, lifted out of the chat runtime so the right-rail permissions
   // feed can follow the session the user is looking at.
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
+  // Approvals waiting in the active chat, for the rail's Needs you ticket.
+  const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -233,6 +238,7 @@ function AmanShell({
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
         onActiveSessionChange={setActiveSessionId}
+        onPendingApprovalsChange={setPendingApprovalIds}
       />
       <AmanRuntimeRail
         modelName={modelName}
@@ -244,6 +250,7 @@ function AmanShell({
         buildRef={buildRef}
         memoryBank={memoryBank}
         settingsHref="/settings"
+        pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
     </div>

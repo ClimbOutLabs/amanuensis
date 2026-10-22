@@ -1,13 +1,12 @@
 'use client';
 
-import { useAui } from '@assistant-ui/react';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
-import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
+import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useOptionalScheduleServer, useServerCapabilities } from '../server/ServerContext.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
@@ -71,24 +70,6 @@ function useScheduleCount(): number {
     };
   }, [schedules]);
   return count;
-}
-
-/** Puts a prompt in the composer and sends it, through the same busy-state wrapper the send button uses. */
-function useSendPrompt(): (prompt: string) => void {
-  const aui = useAui();
-  const busy = useOptionalComposerBusyState();
-  return useCallback(
-    (prompt: string) => {
-      aui.composer().setText(prompt);
-      const send = () => aui.composer().send();
-      if (busy === null) {
-        send();
-      } else {
-        busy.send(send);
-      }
-    },
-    [aui, busy],
-  );
 }
 
 /**
