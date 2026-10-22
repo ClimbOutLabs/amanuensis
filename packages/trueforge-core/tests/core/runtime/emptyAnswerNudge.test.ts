@@ -381,6 +381,8 @@ describe('empty-answer nudge durability', () => {
     expect(metrics.total_input_tokens).toBe(firstUsage.input_tokens + secondUsage.input_tokens);
     expect(metrics.total_output_tokens).toBe(firstUsage.output_tokens + secondUsage.output_tokens);
     expect(metrics.total_tokens).toBe(firstUsage.total_tokens + secondUsage.total_tokens);
+    // The context figure is the input of the last call the model saw, not the sum over calls.
+    expect(thread.getLastCallInputTokens()).toBe(secondUsage.input_tokens);
   });
 
   it('honors the once-per-turn guard even when compaction removes the nudge tag before the retry runs', async () => {

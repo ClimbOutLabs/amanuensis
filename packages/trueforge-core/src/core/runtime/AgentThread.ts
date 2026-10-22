@@ -1477,6 +1477,8 @@ export class AgentThread {
   private readonly logger: Logger;
 
   private metrics: AgentThreadMetrics = createEmptyAgentThreadMetrics();
+  /** Provider-reported input tokens of this thread's latest main model call; null before the first. */
+  private lastCallInputTokens: number | null = null;
   private tfyManagedServerNames = new Set<string>();
 
   private contextBusy = false;
@@ -2215,6 +2217,7 @@ export class AgentThread {
     // Update metrics before yield so we still count it if the stream stops here.
     if (usage) {
       updateMetricsFromUsage(this.metrics, usage);
+      this.lastCallInputTokens = usage.input_tokens;
     }
 
     yield event;
@@ -2349,6 +2352,10 @@ export class AgentThread {
 
   public getAgentThreadMetrics(): AgentThreadMetrics {
     return { ...this.metrics };
+  }
+
+  public getLastCallInputTokens(): number | null {
+    return this.lastCallInputTokens;
   }
 
   /**
