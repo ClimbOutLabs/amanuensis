@@ -356,6 +356,19 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {declineVerb(card)}
           </Button>
         </div>
+        {/* The server offers a chat-wide grant only where it is safe, so the card shows it, never folds it away. */}
+        {onApproveForChat !== undefined && !newRecipients && (
+          <Button
+            variant="secondary"
+            size="small"
+            title={chatChoice.hint}
+            onClick={markSent(onApproveForChat)}
+            disabled={disabled || sentAt !== null}
+            className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
+          >
+            {chatChoice.label}
+          </Button>
+        )}
         {changing && onChangeRequest !== undefined && (
           <ChangeRequestBox
             disabled={disabled}
@@ -380,17 +393,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <div className="mt-2 space-y-3">
             {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
             {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
-            {onApproveForChat !== undefined && !newRecipients && (
-              <Button
-                variant="secondary"
-                size="small"
-                title={chatChoice.hint}
-                onClick={markSent(onApproveForChat)}
-                disabled={disabled || sentAt !== null}
-              >
-                {chatChoice.label}
-              </Button>
-            )}
             {onApproveAlways !== undefined && !newRecipients && (
               <AlwaysAllowToolControl
                 size="small"
