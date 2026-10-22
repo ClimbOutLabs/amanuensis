@@ -21,13 +21,12 @@ function parseBriefItemCompletionKeys(body: unknown): string[] {
   if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
     return [];
   }
-  const keys: string[] = [];
-  for (const row of body.data) {
-    if (typeof row === 'object' && row !== null && 'item_key' in row && typeof row.item_key === 'string') {
-      keys.push(row.item_key);
-    }
-  }
-  return keys;
+  const rows: unknown[] = body.data;
+  return rows.filter(isBriefItemCompletionRow).map(row => row.item_key);
+}
+
+function isBriefItemCompletionRow(row: unknown): row is { item_key: string } {
+  return typeof row === 'object' && row !== null && 'item_key' in row && typeof row.item_key === 'string';
 }
 
 async function readError(response: Response): Promise<Error> {
