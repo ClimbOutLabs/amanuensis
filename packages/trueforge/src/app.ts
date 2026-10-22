@@ -349,8 +349,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       logger: deps.logger,
     });
   };
-  // One Iris per person: she is installed on the first request a person makes in this process (a new
-  // account, or an existing one after a restart), and the standalone person at boot. Never blocks a request.
+  // One Iris per person: she is installed when a person first signs in to this process (a new account, or an
+  // existing one after a restart), and the standalone person at boot. Each request waits for her, so Settings
+  // lists her on the first load. The install never rejects, so a broken install cannot block a request.
   const seedGuide = createGuideSeeder({ logger: deps.logger });
   const authenticate = createAuthMiddleware(deps.authenticator);
   const authMiddleware: MiddlewareHandler = async (c, next) => {
@@ -358,7 +359,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       const requestContext = c.get('request_context');
       if (requestContext !== undefined) {
         const userId = requestContext.subject.id;
-        void seedGuide(userId, () =>
+        await seedGuide(userId, () =>
           ensureAmanGuideFor({ userId, modelProviderStore: deps.resolveModelProviderStore(c) }),
         );
       }

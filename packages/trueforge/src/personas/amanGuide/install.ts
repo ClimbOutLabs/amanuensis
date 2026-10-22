@@ -90,9 +90,9 @@ async function refreshGuideKnowledge(input: GuideKnowledgeInput): Promise<void> 
 }
 
 /**
- * Installs the Aman guide for one person, or brings it up to date. Creates the
- * persona on first sight and keeps its id, so existing chats stay attached.
- * A name clash with a persona the person already made leaves that persona alone.
+ * Installs Iris for one person, or refreshes her instructions and knowledge. Creates the persona on
+ * first sight and keeps its id, so existing chats stay attached. Her name, model and aliases are
+ * never rewritten after that. A name clash with a persona the person already made leaves it alone.
  */
 export async function ensureAmanGuide(input: {
   personaStore: IPersonaStore;
@@ -117,18 +117,15 @@ export async function ensureAmanGuide(input: {
         instructions: AMAN_GUIDE_INSTRUCTIONS,
         model_name: modelName,
       });
-    } else if (
-      existing.display_name !== AMAN_GUIDE_NAME ||
-      existing.instructions !== AMAN_GUIDE_INSTRUCTIONS ||
-      existing.model_name !== modelName
-    ) {
+    } else if (existing.instructions !== AMAN_GUIDE_INSTRUCTIONS) {
+      // Only the bundled instructions are refreshed. The name, model and aliases are the person's to change.
       await personaStore.updatePersona({
         ...key,
         updated_by: userId,
-        display_name: AMAN_GUIDE_NAME,
+        display_name: existing.display_name,
         aliases: existing.aliases,
         instructions: AMAN_GUIDE_INSTRUCTIONS,
-        model_name: modelName,
+        model_name: existing.model_name,
       });
     }
   } catch (error) {
