@@ -6,6 +6,7 @@ import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/sche
 
 import { Highlight } from '../atoms/Reward.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanPandaRoundTicket } from './AmanPanda.js';
 import { toggleHelpArea } from './HelpAreaChoices.js';
 import { TourIllustration } from './tourIllustrations.js';
@@ -34,7 +35,7 @@ const TICKET_BUTTON_CLASS =
   'flex h-full w-full cursor-pointer flex-col gap-1.5 rounded-[inherit] border-0 bg-transparent p-3 text-left text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
 
 const CHIP_CLASS =
-  'cursor-pointer rounded-full border border-border bg-card-bg px-3 py-1.5 text-sm text-text-primary hover:border-gold-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring aria-pressed:border-gold-ink aria-pressed:bg-gold-ink aria-pressed:text-card-bg';
+  'cursor-pointer rounded-full border border-border bg-card-bg px-2.5 py-1.5 text-sm text-text-primary hover:border-gold-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring aria-pressed:border-gold-ink aria-pressed:bg-gold-ink aria-pressed:text-card-bg';
 
 const STUB_LINE_CLASS = 'font-mono text-[0.68rem] uppercase tracking-[0.1em] text-text-secondary';
 
@@ -90,6 +91,8 @@ export type AmanTourProps = {
   onHelpAreasChange: (next: HelpAreaId[]) => void;
   /** The person's name, for the greeting. */
   userName?: string | null;
+  /** The name the assistant goes by, on every line of the first frame; Aman when not chosen. */
+  assistantName?: string | null;
   /** The clock the greeting and the day label read; the host's clock when omitted. */
   now?: Date;
   /** What is waiting on the person now, and the id of the first of them. */
@@ -113,6 +116,7 @@ export function AmanTour({
   helpAreas,
   onHelpAreasChange,
   userName,
+  assistantName,
   now = new Date(),
   waiting,
   scheduleCount,
@@ -126,15 +130,16 @@ export function AmanTour({
   const name = userName?.trim();
   const greeting = `${greetingFor(now)}${name ? `, ${name}` : ''}.`;
   const dayLabel = now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-  const cards = firstFrameCardPrompts({ helpAreas, capabilities });
+  const assistant = assistantDisplayName(assistantName);
+  const cards = firstFrameCardPrompts({ helpAreas, capabilities, assistantName: assistant });
   const needsSelected = waiting.firstId !== null && highlighted === waiting.firstId;
   const disabled = !canSend;
 
   return (
-    <div data-testid="aman-tour" className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4">
+    <div data-testid="aman-tour" className="mx-auto flex w-full max-w-4xl flex-col gap-2.5 px-4">
       <section aria-label="Your day" className="aui-ticket aui-ticket--stub aui-settle">
         <div className="flex flex-col gap-2 p-3">
-          <p className="aui-ticket__sub">Aman is your chief of staff</p>
+          <p className="aui-ticket__sub">{assistant} is your chief of staff</p>
           <h1 className="aui-day-title m-0">
             <span className="aui-underline">{greeting}</span>
           </h1>
@@ -153,7 +158,7 @@ export function AmanTour({
         </div>
       </section>
 
-      {pandaSrc === null ? null : <AmanPandaRoundTicket src={pandaSrc} className="sm:hidden" />}
+      {pandaSrc === null ? null : <AmanPandaRoundTicket src={pandaSrc} name={assistant} className="sm:hidden" />}
 
       {canSend ? null : (
         <p className="text-center text-sm text-text-secondary">Choose a model in Settings before you start a chat.</p>
@@ -175,7 +180,7 @@ export function AmanTour({
             <span className="aui-ticket__title">{waitingTitle(waiting.count)}</span>
             <span className="text-sm text-text-secondary">
               {waiting.count === 0
-                ? 'Aman asks before it sends or changes anything.'
+                ? `${assistant} asks before it sends or changes anything.`
                 : 'Look them over before anything goes out.'}
             </span>
             <span className="text-sm font-medium text-gold-ink underline underline-offset-2">
@@ -187,10 +192,10 @@ export function AmanTour({
           <TicketButton prompt={WATCHING_PROMPT.prompt} disabled={disabled} onSend={onSend}>
             <span className="aui-ticket__title">Quietly watching</span>
             <span className="text-sm text-text-secondary">
-              Aman keeps an eye on what you set up, and checks with you first.
+              {assistant} keeps an eye on what you set up, and checks with you first.
             </span>
             <span className="text-sm font-medium text-gold-ink underline underline-offset-2">
-              Ask what Aman has noticed →
+              Ask what {assistant} has noticed →
             </span>
           </TicketButton>
           <div className="px-3 pb-2">{setup}</div>
@@ -204,7 +209,7 @@ export function AmanTour({
         >
           What would help you most?
         </h2>
-        <div role="group" aria-labelledby="aman-tour-help-heading" className="flex flex-wrap gap-2">
+        <div role="group" aria-labelledby="aman-tour-help-heading" className="flex flex-wrap gap-1.5">
           {HELP_AREA_IDS.map(id => (
             <button
               key={id}
@@ -221,9 +226,9 @@ export function AmanTour({
 
       <section aria-labelledby="aman-tour-can-heading" className="flex flex-col gap-2">
         <h2 id="aman-tour-can-heading" className="aui-ticket__title m-0">
-          What Aman can do
+          What {assistant} can do
         </h2>
-        <ul className="grid list-none grid-cols-2 gap-3 p-0 sm:grid-cols-4">
+        <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-4">
           {cards.map(item => (
             <CapabilityTicket key={item.key} item={item} disabled={disabled} onSend={onSend} />
           ))}

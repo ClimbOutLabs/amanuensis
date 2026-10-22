@@ -217,3 +217,30 @@ describe('greetingFor', () => {
     expect(greetingFor(new Date(2026, 9, 21, 20, 0))).toBe('Good evening');
   });
 });
+
+describe('AmanTour assistant name', () => {
+  it('uses the chosen name on every line of the first frame and never says Aman', () => {
+    const { container } = renderTour({
+      assistantName: 'Maya',
+      userName: 'Sam',
+      capabilities: ALL,
+      waiting: { count: 1, firstId: 'a1' },
+      scheduleCount: 1,
+      setup: <p>2 of 3 set up →</p>,
+      pandaSrc: '/aman-avatar.png',
+    });
+
+    expect(container.textContent).toContain('Maya is your chief of staff');
+    expect(screen.getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Get to know Maya/ })).toBeInTheDocument();
+    expect(screen.getByText('Maya', { selector: '.aui-ticket__title' })).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/Aman/);
+  });
+
+  it('falls back to Aman when the person has not chosen a name', () => {
+    renderTour({ assistantName: null, capabilities: ALL });
+
+    expect(screen.getByRole('button', { name: /Get to know Aman/ })).toBeInTheDocument();
+    expect(screen.getByText('Aman is your chief of staff')).toBeInTheDocument();
+  });
+});

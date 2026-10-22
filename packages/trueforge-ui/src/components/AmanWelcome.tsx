@@ -8,6 +8,7 @@ import { Button } from '../atoms/primitives/Button.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useOptionalScheduleServer, useServerCapabilities } from '../server/ServerContext.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
 import { useOptionalAmanPandaSrc } from './AmanPanda.js';
@@ -17,16 +18,9 @@ import { useTourWaiting } from './AmanTourWaiting.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import type { TourCapabilities } from './tourPrompts.js';
 
-const DEFAULT_HEADING = 'How can I help you today?';
-
-/**
- * An assistant without a chosen name gets the plain question rather than introducing itself as
- * Amanuensis: the rail already carries the product name, and a greeting should only claim a name
- * the user picked.
- */
+/** The plain greeting's heading, in the assistant's name (Aman until the person picks another). */
 export function amanWelcomeHeading(assistantName: string | null | undefined): string {
-  const name = assistantName?.trim();
-  return name ? `Hi, I'm ${name}. What's on your mind?` : DEFAULT_HEADING;
+  return `Hi, I'm ${assistantDisplayName(assistantName)}. What's on your mind?`;
 }
 
 /**
@@ -86,7 +80,7 @@ function AmanNameLine() {
   }
   return (
     <p className="text-center text-sm text-text-secondary" data-testid="aman-name-prompt">
-      Aman does not know your name yet.{' '}
+      {assistantDisplayName(personalization?.profile?.assistant_name)} does not know your name yet.{' '}
       <FirstRunLink target={{ kind: 'settings', section: 'personalization' }} settingsHref={setup.settingsHref}>
         Add it in Personalization
       </FirstRunLink>
@@ -155,6 +149,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
         helpAreas={profile.help_areas}
         onHelpAreasChange={saveHelpAreas}
         userName={profile.user_name}
+        assistantName={profile.assistant_name}
         waiting={waiting}
         scheduleCount={scheduleCount}
         canSend={setup === null || setup.modelName !== null}
@@ -174,7 +169,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
       {ordinaryChat ? (
         <div className="mb-6 flex justify-center">
           <Button type="button" variant="ghost" size="small" onClick={() => setHidden(false)}>
-            Show the tour
+            Replay the tour
           </Button>
         </div>
       ) : null}

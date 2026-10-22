@@ -91,7 +91,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
 
     expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /How can I help/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
   });
 
   it('keeps a heading the runtime passes in, such as an active agent name, on the plain screen', async () => {
@@ -137,7 +137,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
 
     expect(await screen.findByRole('button', { name: /Handle your email/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Reply to an email/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Keep pages in Spaces/ })).toBeInTheDocument();
   });
 
   it('hides the Google prompts when the host has no Google port at all', async () => {
@@ -209,10 +209,10 @@ describe('hiding and bringing back the tour', () => {
       assistantName: 'Testinatrix',
       setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
     });
-    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Replay the tour' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: TOUR_HEADING })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show the tour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replay the tour' }));
     expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
     expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
   });
@@ -221,17 +221,30 @@ describe('hiding and bringing back the tour', () => {
     window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
     renderWelcome({ setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed } });
 
-    expect(await screen.findByRole('heading', { name: 'How can I help you today?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: "Hi, I'm Aman. What's on your mind?" })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: TOUR_HEADING })).not.toBeInTheDocument();
   });
 });
 
 describe('amanWelcomeHeading', () => {
-  it('names the assistant only when the owner picked a name', () => {
+  it('names the assistant the owner picked, and Aman until they pick one', () => {
     expect(amanWelcomeHeading('Testinatrix')).toBe("Hi, I'm Testinatrix. What's on your mind?");
-    expect(amanWelcomeHeading('  ')).toBe('How can I help you today?');
-    expect(amanWelcomeHeading('')).toBe('How can I help you today?');
-    expect(amanWelcomeHeading(undefined)).toBe('How can I help you today?');
+    expect(amanWelcomeHeading('  ')).toBe("Hi, I'm Aman. What's on your mind?");
+    expect(amanWelcomeHeading('')).toBe("Hi, I'm Aman. What's on your mind?");
+    expect(amanWelcomeHeading(undefined)).toBe("Hi, I'm Aman. What's on your mind?");
+  });
+});
+
+describe('AmanWelcome assistant name', () => {
+  it('shows no Aman anywhere on the first frame once the owner names the assistant', async () => {
+    renderWelcome({
+      assistantName: 'Maya',
+      setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed },
+    });
+
+    expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
+    expect(screen.getByTestId('aman-tour').textContent).toContain('Maya is your chief of staff');
+    expect(screen.getByTestId('aman-tour').textContent).not.toMatch(/Aman/);
   });
 });

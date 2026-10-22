@@ -1,12 +1,14 @@
 import {
   AmanFirstRunGuide,
   AmanFirstRunSummary,
+  AmanPandaSourceProvider,
   AmanSetupProvider,
   AmanTour,
   AmanWelcome,
   PersonalizationPanel,
   PersonalizationProvider,
   ThemeProvider,
+  TrueForgeUI,
   type AmanSetupState,
   type PersonalizationApi,
   type PersonalizationProfile,
@@ -20,7 +22,17 @@ import { createRoot } from 'react-dom/client';
  * Settings shows it, and the Personalization page. Everything on screen is invented.
  */
 export type FixtureState =
-  'fresh' | 'half' | 'done' | 'line' | 'settings' | 'panel' | 'connected' | 'hidden' | 'tour-focus' | 'tour-none';
+  | 'fresh'
+  | 'half'
+  | 'done'
+  | 'line'
+  | 'settings'
+  | 'panel'
+  | 'connected'
+  | 'hidden'
+  | 'tour-focus'
+  | 'tour-none'
+  | 'shell';
 export const FIXTURE_STATES: readonly FixtureState[] = [
   'fresh',
   'half',
@@ -32,6 +44,7 @@ export const FIXTURE_STATES: readonly FixtureState[] = [
   'hidden',
   'tour-focus',
   'tour-none',
+  'shell',
 ];
 const TOUR_HIDDEN_STORAGE_KEY = 'aman.hide_tour';
 
@@ -78,9 +91,20 @@ function setupFor(state: FixtureState): AmanSetupState {
     case 'hidden':
     case 'tour-focus':
     case 'tour-none':
+    case 'shell':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
   }
 }
+
+/**
+ * The real chat shell: top bar, the first frame and the composer together, with every network call
+ * answered by an empty list. Sized to the viewport so the page itself must not scroll.
+ */
+const shellFetch: typeof fetch = async input => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes('/sessions')) return new Response(JSON.stringify({ data: [], has_more: false }), { status: 200 });
+  return new Response('{}', { status: 503 });
+};
 
 function staticApi(profile: PersonalizationProfile): PersonalizationApi {
   return {
@@ -91,6 +115,19 @@ function staticApi(profile: PersonalizationProfile): PersonalizationApi {
 }
 
 function Screen({ state }: { state: FixtureState }) {
+  if (state === 'shell') {
+    return (
+      <div className="overflow-hidden" style={{ height: '100vh' }}>
+        <AmanPandaSourceProvider src="/aman-avatar.png">
+          <TrueForgeUI
+            server={{ type: 'trueforge', baseUrl: 'http://127.0.0.1/', fetch: shellFetch }}
+            layout="sidebar"
+            overrides={{ WelcomeScreen: AmanWelcome }}
+          />
+        </AmanPandaSourceProvider>
+      </div>
+    );
+  }
   if (state === 'panel') {
     return (
       <div className="mx-auto flex max-w-3xl flex-col px-6 py-6">

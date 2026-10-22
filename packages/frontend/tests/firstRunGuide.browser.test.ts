@@ -141,7 +141,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           .getByRole('button', { name: /Find forgotten subscriptions/ })
           .waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.ok(await page.getByRole('button', { name: /Handle your email/ }).isVisible());
-        assert.ok(await page.getByRole('button', { name: /Reply to an email/ }).isVisible());
+        assert.ok(await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible());
         await shoot('connected');
 
         // The Tour with an area chosen: its cards lead, and the chip shows it is chosen.
@@ -163,7 +163,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         await shoot('tour-none');
         // Hidden on request: the plain greeting, with a way back to the tour.
         await open('hidden');
-        await page.getByRole('button', { name: 'Show the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByRole('button', { name: 'Replay the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(await page.getByTestId('aman-tour').count(), 0);
         await shoot('hidden');
 
@@ -182,6 +182,46 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.ok(nameBox != null && assistantBox != null, 'both name fields should have geometry');
         assert.ok(nameBox.y < assistantBox.y, 'the owner name field comes before the assistant name field');
         await shoot('panel');
+
+        // The real shell: the top bar, the first frame and the composer share one screen with no page scroll.
+        await open('shell');
+        await page.getByTestId('aman-tour').waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+        // Let the settle and lay animations finish so the picture shows the resting frame.
+        await page.waitForFunction(() =>
+          document.getAnimations().every(animation => animation.playState !== 'running'),
+        );
+        await shoot('shell');
+        assert.ok(
+          (await page.evaluate(() => document.documentElement.scrollHeight)) <= viewport.height,
+          `the first frame scrolls the page at ${viewport.name} ${theme}`,
+        );
+        // Every grid fills its rows: at desktop width each row is complete, on the phone the cards stack.
+        const rowsOf = (selector: string) =>
+          page.evaluate(
+            sel => Array.from(document.querySelectorAll(sel)).map(el => Math.round(el.getBoundingClientRect().top)),
+            selector,
+          );
+        const chipTops = await rowsOf('[role="group"] button');
+        const ticketTops = await rowsOf('[data-testid="aman-tour"] > ul > li');
+        if (viewport.name === 'desktop') {
+          assert.equal(new Set(chipTops).size, 1, 'the five chips share one row at desktop width');
+          assert.equal(new Set(ticketTops).size, 1, 'the three tickets share one row at desktop width');
+        }
+        const cardLefts = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('[data-testid="aman-tour"] section ul > li')).map(el =>
+            Math.round(el.getBoundingClientRect().left),
+          ),
+        );
+        assert.equal(cardLefts.length, 4, 'four capability tickets');
+        assert.equal(
+          new Set(cardLefts).size,
+          viewport.name === 'desktop' ? 4 : 1,
+          'the capability tickets fill four columns on desktop and one on the phone',
+        );
+        assert.ok(
+          await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible(),
+          'Keep pages in Spaces is on the first frame',
+        );
       }
       await context.close();
     }

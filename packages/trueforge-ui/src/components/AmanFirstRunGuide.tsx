@@ -89,7 +89,9 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
   children,
 }) => {
   const shell = useOptionalShellMode();
-  const className = 'text-text-primary underline underline-offset-2 hover:text-primary-button-bg';
+  // A button takes the browser's own box and colour unless reset, which hides its text on dark paper.
+  const className =
+    'cursor-pointer appearance-none border-0 bg-transparent p-0 font-[inherit] text-text-primary underline underline-offset-2 hover:text-primary-button-bg';
   if (shell !== null) {
     return (
       <button

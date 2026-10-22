@@ -45,8 +45,17 @@ export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities:
   return prompts.filter(item => item.needs === undefined || item.needs.some(name => capabilities[name]));
 }
 
-/** How many capability tickets the first frame shows. */
+/** How many capability tickets the first frame shows: a full row of four on a desktop. */
 export const FIRST_FRAME_CARD_SLOTS = 4;
+
+/** The capability ticket that always shows on the first frame, so the person can always reach their pages. */
+export const KEEP_PAGES_IN_SPACES: TourPrompt = {
+  key: 'spaces',
+  label: 'Keep pages in Spaces',
+  prompt:
+    'Make a space called Dog breeds. It\'s a page I can come back to while I pick a dog. For each breed show: size, energy level, grooming, how it does with kids and other pets, apartment-friendly or not, common health issues, and typical lifespan. Start with 8 popular family breeds as cards I can compare at a glance. Add a "My shortlist" section at the top that stays empty until I tell you which ones I like. Keep it up to date as we talk. Then tell me where to find it.',
+  illustration: 'spaces',
+};
 
 /** The featured card above the Try a day row. It needs no capability, so it always shows. */
 export const MORNING_BRIEF: TourPrompt = {
@@ -288,93 +297,89 @@ export const WAITING_PROMPT: TourPrompt = {
 };
 
 /** The "What Aman can do" list: one card per capability, each a tap away from a chat. */
-export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
-  {
-    // Naming the guide invokes it, so the reply comes from Iris, the guide persona.
-    key: 'get-to-know',
-    label: 'Get to know Aman',
-    prompt: 'Iris, introduce yourself and show me how to get started.',
-  },
-  {
-    key: 'email',
-    label: 'Handle your email',
-    prompt: 'Go through my unread email and tell me what needs a reply first.',
-    needs: ['email'],
-    illustration: 'email',
-  },
-  FORGOTTEN_SUBSCRIPTIONS,
-  {
-    key: 'reply',
-    label: 'Reply to an email',
-    prompt: 'Help me reply to my most recent email that needs an answer.',
-    needs: ['email'],
-    illustration: 'reply',
-  },
-  {
-    key: 'schedule',
-    label: 'Run things on a schedule',
-    prompt: 'Every weekday at 7:30, send me my morning brief.',
-    illustration: 'schedule',
-  },
-  {
-    key: 'calendar',
-    label: 'Keep your calendar',
-    prompt: 'What is on my calendar this week?',
-    needs: ['calendar'],
-    illustration: 'calendar',
-  },
-  {
-    key: 'places',
-    label: 'Find places and plan routes',
-    prompt: 'Find a quiet coffee shop near me and plan the walk there.',
-    illustration: 'places',
-  },
-  {
-    key: 'web',
-    label: 'Research the live web',
-    prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
-    illustration: 'web',
-  },
-  {
-    key: 'spaces',
-    label: 'Keep pages in Spaces',
-    prompt:
-      'Make a space called Dog breeds. It\'s a page I can come back to while I pick a dog. For each breed show: size, energy level, grooming, how it does with kids and other pets, apartment-friendly or not, common health issues, and typical lifespan. Start with 8 popular family breeds as cards I can compare at a glance. Add a "My shortlist" section at the top that stays empty until I tell you which ones I like. Keep it up to date as we talk. Then tell me where to find it.',
-    illustration: 'spaces',
-  },
-  {
-    key: 'specialists',
-    label: 'Bring in specialists',
-    prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
-    illustration: 'specialists',
-  },
-  {
-    key: 'code',
-    label: 'Read files and run code',
-    prompt: 'Add up my expenses by category and make a chart: rent 900, groceries 210, transport 45, eating out 80.',
-    needs: ['sandbox'],
-    illustration: 'code',
-  },
-  {
-    key: 'memory',
-    label: 'Remember what matters',
-    prompt: 'What do you remember about me so far?',
-    illustration: 'memory',
-  },
-  {
-    key: 'skills',
-    label: 'Learn new skills',
-    prompt: 'Learn how to turn a photo of a receipt into a line in my expense list.',
-    needs: ['sandbox'],
-    illustration: 'skills',
-  },
-  {
-    key: 'move',
-    label: 'Move with you',
-    prompt: 'How do I use you from my phone?',
-  },
-  { key: 'cost', label: 'Show what it costs', prompt: 'Show me what my chats have cost so far this month.' },
-];
+export function capabilityPrompts(assistantName: string): readonly TourPrompt[] {
+  return [
+    {
+      // Naming the guide invokes it, so the reply comes from Iris, the guide persona.
+      key: 'get-to-know',
+      label: `Get to know ${assistantName}`,
+      prompt: 'Iris, introduce yourself and show me how to get started.',
+    },
+    {
+      key: 'email',
+      label: 'Handle your email',
+      prompt: 'Go through my unread email and tell me what needs a reply first.',
+      needs: ['email'],
+      illustration: 'email',
+    },
+    FORGOTTEN_SUBSCRIPTIONS,
+    {
+      key: 'reply',
+      label: 'Reply to an email',
+      prompt: 'Help me reply to my most recent email that needs an answer.',
+      needs: ['email'],
+      illustration: 'reply',
+    },
+    {
+      key: 'schedule',
+      label: 'Run things on a schedule',
+      prompt: 'Every weekday at 7:30, send me my morning brief.',
+      illustration: 'schedule',
+    },
+    {
+      key: 'calendar',
+      label: 'Keep your calendar',
+      prompt: 'What is on my calendar this week?',
+      needs: ['calendar'],
+      illustration: 'calendar',
+    },
+    {
+      key: 'places',
+      label: 'Find places and plan routes',
+      prompt: 'Find a quiet coffee shop near me and plan the walk there.',
+      illustration: 'places',
+    },
+    {
+      key: 'web',
+      label: 'Research the live web',
+      prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
+      illustration: 'web',
+    },
+    KEEP_PAGES_IN_SPACES,
+    {
+      key: 'specialists',
+      label: 'Bring in specialists',
+      prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
+      illustration: 'specialists',
+    },
+    {
+      key: 'code',
+      label: 'Read files and run code',
+      prompt: 'Add up my expenses by category and make a chart: rent 900, groceries 210, transport 45, eating out 80.',
+      needs: ['sandbox'],
+      illustration: 'code',
+    },
+    {
+      key: 'memory',
+      label: 'Remember what matters',
+      prompt: 'What do you remember about me so far?',
+      illustration: 'memory',
+    },
+    {
+      key: 'skills',
+      label: 'Learn new skills',
+      prompt: 'Learn how to turn a photo of a receipt into a line in my expense list.',
+      needs: ['sandbox'],
+      illustration: 'skills',
+    },
+    {
+      key: 'move',
+      label: 'Move with you',
+      prompt: 'How do I use you from my phone?',
+    },
+    { key: 'cost', label: 'Show what it costs', prompt: 'Show me what my chats have cost so far this month.' },
+  ];
+}
 
 /** Keeps the first card for each key, so a card that two areas offer appears once. */
 function uniqueByKey(prompts: readonly TourPrompt[]): TourPrompt[] {
@@ -404,19 +409,23 @@ function interleave(queues: readonly (readonly TourPrompt[])[]): TourPrompt[] {
 }
 
 /**
- * The first frame's capability tickets. The cards of the areas the person chose come first, in the
- * order chosen, so the chooser shapes what is offered; the capability list fills the rest.
+ * The first frame's capability tickets: the cards of the areas the person chose come first, in the
+ * order chosen, so the chooser shapes what is offered. Keep pages in Spaces always keeps its place;
+ * the other slots fill from the areas and then the capability list.
  */
 export function firstFrameCardPrompts({
   helpAreas,
   capabilities,
+  assistantName,
 }: {
   helpAreas: readonly HelpAreaId[];
   capabilities: TourCapabilities;
+  assistantName: string;
 }): TourPrompt[] {
   const areaQueues = helpAreas.map(id => visibleTourPrompts(HELP_AREAS[id].cards, capabilities));
-  return uniqueByKey([...interleave(areaQueues), ...visibleTourPrompts(CAPABILITY_PROMPTS, capabilities)]).slice(
-    0,
-    FIRST_FRAME_CARD_SLOTS,
-  );
+  const others = uniqueByKey([
+    ...interleave(areaQueues),
+    ...visibleTourPrompts(capabilityPrompts(assistantName), capabilities),
+  ]).filter(item => item.key !== KEEP_PAGES_IN_SPACES.key);
+  return [...others.slice(0, FIRST_FRAME_CARD_SLOTS - 1), KEEP_PAGES_IN_SPACES];
 }

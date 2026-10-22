@@ -25,7 +25,11 @@ export function useOptionalAmanPandaSrc(): string | null {
  * The small round panda ticket the phone's first frame shows under the day ticket. Renders nothing
  * when the host gave no picture, so the frame stays whole without it.
  */
-export const AmanPandaRoundTicket: FC<{ src: string | null; className?: string }> = ({ src, className }) => {
+export const AmanPandaRoundTicket: FC<{ src: string | null; name: string; className?: string }> = ({
+  src,
+  name,
+  className,
+}) => {
   if (src === null) {
     return null;
   }
@@ -37,7 +41,7 @@ export const AmanPandaRoundTicket: FC<{ src: string | null; className?: string }
         className="size-[3.4rem] shrink-0 rounded-full border-[0.125rem] border-gold object-cover"
       />
       <div className="min-w-0">
-        <p className="aui-ticket__title">Aman</p>
+        <p className="aui-ticket__title">{name}</p>
         <p className="aui-ticket__sub">Your chief of staff</p>
       </div>
     </div>
