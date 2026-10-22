@@ -8,11 +8,13 @@ import { parseEnvFile } from '../../demo/scripts/test-mailbox-env.mjs';
 import { createInstanceClient } from './client.mjs';
 import { loadTokenSet } from './parse.mjs';
 import { DEFAULT_POLL_INTERVAL_MS, runEvalTokens } from './run.mjs';
+import { loadSpaceFixture } from './space.mjs';
 
 export const DEFAULT_ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const TOKEN_KEY = 'TRUEFORGE_TOKEN';
 const ENV_FILE_NAME = '.env.eval-tokens';
 const DEFAULT_SET_PATH = ['packages', 'trueforge', 'evals', 'token-set.json'];
+const SPACE_FIXTURE_PATH = ['packages', 'trueforge', 'evals', 'fixtures', 'space.json'];
 const DEFAULT_TEMPERATURE = 0;
 const MAX_RUNS = 20;
 
@@ -196,8 +198,10 @@ export async function main({
       throw new Error(NOT_EVAL_INSTANCE_MESSAGE);
     }
     const tokenSet = await loadTokenSet(args.setPath ?? path.join(rootDir, ...DEFAULT_SET_PATH));
+    const space = await loadSpaceFixture(path.join(rootDir, ...SPACE_FIXTURE_PATH));
     const outDir = args.outDir ?? defaultOutDir({ rootDir, label: args.label, now });
     const result = await runEvalTokens({
+      space,
       client,
       tokenSet,
       model: args.model,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,10 +9,12 @@ import { createInstanceClient, InstanceHttpError, InstanceUnreachableError } fro
 import { REPLY_CSV_COLUMNS } from '../scripts/eval-tokens/csv.mjs';
 import { loadTokenSet } from '../scripts/eval-tokens/parse.mjs';
 import { combineTurnMetrics, runEvalTokens } from '../scripts/eval-tokens/run.mjs';
+import { loadSpaceFixture, removeSpace } from '../scripts/eval-tokens/space.mjs';
 import { loadFakeMetrics, startFakeInstance } from './eval-tokens/fakeInstance.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureSetPath = path.join(rootDir, 'tests', 'fixtures', 'eval-tokens', 'token-set.json');
+const fixtureSpacePath = path.join(rootDir, 'tests', 'fixtures', 'eval-tokens', 'space.json');
 const TOKEN = 'fake-token-for-tests-only-0123456789';
 
 /** Small RFC 4180 reader: quoted cells may hold commas, quotes and line breaks. */
@@ -58,6 +60,13 @@ function asObjects(rows) {
   return body.map(cells => Object.fromEntries(header.map((name, index) => [name, cells[index] ?? ''])));
 }
 
+/** Puts the fixture space where the CLI looks for it under a temporary repo root. */
+async function stageSpaceFixture(dir) {
+  const target = path.join(dir, 'packages', 'trueforge', 'evals', 'fixtures');
+  await mkdir(target, { recursive: true });
+  await copyFile(fixtureSpacePath, path.join(target, 'space.json'));
+}
+
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(tmpdir(), 'eval-tokens-run-'));
   try {
@@ -77,6 +86,7 @@ test('a fake-instance run writes one CSV row per reply, a blank pass column, and
       const outDir = path.join(dir, 'out');
       const result = await runEvalTokens({
         client,
+        space: await loadSpaceFixture(fixtureSpacePath),
         tokenSet,
         model: 'fake/model-1',
         temperature: 0,
@@ -174,7 +184,16 @@ test('a wrong token stops the run at once and writes no output', async () => {
       const client = createInstanceClient({ baseUrl: fake.baseUrl, token: 'wrong-token-value-xyz' });
       const outDir = path.join(dir, 'out');
       await assert.rejects(
-        runEvalTokens({ client, tokenSet, model: 'fake/m', temperature: 0, runs: 1, label: 'x', outDir }),
+        runEvalTokens({
+          client,
+          tokenSet,
+          space: await loadSpaceFixture(fixtureSpacePath),
+          model: 'fake/m',
+          temperature: 0,
+          runs: 1,
+          label: 'x',
+          outDir,
+        }),
         error => {
           assert.ok(error instanceof InstanceHttpError);
           assert.equal(error.status, 401);
@@ -221,7 +240,16 @@ test('an unreachable instance stops the run with a plain message', async () => {
   const tokenSet = await loadTokenSet(fixtureSetPath);
   const client = createInstanceClient({ baseUrl: closedUrl, token: TOKEN });
   await assert.rejects(
-    runEvalTokens({ client, tokenSet, model: 'fake/m', temperature: 0, runs: 1, label: 'x', outDir: tmpdir() }),
+    runEvalTokens({
+      client,
+      tokenSet,
+      space: await loadSpaceFixture(fixtureSpacePath),
+      model: 'fake/m',
+      temperature: 0,
+      runs: 1,
+      label: 'x',
+      outDir: tmpdir(),
+    }),
     error => {
       assert.ok(error instanceof InstanceUnreachableError);
       assert.ok(error.message.includes('Check that the instance is running'));
@@ -237,6 +265,7 @@ test('the command reads the token from the environment and prints no secret', as
       const out = [];
       const err = [];
       const outDir = path.join(dir, 'cli-out');
+      await stageSpaceFixture(dir);
       const code = await main({
         argv: [
           '--instance',
@@ -309,4 +338,59 @@ test('combineTurnMetrics keeps missing values missing', () => {
   assert.equal(combined.steps, undefined);
   assert.equal(combined.tool_calls_by_tool, undefined);
   assert.equal(combined.claim_mismatch, undefined);
+});
+
+test('the run puts the fixture space in before the first prompt and removes it after the last reply', async () => {
+  const metrics = await loadFakeMetrics();
+  const fake = await startFakeInstance({ token: TOKEN, metrics });
+  try {
+    await withTempDir(async dir => {
+      const tokenSet = await loadTokenSet(fixtureSetPath);
+      const client = createInstanceClient({ baseUrl: fake.baseUrl, token: TOKEN });
+      const space = await loadSpaceFixture(fixtureSpacePath);
+      await runEvalTokens({
+        client,
+        tokenSet,
+        space,
+        model: 'fake/m',
+        temperature: 0,
+        runs: 1,
+        label: 'space',
+        outDir: path.join(dir, 'out'),
+        pollIntervalMs: 0,
+      });
+
+      const calls = fake.requests.map(request => `${request.method} ${request.path.split('?')[0]}`);
+      const created = fake.requests.find(request => request.method === 'POST' && request.path === '/api/v1/spaces');
+      const firstSession = calls.indexOf('POST /api/v1/sessions');
+      const lastSession = calls.lastIndexOf('POST /api/v1/sessions');
+      const removedIndex = calls.findIndex(call => call.startsWith('DELETE /api/v1/spaces/'));
+      assert.equal(created?.body?.space?.name, space.name);
+      assert.ok(calls.indexOf('POST /api/v1/spaces') < firstSession, 'the space is created before the first prompt');
+      assert.ok(removedIndex > lastSession, 'the space is removed after the last prompt');
+      assert.match(fake.requests[removedIndex].path, /expected_revision=1$/);
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
+test('a failed removal names the space so it can be deleted by hand', async () => {
+  const client = {
+    deleteSpace: () => Promise.reject(new Error('refused')),
+  };
+  await assert.rejects(removeSpace({ client, seeded: { id: 'space_x', revision: 3 } }), error => {
+    assert.match(error.message, /space_x/);
+    assert.match(error.message, /Delete it by hand/);
+    assert.equal(error.cause.message, 'refused');
+    return true;
+  });
+});
+
+test('a space fixture missing a field names that field', async () => {
+  await withTempDir(async dir => {
+    const file = path.join(dir, 'space.json');
+    await writeFile(file, JSON.stringify({ name: 'A', purpose: 'B', status: 'active', format: 'markdown' }));
+    await assert.rejects(loadSpaceFixture(file), /missing: body/);
+  });
 });

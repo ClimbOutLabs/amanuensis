@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -38,6 +39,22 @@ function problemsOf(value) {
   }
   assert.fail('expected the set to be rejected');
 }
+
+test('every eval page link in the real set names a page in the fixture folder', async () => {
+  const set = await loadTokenSet(realSetPath);
+  const pagesDir = path.join(path.dirname(realSetPath), 'fixtures', 'pages');
+  let links = 0;
+  for (const prompt of set.prompts) {
+    for (const [, name] of prompt.prompt.matchAll(/https:\/\/fixtures\.aman\.invalid\/([a-z0-9-]+)/g)) {
+      links += 1;
+      assert.ok(
+        existsSync(path.join(pagesDir, `${name}.md`)),
+        `${prompt.id} links to a page that is not in the folder: ${name}`,
+      );
+    }
+  }
+  assert.equal(links, 1);
+});
 
 test('the real token-set.json parses: 18 prompts, unique ids, valid policies and checklists', async () => {
   const set = await loadTokenSet(realSetPath);

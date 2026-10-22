@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { InstanceHttpError, InstanceUnreachableError } from './client.mjs';
 import { REPLY_CSV_COLUMNS, toCsv } from './csv.mjs';
+import { removeSpace, seedSpace } from './space.mjs';
 import { buildSummary } from './summary.mjs';
 
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -227,6 +228,7 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, po
  * @param {{
  *   client: ReturnType<import('./client.mjs').createInstanceClient>,
  *   tokenSet: import('./parse.mjs').TokenSet,
+ *   space: Record<string, string>,
  *   model: string,
  *   temperature: number,
  *   runs: number,
@@ -241,6 +243,7 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, po
 export async function runEvalTokens({
   client,
   tokenSet,
+  space,
   model,
   temperature,
   runs,
@@ -251,12 +254,19 @@ export async function runEvalTokens({
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   log = ignoreLog,
 }) {
+  const seeded = await seedSpace({ client, content: space });
   const rows = [];
-  for (let run = 1; run <= runs; run += 1) {
-    for (const prompt of tokenSet.prompts) {
-      log(`run ${String(run)}/${String(runs)}  ${prompt.id}`);
-      rows.push(await runOnePrompt({ client, prompt, model, temperature, run, label, pollIntervalMs, turnTimeoutMs }));
+  try {
+    for (let run = 1; run <= runs; run += 1) {
+      for (const prompt of tokenSet.prompts) {
+        log(`run ${String(run)}/${String(runs)}  ${prompt.id}`);
+        rows.push(
+          await runOnePrompt({ client, prompt, model, temperature, run, label, pollIntervalMs, turnTimeoutMs }),
+        );
+      }
     }
+  } finally {
+    await removeSpace({ client, seeded });
   }
 
   await mkdir(outDir, { recursive: true });

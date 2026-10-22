@@ -130,5 +130,31 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       );
       return readTurn(body);
     },
+    /** @returns {Promise<{ aggregate_revision: number }>} */
+    async listSpaces() {
+      const body = await request('GET', '/api/v1/spaces');
+      if (!isRecord(body) || !isRecord(body.data) || typeof body.data.aggregate_revision !== 'number') {
+        throw new Error('The instance did not return its spaces. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /**
+     * @param {{ space: Record<string, string>, expected_aggregate_revision: number }} options
+     * @returns {Promise<{ space: { id: string, revision: number } }>}
+     */
+    async createSpace({ space, expected_aggregate_revision }) {
+      const body = await request('POST', '/api/v1/spaces', { space, expected_aggregate_revision });
+      if (!isRecord(body) || !isRecord(body.data) || !isRecord(body.data.space)) {
+        throw new Error('The instance did not return the new space. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @param {{ id: string, expected_revision: number }} options */
+    async deleteSpace({ id, expected_revision }) {
+      await request(
+        'DELETE',
+        `/api/v1/spaces/${encodeURIComponent(id)}?expected_revision=${encodeURIComponent(String(expected_revision))}`,
+      );
+    },
   };
 }

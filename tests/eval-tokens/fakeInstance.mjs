@@ -28,6 +28,8 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
   const requests = [];
   const sessions = new Map();
   const turns = new Map();
+  const spaces = new Map();
+  let aggregateRevision = 0;
   let counter = 0;
   const nextId = prefix => `${prefix}_fake_${String(++counter)}`;
 
@@ -189,6 +191,38 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
         return;
       }
       send(res, 200, { data: { ...publicTurn(turn), state: finalState(turn) } });
+      return;
+    }
+
+    const spaceMatch = /^\/api\/v1\/spaces(?:\/([^/]+))?$/.exec(url.pathname);
+    if (spaceMatch !== null && req.method === 'GET' && spaceMatch[1] === undefined) {
+      send(res, 200, { data: { spaces: [...spaces.values()], aggregate_revision: aggregateRevision } });
+      return;
+    }
+    if (spaceMatch !== null && req.method === 'POST' && spaceMatch[1] === undefined) {
+      if (body?.expected_aggregate_revision !== aggregateRevision) {
+        send(res, 409, { error: { message: 'The spaces changed. Read them again.' } });
+        return;
+      }
+      const space = { ...body.space, id: nextId('space'), revision: 1 };
+      spaces.set(space.id, space);
+      aggregateRevision += 1;
+      send(res, 201, { data: { space, aggregate_revision: aggregateRevision } });
+      return;
+    }
+    if (spaceMatch !== null && req.method === 'DELETE' && spaceMatch[1] !== undefined) {
+      const space = spaces.get(spaceMatch[1]);
+      if (space === undefined) {
+        send(res, 404, { error: { message: 'Space not found.' } });
+        return;
+      }
+      if (url.searchParams.get('expected_revision') !== String(space.revision)) {
+        send(res, 409, { error: { message: 'The space changed. Read it again.' } });
+        return;
+      }
+      spaces.delete(space.id);
+      aggregateRevision += 1;
+      send(res, 200, {});
       return;
     }
 

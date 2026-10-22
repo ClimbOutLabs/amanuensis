@@ -2,13 +2,14 @@ import {} from '../../../src/core';
 import { isCallToolResponseResult, type CallToolResponse } from '../../../src/core/mcp/IMCPServer';
 import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../src/core/search/groundPlace';
-import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
+import type { PageFixtureSource } from '../../../src/core/search/pageFixtures';
+import { extractCreditsFor, TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
-import { CANAL_URL, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL, extractResponse, searchResponse } from './tavilyFixtures';
+import { CANAL_URL, extractResponse, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL, searchResponse } from './tavilyFixtures';
 
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
-function harness(input: { status?: number; body?: unknown }) {
+function harness(input: { status?: number; body?: unknown; pageFixtures?: PageFixtureSource | undefined }) {
   const calls: { url: string; body: unknown }[] = [];
   const client = new TavilyClient({
     auth: { kind: 'keyless' },
@@ -18,7 +19,14 @@ function harness(input: { status?: number; body?: unknown }) {
     },
   });
   const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
-  const source = new TavilySource({ id: 'tavily', name: 'tavily', client, pages, scope: SCOPE });
+  const source = new TavilySource({
+    id: 'tavily',
+    name: 'tavily',
+    client,
+    pages,
+    scope: SCOPE,
+    pageFixtures: input.pageFixtures,
+  });
   return { source, pages, calls };
 }
 
@@ -194,5 +202,46 @@ describe('what a Tavily extract stores can ground', () => {
         scope: SCOPE,
       }),
     ).toMatchObject({ ok: true });
+  });
+});
+
+describe('TavilySource page fixtures', () => {
+  const FIXTURE_URL = 'https://fixtures.aman.invalid/long-report';
+  const MISSING_URL = 'https://fixtures.aman.invalid/no-such-page';
+  const FIXTURE_TEXT = 'Invented long report text.';
+  const fixtures: PageFixtureSource = {
+    serves: url => new URL(url).hostname === 'fixtures.aman.invalid',
+    read: url => (url === FIXTURE_URL ? { title: 'long-report', text: FIXTURE_TEXT } : undefined),
+  };
+
+  it('answers a fixture link from the fixture with no Tavily call, and reads other links from Tavily', async () => {
+    const body = { results: [{ url: HARBOUR_URL, title: 'Harbour', raw_content: 'Live text.' }], failed_results: [] };
+    const { source, pages, calls } = harness({ body, pageFixtures: fixtures });
+    const out = textOf(
+      await source.callTool({ name: 'tavily_extract', arguments: { urls: [FIXTURE_URL, HARBOUR_URL] } }),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toEqual({ urls: [HARBOUR_URL], extract_depth: 'basic', format: 'markdown', timeout: 20 });
+    const parsed = JSON.parse(out.text);
+    expect(parsed.pages.map((p: { url: string }) => p.url)).toEqual([FIXTURE_URL, HARBOUR_URL]);
+    expect(parsed.pages[0].text).toBe(FIXTURE_TEXT);
+    expect(parsed.credits_estimate).toBe(extractCreditsFor(1));
+    expect(pages.recall({ scope: SCOPE, url: FIXTURE_URL })?.text).toBe(FIXTURE_TEXT);
+  });
+
+  it('sends a fixture link to Tavily when no fixtures are set, as for any unreachable host', async () => {
+    const body = { results: [], failed_results: [{ url: FIXTURE_URL, error: 'Could not load the page' }] };
+    const { source, calls } = harness({ body });
+    const out = textOf(await source.callTool({ name: 'tavily_extract', arguments: { urls: [FIXTURE_URL] } }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toMatchObject({ urls: [FIXTURE_URL] });
+    expect(JSON.parse(out.text).not_fetched).toEqual([{ url: FIXTURE_URL, error: 'Could not load the page' }]);
+  });
+
+  it('reports a fixture link with no fixture page as not fetched, without a Tavily call', async () => {
+    const { source, calls } = harness({ body: extractResponse, pageFixtures: fixtures });
+    const out = textOf(await source.callTool({ name: 'tavily_extract', arguments: { urls: [MISSING_URL] } }));
+    expect(calls).toHaveLength(0);
+    expect(JSON.parse(out.text).not_fetched).toEqual([{ url: MISSING_URL, error: 'No fixture page has this name.' }]);
   });
 });

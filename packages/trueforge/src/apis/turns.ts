@@ -60,6 +60,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
+import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -534,6 +535,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
