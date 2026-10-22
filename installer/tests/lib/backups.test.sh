@@ -61,6 +61,7 @@ test_the_question_is_asked_once() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>n
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -69,7 +70,8 @@ Enter password again=>$SENTINEL_PASSWORD"
   assert_contains "$OUT" "Back up automatically every day? [Y/n]"
   assert_eq "$(mode_file)" off
   assert_not_contains "$(cron_table)" "amanuensis-backup"
-  run_install_tty "Go ahead?=>y"
+  run_install_tty "Connect a calendar?=>n
+Go ahead?=>y"
   assert_not_contains "$OUT" "Back up automatically every day?"
   assert_eq "$(mode_file)" off
   sandbox_drop
@@ -77,6 +79,7 @@ Enter password again=>$SENTINEL_PASSWORD"
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD

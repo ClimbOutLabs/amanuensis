@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Host shim installed as ~/.amanuensis/bin/aman. `aman doctor` runs machine checks with
 # the Docker CLI plus each instance's in-image `aman doctor`, combined into one document.
-# Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
+# Changes nothing but the host report it saves (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
 #   aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
 #   aman doctor instance|network [--fix [--yes]] [--instance NAME]
@@ -13,6 +13,10 @@
 #   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
+#
+# Every full run (no --only, no --local) also saves host-report.json into each instance's data folder, which the app
+# shows as its last full check. The installer sets AMAN_REPORT_COMMAND to install, upgrade or refresh when it runs the
+# doctor itself; a failed save prints one warning and changes nothing else.
 #
 # `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app. The slot
 # setup is the copy of packages/trueforge/scripts/sandbox-slots the installer took out of the app image; it runs on
@@ -178,6 +182,7 @@ require_lib shared
 require_lib diagnose
 require_lib network
 require_lib schedule
+require_lib host-report
 
 load_ui() {
   require_lib ui
@@ -243,11 +248,6 @@ container_cause_sentence() {
   [ -n "$log" ] || return 0
   cause=$(printf '%s' "$log" | container_failure_cause_stdin)
   if [ -n "$cause" ]; then printf ' %s' "$cause"; fi
-}
-
-json_escape() {
-  local value=${1//\\/\\\\}
-  JSON_ESCAPED=${value//\"/\\\"}
 }
 
 # Days-from-civil arithmetic, so no GNU or BSD date flags are needed.
@@ -1730,6 +1730,100 @@ renew_tls_if_due() {
   fi
 }
 
+# ---------------------------------------------------------------- host report
+
+CHECK_NAME=""
+
+# Sets CHECK_NAME to the plain-words name of a check in the host report. Instance checks are "instance_<id>" there, so
+# they never share an id with a machine check.
+check_name() { # machine|instance id
+  case "$1:$2" in
+    machine:docker) CHECK_NAME="Docker" ;;
+    machine:runtime) CHECK_NAME="Docker runtime" ;;
+    machine:credentials) CHECK_NAME="Docker credential store" ;;
+    machine:images) CHECK_NAME="Aman images" ;;
+    machine:disk) CHECK_NAME="Free space for Docker" ;;
+    machine:docker_memory) CHECK_NAME="Memory for Docker" ;;
+    machine:clock) CHECK_NAME="Clock" ;;
+    machine:backup) CHECK_NAME="Daily backups" ;;
+    machine:checkout) CHECK_NAME="Installer folder" ;;
+    machine:tls) CHECK_NAME="Https certificate" ;;
+    instance:config) CHECK_NAME="Instance settings" ;;
+    instance:containers) CHECK_NAME="Instance containers" ;;
+    instance:ports) CHECK_NAME="Instance ports" ;;
+    instance:service) CHECK_NAME="Aman app" ;;
+    instance:login) CHECK_NAME="Sign-in service" ;;
+    instance:database) CHECK_NAME="Database" ;;
+    instance:disk) CHECK_NAME="Free space for data" ;;
+    instance:clock) CHECK_NAME="App clock" ;;
+    instance:run_code) CHECK_NAME="Running code" ;;
+    instance:attachments) CHECK_NAME="Reading files" ;;
+    instance:demo) CHECK_NAME="Example data" ;;
+    instance:model) CHECK_NAME="Search model" ;;
+    instance:public_url) CHECK_NAME="Public address" ;;
+    instance:public_login) CHECK_NAME="Public sign-in address" ;;
+    instance:network) CHECK_NAME="Network" ;;
+    *) CHECK_NAME=$2 ;;
+  esac
+}
+
+# The host report for one instance: the machine checks and that instance's checks. A skipped check is left out, since
+# the report has no skipped state.
+report_document() { # instance
+  local name=$1 scope id state detail fix label key status message next cname checks="" overall=pass command=doctor
+  case "${AMAN_REPORT_COMMAND:-}" in install | upgrade | refresh) command=$AMAN_REPORT_COMMAND ;; esac
+  while IFS=$'\t' read -r scope id state detail fix; do
+    if [ "$scope" = machine ]; then
+      label=machine
+    elif [ -n "$scope" ] && [ "$scope" = "$name" ]; then
+      label=instance
+    else
+      continue
+    fi
+    case "$state" in
+      ok) status=pass ;;
+      warn | fail) status=$state ;;
+      *) continue ;;
+    esac
+    case "$status" in
+      fail) overall=fail ;;
+      warn) [ "$overall" = fail ] || overall=warn ;;
+    esac
+    if [ "$label" = machine ]; then key=$id; else key="instance_$id"; fi
+    json_escape "$key"
+    key=$JSON_ESCAPED
+    check_name "$label" "$id"
+    json_escape "$CHECK_NAME"
+    cname=$JSON_ESCAPED
+    json_escape "$detail"
+    message=$JSON_ESCAPED
+    if [ -n "$fix" ]; then
+      json_escape "$fix"
+      next="\"$JSON_ESCAPED\""
+    else
+      next=null
+    fi
+    checks="${checks:+$checks,}{\"id\":\"$key\",\"name\":\"$cname\",\"status\":\"$status\",\"message\":\"$message\",\"next_step\":$next}"
+  done <<<"$RECORDS"
+  printf '{"schema_version":1,"command":"%s","checked_at":"%s","overall":"%s","checks":[%s]}\n' \
+    "$command" "$(host_report_time "$(now_epoch)")" "$overall" "$checks"
+}
+
+# Saves the report into each instance's data folder, which the app reads. Skipped for a run that checked only some things
+# (--only) or kept to this machine (--local), since the app shows the time of the last full check. An instance whose
+# data folder does not exist yet has nothing to show it in.
+write_host_reports() {
+  local name image volume
+  if [ -n "$ONLY" ] || [ "$LOCAL" = 1 ] || [ "$DOCKER_OK" != 1 ]; then return 0; fi
+  image=$(json_value "${AMAN_HOME}/release/release.json" app_image)
+  [ -n "$image" ] || return 0
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    volume="aman_${name}_data"
+    bounded "$PROBE_SECONDS" docker volume inspect "$volume" >/dev/null 2>&1 || continue
+    host_report_save "$volume" "$image" "$(report_document "$name")" || true
+  done
+}
+
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
@@ -1822,6 +1916,7 @@ for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
 done
 
 if [ "$AS_JSON" = 1 ]; then print_json; else print_text; fi
+write_host_reports
 
 failures=0
 while IFS=$'\t' read -r _scope id state _rest; do

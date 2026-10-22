@@ -196,7 +196,9 @@ describe('document and exit codes', () => {
   it('is read-only: only inspection commands reach Docker', () => {
     make();
     world.run();
-    const allowed = /^(--version|info|version|compose version|ps|port|exec|image inspect)\b/;
+    // The host report is the one write: a throwaway container that mounts an instance's data volume with no network.
+    const allowed =
+      /^(--version|info|version|compose version|ps|port|exec|image inspect|volume inspect aman_[a-z0-9-]+_data$|run --rm -i --network none -v aman_[a-z0-9-]+_data:\/data )/;
     for (const call of world.calls()) {
       assert.match(call, allowed, call);
     }

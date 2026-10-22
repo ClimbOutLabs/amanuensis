@@ -343,7 +343,7 @@ function buildMcpServer({
  * (no task store) ever reads it back afterwards. Code that needs the live
  * session id already has direct access to `transport` via `onsessioninitialized`.
  */
-function asTransport(transport: StreamableHTTPServerTransport): Transport {
+export function asTransport(transport: StreamableHTTPServerTransport): Transport {
   return {
     start: () => transport.start(),
     send: (message, options) => transport.send(message, options),

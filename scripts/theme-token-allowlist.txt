@@ -6,9 +6,5 @@
 
 packages/trueforge-ui/src/github-markdown-bridge.css :: vendored github-markdown-css theme variables with light and dark variants
 packages/trueforge-ui/src/server/imageAttachmentAdapter.ts | context.fillStyle = '#ffffff' :: white matte for JPEG export compositing; the output file has no transparency and must not follow the theme
-packages/frontend/src/App.tsx | primaryButtonBg: '#6366F1' :: host brand override passed to ThemeProvider as a token
-packages/frontend/src/App.tsx | primaryButtonHover: '#3d2dd4' :: host brand override passed to ThemeProvider as a token
 packages/frontend/src/index.css | color: #2c2a26; :: pre-hydration body paint; theme variables are not mounted yet
 packages/frontend/src/index.css | background: #f7f2e8; :: pre-hydration body paint; theme variables are not mounted yet
-packages/frontend/src/index.css | radial-gradient( :: host brand gradient for the primary button; not expressible as a color token
-packages/frontend/src/index.css | color-mix(in oklab, #4f39f6 :: host brand glow paired with the primary button gradient

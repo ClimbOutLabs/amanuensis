@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "command": "doctor",
+  "checked_at": "2026-10-20T08:30:00Z",
+  "overall": "warn",
+  "checks": [
+    { "id": "docker", "name": "Docker", "status": "pass", "message": "Docker is running.", "next_step": null },
+    {
+      "id": "disk_space",
+      "name": "Disk space",
+      "status": "warn",
+      "message": "Disk space is getting low.",
+      "next_step": "Free up some space on your computer."
+    },
+    {
+      "id": "ports",
+      "name": "Ports",
+      "status": "fail",
+      "message": "Port 8791 is in use by another program.",
+      "next_step": "Stop the other program, then run aman doctor again."
+    }
+  ]
+}

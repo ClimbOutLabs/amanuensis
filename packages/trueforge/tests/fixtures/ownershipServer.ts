@@ -246,6 +246,8 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -260,6 +262,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
     outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
@@ -336,6 +339,8 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),
@@ -350,6 +355,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
     outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
