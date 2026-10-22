@@ -127,6 +127,34 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     expect(page.entries[2]).toMatchObject({ outcome: 'approved', tier: 3, description: 'Read a file' });
   });
 
+  it('listForUser shows a chat title only to the chat’s own owner', async () => {
+    const env = getEnv();
+    await env.sessions.createSession({
+      tenant_id: 't1',
+      session_id: 'their-chat',
+      created_by_subject: { subject_id: 'u2', subject_type: 'user', subject_display_name: 'u2' },
+      external_id: null,
+      source: null,
+      metadata: {},
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      custom: null,
+    });
+    await env.sessions.updateSession({
+      tenant_id: 't1',
+      session_id: 'their-chat',
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      title: 'Private plan of u2',
+      metadata: undefined,
+    });
+    await env.store.record(entry({ conversation_id: 'their-chat', tool_name: 'write_file', tier: 2 }));
+
+    const page = await env.store.listForUser({ ...forUser, limit: 10 });
+
+    expect(page.entries.map(row => [row.conversation_id, row.chat_exists, row.session_title])).toEqual([
+      ['their-chat', true, null],
+    ]);
+  });
+
   it('listForUser never returns another user’s or another tenant’s entries', async () => {
     const { store } = getEnv();
     await recordInOrder(store, [
