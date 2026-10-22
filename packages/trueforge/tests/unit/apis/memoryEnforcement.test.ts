@@ -381,6 +381,13 @@ function contentText(content: unknown): string {
   return '';
 }
 
+/** The line that opens a recalled-memory block; the static instruction only names the tag. */
+const MEMORY_BLOCK_OPENING = '<aman-memory>\n';
+
+function memoryBlockMessages(messages: readonly { role: string; content?: unknown }[]) {
+  return messages.filter(message => contentText(message.content).includes(MEMORY_BLOCK_OPENING));
+}
+
 function lastUserMessageIndex(messages: readonly { role: string; content?: unknown }[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.role === 'user') {
@@ -465,16 +472,15 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(finalUserIndex).toBeGreaterThan(0);
       const finalUserMessage = turn1ModelRequest.messages[finalUserIndex];
       expect(contentText(finalUserMessage?.content)).toContain(USER_MESSAGE_1);
-      // The block is host context, so it is a system message placed before the final user message.
-      const memoryIndex = turn1ModelRequest.messages.findIndex(message =>
-        contentText(message.content).includes('<aman-memory>'),
-      );
-      expect(memoryIndex).toBeGreaterThan(0);
-      expect(memoryIndex).toBeLessThan(finalUserIndex);
-      const injectedMessage = turn1ModelRequest.messages[memoryIndex];
+      // The block is host context in the per-reply block, after the date. This provider's adapter
+      // folds system text into the leading system message, so the block is found there.
+      const memoryMessages = memoryBlockMessages(turn1ModelRequest.messages);
+      expect(memoryMessages).toHaveLength(1);
+      const injectedMessage = memoryMessages[0];
       expect(injectedMessage?.role).toBe('system');
       const injectedText = contentText(injectedMessage?.content);
-      expect(injectedText).toContain('<aman-memory>');
+      expect(injectedText.indexOf("Today's date")).toBeGreaterThan(-1);
+      expect(injectedText.indexOf("Today's date")).toBeLessThan(injectedText.indexOf(MEMORY_BLOCK_OPENING));
       expect(injectedText).toContain(CANNED_ITEM_TEXT);
 
       // (c) the turn's own persisted events carry the recall outcome, injected_block included
@@ -544,11 +550,8 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
         throw new Error('expected the scripted model server to have received a request for turn 2');
       }
       // The system prompt's own memory instructions mention the `<aman-memory>` tag by name, so
-      // this only counts *user*-role messages — the only role the ephemeral splice ever uses.
-      const amanMemoryUserMessages = turn2ModelRequest.messages.filter(
-        message => message.role === 'user' && contentText(message.content).includes('<aman-memory>'),
-      );
-      expect(amanMemoryUserMessages).toHaveLength(1);
+      // this counts only messages that carry the block's opening line.
+      expect(memoryBlockMessages(turn2ModelRequest.messages)).toHaveLength(1);
 
       const turn1HistoryMessages = turn2ModelRequest.messages.filter(
         message => message.role === 'user' && contentText(message.content).includes(USER_MESSAGE_1),
@@ -559,7 +562,6 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const finalUserIndex = lastUserMessageIndex(turn2ModelRequest.messages);
       expect(finalUserIndex).toBeGreaterThan(0);
       expect(contentText(turn2ModelRequest.messages[finalUserIndex]?.content)).toContain(USER_MESSAGE_2);
-      expect(contentText(turn2ModelRequest.messages[finalUserIndex - 1]?.content)).toContain('<aman-memory>');
     },
     TURN_TIMEOUT_MS,
   );

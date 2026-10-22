@@ -861,8 +861,8 @@ export interface ConvertedMessages {
 
 /**
  * System messages are extracted into `instructions`, since SDK v7 no longer accepts
- * `{ role: 'system' }` in the messages array. The toolCallId → toolName lookup is built first
- * because tool result messages carry only the id.
+ * `{ role: 'system' }` in the messages array, except on Anthropic mid-conversation context (see below).
+ * The toolCallId → toolName lookup is built first because tool result messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -887,16 +887,35 @@ export function convertMessages({
     }
   }
 
+  const firstConversationIndex = messages.findIndex(msg => msg.role !== 'system');
+  const lastUserIndex = findLastUserIndex(messages);
   const systemParts: string[] = [];
+  // Anthropic hoists system text above the whole conversation, which would move each reply's
+  // context ahead of the cached history. There, system text sent mid-conversation rides on the
+  // last user turn instead, in the same wording it has elsewhere.
+  const turnContextParts: string[] = [];
   const result: ModelMessage[] = [];
-  for (const msg of messages) {
+  for (const [index, msg] of messages.entries()) {
     if (msg.role === 'system') {
       const content = typeof msg.content === 'string' ? msg.content : msg.content.map(p => p.text).join('');
-      systemParts.push(content);
+      const midConversation = index > firstConversationIndex && lastUserIndex > index;
+      if (provider === 'anthropic' && midConversation) {
+        turnContextParts.push(content);
+      } else {
+        systemParts.push(content);
+      }
       continue;
     }
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: toUserContent(msg.content) });
+      const userContent = toUserContent(msg.content);
+      if (index !== lastUserIndex || turnContextParts.length === 0) {
+        result.push({ role: 'user', content: userContent });
+        continue;
+      }
+      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
+      const ownParts: UserContent =
+        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
+      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -922,6 +941,16 @@ export function convertMessages({
     // 'developer' / 'function' roles — not used in the harness pipeline; skip.
   }
   return { instructions: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, messages: result };
+}
+
+/** Index of the latest user message, or -1 when there is none. */
+function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */

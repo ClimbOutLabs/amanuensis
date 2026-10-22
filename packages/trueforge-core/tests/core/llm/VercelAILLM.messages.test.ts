@@ -373,6 +373,64 @@ describe('convertMessages', () => {
     expect(instructions).toBeUndefined();
   });
 
+  it('anthropic: mid-conversation system context rides on the last user turn, not in instructions', () => {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: 'Static instruction' },
+      { role: 'user', content: 'earlier question' },
+      { role: 'assistant', content: 'earlier answer' },
+      { role: 'system', content: 'Host context for this reply.' },
+      { role: 'system', content: '<aman-memory>remembered</aman-memory>' },
+      { role: 'user', content: 'current question' },
+    ];
+    const { instructions, messages: result } = convertMessages({
+      messages,
+      provider: 'anthropic',
+      providerName: 'anthropic',
+    });
+    expect(instructions).toBe('Static instruction');
+    expect(result).toEqual([
+      { role: 'user', content: 'earlier question' },
+      { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: '<aman-memory>remembered</aman-memory>' },
+          { type: 'text', text: 'current question' },
+        ],
+      },
+    ]);
+  });
+
+  it('anthropic: keeps the last user turn plain when no system context sits before it', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'user', content: 'hi' },
+      ],
+      provider: 'anthropic',
+      providerName: 'anthropic',
+    });
+    expect(instructions).toBe('Static instruction');
+    expect(result).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('other providers keep mid-conversation system text in instructions', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'user', content: 'earlier question' },
+        { role: 'assistant', content: 'earlier answer' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'current question' },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    expect(instructions).toBe('Static instruction\n\nHost context for this reply.');
+    expect(result[result.length - 1]).toEqual({ role: 'user', content: 'current question' });
+  });
+
   it('preserves user/assistant/tool message ordering', () => {
     const messages: ChatCompletionMessageParam[] = [
       { role: 'user', content: 'q1' },

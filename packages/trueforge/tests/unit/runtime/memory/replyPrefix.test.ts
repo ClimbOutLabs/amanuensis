@@ -259,13 +259,14 @@ describe('reply prefix stability', () => {
     expect(String(step1.messages[0]?.content)).not.toMatch(/Today's date|Alex/);
   });
 
-  it('two replies on the same day with the same tools share the same static prefix', async () => {
+  it('two replies with the same loaded bundles share the same static prefix', async () => {
     const [firstReply] = await runReply('Remember that Robin likes tea.');
     if (!firstReply) {
       throw new Error('expected a model step in the first reply');
     }
     // The second reply's history includes the first reply's exchange, as a real conversation does.
-    const [secondReply] = await runReply('What did I ask you to remember?', DEFAULT_RECALL, [
+    // Neither message routes a tool bundle, so the bundle set is the same in both replies.
+    const [secondReply] = await runReply('Remember that Robin likes tea too.', DEFAULT_RECALL, [
       ...DEFAULT_HISTORY,
       { role: 'user', content: 'Remember that Robin likes tea.' },
       { role: 'assistant', content: 'Saved.' },
@@ -276,5 +277,22 @@ describe('reply prefix stability', () => {
     expect(JSON.stringify(secondReply.messages[0])).toBe(JSON.stringify(firstReply.messages[0]));
     expect(JSON.stringify(secondReply.tools)).toBe(JSON.stringify(firstReply.tools));
     expect(prefixThroughHistory(secondReply)).toBe(prefixThroughHistory(firstReply));
+  });
+
+  it('a reply that loads a bundle changes the static prefix only by adding that bundle sections', async () => {
+    const [firstReply] = await runReply('Remember that Robin likes tea.');
+    // A question mark routes the web bundle, so this reply loads it.
+    const [secondReply] = await runReply('Where does Robin live now?', ['Robin moved to Lisbon in May.']);
+    if (!firstReply || !secondReply) {
+      throw new Error('expected a model step in both replies');
+    }
+    const firstInstruction = String(firstReply.messages[0]?.content);
+    const secondInstruction = String(secondReply.messages[0]?.content);
+    expect(secondInstruction).toContain('<source-discovery>');
+    expect(firstInstruction).not.toContain('<source-discovery>');
+    const withoutWebSections = secondInstruction
+      .replace(/\n\n<source-discovery>[\s\S]*?<\/source-discovery>/, '')
+      .replace(/\n\n<web-images>[\s\S]*?<\/web-images>/, '');
+    expect(withoutWebSections).toBe(firstInstruction);
   });
 });
