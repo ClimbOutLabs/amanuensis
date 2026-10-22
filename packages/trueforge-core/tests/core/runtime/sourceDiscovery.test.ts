@@ -38,10 +38,14 @@ describe('source discovery contract at the model request boundary', () => {
     expect(systemMessage?.content).toContain(createSourceDiscoveryContract({ shellCanFetch: false }).trim());
     expect(systemMessage?.content).not.toContain('sandbox exec tool');
     expect(systemMessage?.content).toContain('<no-sandbox>');
-    expect(systemMessage?.content).toContain('Work on a repo in the composer');
+    expect(systemMessage?.content).toContain('open Add-ons in the composer, go to Connectors, and turn on Sandbox');
+    expect(systemMessage?.content).not.toContain('Work on a repo');
+    expect(systemMessage?.content).not.toContain('Settings');
     expect(systemMessage?.content).toContain('URLs');
     expect(systemMessage?.content).not.toContain('already identified source');
-    expect(systemMessage?.content).toContain('does not discover or validate a guessed URL');
+    // Without a sandbox the contract names no sandbox at all, guessed URLs included.
+    expect(systemMessage?.content).toContain('discovers or validates a guessed URL. A URL alone');
+    expect(systemMessage?.content).not.toContain('the sandbox does not discover');
     expect(systemMessage?.content).toContain('A URL alone is not evidence');
     expect(systemMessage?.content).toContain('no permitted capability can obtain them');
     // A known URL is never a substitute for retrieval: the claim waits for contents either way.
