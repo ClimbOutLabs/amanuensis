@@ -23,7 +23,7 @@ import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
-import { answeredMessageOf, checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
+import { answeredMessageOf, checkReplyThreading, isReply, replyRecipientOf, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
   listDraftsResult,
@@ -49,6 +49,7 @@ import {
   LIST_INBOX_THREADS_TOOL_NAME,
   ListDraftsSchema,
   ListInboxThreadsSchema,
+  NO_RECIPIENT_MESSAGE,
   READ_ANNOTATIONS,
   READ_EMAIL_TOOL_NAME,
   ReadEmailSchema,
@@ -95,6 +96,16 @@ const NEW_APPROVAL =
 /** A refusal of a send in words the model can relay: what was refused, that nothing went out, and what to do. */
 function sendRefusal(reason: string): string {
   return `${reason} Nothing was sent. ${NEW_APPROVAL}`;
+}
+
+/**
+ * Why a draft call's details cannot be used. A draft with no recipient gets the draft contract's own
+ * reason, so the person hears what to add rather than a general refusal.
+ */
+function invalidDraftReason(error: z.ZodError): string {
+  return error.issues.some(issue => issue.message === NO_RECIPIENT_MESSAGE)
+    ? NO_RECIPIENT_MESSAGE
+    : 'The draft details were not valid, so nothing was saved.';
 }
 
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
@@ -195,7 +206,7 @@ export class GmailToolSet extends LocalToolMCP {
         defineTool({
           name: DRAFT_EMAIL_TOOL_NAME,
           description:
-            'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>". The user is asked before the draft is saved.',
+            'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>", and without a "to" the reply is addressed to that message\'s sender. The user is asked before the draft is saved.',
           schema: DraftEmailSchema,
           annotations: WRITE_ANNOTATIONS,
           handler: input => this.#draftEmail(input),
@@ -332,11 +343,10 @@ export class GmailToolSet extends LocalToolMCP {
         }
         return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
-      const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
       if (params.name === UPDATE_DRAFT_TOOL_NAME) {
         const parsed = UpdateDraftSchema.safeParse(params.arguments);
         if (!parsed.success) {
-          return invalid;
+          return { failure: invalidDraftReason(parsed.error) };
         }
         const existing = await this.#editableDraft(parsed.data.draft_id);
         if ('failure' in existing) {
@@ -347,7 +357,7 @@ export class GmailToolSet extends LocalToolMCP {
       }
       const parsed = DraftEmailSchema.safeParse(params.arguments);
       if (!parsed.success) {
-        return invalid;
+        return { failure: invalidDraftReason(parsed.error) };
       }
       const resolved = await this.#resolveContent({ input: parsed.data, existing: undefined });
       return { draft: resolved.reviewable, replaces: undefined, answered: resolved.answered };
@@ -387,8 +397,9 @@ export class GmailToolSet extends LocalToolMCP {
 
   /**
    * Settles what a new or changed draft contains: a reply takes its thread, its reply headers and the subject
-   * "Re: <original>" from the message it answers; a changed draft keeps the thread and reply headers it had,
-   * after they are checked against the thread again. Throws a RangeError when a reply cannot be threaded.
+   * "Re: <original>" from the message it answers, and the sender of that message as its recipient when the
+   * call names none; a changed draft keeps the thread and reply headers it had, after they are checked
+   * against the thread again. Throws a RangeError when a reply cannot be threaded or addressed.
    */
   async #resolveContent(input: { input: DraftContent; existing: GmailMessage | undefined }): Promise<{
     content: RawDraftContent;
@@ -403,6 +414,7 @@ export class GmailToolSet extends LocalToolMCP {
     let subject = call.subject.trim();
     let threadId = call.thread_id;
     let answered: AnsweredMessage | undefined;
+    let recipients = call.to ?? [];
     if (call.in_reply_to !== undefined) {
       const original = await this.#options.api.getMessage(call.in_reply_to);
       const part = original.payload;
@@ -421,6 +433,15 @@ export class GmailToolSet extends LocalToolMCP {
       subject = replySubject(headerOf({ message: original, name: 'Subject' }));
       threadId = original.threadId;
       answered = answeredMessageOf(original);
+      if (recipients.length === 0) {
+        const recipient = replyRecipientOf(original);
+        if (recipient === null) {
+          throw new RangeError(
+            'Aman could not read the address of the person who sent the message being answered, so the reply draft has no recipient. Add the recipient in "to" and ask me to save the reply again.',
+          );
+        }
+        recipients = [recipient];
+      }
     } else if (existing?.payload !== undefined) {
       reply = {
         messageIdHeader: rawHeaderOf({ part: existing.payload, name: 'in-reply-to' }),
@@ -429,9 +450,9 @@ export class GmailToolSet extends LocalToolMCP {
       threadId ??= existing.threadId;
     }
     const body = call.body.trim();
-    const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
+    const content: RawDraftContent = { to: recipients, cc: call.cc, bcc: call.bcc, subject, body };
     const reviewable: ReviewableDraft = {
-      to: call.to.map(address => mailboxOf(address)),
+      to: recipients.map(address => mailboxOf(address)),
       cc: (call.cc ?? []).map(address => mailboxOf(address)),
       bcc: (call.bcc ?? []).map(address => mailboxOf(address)),
       subject,
@@ -440,9 +461,10 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
-      // The model's recipients are validated bare addresses (toolContract), so no name is left off today. This check
+      // The recipients are bare addresses (the model's are validated in toolContract, and a filled reply
+      // recipient is the sender address read from the message), so no name is left off today. This check
       // stays as a defence in case that contract ever admits display names.
-      nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
+      nameLeftOff: [...recipients, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
     };
     if (answered === undefined && existing !== undefined) {
       // Headers kept from a saved draft are not the model's, but anyone may have edited that draft in Gmail.
