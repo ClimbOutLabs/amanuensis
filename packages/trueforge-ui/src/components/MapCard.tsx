@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { MapsTransitStep, MapsTravelMode } from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
 
 import { describeDuration, describeTransitStep } from '../utils/mapsTransitSteps.js';
+import { RefusedPlaceList } from './RefusedPlaceList.js';
 
 export interface MapPin {
   name: string;
@@ -29,6 +30,12 @@ export interface MapPlace {
   already_in_calendar: boolean;
 }
 
+/** A place the page check left out, with the plain reason it was left out. */
+export interface MapRefusedPlace {
+  name: string;
+  reason: string;
+}
+
 export interface MapCardData {
   kind: 'place' | 'route' | 'places';
   /** Place card: center and pins. Route card: endpoints and geometry. */
@@ -41,7 +48,7 @@ export interface MapCardData {
   /** Places card only: the found places, each with its details and source. */
   places?: MapPlace[];
   /** Places card only: the places that were left out, with the plain reason for each. */
-  refused?: { name: string; reason: string }[];
+  refused?: MapRefusedPlace[];
   /** Route card only. */
   from_name?: string;
   to_name?: string;
@@ -350,7 +357,6 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
     setRetryKey(key => key + 1);
   };
 
-  const leftOut = data === null ? null : refusedLine(data.refused);
   const showPanel = state === 'blocked' || state === 'unavailable' || data === null || failure !== null;
   const tilesFailed = failure === 'tiles';
   const panelTitle = tilesFailed ? 'Map tiles unavailable' : 'Map unavailable';
@@ -395,7 +401,12 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
                 ))}
               </div>
             )}
-            {data.kind === 'places' && leftOut !== null && <p className="maps-place-note">{leftOut}</p>}
+            {data.kind === 'places' && data.refused !== undefined && data.refused.length > 0 && (
+              <details className="maps-card-details">
+                <summary>Details</summary>
+                <RefusedPlaceList refused={data.refused} />
+              </details>
+            )}
             <p className="maps-card-attribution">
               <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
                 {data.attribution}
@@ -431,16 +442,6 @@ function routeSummary(data: MapCardData): string {
     parts.push(`leaves ${data.departs}, arrives ${data.arrives}`);
   }
   return parts.join(' · ');
-}
-
-/** One line for a part-way places card: how many places were left out, and each distinct reason once. */
-function refusedLine(refused: { name: string; reason: string }[] | undefined): string | null {
-  if (refused === undefined || refused.length === 0) {
-    return null;
-  }
-  const reasons = [...new Set(refused.map(place => place.reason))];
-  const count = refused.length === 1 ? '1 place was left out' : `${String(refused.length)} places left out`;
-  return `${count}: ${reasons.join(' ')}`;
 }
 
 const PLACE_FIELDS = [

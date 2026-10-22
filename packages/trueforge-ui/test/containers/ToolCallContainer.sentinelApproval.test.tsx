@@ -84,6 +84,8 @@ type PendingCall = {
   options?: ApprovalOptions;
   /** What the server said about chat scope; absent from older servers. */
   chatAllowOffered?: boolean;
+  /** What the server said about a standing "Always allow this tool"; absent when it did not say. */
+  alwaysAllowOffered?: boolean;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
@@ -111,6 +113,7 @@ function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) 
         eventId: call.event ?? 'evt-1',
         threadId: call.thread ?? 'main',
         ...(call.chatAllowOffered === undefined ? {} : { chatAllowOffered: call.chatAllowOffered }),
+        ...(call.alwaysAllowOffered === undefined ? {} : { alwaysAllowOffered: call.alwaysAllowOffered }),
       });
     }
   });
@@ -135,14 +138,14 @@ describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.getByText('Do a')).toBeInTheDocument();
-    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('approves a single Tier 2 call through the part, without a batch button', () => {
     const { onRespondToToolApproval } = renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: true }));
   });
 
@@ -199,7 +202,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('div.rounded-lg');
+    const tier3Card = screen.getByText('Do danger').closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
       expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
@@ -221,7 +224,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Deny'));
+    fireEvent.click(firstButton('Not now'));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: false }));
     expect(respondToApproval).not.toHaveBeenCalled();
   });
@@ -270,7 +273,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
           ],
         },
       ]);
-      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
       expect(onRespondToToolApproval).toHaveBeenCalledWith(
         expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
       );
@@ -290,7 +293,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
         ],
       },
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     const [response] = onRespondToToolApproval.mock.calls[0] ?? [];
     expect(response).toMatchObject({ approvalId: 'a', approved: true });
     expect(response).not.toHaveProperty('optionId');
@@ -317,6 +320,42 @@ describe('ToolCallContainer Sentinel approvals', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
       expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
     });
+  });
+});
+
+describe('ToolCallContainer always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers Always allow this tool only on a card the server says may be always allowed', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('never offers it when the server did not say so, or said no', () => {
+    renderPending([
+      { id: 'send', tier: 3 },
+      { id: 'write', tier: 3, alwaysAllowOffered: false },
+    ]);
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation, and records nothing when the owner cancels', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(respondToApproval).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it('approves the call with the standing option once the owner confirms', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+    expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'read', approved: true, optionId: 'allow-standing' }],
+    ]);
   });
 });
 
@@ -405,13 +444,13 @@ describe('ToolCallContainer "Change it"', () => {
       return { onRespondToToolApproval };
     }
 
-    it('offers Change it between Approve and Deny', () => {
+    it('offers Change it between the safe verb and the quiet no', () => {
       renderPersonaApproval();
       const labels = screen
         .getAllByRole('button')
         .map(button => button.textContent)
-        .filter(text => text === 'Approve' || text === 'Change it' || text === 'Deny');
-      expect(labels).toEqual(['Approve', 'Change it', 'Deny']);
+        .filter(text => text === 'Create it' || text === 'Change it' || text === 'Not now');
+      expect(labels).toEqual(['Create it', 'Change it', 'Not now']);
     });
 
     it('sends the words as the reason, declines the call, and never grants it', () => {

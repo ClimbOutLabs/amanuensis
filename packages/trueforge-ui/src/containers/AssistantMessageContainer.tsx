@@ -19,6 +19,8 @@ import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
 import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
+import { AmanBrief } from '../components/AmanBrief.js';
+import { parseBrief } from '../components/briefSections.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -35,6 +37,7 @@ import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
 import { ToolCallContainer } from './ToolCallContainer.js';
 import { ToolRefusalNoticesContainer } from './ToolRefusalNoticesContainer.js';
+import { answersBriefPrompt, messageText } from './briefTurn.js';
 
 /**
  * Dispatches a leaf message part to its renderer. "data" parts (generative
@@ -154,6 +157,11 @@ export function AssistantMessageContainer() {
 
   const parts = useAuiState(s => s.message.parts);
   const chatImagesPort = useChatImagesPort();
+  const messageId = useAuiState(s => s.message.id);
+  const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
+  const answerText = useAuiState(s => messageText(s.message.content));
+  // A brief shows its stops and chapters once the answer is done; until then the normal progress shows.
+  const briefSections = answersBrief && !isMessageRunning ? parseBrief(answerText) : null;
 
   const { runs, hasFinal } = computeAgentStepsSplit(parts);
 
@@ -322,7 +330,9 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
+        {briefSections !== null ? (
+          <AmanBrief sections={briefSections} briefId={turnId ?? messageId} sessionId={sessionId} />
+        ) : chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
           <ChatImageScope port={chatImagesPort} sessionId={sessionId} turnId={turnId} settled={!isMessageRunning}>
             {messageBody}
           </ChatImageScope>

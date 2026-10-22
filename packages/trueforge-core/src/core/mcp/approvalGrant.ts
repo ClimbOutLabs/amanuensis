@@ -80,6 +80,9 @@ export function effectiveToolAdmissions(input: {
  * unknown, or repository-mutating run never creates a commit receipt.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
+  if (secretPathReadBarsDurableGrant(info)) {
+    return false;
+  }
   if (info.implementation_plan_grant !== undefined) {
     return true;
   }
@@ -95,6 +98,15 @@ function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
+ * A private read (a sensitive path or a path-like argument) is never covered by a durable grant,
+ * whatever its annotations say: the grant would then cover every later read of that path. Shared by
+ * the chat and always scopes.
+ */
+function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
+  return info.secret_path_read === true;
+}
+
+/**
  * Server-owned eligibility for a standing "Always allow this tool" grant: only a connector tool
  * that is read-only inspection, for the same argument-blindness reason as a chat grant.
  */
@@ -103,6 +115,7 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   return (
     info.type === 'mcp' &&
     info.effect === 'inspect' &&
+    !secretPathReadBarsDurableGrant(info) &&
     !tierBarsDurableGrant(info) &&
     info.implementation_plan_grant === undefined &&
     info.search_provider_call !== true

@@ -67,6 +67,7 @@ release_resolve() {
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
   REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
+  REL_CALENDAR_TAG=aman-calendar-caldav:$(source_id ops/calendar-sidecar)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
 }
 
@@ -81,6 +82,7 @@ release_write() {
     printf '  "source_ref": "%s",\n' "$REL_REF"
     printf '  "app_image": "%s",\n' "$REL_APP_TAG"
     printf '  "stt_image": "%s",\n' "$REL_STT_TAG"
+    printf '  "calendar_image": "%s",\n' "$REL_CALENDAR_TAG"
     printf '  "dex_image": "%s"\n' "$REL_DEX_IMAGE"
     printf '}\n'
   } >"$tmp"
@@ -101,6 +103,7 @@ release_load() {
   [ -f "$file" ] || return 1
   CUR_APP_TAG=$(json_get "$file" app_image)
   CUR_STT_TAG=$(json_get "$file" stt_image)
+  CUR_CALENDAR_TAG=$(json_get "$file" calendar_image)
   CUR_DEX_IMAGE=$(json_get "$file" dex_image)
   [ -n "$CUR_APP_TAG" ] && [ -n "$CUR_STT_TAG" ] && [ -n "$CUR_DEX_IMAGE" ]
 }
@@ -118,6 +121,13 @@ build_app_image() {
     step_fail "Building the Aman app failed" "Fix what the log says, then run install.sh again. Anything already running was not touched."
   fi
   step_ok "Built the Aman app"
+}
+
+build_calendar_image() {
+  [ -f "$REPO_ROOT/ops/calendar-sidecar/Dockerfile" ] || die "The file ops/calendar-sidecar/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
+  step_begin build-calendar "Building the calendar connector"
+  D build -t "$REL_CALENDAR_TAG" "$REPO_ROOT/ops/calendar-sidecar" >"$STEP_LOG" 2>&1 || step_fail "Building the calendar connector failed" "Fix what the log says, then run install.sh again."
+  step_ok "Built the calendar connector"
 }
 
 build_stt_image() {
@@ -138,6 +148,11 @@ images_ensure() {
     ui_skip "The speech-to-text service is already built"
   else
     build_stt_image
+  fi
+  if docker_image_exists "$REL_CALENDAR_TAG"; then
+    ui_skip "The calendar connector is already built"
+  else
+    build_calendar_image
   fi
   if docker_image_exists "$REL_DEX_IMAGE"; then
     ui_skip "The sign-in service is already downloaded"

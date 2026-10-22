@@ -406,7 +406,7 @@ describe('connector card: unknown tools stay fail-closed', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
-    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+    expect(card.plain_what).toBe('This is a new tool from exa. Check what it will do before you allow it.');
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');
@@ -692,7 +692,7 @@ describe('card for a call that was gated some other way', () => {
       action: connectorCall({ tool_name: 'frobnicate', params: { id: '7' } }),
       agent_intent: null,
     });
-    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+    expect(card.plain_what).toBe('This is a new tool from exa. Check what it will do before you allow it.');
     expect(card.outbound_text).toBe('id: 7');
   });
 });

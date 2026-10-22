@@ -464,6 +464,7 @@ export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-primary-bg">
       <PageHeader
+        helpAction
         title="Agents"
         end={
           <div className="w-56 shrink-0">

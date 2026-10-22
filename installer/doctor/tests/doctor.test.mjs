@@ -10,6 +10,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -195,7 +196,9 @@ describe('document and exit codes', () => {
   it('is read-only: only inspection commands reach Docker', () => {
     make();
     world.run();
-    const allowed = /^(--version|info|version|compose version|ps|port|exec|image inspect)\b/;
+    // The host report is the one write: a throwaway container that mounts an instance's data volume with no network.
+    const allowed =
+      /^(--version|info|version|compose version|ps|port|exec|image inspect|volume inspect aman_[a-z0-9-]+_data$|run --rm -i --network none -v aman_[a-z0-9-]+_data:\/data )/;
     for (const call of world.calls()) {
       assert.match(call, allowed, call);
     }
@@ -948,6 +951,20 @@ describe('doctor sandbox', () => {
     world.set('node', { rc: 1 });
     const result = world.shim(['doctor', 'sandbox']);
     assert.equal(result.code, 1);
+    assert.ok(!world.calls().some(line => line.includes('--only run_code')));
+  });
+
+  it('shows the plain safety check line the setup prints for an unhealthy slot', () => {
+    make();
+    ready();
+    world.set('node', {
+      out: 'Safety check network failed: interfaces: eth0 has a route off this computer\n',
+      rc: 1,
+    });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(result.stdout, /attestation FAILED/);
     assert.ok(!world.calls().some(line => line.includes('--only run_code')));
   });
 
@@ -2089,5 +2106,175 @@ describe('sandbox settings that are incomplete', () => {
     assert.ok(install, fixed.stdout + fixed.stderr);
     assert.ok(install.includes('--name main'));
     assert.ok(!install.includes('--yes'), install);
+  });
+});
+
+describe('the sandbox row of the plain doctor', () => {
+  const slot = (n, state, status) =>
+    world.psLine({ id: `s${n}`, name: `aman-slots-sandbox-${n}-1`, state, status, service: `sandbox-${n}` });
+  const healthySlots = () => [1, 2, 3, 4].map(n => slot(n, 'running', 'Up 2 minutes (healthy)'));
+
+  it('shows the failing safety check line of an unhealthy slot, with no instance at all', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[1] = slot(2, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s2', {
+      out: '2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer\n',
+    });
+    const result = world.json();
+    assert.equal(result.code, 1);
+    const check = machine(result, 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(check.detail, /attestation FAILED/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+    const text = world.run();
+    assert.match(text.stdout, /Safety check network failed: interfaces:/);
+  });
+
+  it('shows the safety check line of a slot that never started', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[0] = slot(1, 'exited', 'Exited (1) 2 minutes ago');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s1', {
+      out: '2026-10-10 11:57:00 attestation FAILED runsc: the sandbox runtime did not answer\n',
+    });
+    const check = machine(world.json(), 'sandbox');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /Safety check runsc failed: the sandbox runtime did not answer/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+  });
+
+  it('shows the plain failure line, word for word, for an unhealthy slot', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[2] = slot(3, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s3', {
+      out: '2026-10-10 11:58:00 attestation FAILED seccomp: Seccomp is "0"\n',
+    });
+    const check = machine(world.json(), 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.detail, 'A sandbox slot failed: Safety check seccomp failed: Seccomp is "0"');
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+    const text = world.run();
+    assert.match(text.stdout, /Safety check seccomp failed/);
+    assert.doesNotMatch(text.stdout, /attestation FAILED/);
+  });
+
+  it('is ok when every slot is running and healthy, and absent when there are no slots', () => {
+    make({ instances: [] });
+    world.set('ps', { out: `${healthySlots().join('\n')}\n`, rc: 0 });
+    const check = machine(world.json(), 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'ok');
+    world.dispose();
+    make();
+    assert.equal(machine(world.json(), 'sandbox'), undefined);
+  });
+
+  it('still fails, without inventing a reason, when an unhealthy slot logged no attestation line', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[3] = slot(4, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s4', { out: 'some other problem entirely\n' });
+    const check = machine(world.json(), 'sandbox');
+    assert.equal(check.state, 'fail');
+    assert.doesNotMatch(check.detail, /attestation FAILED/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+  });
+
+  it('records nothing when Docker cannot be reached', () => {
+    make({ instances: [] });
+    world.set('ps', { out: `${healthySlots().join('\n')}\n`, rc: 0 });
+    world.set('info', { err: 'Cannot connect to the Docker daemon', rc: 1 });
+    assert.equal(machine(world.json(), 'sandbox'), undefined);
+  });
+});
+
+describe('backup with no instances', () => {
+  function noInstances(mode, ageDays) {
+    make({ instances: [] });
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    if (mode !== null) {
+      writeFileSync(path.join(world.home, 'state', 'backups'), `${mode}\n`);
+    }
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261007T030000Z', ageDays);
+  }
+
+  it('passes quietly in the report, whatever the mode or the age of the last backup', () => {
+    noInstances('daily', 3);
+    let result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(machine(result, 'backup'), {
+      id: 'backup',
+      state: 'ok',
+      detail: 'No instances yet; nothing to back up.',
+      fix: '',
+    });
+    world.dispose();
+    noInstances('off', 20);
+    assert.equal(machine(world.json(), 'backup').state, 'ok');
+    world.dispose();
+    noInstances(null, 9);
+    assert.equal(machine(world.json(), 'backup').state, 'ok');
+  });
+
+  it('doctor backup shows no warning, and --fix neither repeats one nor calls the installer', () => {
+    noInstances('daily', 3);
+    world.installerStub(world.sandbox());
+    const shown = world.shim(['doctor', 'backup']);
+    assert.equal(shown.code, 0, shown.stdout + shown.stderr);
+    assert.doesNotMatch(shown.stdout, /days old/);
+    assert.match(shown.stdout, /No instances yet; nothing to back up\./);
+    const fixed = world.shim(['doctor', 'backup', '--fix']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.doesNotMatch(fixed.stdout, /days old/);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('still warns when an instance exists', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'backups'), 'daily\n');
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261005T030000Z', 5);
+    assert.equal(machine(world.json(), 'backup').state, 'warn');
+  });
+});
+
+describe('the daily backup warning', () => {
+  it('names the newest backup in its own clause, with the home folder shown as ~', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'backups'), 'daily\n');
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261005T030000Z', 5);
+    const check = machine(world.json(), 'backup');
+    assert.equal(check.state, 'warn');
+    assert.equal(
+      check.detail,
+      'Daily backups are scheduled, but the last one is 5 days old. The newest backup is in ~/home/backups/20261005T030000Z.',
+    );
+    assert.equal(check.fix, 'Run aman doctor backup --fix');
+  });
+
+  it('still says none has been made yet when there is no backup', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    const modeFile = path.join(world.home, 'state', 'backups');
+    writeFileSync(modeFile, 'daily\n');
+    const old = world.now - 3 * 86400;
+    utimesSync(modeFile, old, old);
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    const check = machine(world.json(), 'backup');
+    assert.equal(check.state, 'warn');
+    assert.equal(check.detail, 'Daily backups are scheduled, but none has been made yet.');
   });
 });

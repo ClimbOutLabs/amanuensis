@@ -2,12 +2,7 @@
 
 import type { FC } from 'react';
 
-import type { SentinelApprovalCalendarAction, SentinelApprovalCalendarEvent } from './types.js';
-
-export const CALENDAR_BADGES: Record<SentinelApprovalCalendarAction, string> = {
-  create: 'Add event',
-  change: 'Change event',
-};
+import type { SentinelApprovalCalendarEvent } from './types.js';
 
 function Line({ label, value }: { label: string; value: string }) {
   return (

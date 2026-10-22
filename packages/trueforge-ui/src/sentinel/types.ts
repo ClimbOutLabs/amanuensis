@@ -62,6 +62,8 @@ export type SentinelApprovalEmail = {
   replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
   reply_in_thread: { subject: string; from: string } | null;
+  /** The address replies go to when it is not the sender, or null when replies go to the sender. */
+  reply_to: string | null;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -148,6 +150,8 @@ export type SentinelApprovalCard = {
   schedule: SentinelApprovalSchedule | null;
   /** The whole specialist when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
+  /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
+  mail_new_recipients?: string[] | null;
 };
 
 /** The whole specialist a chat call adds, in plain words. */
@@ -164,8 +168,6 @@ export type SentinelApprovalPersona = {
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
 export type HeldActionInfo = {
-  /** Whether "Always allow" may be offered; the server refuses it for other tools. */
-  alwaysAllowOffered: boolean;
   /** ISO time after which the held action can no longer be approved, or null when not sent. */
   expiresAt: string | null;
 };
@@ -181,6 +183,8 @@ export type SentinelApprovalInfo = {
   threadId: string | null;
   /** False when the server refuses chat scope for this call; absent from servers that do not say. */
   chatAllowOffered?: boolean | undefined;
+  /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
+  alwaysAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -197,27 +201,33 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
-/** Plain-word outcome labels for the owner. `logged` covers held actions and noted sensitive reads. */
+/** The one owner of the words for a call that ran because the person's settings allow it. */
+export const ALLOWED_BY_SETTINGS_LABEL = 'Done · allowed by your settings';
+
+/** The one owner of the words for a call held for the person's OK. */
+export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
+
+/**
+ * Plain-word outcome labels for the owner. `logged` is shared by two kinds of row, so a row's own
+ * label comes from `sentinelAuditLabel`; this entry names the outcome in the filter.
+ */
 export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
-  logged: 'Held or noted',
+  logged: 'Allowed by your settings, or waiting for you',
   ran: 'Ran',
   approved: 'Approved',
   denied: 'Denied',
   auto_denied: 'Refused',
 };
 
-/** Plain words for the machine reasons a call can be refused without asking. */
-export const SENTINEL_AUDIT_REASON_LABELS: Record<string, string> = {
-  destination_unverifiable: 'Aman could not check where it would go',
-  incomplete_send_card: 'the card was missing details Aman needs to check it',
-  offline_mode: 'Offline mode is on',
-  outbound_guard: 'it carries something that must not leave this computer',
-  unattended_run: 'no one was there to ask',
-};
-
-/** The reason an audit row shows: plain words for a known machine reason, the text itself otherwise. */
-export function plainAuditReason(reason: string): string {
-  return SENTINEL_AUDIT_REASON_LABELS[reason] ?? reason;
+/**
+ * The label for one audit row. A `logged` row is a Tier 1 call that ran under the person's settings,
+ * or a Tier 2 or Tier 3 call waiting for them; only the stored tier tells them apart.
+ */
+export function sentinelAuditLabel(entry: Pick<SentinelAuditEntry, 'outcome' | 'tier'>): string {
+  if (entry.outcome === 'logged') {
+    return entry.tier === 1 ? ALLOWED_BY_SETTINGS_LABEL : WAITING_FOR_YOU_LABEL;
+  }
+  return SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome];
 }
 
 function parseAuditOutcome(value: unknown): SentinelAuditOutcome | undefined {
@@ -265,6 +275,8 @@ export type SentinelUserSettings = {
   search_without_asking: boolean;
   /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
   maps_without_asking: boolean;
+  /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
+  sandbox_without_asking: boolean;
 };
 
 /**
@@ -402,6 +414,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
+  // A card from before this field existed has no reply address, so it replies to the sender as it did then.
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
   return {
     action,
     to,
@@ -413,6 +427,7 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
+    reply_to: replyTo,
   };
 }
 
@@ -532,7 +547,15 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
+    mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
   });
+}
+
+/** The addresses a send would add to the Email list, or null when there are none to read. */
+function parseNewRecipients(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const addresses = value.filter((item): item is string => typeof item === 'string');
+  return addresses.length === 0 ? null : addresses;
 }
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
@@ -544,7 +567,6 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
 function parseHeldInfo(ref: Record<string, unknown>): HeldActionInfo | undefined {
   if (ref.held !== true) return undefined;
   return {
-    alwaysAllowOffered: ref.can_always_allow === true || ref.canAlwaysAllow === true,
     expiresAt: nullableString(ref, 'expires_at') ?? nullableString(ref, 'expiresAt'),
   };
 }
@@ -565,12 +587,14 @@ function parseApprovalInfo(
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
+  const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
+    ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -714,12 +738,19 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
   if (!isRecord(settings)) {
-    return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true, maps_without_asking: false };
+    return {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    };
   }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }

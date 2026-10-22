@@ -98,7 +98,13 @@ function mcpAction(tool_name: string, canonical_params: Record<string, unknown>)
 
 function trackScript(ctx: ClassifyContext, file_identity: string): void {
   ctx.services.tracked_store.track({
-    scope: { tenant_id: 't1', created_by: 'u1', repository_id: 'r1', workspace_cwd: ctx.workspace_cwd },
+    scope: {
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: ctx.conversation_id,
+      repository_id: 'r1',
+      workspace_cwd: ctx.workspace_cwd,
+    },
     file_identity,
   });
 }
@@ -778,6 +784,7 @@ describe('Suite D - approval token integrity', () => {
 
       // A new conversation must not inherit the grant.
       const ctx2 = makeCtx({ services: ctx1.services, workspace_cwd: dir, conversation_id: 'conv-2' });
+      trackScript(ctx2, script);
       const again = await classifyTier(action('exec', params), ctx2);
       expect(again.tier).toBe(3);
       expect(again.reason).toBe('tracked_executable_unapproved');

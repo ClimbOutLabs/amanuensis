@@ -156,7 +156,7 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+      expect(info.tier3_card?.plain_what).toBe("This is a new tool from misc. Check what it will do before you allow it.");
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }

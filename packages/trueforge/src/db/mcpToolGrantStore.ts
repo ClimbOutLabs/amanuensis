@@ -1,4 +1,4 @@
-import type { ToolGrantKey, ToolGrantStore } from '@truefoundry/trueforge-core/core';
+import type { ToolGrantIdentity, ToolGrantStore } from '@truefoundry/trueforge-core/core';
 
 import type { McpToolGrant } from '../schemas/mcpServer';
 
@@ -21,7 +21,7 @@ export interface IMcpToolGrantStore<TTransaction = never> extends ToolGrantStore
   /** The user's grants on one connector, oldest first. */
   listToolGrants(input: ListMcpToolGrantsInput): Promise<McpToolGrant[]>;
   /** Removes one grant; a no-op when none exists. */
-  revokeToolGrant(key: ToolGrantKey): Promise<void>;
+  revokeToolGrant(key: ToolGrantIdentity): Promise<void>;
   /** Removes every user's grants on one connector. */
   revokeServerToolGrants(input: RevokeServerToolGrantsInput, transaction?: TTransaction): Promise<void>;
 }

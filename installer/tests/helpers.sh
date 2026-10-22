@@ -162,10 +162,11 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/calendar-sidecar/Dockerfile"
   (
     cd "$1"
     git init -q .

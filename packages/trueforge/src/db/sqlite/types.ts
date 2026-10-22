@@ -198,6 +198,8 @@ export interface SentinelUserSettingsTable {
   search_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   maps_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  sandbox_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -250,6 +252,14 @@ export interface ChatImageTable {
   created_at: string;
 }
 
+/** A cleared card whose request ended; never runs. PRIMARY KEY (session_id, thread_id, tool_call_id). */
+export interface ApprovalDismissalTable {
+  session_id: string;
+  thread_id: string;
+  tool_call_id: string;
+  dismissed_at: string;
+}
+
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
 /** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
@@ -257,6 +267,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Connector host the grant was given for; null for a connector with no URL. */
+  mcp_server_host: string | null;
   created_at: string;
 }
 
@@ -775,6 +787,7 @@ export interface Database {
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
+  approval_dismissal: ApprovalDismissalTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

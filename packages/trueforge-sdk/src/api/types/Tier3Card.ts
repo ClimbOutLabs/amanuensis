@@ -13,12 +13,15 @@ export interface Tier3Card {
     /** Host of the connector server that receives the call, or null when it is not a remote server. */
     destinationHost: string | null;
     email?: TrueForge.Tier3Email | null;
+    /** For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null. */
+    mailNewRecipients?: string[] | null;
     /** Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker. */
     outboundText: string | null;
     /** True when part of outbound_text is cut and not shown in full. */
     outboundTruncated: boolean;
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
+    persona?: TrueForge.Tier3Persona | null;
     /** One plain-language sentence describing what will happen. No jargon. */
     plainWhat: string;
     /** One sentence on why the agent wants this, from agent intent when available. */

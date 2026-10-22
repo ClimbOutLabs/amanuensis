@@ -102,13 +102,17 @@ describe('docker-compose.slots.yml', () => {
   });
 });
 
-/** The installer's instance template with the sandbox on and no https front end of either kind, for an instance named main. */
-function renderInstanceTemplate(): unknown {
+/**
+ * The installer's instance template with the sandbox on and no https front end of either kind, for an instance named
+ * main. The calendar connector block is kept only when `calendar` is true, as the installer keeps or drops it.
+ */
+function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
   const text = readFileSync(resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'), 'utf8');
   const rendered = text
     .split('\n')
     .filter(line => !line.startsWith('@@IF_EDGE@@') && !line.startsWith('@@IF_TLS@@'))
-    .map(line => line.replace('@@IF_SANDBOX@@', ''))
+    .filter(line => calendar || !line.startsWith('@@IF_CALENDAR@@'))
+    .map(line => line.replace('@@IF_SANDBOX@@', '').replace('@@IF_CALENDAR@@', ''))
     .join('\n')
     .replace(/@@NAME@@/g, 'main')
     .replace('@@APP_PORTS@@', "      - '127.0.0.1:1:8790'")
@@ -127,7 +131,7 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
       }),
       volumes: z.record(z.string(), z.object({ name: z.string(), external: z.boolean().optional() })),
     })
-    .parse(renderInstanceTemplate());
+    .parse(renderInstanceTemplate({ calendar: false }));
 
   test('switches the app to the slot backend and mounts each control volume read-only, with no socket', () => {
     expect(app.services.app.environment).toMatchObject({
@@ -172,5 +176,30 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
     expect(readFileSync(resolve(REPO_ROOT, 'installer/lib/sandbox.sh'), 'utf8')).toContain(
       `SLOT_IMAGE=${service.image}`,
     );
+  });
+});
+
+describe('installer/templates/instance/compose.yaml.tpl calendar connector', () => {
+  const services = (calendar: boolean) =>
+    z.object({ services: z.record(z.string(), z.unknown()) }).parse(renderInstanceTemplate({ calendar })).services;
+
+  test('renders without the connector when the calendar is off, and with it when on, and both parse', () => {
+    expect(Object.keys(services(false))).not.toContain('calendar-caldav');
+    expect(Object.keys(services(true))).toEqual(expect.arrayContaining(['app', 'dex', 'calendar-caldav']));
+  });
+
+  test('the connector is never published and runs with the hardening the other services use', () => {
+    const connector = z
+      .object({
+        expose: z.array(z.string()),
+        cap_drop: z.array(z.string()),
+        security_opt: z.array(z.string()),
+        restart: z.literal('unless-stopped'),
+        ports: z.never().optional(),
+      })
+      .parse(services(true)['calendar-caldav']);
+    expect(connector.expose).toEqual(['9558']);
+    expect(connector.cap_drop).toEqual(['ALL']);
+    expect(connector.security_opt).toEqual(['no-new-privileges:true']);
   });
 });

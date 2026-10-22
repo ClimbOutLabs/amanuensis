@@ -21,6 +21,7 @@ import type {
   AppendCommandExecutionStartedInput,
   AppendToEventsInput,
   AppendToThreadContextInput,
+  ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
   CommandExecutionRecord,
@@ -40,6 +41,7 @@ import type {
   GetTurnInput,
   ImplementationPlanTurnOwner,
   ISessionStore,
+  ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -52,6 +54,7 @@ import type {
   PatchSandboxInfoInput,
   PatchThreadCapabilityStateInput,
   PersistImplementationPlanGrantInput,
+  RecordApprovalDismissalInput,
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
@@ -263,6 +266,7 @@ export class InMemorySessionStore<
   private readonly commandExecutions = new Map<string, CommandExecutionRecord>();
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
+  private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
     const key = sessionKey(input.session_id);
@@ -345,6 +349,7 @@ export class InMemorySessionStore<
       }
     }
     this.implementationPlanGrants.delete(sKey);
+    this.approvalDismissals.delete(sKey);
     for (const [dispatchKey, dispatch] of this.implementationPlanDispatches) {
       if (dispatch.session_id === input.session_id) {
         this.implementationPlanDispatches.delete(dispatchKey);
@@ -646,6 +651,26 @@ export class InMemorySessionStore<
         session.record.folder_id = null;
       }
     }
+  }
+
+  async recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void> {
+    const sKey = sessionKey(input.session_id);
+    const dismissals = this.approvalDismissals.get(sKey) ?? new Map<string, ApprovalDismissalRecord>();
+    const key = `${input.thread_id}\u0000${input.tool_call_id}`;
+    if (!dismissals.has(key)) {
+      dismissals.set(key, {
+        thread_id: input.thread_id,
+        tool_call_id: input.tool_call_id,
+        dismissed_at: input.dismissed_at,
+      });
+    }
+    this.approvalDismissals.set(sKey, dismissals);
+  }
+
+  async listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
+    return [...(this.approvalDismissals.get(sessionKey(input.session_id))?.values() ?? [])].map(record => ({
+      ...record,
+    }));
   }
 
   async setSessionFolder(input: SetSessionFolderInput): Promise<void> {

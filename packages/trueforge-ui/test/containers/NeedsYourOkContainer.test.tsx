@@ -16,6 +16,7 @@ const { answerHeldAction, reload, server } = vi.hoisted(() => {
     value: {
       peekSessionTip: vi.fn(),
       dismissPendingApprovals: vi.fn(),
+      dismissEndedApproval: vi.fn(),
       answerHeldAction: answer,
       getLastCompactionStatus: vi.fn(),
       getLastTurnInputTokens: vi.fn(),
@@ -64,6 +65,7 @@ const MAIL: NonNullable<SentinelApprovalCard['email']> = {
   body: 'Lunch at noon?',
   replaces: null,
   reply_in_thread: null,
+  reply_to: null,
 };
 
 function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
@@ -112,7 +114,7 @@ function renderBrief(
       threadId: 'main',
       ...(input.heldCards === false
         ? { notSaved: 'too_many' as const }
-        : { held: { alwaysAllowOffered: input.alwaysAllowOffered ?? false, expiresAt: input.expiresAt ?? null } }),
+        : { held: { expiresAt: input.expiresAt ?? null }, alwaysAllowOffered: input.alwaysAllowOffered ?? false }),
     });
     for (let index = 0; index < (input.notSaved ?? 0); index += 1) {
       publishSentinelEvent({
@@ -188,7 +190,8 @@ describe('NeedsYourOkContainer', () => {
   it('sends Always allow only where the server offered it', async () => {
     answerHeldAction.mockResolvedValue(undefined);
     renderBrief({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
     await waitFor(() => {
       expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'always_allow' }));
     });

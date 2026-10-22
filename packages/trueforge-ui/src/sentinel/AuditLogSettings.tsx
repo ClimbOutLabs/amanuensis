@@ -12,6 +12,7 @@ import { outcomeTone } from './SentinelAuditFeed.js';
 import {
   SENTINEL_AUDIT_OUTCOME_LABELS,
   SENTINEL_AUDIT_OUTCOMES,
+  sentinelAuditLabel,
   type SentinelAuditOutcome,
   type SentinelUserAuditEntry,
 } from './types.js';
@@ -41,9 +42,7 @@ const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> =
       <time dateTime={entry.created_at} className="text-xs text-text-secondary">
         {whenLabel(entry.created_at)}
       </time>
-      <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>
-        {SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome]}
-      </span>
+      <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>{sentinelAuditLabel(entry)}</span>
     </div>
     <p className="text-sm text-text-primary">{entry.description}</p>
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">

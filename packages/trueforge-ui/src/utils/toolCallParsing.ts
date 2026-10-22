@@ -6,7 +6,7 @@ import {
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
-import type { MapCardData, MapPin, MapPlace } from '../components/MapCard.js';
+import type { MapCardData, MapPin, MapPlace, MapRefusedPlace } from '../components/MapCard.js';
 import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 import { parseTier2ActionKind, TIER2_ACTION_LABELS } from '../sentinel/types.js';
 import { humanizeToolName } from './activityFeed.js';
@@ -672,9 +672,11 @@ export function plainActionTypeLabel(actionType: string): string {
 }
 
 export interface ParsedMapsResult {
-  state: 'ready' | 'blocked' | 'unavailable';
+  /** `refused`: every place failed the page check, so no card renders; the step shows the reasons. */
+  state: 'ready' | 'blocked' | 'unavailable' | 'refused';
   data: MapCardData | null;
   blockedMessage?: string;
+  refused?: MapRefusedPlace[];
 }
 
 /**
@@ -759,7 +761,7 @@ function parsePlace(value: unknown): MapPlace | undefined {
 }
 
 /** The places a pin call refused, as written by the server: a name and a plain reason each. */
-function parseRefusedPlaces(body: Record<string, unknown>): { name: string; reason: string }[] {
+function parseRefusedPlaces(body: Record<string, unknown>): MapRefusedPlace[] {
   if (!Array.isArray(body.refused)) {
     return [];
   }
@@ -821,16 +823,7 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'The time for the trip could not be understood.' };
     }
     if (code === 'not_grounded') {
-      const refused = parseRefusedPlaces(body);
-      const names = refused.slice(0, 3).map(place => place.name);
-      return {
-        state: 'unavailable',
-        data: null,
-        blockedMessage:
-          names.length === 0
-            ? 'The details could not be checked against the pages Aman read, so no places were pinned.'
-            : `The details could not be checked against the pages Aman read, so no places were pinned. Left out: ${names.join(', ')}. Check each name and address against its page, then try again.`,
-      };
+      return { state: 'refused', data: null, refused: parseRefusedPlaces(body) };
     }
     if (code === 'rate_limited') {
       return {

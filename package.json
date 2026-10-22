@@ -7,7 +7,7 @@
     "node": ">=22.14.0"
   },
   "scripts": {
-    "build": "pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
+    "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
     "build:dev-image": "docker build -f Dockerfile.dev --build-arg BUILD_REF=\"$(git rev-parse HEAD)\" -t aman:dev .",
     "chart:deps": "helm dependency build charts/trueforge",
     "chart:lint": "helm lint charts/trueforge --values charts/trueforge/ci/lint-values.yaml",
@@ -22,6 +22,7 @@
     "dev:no-watch": "cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge --filter frontend dev:no-watch",
     "dev:server:ui": "pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build:frontend-assets && cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge-core --filter @truefoundry/trueforge dev",
     "dev": "cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge-core --filter @truefoundry/trueforge --filter frontend dev",
+    "guide:build": "node scripts/build-aman-guide.mjs",
     "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\" --cache --cache-location .prettiercache --cache-strategy content --error-on-unmatched-pattern --config .prettierrc",
     "format:check:files": "prettier --check --ignore-unknown --config .prettierrc --",
     "format:fix": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\" --cache --cache-location .prettiercache --cache-strategy content --config .prettierrc",
@@ -60,6 +61,7 @@
     "push-sandbox-image-to-daytona": "pnpm --filter @truefoundry/trueforge push-sandbox-image-to-daytona",
     "test:frontend": "pnpm --filter frontend test",
     "test:trueforge-sdk": "pnpm --filter @truefoundry/trueforge-sdk test:wire",
+    "test:aman-guide": "node --test tests/aman-guide-build.test.mjs",
     "test:chart-version": "bash tests/scripts/resolve-chart-version.test.sh",
     "test:installer": "bash installer/tests/run.sh",
     "test:installer-image": "bash installer/tests/image-runtime.sh",
@@ -76,6 +78,7 @@
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs tests/slots-live.test.mjs",
     "test:slots-live": "node scripts/slots-live.mjs",
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs installer/tests/qr.test.mjs installer/tests/pki.test.mjs",
+    "test:calendar-sidecar": "npm --prefix ops/calendar-sidecar ci --ignore-scripts && npm --prefix ops/calendar-sidecar test",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
     "smoke:local-sandbox:lima": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox:lima",
     "smoke:tokenfactory": "pnpm --filter @truefoundry/trueforge smoke:tokenfactory",
@@ -83,7 +86,7 @@
     "test:store:postgres": "pnpm --filter @truefoundry/trueforge test:store:postgres",
     "test:store:sqlite": "pnpm --filter @truefoundry/trueforge test:store:sqlite",
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
-    "test": "pnpm test:trueforge-core && pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
+    "test": "pnpm test:aman-guide && pnpm test:trueforge-core &&pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
     "typecheck": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
     "version": "node scripts/version.mjs"

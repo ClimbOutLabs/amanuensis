@@ -2,6 +2,10 @@
  * An unattended run holds every call that would ask, finishes everything else, and the owner's later
  * answer runs exactly the stored call once, with no model call.
  */
+import {
+  NEW_RECIPIENT_REFUSED,
+  SEND_LIST_STILL_UPDATING,
+} from '../../../src/core/email/mailConnector/sendListApproval';
 import { InvalidAgentSendInputError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
@@ -16,6 +20,8 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
+import { changeRequestReason } from '../../../src/core/permissions/changeRequest';
+import type { MailAddRecipientsResult } from '../../../src/core/permissions/context';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadConstructorInput } from '../../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
@@ -61,48 +67,66 @@ async function* toolCallsStream(
 
 type CallToolMock = jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>;
 
-function makeSource(callTool: CallToolMock): ToolSource {
+/** The Email connector's name; the classifier checks new recipients only on a call from this server. */
+const MAIL_SERVER = 'Email';
+
+function makeSource(callTool: CallToolMock, serverName = 'mail', clashingSend = false): ToolSource {
   const schema = { type: 'object' as const, properties: {} };
+  // A second tool with the same name registers as `send_email1`, the name the model sees after a clash.
+  const sendTool = { name: 'send_email', description: 'Send an email', inputSchema: schema, preload: true };
+  const tools =
+    serverName === MAIL_SERVER
+      ? clashingSend
+        ? [sendTool, sendTool]
+        : [sendTool]
+      : [
+          { name: 'send_note', description: 'Send a note', inputSchema: schema, preload: true },
+          {
+            name: 'web_search',
+            description: 'Search the web',
+            inputSchema: schema,
+            annotations: { readOnlyHint: true, openWorldHint: true },
+            preload: true,
+          },
+          {
+            name: 'read_note',
+            description: 'Read a note',
+            inputSchema: schema,
+            annotations: { readOnlyHint: true, openWorldHint: false },
+            preload: true,
+          },
+          {
+            name: 'get_attachment',
+            description: 'Read an attachment',
+            inputSchema: schema,
+            preload: true,
+          },
+        ];
   return {
-    name: 'mail',
-    id: 'mail',
-    listTools: () =>
-      Promise.resolve({
-        result: {
-          tools: [
-            { name: 'send_note', description: 'Send a note', inputSchema: schema, preload: true },
-            {
-              name: 'web_search',
-              description: 'Search the web',
-              inputSchema: schema,
-              annotations: { readOnlyHint: true, openWorldHint: true },
-              preload: true,
-            },
-            {
-              name: 'read_note',
-              description: 'Read a note',
-              inputSchema: schema,
-              annotations: { readOnlyHint: true, openWorldHint: false },
-              preload: true,
-            },
-          ],
-        },
-        wasInitialized: undefined,
-      }),
+    name: serverName,
+    id: serverName,
+    listTools: () => Promise.resolve({ result: { tools }, wasInitialized: undefined }),
     callTool,
     toolCallInfo: params =>
       Promise.resolve({
         type: 'mcp',
-        mcp_server_id: 'mail',
-        mcp_server_name: 'mail',
+        mcp_server_id: serverName,
+        mcp_server_name: serverName,
         original_tool_name: params.name,
       }),
   };
 }
 
+type MailAddMock = jest.Mock<
+  ReturnType<SentinelServices['mail_add_recipients']>,
+  Parameters<SentinelServices['mail_add_recipients']>
+>;
+
 interface Harness {
   base: SentinelServices;
   callTool: CallToolMock;
+  mailAdd: MailAddMock;
+  mailLoaded: jest.Mock<Promise<'loaded' | 'not_loaded'>, unknown[]>;
   audit: AuditRecordInput[];
   llmCreate: jest.Mock;
   build: (input: {
@@ -115,9 +139,19 @@ interface Harness {
 
 function makeHarness(
   script: (() => ReturnType<typeof textReplyStream>)[],
-  options: { searchProviderAsks?: boolean; searchProvider?: boolean; secrets?: readonly string[] } = {},
+  options: {
+    searchProviderAsks?: boolean;
+    searchProvider?: boolean;
+    secrets?: readonly string[];
+    /** Sends go through the Email connector; `listed` is the Email list and `add` answers each add. */
+    mail?: { listed: readonly string[]; add: MailAddRecipientsResult; clash?: boolean };
+  } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
+  const mailAdd: MailAddMock = jest.fn<ReturnType<MailAddMock>, Parameters<MailAddMock>>(() =>
+    Promise.resolve(options.mail?.add ?? 'loaded'),
+  );
+  const mailLoaded = jest.fn<Promise<'loaded' | 'not_loaded'>, unknown[]>(() => Promise.resolve('loaded'));
   const base: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     audit: {
@@ -128,6 +162,9 @@ function makeHarness(
     },
     searchWithoutAsking: () => Promise.resolve(options.searchProviderAsks !== true),
     outboundSecrets: () => Promise.resolve(options.secrets ?? []),
+    mail_listed_addresses: () => Promise.resolve(options.mail?.listed ?? []),
+    mail_add_recipients: mailAdd,
+    mail_list_loaded: mailLoaded,
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -141,12 +178,14 @@ function makeHarness(
     base,
     audit,
     callTool,
+    mailAdd,
+    mailLoaded,
     llmCreate,
     build: input => {
       const services = input.unattended ? forUnattendedRun(base) : base;
       const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1', services });
       const toolSet = new ToolSet({
-        source: makeSource(callTool),
+        source: makeSource(callTool, options.mail === undefined ? 'mail' : MAIL_SERVER, options.mail?.clash === true),
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
@@ -243,7 +282,7 @@ describe('an unattended run', () => {
     // The run's last message names what it held, so the owner knows to look at the list.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: Aman doesn't know this tool yet: send_note. Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: This is a new tool from mail. Check what it will do before you allow it. Approve it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
@@ -272,7 +311,12 @@ describe('an unattended run', () => {
 
   it('still runs a read-only tool the owner always allowed, silently', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -349,6 +393,60 @@ describe('an unattended run', () => {
       sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Send it now' }],
     });
     expect(turn.result.required_actions).toMatchObject([{ type: EventType.TOOL_APPROVAL_REQUIRED }]);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('an attended annotated read of a secret path', () => {
+  const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+
+  it('is asked for once, never offered chat scope, and refused a chat-wide approval', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { orchestrator, thread } = h.build({ unattended: false });
+    const asked = await runTurn({
+      orchestrator,
+      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Read my key' }],
+    });
+    expect(asked.result.required_actions).toMatchObject([{ type: EventType.TOOL_APPROVAL_REQUIRED }]);
+    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', can_chat_allow: false, can_always_allow: false }],
+    });
+
+    const refused = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: refused.orchestrator, sendBatch: [approve('call-secret', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    const once = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: once.orchestrator, sendBatch: [approve('call-secret')] });
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an unannotated connector read of a secret path in any argument', () => {
+  const secretRead = {
+    id: 'call-attachment',
+    name: 'get_attachment',
+    args: JSON.stringify({ attachment_path: '/home/u/.ssh/id_rsa' }),
+  };
+
+  it('is never offered chat scope or Always allow, and refused both', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-attachment', held: true, can_always_allow: false }],
+    });
+
+    const chat = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: chat.orchestrator, sendBatch: [approve('call-attachment', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+
+    const always = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: always.orchestrator, sendBatch: [approve('call-attachment', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
     expect(h.callTool).not.toHaveBeenCalled();
   });
 });
@@ -508,7 +606,7 @@ describe('approving a held action later', () => {
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', mcp_server_host: null };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -520,6 +618,21 @@ describe('approving a held action later', () => {
     expect(h.audit.at(-1)).toMatchObject({ outcome: 'approved' });
   });
 
+  it('does not offer or accept Always allow for an annotated read of a secret path', async () => {
+    const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', held: true, can_always_allow: false }],
+    });
+
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-secret', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
   it('does not offer a chat-wide approval on a held action', async () => {
     const h = makeHarness([() => toolCallsStream([sendNoteCall])]);
     const context = await heldBrief(h);
@@ -527,6 +640,160 @@ describe('approving a held action later', () => {
     await expect(
       runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send', 'chat')] }),
     ).rejects.toThrow('chat-scoped approval is not available');
+  });
+});
+
+describe('approving a held mail send to an address not on the Email list', () => {
+  const MAIL_SEND_ARGS = { recipients: ['dana@example.com', 'Stranger@Example.net'], subject: 'Lunch', body: 'Noon?' };
+  const mailSendCall: CallSpec = { id: 'call-mail', name: 'send_email', args: JSON.stringify(MAIL_SEND_ARGS) };
+
+  function deny(callId: string, reason?: string) {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: callId,
+      approval: { status: 'deny' as const, ...(reason === undefined ? {} : { reason }) },
+    };
+  }
+
+  /** The unattended run holds the send; the harness then answers it. */
+  async function heldSend(listed: readonly string[], options: { call?: CallSpec; clash?: boolean } = {}) {
+    const h = makeHarness([() => toolCallsStream([options.call ?? mailSendCall])], {
+      mail: { listed, add: 'loaded', clash: options.clash === true },
+    });
+    const { thread } = await runBrief(h);
+    return { h, context: heldContext(thread) };
+  }
+
+  function answer(
+    h: Harness,
+    context: ReturnType<typeof heldContext>,
+    sendBatch: Parameters<typeof runTurn>[0]['sendBatch'],
+  ) {
+    const replay = h.build({ unattended: false, context, stopAfterToolResponse: true });
+    return runTurn({ orchestrator: replay.orchestrator, sendBatch });
+  }
+
+  it('adds exactly the new address the card named, then sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    await answer(h, context, [approve('call-mail')]);
+
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'send_email', arguments: MAIL_SEND_ARGS },
+      expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
+    );
+  });
+
+  it('a send under a clashing name adds the addresses on its card, then sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, name: 'send_email1' },
+      clash: true,
+    });
+    await answer(h, context, [approve('call-mail')]);
+
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'send_email', arguments: MAIL_SEND_ARGS },
+      expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
+    );
+  });
+
+  it('Cancel adds nothing and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    await answer(h, context, [deny('call-mail')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('Change it adds nothing and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    await answer(h, context, [deny('call-mail', changeRequestReason('save it as a draft'))]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('keeps the draft with a plain message when the sidecar has not loaded the list in time', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    // The refused answer was not recorded, so the same card can still be approved.
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry after the sidecar did not load the list waits for it again before it sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry waits for the sidecar again once the list shows the address, and sends only when it loads', async () => {
+    // Each add writes the address to the list, as the real server does, before the sidecar has loaded it.
+    const listed = ['dana@example.com'];
+    const { h, context } = await heldSend(listed);
+    const answers: MailAddRecipientsResult[] = ['not_loaded', 'not_loaded', 'loaded'];
+    h.mailAdd.mockImplementation((_ctx, addresses) => {
+      listed.push(...addresses);
+      return Promise.resolve(answers.shift() ?? 'loaded');
+    });
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.mailAdd).toHaveBeenCalledTimes(3);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('an approved send with only known addresses waits for the list, keeps the draft, and sends nothing while it is not loaded', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, args: JSON.stringify({ ...MAIL_SEND_ARGS, recipients: ['dana@example.com'] }) },
+    });
+    h.mailLoaded.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailLoaded).toHaveBeenCalledTimes(1);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the draft with a plain message when the address is refused, and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('refused');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(NEW_RECIPIENT_REFUSED);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('refuses a chat-wide approval for it, so nothing is added or sent', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+
+    await expect(answer(h, context, [approve('call-mail', 'chat')])).rejects.toBeInstanceOf(InvalidAgentSendInputError);
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
   });
 });
 
@@ -717,7 +984,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: '{}',
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -752,7 +1024,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(20);
@@ -767,7 +1044,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).not.toHaveBeenCalled();

@@ -113,7 +113,7 @@ export function ToolCallCard({
       className={cn(
         'aui-tool-call-card flex min-w-0 flex-col transition-shadow duration-300',
         highlightCard ? 'rounded-md p-1 -mx-1' : 'mx-0 mt-2 p-0',
-        isFlashing && 'rounded-md ring-2 ring-approval-banner-accent ring-offset-2 ring-offset-transparent',
+        isFlashing && 'rounded-md ring-2 ring-gold-ink ring-offset-2 ring-offset-transparent',
         className,
       )}
       data-testid={dataTestPrefix ? `${dataTestPrefix}-tool-call-card` : undefined}

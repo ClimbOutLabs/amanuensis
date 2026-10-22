@@ -13,6 +13,7 @@ import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
+import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsMutable, useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -66,6 +67,7 @@ export function DrawerLayout({ className }: { className?: string }) {
 
   return (
     <div className={cn('relative flex h-full min-h-0 w-full bg-primary-bg', className)}>
+      <HelpNewChatBridge />
       {showAgentConfig ? (
         <aside
           role="dialog"
@@ -79,6 +81,7 @@ export function DrawerLayout({ className }: { className?: string }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Keep ShellActions mounted across Settings open/close so host action-slot state persists. */}
         <PageHeader
+          helpAction
           className="bg-topbar-bg"
           title={
             !overlayOpen ? (

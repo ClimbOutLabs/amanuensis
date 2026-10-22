@@ -403,7 +403,13 @@ describe('classifyTier tracked executables', () => {
       writeFileSync(script, '#!/bin/sh\necho hi\n');
       const ctx = makeCtx({ workspace_cwd: dir });
       ctx.services.tracked_store.track({
-        scope: { tenant_id: 't1', created_by: 'u1', repository_id: 'r1', workspace_cwd: dir },
+        scope: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: 'r1',
+          workspace_cwd: dir,
+        },
         file_identity: script,
       });
       const decision = await classifyTier(action('exec', { command: 'sh tool.sh', cwd: dir }), ctx);
@@ -444,18 +450,20 @@ describe('classifyTier external services', () => {
 
 /** A grant store the test can revoke from, keyed exactly like the server store. */
 class RevocableGrantStore implements ToolGrantStore {
-  private readonly grants = new Set<string>();
+  /** Grant identity to the connector host it was recorded for. */
+  private readonly grants = new Map<string, string | null>();
 
   private static id(key: ToolGrantKey): string {
     return JSON.stringify([key.tenant_id, key.created_by, key.mcp_server_name, key.tool_name]);
   }
 
   hasToolGrant(key: ToolGrantKey): Promise<boolean> {
-    return Promise.resolve(this.grants.has(RevocableGrantStore.id(key)));
+    const id = RevocableGrantStore.id(key);
+    return Promise.resolve(this.grants.has(id) && this.grants.get(id) === key.mcp_server_host);
   }
 
   recordToolGrant(key: ToolGrantKey): Promise<void> {
-    this.grants.add(RevocableGrantStore.id(key));
+    this.grants.set(RevocableGrantStore.id(key), key.mcp_server_host);
     return Promise.resolve();
   }
 
@@ -471,11 +479,13 @@ describe('classifyTier connector tools and standing grants', () => {
     created_by: 'u1',
     mcp_server_name: 'notes',
     tool_name: 'lookup_record',
+    mcp_server_host: null,
   };
 
   function connectorAction(input?: {
     tool_name?: string;
     mcp_server_name?: string;
+    mcp_server_host?: string | null;
     mcp_hints?: SentinelAction['mcp_hints'];
     canonical_params?: Record<string, unknown>;
   }): SentinelAction {
@@ -484,6 +494,7 @@ describe('classifyTier connector tools and standing grants', () => {
       canonical_params: input?.canonical_params ?? { id: '1' },
       tool_type: 'mcp',
       mcp_server_name: input?.mcp_server_name ?? grantKey.mcp_server_name,
+      ...(input?.mcp_server_host == null ? {} : { mcp_server_host: input.mcp_server_host }),
       mcp_hints: input?.mcp_hints ?? closedWorldRead,
     };
   }
@@ -518,6 +529,35 @@ describe('classifyTier connector tools and standing grants', () => {
     expect(decision.tier).toBe(1);
     expect(decision.reason).toBe(TOOL_GRANT_REASON);
     expect(decision.card).toBeNull();
+  });
+
+  test('a grant binds to the connector host: the same tool on a connector that now points elsewhere asks again', async () => {
+    const bound = { ...grantKey, mcp_server_host: 'mail.example.com' };
+    const { services } = grantedServices([bound]);
+
+    const sameHost = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com' }),
+      makeCtx({ services }),
+    );
+    expect(sameHost.tier).toBe(1);
+    expect(sameHost.reason).toBe(TOOL_GRANT_REASON);
+
+    const moved = await classifyTier(connectorAction({ mcp_server_host: 'other.example.com' }), makeCtx({ services }));
+    expect(moved.tier).toBe(3);
+    expect(moved.card).not.toBeNull();
+  });
+
+  test('a grant made for a connector with no URL does not cover one that has a host, and the reverse', async () => {
+    const { services: noHost } = grantedServices([{ ...grantKey, mcp_server_host: null }]);
+    const gained = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com' }),
+      makeCtx({ services: noHost }),
+    );
+    expect(gained.tier).toBe(3);
+
+    const { services: hosted } = grantedServices([{ ...grantKey, mcp_server_host: 'mail.example.com' }]);
+    const lost = await classifyTier(connectorAction(), makeCtx({ services: hosted }));
+    expect(lost.tier).toBe(3);
   });
 
   test('a grant is ignored once the tool omits openWorldHint, since absent means open-world', async () => {
@@ -584,6 +624,57 @@ describe('classifyTier connector tools and standing grants', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.sensitive_read).toBe(true);
+  });
+
+  test.each([
+    ['a very long path ending in an SSH key', { path: `${'/a'.repeat(4000)}/.ssh/id_rsa` }],
+    ['a bare credentials name under a path key', { path: 'credentials' }],
+    ['a credentials backup under a path key', { path: 'credentials.backup.json' }],
+    ['a Windows path to an SSH key', { path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+    ['a git credentials file', { path: '/home/u/.git-credentials' }],
+    ['a client secret file', { path: '/home/u/client_secret.json' }],
+    ['an application default credentials file', { path: '/home/u/application_default_credentials.json' }],
+    ['a token text file', { path: '/home/u/github_token.txt' }],
+  ])('a granted tool still asks for %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.secret_path_read).toBe(true);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+  });
+
+  test.each([
+    ['a search with a secret word in free text', { query: 'my token budget and secret santa plans' }],
+    ['a message id', { id: '18f2a9c0' }],
+  ])('a granted tool still runs silently for %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+  });
+
+  test.each([
+    ['a file in a folder named secretary', { path: '/work/secretary/notes.md' }],
+    ['a file named tokenizer', { path: '/repo/src/tokenizer.ts' }],
+    ['a file in a folder named keyboard', { path: '/work/keyboard/layout.md' }],
+    ['a file with an extension and no folder', { file: 'layout.md' }],
+    ['a Windows path', { path: 'C:\\Users\\u\\notes\\plan.txt' }],
+    ['a parent folder reference', { path: '..' }],
+    ['a dotfile name', { path: '.bashrc' }],
+    ['a percent-encoded parent path', { path: '..%2F..%2F.ssh%2Fid_rsa' }],
+    ['a double-encoded parent path', { path: '%252e%252e%252fsecrets' }],
+    ['a division slash path', { path: 'notes\u2215todo' }],
+    ['a fullwidth slash path', { path: 'notes\uFF0Ftodo' }],
+    ['a path-like key', { '../secrets': 'yes' }],
+  ])('a granted tool asks for a path-like argument, %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.card).not.toBeNull();
+    expect(decision.inspection).toBe(false);
+    expect(decision.secret_path_read).toBe(true);
   });
 
   test('offline mode auto-denies a granted tool', async () => {
@@ -1069,5 +1160,245 @@ describe('verifyPreDispatch', () => {
       ctx: { ...makeCtx({ services }), offline: false },
     });
     expect(result).toMatch(/changed|invalid/i);
+  });
+});
+
+describe('connector reads can be always allowed', () => {
+  const mailServer = 'apple-mail';
+  const readNames = [
+    'list-messages',
+    'search-messages',
+    'get-message',
+    'get-thread',
+    'get-unread-count',
+    'list-attachments',
+    'fetch-attachment',
+  ];
+
+  function readAction(input: {
+    tool_name: string;
+    canonical_params?: Record<string, unknown>;
+    mcp_hints?: SentinelAction['mcp_hints'];
+    mcp_server_name?: string;
+  }): SentinelAction {
+    return {
+      tool_name: input.tool_name,
+      canonical_params: input.canonical_params ?? { account: 'work' },
+      tool_type: 'mcp',
+      mcp_server_name: input.mcp_server_name ?? mailServer,
+      mcp_hints: input.mcp_hints ?? {},
+    };
+  }
+
+  function grantFor(tool_name: string, mcp_server_name = mailServer): ToolGrantKey {
+    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name, mcp_server_host: null };
+  }
+
+  function servicesGranting(keys: ToolGrantKey[]): SentinelServices {
+    const grants = new RevocableGrantStore();
+    for (const key of keys) {
+      void grants.recordToolGrant(key);
+    }
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.tool_grants = grants;
+    return services;
+  }
+
+  test.each(readNames)('%s with a standing grant runs at Tier 1 and still marks private data', async name => {
+    const services = servicesGranting([grantFor(name)]);
+    const decision = await classifyTier(readAction({ tool_name: name }), makeCtx({ services }));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.inspection).toBe(true);
+  });
+
+  test.each(readNames)('%s without a grant asks with a card, as before', async name => {
+    const decision = await classifyTier(readAction({ tool_name: name }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.card).not.toBeNull();
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.inspection).toBe(true);
+  });
+
+  test('a scheduled run reads mail when the owner granted it', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages' }),
+      makeCtx({ services: forUnattendedRun(services) }),
+    );
+    expect(decision.tier).toBe(1);
+  });
+
+  test('a scheduled run holds an ungranted mail read for the owner rather than dropping it', async () => {
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages' }),
+      makeCtx({ services: forUnattendedRun(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' })) }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.inspection).toBe(true);
+  });
+
+  test.each([
+    ['send-email', { to: 'someone@example.com', subject: 'hi' }],
+    ['reply-to-message', { id: '1', body: 'thanks' }],
+    ['create-draft', { to: 'someone@example.com', subject: 'hi' }],
+    ['get-message', { id: '1', to: 'someone@example.com' }],
+    ['get-contacts', { id: '1' }],
+  ])('%s is never always-allowed, even with a grant on it', async (name, canonical_params) => {
+    const services = servicesGranting([grantFor(name)]);
+    const decision = await classifyTier(readAction({ tool_name: name, canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.inspection).toBe(false);
+  });
+
+  test('a connector read of a secret path is never always-allowed, even with a grant on it', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', path: '/srv/secrets/token.txt' } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.inspection).toBe(false);
+  });
+
+  test.each([{ read_only_hint: true, open_world_hint: true }, { read_only_hint: false }])(
+    'a mail read that claims %j is never always-allowed',
+    async mcp_hints => {
+      const services = servicesGranting([grantFor('list-messages')]);
+      const decision = await classifyTier(readAction({ tool_name: 'list-messages', mcp_hints }), makeCtx({ services }));
+      expect(decision.tier).toBe(3);
+      expect(decision.inspection).toBe(false);
+    },
+  );
+
+  test.each([
+    ['a relative path', { attachment_path: 'notes/todo.md' }],
+    ['a file name with an extension', { attachment: 'todo.md' }],
+    ['a home path', { attachment_path: '~/Documents/plan' }],
+    ['a drive path', { attachment_path: 'D:\\exports\\summary' }],
+    ['a folder name with spaces', { attachment_path: '/home/u/My Notes/plan' }],
+    ['a file name with spaces', { attachment: 'Q3 report final.pdf' }],
+    ['a path nested in a list', { filters: [{ files: ['/srv/exports/2026'] }] }],
+    ['a very long path', { attachment_path: `${'/a'.repeat(4000)}/draft` }],
+    ['a folder that is not a zone', { attachment_path: 'America/Nowhere' }],
+    ['a percent-encoded folder', { attachment_path: 'notes%2Ftodo' }],
+  ])('a mail read of %s gets a card every time, even with a grant on it', async (_, args) => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', ...args } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card).not.toBeNull();
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.secret_path_read).toBe(true);
+    expect(decision.inspection).toBe(false);
+  });
+
+  test.each([
+    ['a sender search with an email address', { query: 'invoice from:alice@example.com' }],
+    ['a label and a date', { label: 'INBOX', after: '2026-10-01' }],
+    ['a folder name with a space and no slash', { folder: 'Family photos' }],
+    ['a search with a secret word in free text', { query: 'my token budget and secret santa plans' }],
+    ['a calendar time zone', { timeZone: 'America/New_York' }],
+    ['another calendar time zone', { time_zone: 'Europe/London' }],
+  ])('a mail read of %s keeps both offers', async (_, args) => {
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', ...args } }),
+      makeCtx({ services: servicesGranting([grantFor('list-messages')]) }),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.inspection).toBe(true);
+    expect(decision.secret_path_read).not.toBe(true);
+  });
+
+  test('a first-party read-only tool with a path argument still runs silently, as before', async () => {
+    const decision = await classifyTier(
+      {
+        ...readAction({
+          tool_name: 'list-messages',
+          canonical_params: { account: 'work', path: '/home/u/notes/todo.md' },
+          mcp_hints: { read_only_hint: true, open_world_hint: false },
+        }),
+        mcp_first_party: true,
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
+  });
+
+  test('a grant on one read does not cover another read, or the same read on another connector', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const otherRead = await classifyTier(readAction({ tool_name: 'get-message' }), makeCtx({ services }));
+    const otherConnector = await classifyTier(
+      readAction({ tool_name: 'list-messages', mcp_server_name: 'work-mail' }),
+      makeCtx({ services }),
+    );
+    expect([otherRead.tier, otherConnector.tier]).toEqual([3, 3]);
+  });
+});
+
+describe('a silent search row names only what was searched', () => {
+  const SESSION_ID = '5f0c9a3e-2b7d-4c1a-9e8f-7a6b5c4d3e2f';
+  const MODEL = 'provider-model-x9';
+  const PLUMBED_SEARCH: SentinelAction = {
+    tool_name: 'web_search',
+    canonical_params: { query: 'Lisbon weather today', session_id: SESSION_ID, model: MODEL },
+    tool_type: 'mcp',
+    mcp_server_name: 'search',
+    mcp_search_provider: true,
+    mcp_search_tool: true,
+    mcp_search_plumbing_fields: ['session_id', 'model'],
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  };
+
+  it('keeps the session id and model name out of the reason and the silent query a person reads', async () => {
+    const decision = await classifyTier(PLUMBED_SEARCH, makeCtx());
+    expect(decision).toMatchObject({ tier: 1, silent_search_query: 'Lisbon weather today' });
+    expect(decision.reason_detail).toBe('Searched: Lisbon weather today');
+    for (const text of [decision.reason_detail, decision.silent_search_query]) {
+      expect(text).not.toContain(SESSION_ID);
+      expect(text).not.toContain(MODEL);
+    }
+  });
+});
+
+describe('a held server key is never shown raw on a card', () => {
+  // Invented key, shaped so no secret-name rule matches it.
+  const KEY = 'sk-live-Qz9xR7mLp2VbT8kHw4YcN1dF0e';
+  const keyCtx = (): ClassifyContext => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.outboundSecrets = () => Promise.resolve([KEY]);
+    return makeCtx({ services });
+  };
+  const searchWith = (tool_name: string, params: Record<string, unknown>): SentinelAction => ({
+    tool_name,
+    canonical_params: params,
+    tool_type: 'mcp',
+    mcp_server_name: 'search',
+    mcp_search_provider: true,
+    mcp_search_tool: true,
+    mcp_search_plumbing_fields: ['session_id'],
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  });
+
+  it('holds a search whose plumbing field carries the key, and masks it on the card', async () => {
+    const decision = await classifyTier(searchWith('web_search', { query: 'lisbon', session_id: KEY }), keyCtx());
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_guard' });
+    expect(decision.card?.outbound_text ?? '').not.toContain(KEY);
+  });
+
+  it('masks the key on a card whose search would be refused for other reasons', async () => {
+    const decision = await classifyTier(searchWith('delete_search', { query: 'lisbon', session_id: KEY }), keyCtx());
+    expect(decision.tier).toBe(3);
+    expect(JSON.stringify(decision.card)).not.toContain(KEY);
+    expect(decision.approval_token_id).not.toBeNull();
   });
 });

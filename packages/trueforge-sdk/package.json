@@ -99,6 +99,17 @@
             },
             "default": "./dist/cjs/api/resources/data/exports.js"
         },
+        "./help": {
+            "import": {
+                "types": "./dist/esm/api/resources/help/exports.d.mts",
+                "default": "./dist/esm/api/resources/help/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/help/exports.d.ts",
+                "default": "./dist/cjs/api/resources/help/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/help/exports.js"
+        },
         "./mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/mcpServers/exports.d.mts",
