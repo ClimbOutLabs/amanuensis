@@ -8,6 +8,7 @@ import {
   UserToolResponseMessageSchema,
 } from '../../core/events/schema';
 import { AbnormalHandoffSchema } from '../../core/runtime/AbnormalHandoff';
+import { ReplyResultsByKindSchema } from '../../core/runtime/metrics';
 
 export enum CancellationReason {
   // AbortController.abort() reason for the max-execution timer.
@@ -71,6 +72,62 @@ export const TurnMetricsSchema = z
       .optional()
       .describe('Total reasoning tokens across model calls in this turn.'),
     total_cost_in_usd: z.number().nonnegative().optional().describe('Estimated total cost in USD for this turn.'),
+    steps: z.number().int().nonnegative().optional().describe('Model steps in this reply, including sub-agent steps.'),
+    sub_agent_steps: z.number().int().nonnegative().optional().describe('Model steps run by sub-agents in this reply.'),
+    input_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Input tokens across all model steps in this reply.'),
+    cached_input_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .describe('Cached input tokens, or null when the provider did not report them.'),
+    output_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Output tokens across all model steps in this reply.'),
+    reasoning_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .describe('Reasoning tokens, or null when the provider did not report them.'),
+    last_call_input_tokens: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .describe('Input tokens of the last model call in this reply, or null when there was none.'),
+    tool_calls_by_tool: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional()
+      .describe('Tool calls in this reply, counted per tool name.'),
+    results_by_kind: ReplyResultsByKindSchema.optional().describe(
+      'Tool call results in this reply: ok, refused, unavailable, or error.',
+    ),
+    guard_fired: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Reason code of the first guard that blocked a tool call, or null when none did.'),
+    claim_mismatch: z.boolean().optional().describe('True when the last tool call in this reply did not succeed.'),
+    wall_time_ms: z.number().int().nonnegative().optional().describe('Milliseconds from turn start to finish.'),
+    time_to_first_token_ms: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .describe('Milliseconds from the first model request to its first output, or null when there was none.'),
   })
   .openapi('TurnMetrics');
 

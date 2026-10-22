@@ -201,7 +201,12 @@ import {
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
-import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
+import {
+  createEmptyAgentThreadMetrics,
+  recordToolCallResult,
+  updateMetricsFromUsage,
+  type AgentThreadMetrics,
+} from './metrics';
 import {
   collectKnownEventIds,
   guardModelReply,
@@ -3119,6 +3124,7 @@ export class AgentThread {
       } satisfies ModelMessageEvent;
 
       let firstDeltaTimestamped = false;
+      const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
         // The first chunk waits behind the watchdog: a provider that accepts the request but
@@ -3163,6 +3169,7 @@ export class AgentThread {
           if (event) {
             if (!firstDeltaTimestamped) {
               firstDeltaTimestamped = true;
+              this.metrics.time_to_first_token_ms ??= Date.now() - modelRequestStartedAt;
               yield { ...event, created_at: new Date().toISOString() };
             } else {
               yield event;
@@ -3816,7 +3823,14 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
-    this.metrics.total_tool_calls += toolCallResults.length;
+    for (const result of toolCallResults) {
+      const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
+      recordToolCallResult(this.metrics, {
+        toolName: toolCall?.function.name ?? 'unknown_tool',
+        disposition: result.disposition,
+        reasonCode: result.remediation?.reason_code ?? null,
+      });
+    }
     this.metrics.total_sub_agents += createThreadEvents.length;
     // Host-owned research-budget accounting. The next task state is built as a
     // clone — the pre-dispatch reservation refunded, staged findings folded

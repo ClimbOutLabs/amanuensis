@@ -1,0 +1,31 @@
+{
+  "title": "Kelvinton Tram Plan: Working Notes",
+  "owner": "dana.park@example.com",
+  "markdown_lines": [
+    "# Kelvinton Tram Plan: Working Notes",
+    "",
+    "## Summary",
+    "Pilot tram loop for the east side of Kelvinton. Status: draft for review.",
+    "",
+    "## Budget",
+    "Budget: 40,000 EUR",
+    "",
+    "## Timeline",
+    "The pilot starts in spring 2027.",
+    "",
+    "## Milestones",
+    "- Permit application filed: owner Priya Raman, due 15 January 2027",
+    "- Track survey finished: owner Tomas Weber, due 12 February 2027",
+    "- Vehicle order placed: owner not set, due 1 March 2027",
+    "- Public briefing held: owner Lena Ortiz, due not set",
+    "",
+    "## Risks",
+    "- The permit may arrive late.",
+    "- Costs may rise after the survey.",
+    "- Winter weather may stop track work.",
+    "- Staff time is limited.",
+    "",
+    "## Owners",
+    "Dana Park (project lead), Priya Raman (permits), Tomas Weber (survey), Lena Ortiz (public engagement)."
+  ]
+}
