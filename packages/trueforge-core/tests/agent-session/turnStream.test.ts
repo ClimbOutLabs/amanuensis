@@ -1349,7 +1349,7 @@ describe('TurnHandle.stream()', () => {
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'create a child while refresh is unavailable' }],
+      input: [{ type: EventType.USER_MESSAGE, content: 'delegate to a child while refresh is unavailable' }],
       previous_turn_id: 'none',
       signal: controller.signal,
       resolver: makeTestResolver({ modelClient, sandbox }),
