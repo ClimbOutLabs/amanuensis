@@ -45,13 +45,13 @@ function createMetadataBackedServer(initialMetadata: Record<string, string> = {}
 
 /** Stand-in for the sidebar's "Show agent details" menu item, driving the same hook. */
 function AgentDetailsToggle({ sessionId }: { sessionId: string }) {
-  const { visibility, setVisibility } = useAgentDetailsVisibility(sessionId);
+  const { visible, setVisibility } = useAgentDetailsVisibility(sessionId);
   return (
     <button
       type="button"
       role="menuitemcheckbox"
-      aria-checked={visibility === 'expanded'}
-      onClick={() => void setVisibility(visibility === 'expanded' ? 'collapsed' : 'expanded')}
+      aria-checked={visible}
+      onClick={() => void setVisibility(visible ? 'collapsed' : 'expanded')}
     >
       Show agent details
     </button>

@@ -85,7 +85,6 @@ export function AgentDetailsPreferenceProvider({ children }: { children: ReactNo
  * `visible` is the one answer to "is agent detail shown"; every renderer reads it from here.
  */
 export function useAgentDetailsVisibility(sessionId: string | undefined): {
-  visibility: AgentDetailsVisibility;
   visible: boolean;
   setVisibility: (value: AgentDetailsVisibility) => Promise<void>;
 } {
@@ -104,5 +103,5 @@ export function useAgentDetailsVisibility(sessionId: string | undefined): {
     [ctx, sessionId],
   );
 
-  return { visibility, visible: visibility === 'expanded', setVisibility };
+  return { visible: visibility === 'expanded', setVisibility };
 }

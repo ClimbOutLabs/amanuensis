@@ -612,13 +612,44 @@ describe('AssistantMessageContainer with agent details off', () => {
     }
   }
 
-  it('shows only the final answer of a finished reply with several tool steps and a failed call', async () => {
+  it('shows the final answer and one plain line for the failed step, and nothing else of the work', async () => {
     renderAssistantMessage([{ role: 'assistant', content: workedReply() }], { agentDetails: 'collapsed' });
     await settleAgentDetails();
 
     expect(screen.getByText(FINAL)).toBeVisible();
     expectNoWorkShown();
     expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toHaveTextContent(
+      "One step didn't finish. Turn on agent details to see it.",
+    );
+  });
+
+  it('says a hidden step did not finish when it was blocked, even under an answer that claims success', async () => {
+    const blocked = noteCall('send', {
+      result: { schema_version: 'tool.response.v2', outcome: { disposition: 'policy_blocked' }, result: {} },
+    });
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: FIRST_LINE }, blocked, { type: 'text', text: 'Done, I sent it.' }],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+
+    expect(screen.getByText('Done, I sent it.')).toBeVisible();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toBeVisible();
+  });
+
+  it('adds no step line when every hidden step finished', async () => {
+    const content = workedReply().filter(part => part !== failedCall);
+    renderAssistantMessage([{ role: 'assistant', content }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
   });
 
   it('shows only the live progress line while the reply is still working', async () => {
@@ -643,6 +674,7 @@ describe('AssistantMessageContainer with agent details off', () => {
     expect(disclosures[1]).toHaveTextContent(/3 steps · 3 tools/);
     for (const element of screen.getAllByText(/read_note/)) expect(element).toBeVisible();
     expect(screen.getByText(new RegExp(RAW_ERROR))).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
   });
 
   it('still shows the approval card, and nothing else of the work', async () => {
@@ -1419,5 +1451,37 @@ describe('AssistantMessageContainer model and cost line', () => {
     );
 
     expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer with agent details off and an answer before a later step', () => {
+  it('shows the whole answer and the short closing line', async () => {
+    const ANSWER =
+      'Here is your plan for Friday.\n\n- Lunch with Sam at 12:30\n- Dentist at 3pm, bring the insurance card';
+    const CLOSING = 'Saved to your notes.';
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: ANSWER },
+            {
+              type: 'tool-call',
+              toolCallId: 'save',
+              toolName: 'write_note',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            { type: 'text', text: CLOSING },
+          ],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+    expect(screen.getByText(CLOSING)).toBeVisible();
+    expect(screen.getByText('Here is your plan for Friday.')).toBeVisible();
+    expect(screen.getByText('Lunch with Sam at 12:30')).toBeVisible();
   });
 });

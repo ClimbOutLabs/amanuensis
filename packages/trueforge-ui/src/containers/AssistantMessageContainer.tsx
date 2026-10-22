@@ -102,6 +102,14 @@ function isToolPartErrored(part: PartState): boolean {
   return parseToolResultDisposition(part.result)?.tone === 'error';
 }
 
+/** A step that ran into trouble: it failed, was blocked or denied, did not run, or its outcome is unknown. */
+function isToolPartUnfinished(part: PartState): boolean {
+  if (part.type !== 'tool-call') return false;
+  if (isToolPartErrored(part)) return true;
+  const disposition = parseToolResultDisposition(part.result);
+  return disposition !== undefined && disposition.disposition !== 'executed_ok';
+}
+
 type NestedPart = { readonly type: string; readonly messages?: readonly { readonly content: readonly NestedPart[] }[] };
 
 /**
@@ -216,6 +224,11 @@ export function AssistantMessageContainer() {
       parts.slice(run.start, run.end).flatMap(part => (part.type === 'tool-call' ? [part.toolCallId] : [])),
     ),
   );
+  const isHiddenStep = (part: PartState) =>
+    !agentDetailsVisible && part.type === 'tool-call' && foldedToolCallIds.has(part.toolCallId) && !needsPerson(part);
+  // An answer can read as if everything worked, so a hidden step that did not finish always gets one line.
+  const showStepNotFinished =
+    settled && !showNotFinished && parts.some(part => isHiddenStep(part) && isToolPartUnfinished(part));
 
   // The step rows below render only while agent details are on. Errors and approvals surface with an
   // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no
@@ -354,12 +367,7 @@ export function AssistantMessageContainer() {
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
-              return (
-                <AssistantLeafPartContainer
-                  part={part}
-                  stepHidden={!agentDetailsVisible && foldedToolCallIds.has(part.toolCallId) && !needsPerson(part)}
-                />
-              );
+              return <AssistantLeafPartContainer part={part} stepHidden={isHiddenStep(part)} />;
             case 'image':
             case 'data':
               return <AssistantLeafPartContainer part={part} />;
@@ -380,6 +388,11 @@ export function AssistantMessageContainer() {
       {showNotFinished && (
         <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
           This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.
+        </p>
+      )}
+      {showStepNotFinished && (
+        <p role="status" data-testid="assistant-message-step-not-finished" className="mt-2 text-sm text-text-secondary">
+          One step didn't finish. Turn on agent details to see it.
         </p>
       )}
       <TurnImages />
