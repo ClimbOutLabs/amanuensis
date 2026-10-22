@@ -62,6 +62,8 @@ export type SentinelApprovalEmail = {
   replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
   reply_in_thread: { subject: string; from: string } | null;
+  /** The address replies go to when it is not the sender, or null when replies go to the sender. */
+  reply_to: string | null;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -201,12 +203,18 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
+/** The one owner of the words for a call that ran because the person's settings allow it. */
+export const ALLOWED_BY_SETTINGS_LABEL = 'Done · allowed by your settings';
+
+/** The one owner of the words for a call held for the person's OK. */
+export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
+
 /**
  * Plain-word outcome labels for the owner. `logged` is shared by two kinds of row, so a row's own
  * label comes from `sentinelAuditLabel`; this entry names the outcome in the filter.
  */
 export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
-  logged: 'Done without asking, or held for you',
+  logged: 'Allowed by your settings, or waiting for you',
   ran: 'Ran',
   approved: 'Approved',
   denied: 'Denied',
@@ -214,12 +222,12 @@ export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string>
 };
 
 /**
- * The label for one audit row. A `logged` row is a Tier 1 call that ran without asking, or a Tier 2
- * or Tier 3 call held for the owner; only the stored tier tells them apart.
+ * The label for one audit row. A `logged` row is a Tier 1 call that ran under the person's settings,
+ * or a Tier 2 or Tier 3 call waiting for them; only the stored tier tells them apart.
  */
 export function sentinelAuditLabel(entry: Pick<SentinelAuditEntry, 'outcome' | 'tier'>): string {
   if (entry.outcome === 'logged') {
-    return entry.tier === 1 ? 'Done without asking' : 'Held for you';
+    return entry.tier === 1 ? ALLOWED_BY_SETTINGS_LABEL : WAITING_FOR_YOU_LABEL;
   }
   return SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome];
 }
@@ -408,6 +416,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
+  // A card from before this field existed has no reply address, so it replies to the sender as it did then.
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
   return {
     action,
     to,
@@ -419,6 +429,7 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
+    reply_to: replyTo,
   };
 }
 

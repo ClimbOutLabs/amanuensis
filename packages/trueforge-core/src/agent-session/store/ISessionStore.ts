@@ -161,6 +161,21 @@ export interface DeleteSessionFolderInput {
   created_by: string;
 }
 
+/** A card whose request already ended and was cleared. It can never run, so this only hides it. */
+export interface ApprovalDismissalRecord {
+  thread_id: string;
+  tool_call_id: string;
+  dismissed_at: string;
+}
+
+export interface RecordApprovalDismissalInput extends ApprovalDismissalRecord {
+  session_id: string;
+}
+
+export interface ListApprovalDismissalsInput {
+  session_id: string;
+}
+
 export interface SetSessionFolderInput {
   tenant_id: string;
   session_id: string;
@@ -666,6 +681,15 @@ export interface ISessionStore<
 
   /** Fails closed selected records left running by a prior process; providers cannot be reattached. */
   recoverRunningCommandExecutions(input: RecoverRunningCommandExecutionsInput): Promise<number>;
+
+  /**
+   * Records that a card whose request ended was cleared. Nothing runs and no turn is created.
+   * Recording the same thread and tool call again keeps the first record.
+   */
+  recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void>;
+
+  /** Every dismissal recorded for the session, so a reload does not show cleared cards again. */
+  listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]>;
 
   /** Adds thread snapshots to the turn (sub-agent spawns). */
   addThreads(input: AddThreadsInput): Promise<void>;

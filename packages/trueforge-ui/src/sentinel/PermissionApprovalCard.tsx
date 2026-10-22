@@ -23,7 +23,12 @@ import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
+import {
+  WAITING_FOR_YOU_LABEL,
+  type SentinelApprovalCard,
+  type SentinelApprovalEmail,
+  type SentinelApprovalMailbox,
+} from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
@@ -126,6 +131,9 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       )}
       {email.bcc.length > 0 && (
         <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
+      )}
+      {email.reply_to !== null && (
+        <p className="break-words text-sm text-text-primary">Replies go to: {email.reply_to}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -263,7 +271,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
           {sentAt === null ? (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              Waiting for you
+              {WAITING_FOR_YOU_LABEL}
             </span>
           ) : (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">

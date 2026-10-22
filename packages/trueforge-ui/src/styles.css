@@ -482,16 +482,6 @@
   background: color-mix(in oklab, var(--text-primary) 8%, transparent);
 }
 
-/* Memory recall reads as one control: the box and its word share a hit area. */
-.aman-runtime-rail__switch {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
 .aman-runtime-rail__identity {
   padding: 0.25rem 0 1rem;
 }
@@ -1401,6 +1391,30 @@
   color: var(--text-secondary);
 }
 
+.maps-card-details {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-details summary {
+  cursor: pointer;
+}
+
+.maps-card-refused {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+
+.maps-card-refused-label {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+
+.maps-card-refused-name {
+  font-weight: 600;
+}
+
 .maps-place-source {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
@@ -1692,6 +1706,39 @@
   white-space: nowrap;
 }
 
+/* Sharing rows: the name keeps a fixed column and the chips wrap inside the rest of the row. */
+.aui-row--2.aui-row--sharing {
+  grid-template-columns: 8rem minmax(0, 1fr);
+}
+
+.aui-row--sharing .aui-chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Toggle chip: a pressed chip takes the gold-ink edge and a check mark, never a gold fill. */
+.aui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding-inline: 0.625rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  background-color: var(--card-bg);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.aui-chip:hover {
+  color: var(--text-primary);
+}
+
+.aui-chip[aria-pressed='true'] {
+  border-color: var(--gold-ink);
+  color: var(--text-primary);
+}
+
 /* Receipt: a mono list on a card face. */
 .aui-receipt {
   padding: 0.5rem 0.75rem;
@@ -1770,6 +1817,12 @@
 
   .aui-row {
     grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
+  }
+
+  /* Two-column rows that stack: the right-hand choices drop under the left-hand label. */
+  .aui-row--2.aui-row--stack {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.4rem;
   }
 
   .aui-ticket--stub {

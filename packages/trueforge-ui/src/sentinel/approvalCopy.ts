@@ -1,5 +1,5 @@
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard, SentinelApprovalMailbox } from './types.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard, type SentinelApprovalMailbox } from './types.js';
 
 /** The people a card sends to, in plain words: the first name, then how many more. */
 function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string {
@@ -119,6 +119,6 @@ export function approvalStub(card: SentinelApprovalCard, { sentAt }: { sentAt: s
   return {
     what: stubWhat(card),
     detail: stubDetail(card),
-    state: sentAt === null ? 'Waiting for you' : `${doneWord(card)} ${sentAt}`,
+    state: sentAt === null ? WAITING_FOR_YOU_LABEL : `${doneWord(card)} ${sentAt}`,
   };
 }

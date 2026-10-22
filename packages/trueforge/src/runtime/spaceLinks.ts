@@ -33,7 +33,7 @@ function nounOf(kind: BodyLink['kind']): string {
   return kind === 'picture' ? 'picture' : 'link';
 }
 
-function isPlaceholder(host: string): boolean {
+export function isPlaceholder(host: string): boolean {
   return PLACEHOLDER_DOMAINS.some(domain => host === domain || host.endsWith(`.${domain}`));
 }
 
