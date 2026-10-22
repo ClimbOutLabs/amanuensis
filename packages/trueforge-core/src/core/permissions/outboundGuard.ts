@@ -249,6 +249,8 @@ const KEY_PREFIXES: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{10,}/,
   // OpenAI and compatible: the digit requirement keeps `sk-learn-...` style words out.
   /\bsk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}/,
+  // Tavily search keys.
+  /\btvly-[A-Za-z0-9_-]{16,}/,
   // Slack.
   /\bxox[abprso]-[A-Za-z0-9-]{10,}/,
   /\bxapp-[A-Za-z0-9-]{10,}/,

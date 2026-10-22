@@ -16,6 +16,7 @@ import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import { isMapsToolName } from '../permissions/mapsToolNames';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
   countSilentFetches,
   isSearchAskReason,
@@ -176,6 +177,7 @@ export class ToolSet implements IToolSet {
   private readonly searchPlumbingFields: readonly string[];
   private readonly pages: FetchedPageStore | undefined;
   private readonly pagesScope: FetchedPageScope | undefined;
+  private readonly bundle: ToolBundleName | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -213,6 +215,8 @@ export class ToolSet implements IToolSet {
      * host names the chat it belongs to. Set by the host only, alongside `pages`.
      */
     pagesScope?: FetchedPageScope | undefined;
+    /** The bundle every tool of this connector is sent with. Set by the host only; absent sends them on every request. */
+    bundle?: ToolBundleName | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -229,6 +233,12 @@ export class ToolSet implements IToolSet {
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
     this.pages = params.pages;
     this.pagesScope = params.pagesScope;
+    this.bundle = params.bundle;
+  }
+
+  bundleOf(_toolName: string): ToolBundleName | undefined {
+    void _toolName;
+    return this.bundle;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -572,6 +582,10 @@ export class ToolSet implements IToolSet {
       };
     }
     const info = { ...toolEffectHints(tool), ...sourceInfo };
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return { info, classification: undefined };
+    }
     const caldavEvent = await this.caldavEventFor(params);
     const decision = await classifyHostToolCall({
       sentinel,

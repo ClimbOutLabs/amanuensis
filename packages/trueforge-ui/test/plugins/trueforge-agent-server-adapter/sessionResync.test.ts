@@ -380,20 +380,37 @@ describe('chat that paused on a card, was approved, then got a follow-up', () =>
   });
 });
 
-describe('getLastTurnInputTokens', () => {
-  it('reads the newest turn metrics', async () => {
-    const newest = doneTurn({
-      id: 'trn_2',
+describe('getLastCallInputTokens', () => {
+  function turnWithMetrics(id: string, metrics: Record<string, number>) {
+    return doneTurn({
+      id,
       state: {
         status: 'done',
         completedAt: '2026-09-25T00:00:01.000Z',
         output: null,
         requiredActions: [],
-        metrics: { totalInputTokens: 4321 },
+        metrics,
       },
     });
+  }
+
+  it('reads the last call figure, not the turn total summed over a multi-step turn', async () => {
+    // Twelve steps of ~14k each: the total is 168k, but the model last saw 14k.
+    const newest = turnWithMetrics('trn_2', { totalInputTokens: 168_000, lastCallInputTokens: 14_000 });
     const { extensions } = createFakeClient(fakeTurns([doneTurn({ id: 'trn_1' }), newest]));
-    assert.equal(await extensions.getLastTurnInputTokens({ sessionId: 'ses_1' }), 4321);
+    assert.equal(await extensions.getLastCallInputTokens({ sessionId: 'ses_1' }), 14_000);
+  });
+
+  it('accepts the snake_case wire key', async () => {
+    const newest = turnWithMetrics('trn_2', { total_input_tokens: 168_000, last_call_input_tokens: 14_000 });
+    const { extensions } = createFakeClient(fakeTurns([newest]));
+    assert.equal(await extensions.getLastCallInputTokens({ sessionId: 'ses_1' }), 14_000);
+  });
+
+  it('shows no figure for a turn recorded before the per-call metric existed', async () => {
+    const older = turnWithMetrics('trn_2', { totalInputTokens: 168_000 });
+    const { extensions } = createFakeClient(fakeTurns([older]));
+    assert.equal(await extensions.getLastCallInputTokens({ sessionId: 'ses_1' }), null);
   });
 });
 

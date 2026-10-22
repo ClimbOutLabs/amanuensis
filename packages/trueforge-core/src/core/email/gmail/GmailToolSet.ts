@@ -14,11 +14,12 @@ import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
-import { GmailApi, mapSkippingMissing } from './gmailApi';
+import { mapSkippingMissing, type GmailApiPort } from './gmailApi';
 import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
@@ -75,7 +76,7 @@ export interface AttachmentStager {
 
 interface GmailToolSetOptions {
   tracing: AgentTracing;
-  api: GmailApi;
+  api: GmailApiPort;
   /** The connected address, named in every result. */
   account: string;
   /** Features Google actually granted: tools are offered only for these. */
@@ -114,6 +115,7 @@ function jsonResult(value: unknown, sandboxCreated?: SandboxInfo) {
 export class GmailToolSet extends LocalToolMCP {
   readonly name = GMAIL_SERVER_ID;
   readonly displayName = 'Gmail';
+  protected override readonly bundle: ToolBundleName = 'google';
   readonly #options: GmailToolSetOptions;
   readonly #tools: ToolDefinition[];
   /** Sizes of the attachments placed so far this turn: they number the next one and count against the shared caps. */
@@ -247,6 +249,10 @@ export class GmailToolSet extends LocalToolMCP {
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     // A scheduled run is refused by the classifier before anything is loaded to show.
     const prepared = this.#options.sentinel.services.unattended
       ? { draft: undefined, replaces: undefined, answered: undefined }

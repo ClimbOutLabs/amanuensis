@@ -26,6 +26,7 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
@@ -38,6 +39,7 @@ import {
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import configuration from '../config';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
@@ -47,6 +49,7 @@ import {
   type SpaceMutationResult,
   type SpaceRecord,
 } from '../db/spaceStore';
+import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
@@ -686,6 +689,7 @@ function blockPreview(content: string): string {
 class SpaceTool extends LocalToolMCP {
   readonly name = SPACE_SERVER_ID;
   readonly displayName = 'Space';
+  protected override readonly bundle: ToolBundleName = 'spaces';
 
   constructor(private readonly options: SpaceCapabilityOptions) {
     super({ tracing: options.tracing });
@@ -718,13 +722,11 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
-        'Update one space by space_id or exact unique space_name. Provide exactly one of body, edits, or block_edits. ' +
-        'body replaces the whole space: name, purpose, and status are required with it; format defaults to markdown. ' +
-        "edits: up to 50 search/replace pairs applied in order to the current body. Copy each search verbatim from a recent get_space; a search that matches nothing fails the whole update. Check each edit's replacement count against what you intended, and call revert_space if it is wrong. Combine interacting changes into one edit. " +
-        'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; an empty new_content deletes the block. ' +
-        'With edits or block_edits, name, purpose, status, and format are optional. ' +
-        'An update that would shrink the body below a tenth of its size needs confirm_shrink: true. ' +
-        'Pass body as an array of lines. expected_revision and expected_aggregate_revision are optional.',
+        'Update one space by space_id or exact space_name. Provide exactly one of body, edits or block_edits. ' +
+        'body replaces the whole space: name, purpose and status are required; pass it as lines. ' +
+        'edits: up to 50 search/replace pairs applied in order; copy each search verbatim from a recent get_space. A search that matches nothing fails the whole update. Check each replacement count; call revert_space if wrong. Combine interacting changes into one edit. ' +
+        'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; empty new_content deletes. ' +
+        'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: UPDATE_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.update(input)),
     }),
@@ -1340,6 +1342,7 @@ export function spaceCapability(options: SpaceCapabilityOptions): AgentCapabilit
   return {
     systemToolSets: [new SpaceTool(options)],
     instructionBuilders: [buildSpaceInstruction],
+    bundle: 'spaces',
   };
 }
 
@@ -1459,13 +1462,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
   async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
-    if (connections === undefined) {
+    const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
+    if (connections === undefined && evalFixtures === undefined) {
       return undefined;
     }
     try {
       return await googleCapability({
         fetchImpl: undefined,
         connections,
+        evalSources: evalFixtures,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,

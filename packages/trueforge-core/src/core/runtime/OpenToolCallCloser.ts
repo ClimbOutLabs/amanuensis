@@ -59,7 +59,7 @@ const UNKNOWN_OUTCOME_TOOL_MESSAGE_CONTENT = JSON.stringify({
  * treated as side-effecting, including calls whose metadata is missing, since
  * absent metadata must not resolve to the reassuring answer.
  */
-function isSafeToRepeat(info: InternalToolCallInfo): boolean {
+export function isSafeToRepeat(info: InternalToolCallInfo): boolean {
   return info.effect === 'inspect' || (info.effect === undefined && info.read_only_hint === true);
 }
 

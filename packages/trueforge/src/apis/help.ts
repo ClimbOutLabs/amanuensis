@@ -6,11 +6,12 @@ import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import { buildHelpHealthCheck, type SchedulerProbe } from '../help/healthCheck';
-import { probeConnectors, probeModel } from '../help/healthProbes';
+import { probeConnectors, probeGoogleLogin, probeModel } from '../help/healthProbes';
 import { readHostReport } from '../help/hostReport';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { getHelpHealthCheckRoute } from '../routes/helpRoutes';
@@ -23,6 +24,7 @@ export interface HelpRouterDeps {
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
   tokenStore: IOAuthTokenStore;
   globalSettingsStore: IGlobalSettingsStore;
+  googleConnectionStore: IGoogleConnectionStore;
   /** Where the installer writes its latest full check. Read only. */
   hostReportPath: string;
   /** Whether the schedule loop runs in this process, and if so whether it is running. */
@@ -39,7 +41,7 @@ export function createHelpRouter(deps: HelpRouterDeps) {
     const tenantId = requestContext.tenant_id;
     const now = new Date();
     const mcpServerStore = deps.resolveMcpServerStore(c);
-    const [model, connectors, sandboxReady, hostReport] = await Promise.all([
+    const [model, connectors, google, sandboxReady, hostReport] = await Promise.all([
       probeModel({
         tenantId,
         modelProviderStore: deps.resolveModelProviderStore(c),
@@ -54,6 +56,12 @@ export function createHelpRouter(deps: HelpRouterDeps) {
         clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
         connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+        logger: deps.logger,
+      }),
+      probeGoogleLogin({
+        owner: { tenant_id: tenantId, created_by: requestContext.subject.id },
+        connections: deps.googleConnectionStore,
+        fetchImpl: undefined,
         logger: deps.logger,
       }),
       computeCapabilitiesData({
@@ -76,6 +84,7 @@ export function createHelpRouter(deps: HelpRouterDeps) {
       results: {
         model,
         connectors,
+        google,
         sandboxReady,
         scheduler: deps.schedulerStatus(),
         hostReport,

@@ -3,13 +3,12 @@
  * scripted chunk sequences through a mocked fetch, so the whole adapter path runs: the think-tag
  * split, the markup guard, and the reply that finally reaches the person.
  *
- * The garbled-reply line is the one text shown in place of markup that could not be rebuilt.
+ * Leaked tool-call markup is held out of the reply, and nothing in it is ever run.
  */
 import type { LLMCreateParams } from '../../../src/core/llm/ILLM';
 import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { makeSilentLogger } from '../harnessMocks';
 
-const GARBLED = "The model's reply came back garbled. Try again, or pick another model in the model picker.";
 const RAW_MARKERS = ['<tool_call', '</tool_call', '<think', '</think', '<tool_calls', '</invoke', '<invoke'];
 
 function sseBodyFor(pieces: string[]): string {
@@ -100,7 +99,7 @@ describe('Token Factory answer text with think tags', () => {
   });
 });
 
-describe('Token Factory stray and broken tool-call markup', () => {
+describe('Token Factory stray and leaked tool-call markup', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('hides a stray closing tool-call line and keeps the answer around it', async () => {
@@ -108,42 +107,40 @@ describe('Token Factory stray and broken tool-call markup', () => {
     const result = await modelClient().createNonStream(request({ reasoning: false }));
     expect(result.output.content).toBe('Checking the calendar.\nFound it: the dentist visit is Monday.');
     expect(result.output.tool_calls).toBeUndefined();
+    expect(result.tool_markup).toBeUndefined();
   });
 
-  it('turns a Hermes-shaped tool call in the answer into a real tool call', async () => {
+  it('holds a Hermes-shaped tool call in the answer back, never runs it, and reports it leaked', async () => {
     mockContentStream([
       'Let me look that up.\n',
       '<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}}</tool_call>',
     ]);
     const result = await modelClient().createNonStream(request({ reasoning: false }));
     expect(result.output.content).toBe('Let me look that up.\n');
-    expect(result.output.tool_calls).toEqual([
-      expect.objectContaining({
-        type: 'function',
-        function: { name: 'get_event', arguments: '{"event_id":"evt-1"}' },
-      }),
-    ]);
-    expect(result.tool_markup).toBe('recovered');
+    expect(result.output.tool_calls).toBeUndefined();
+    expect(result.tool_markup).toBe('leaked');
   });
 
-  it('hides a call that cannot be parsed and shows the garbled line in its place', async () => {
+  it('holds back a call that cannot be parsed and returns no text for it', async () => {
     mockContentStream(['<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}</tool_call>']);
     const result = await modelClient().createNonStream(request({ reasoning: false }));
-    expect(result.output.content).toBe(GARBLED);
+    expect(result.output.content).toBeNull();
     expect(result.output.tool_calls).toBeUndefined();
+    expect(result.tool_markup).toBe('leaked');
   });
 
-  it('keeps the text before an unparseable call and shows the garbled line once after it', async () => {
+  it('keeps the text before an unparseable call and drops the call', async () => {
     mockContentStream([
       'Here is the list.\n',
       '<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}</tool_call>',
     ]);
     const result = await modelClient().createNonStream(request({ reasoning: false }));
-    expect(result.output.content).toBe(`Here is the list.\n${GARBLED}`);
+    expect(result.output.content).toBe('Here is the list.\n');
     expect(result.output.tool_calls).toBeUndefined();
+    expect(result.tool_markup).toBe('leaked');
   });
 
-  it('turns a garbled reply with reasoning, a stray closing tag and a broken call into the answer and the line', async () => {
+  it('keeps the answer and drops leaked markup from a reply with reasoning and a stray closing tag', async () => {
     mockContentStream([
       'Wait ID? Actually we need the ID',
       ' from create_space response.',
@@ -159,12 +156,12 @@ describe('Token Factory stray and broken tool-call markup', () => {
     ]);
     const result = await modelClient().createNonStream(request({ reasoning: true }));
     const content = typeof result.output.content === 'string' ? result.output.content : '';
-    expect(content).toBe(`Let me check.\n${GARBLED}`);
-    expect(content.split(GARBLED)).toHaveLength(2);
+    expect(content).toBe('Let me check.\n');
     for (const marker of RAW_MARKERS) {
       expect(content).not.toContain(marker);
     }
     expect(result.output.tool_calls).toBeUndefined();
+    expect(result.tool_markup).toBe('leaked');
     expect(JSON.stringify(result.output.thinking_blocks)).toContain('Wait ID? Actually we need the ID');
   });
 });

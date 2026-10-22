@@ -39,6 +39,22 @@ const ALLOWED_HEADERS = new Set([
   'content-transfer-encoding',
 ]);
 
+/** An RFC 5322 date as mail clients and Gmail write it, without the optional zone comment. */
+const DATE_PATTERN = String.raw`(?:[A-Z][a-z]{2}, )?\d{1,2} [A-Z][a-z]{2} \d{4} \d{1,2}:\d{2}(?::\d{2})? (?:[+-]\d{4}|[A-Z]{1,5})`;
+
+const DATE_HEADER = new RegExp(String.raw`^${DATE_PATTERN}(?: \([A-Z]{2,5}\))? ?$`);
+
+/**
+ * Trace headers Gmail itself adds to a message created through its API, each allowed only as that exact stamp.
+ * Any other value, another host or a second hop included, is refused by name like an unknown header.
+ */
+const GMAIL_TRACE_HEADERS = new Map([
+  [
+    'received',
+    new RegExp(String.raw`^from \d{1,20} named unknown by gmailapi\.google\.com with HTTPREST; ${DATE_PATTERN}$`),
+  ],
+]);
+
 /**
  * Headers Aman neither shows on the card nor decodes must be in a closed format that cannot carry text: an id
  * list, a version number, a date. Each is matched whole, with no spare space, no comment and nothing but
@@ -49,10 +65,7 @@ const STRICT_HEADERS: Record<string, (value: string) => boolean> = {
   references: value => parseIdList({ value, max: MAX_REFERENCES }) !== null,
   'message-id': value => parseIdList({ value, max: 1 }) !== null,
   'mime-version': value => value === '1.0',
-  date: value =>
-    /^(?:[A-Z][a-z]{2}, )?\d{1,2} [A-Z][a-z]{2} \d{4} \d{1,2}:\d{2}(?::\d{2})? (?:[+-]\d{4}|[A-Z]{1,5})(?: \([A-Z]{2,5}\))? ?$/.test(
-      value,
-    ),
+  date: value => DATE_HEADER.test(value),
 };
 
 /** Headers that name an address other than the body's recipients; each is allowed only when it is the account. */
@@ -173,7 +186,8 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     if (seen.has(name)) {
       return { ok: false, reason: repeatedHeaderRefusal(name) };
     }
-    if (!ALLOWED_HEADERS.has(name) && !ADDRESS_HEADERS.has(name)) {
+    const isGmailStamp = GMAIL_TRACE_HEADERS.get(name)?.test(rawHeaderOf({ part: payload, name })) === true;
+    if (!ALLOWED_HEADERS.has(name) && !ADDRESS_HEADERS.has(name) && !isGmailStamp) {
       return { ok: false, reason: unknownHeaderRefusal(header.name) };
     }
     seen.add(name);

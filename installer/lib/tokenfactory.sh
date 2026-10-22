@@ -15,13 +15,11 @@ tf_key_problem() {
   valid_tf_key "$1" || echo "The Token Factory key has a length or characters a key never has."
 }
 
-# --token-factory-key-stdin: one line of stdin, read before any prompt so it cannot be taken by one.
-read_token_factory_key_stdin() {
-  local line=
-  IFS= read -r line || true
-  [ -n "$line" ] || usage_die "The input line was empty, and --token-factory-key-stdin reads the Token Factory key from it."
-  [ -z "$(tf_key_problem "$line")" ] || usage_die "$(tf_key_problem "$line")"
-  AMAN_TF_KEY=$line
+# The --token-factory-key-stdin line, from stdin_answers_read.
+token_factory_key_take() {
+  [ -n "$1" ] || usage_die "The Token Factory key line of the input was empty. Put the key on its own line, in the order install.sh --help gives."
+  [ -z "$(tf_key_problem "$1")" ] || usage_die "$(tf_key_problem "$1")"
+  AMAN_TF_KEY=$1
 }
 
 # Sets I_TF (1 when a hosted model is wanted), I_TF_MODEL and I_TF_CAP. The key comes only from
@@ -61,16 +59,14 @@ tf_rotation_name() {
   fi
 }
 
-# Reads the new key for an instance that already exists. With --password-stdin its first line is the password, which an
-# existing instance has no use for, so it is read and dropped to keep the order of the lines the same as for a new one.
+# The new key for an instance that already exists. A sign-in password line given with it has no use here, but
+# stdin_answers_read still takes it, so the lines come in the same order as for a new instance.
 tf_rotation_collect() {
-  local name skipped=
+  local name
   TF_ROTATE_NAME=
   [ "$OPT_TF_KEY_STDIN" = 1 ] || return 0
   name=$(tf_rotation_name)
   [ "$DRY_RUN" != 1 ] || return 0
-  if [ "$PASSWORD_FROM_STDIN" = 1 ]; then IFS= read -r skipped || true; fi
-  read_token_factory_key_stdin
   TF_ROTATE_NAME=$name
 }
 

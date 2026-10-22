@@ -36,6 +36,18 @@ function fakeSummarizer(content: string | { type: 'text'; text: string }[]): ILL
   };
 }
 
+/** An ILLM double whose summarization call fails with `error`. */
+function fakeSummarizerThrowing(error: Error): ILLM {
+  return {
+    create(): ReturnType<ILLM['create']> {
+      throw new Error('streaming is not used by memory summarization');
+    },
+    createNonStream: async () => {
+      throw error;
+    },
+  };
+}
+
 function fakeModelProviderStore(): IModelProviderStore {
   return {
     listProviders: jest.fn(),
@@ -122,7 +134,7 @@ describe('summarizeTurnContent', () => {
         throw new Error('provider down');
       },
     });
-    expect(result).toEqual({ status: 'failed', reason: 'provider down' });
+    expect(result).toEqual({ status: 'failed', reason: 'provider down', fallback: 'model_unresolved' });
   });
 
   it('returns failed when the model returns an empty summary', async () => {
@@ -130,7 +142,27 @@ describe('summarizeTurnContent', () => {
       ...base,
       resolveLlm: async () => fakeSummarizer('   '),
     });
-    expect(result).toEqual({ status: 'failed', reason: 'empty-summary' });
+    expect(result).toEqual({ status: 'failed', reason: 'empty-summary', fallback: 'summary_empty' });
+  });
+
+  it('returns failed with model_timeout when the summarizer call times out', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      resolveLlm: async () => fakeSummarizerThrowing(new Error('The request timed out after 30000 ms')),
+    });
+    expect(result).toEqual({
+      status: 'failed',
+      reason: 'The request timed out after 30000 ms',
+      fallback: 'model_timeout',
+    });
+  });
+
+  it('returns failed with model_failed when the summarizer call errors', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      resolveLlm: async () => fakeSummarizerThrowing(new Error('upstream 500')),
+    });
+    expect(result).toEqual({ status: 'failed', reason: 'upstream 500', fallback: 'model_failed' });
   });
 
   it('returns failed for an overlong summary instead of truncating', async () => {
@@ -138,7 +170,7 @@ describe('summarizeTurnContent', () => {
       ...base,
       resolveLlm: async () => fakeSummarizer('x'.repeat(5000)),
     });
-    expect(result).toEqual({ status: 'failed', reason: 'summary-too-long' });
+    expect(result).toEqual({ status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' });
   });
 
   it('returns skipped/input-too-long instead of truncating an overlong turn', async () => {

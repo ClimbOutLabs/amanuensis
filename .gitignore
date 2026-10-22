@@ -107,3 +107,6 @@ ops/sandbox-slot/packs/selected.json
 
 # Local person-specific patterns for scripts/private-data-scan.py (never commit)
 scripts/private-data-patterns.local.txt
+
+# Token eval output folders (scripts/eval-tokens).
+eval-results/

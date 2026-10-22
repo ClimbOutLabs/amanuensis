@@ -59,6 +59,8 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { gateEvalApprovals } from '../eval/approvalGate';
+import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -83,7 +85,11 @@ import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
+import {
+  submitRetainWithVerification,
+  type RetainOutcomeLog,
+  type SummarizeTurnContext,
+} from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -134,6 +140,7 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+import { readServerSandboxAvailable } from './capabilities';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -345,6 +352,8 @@ function createTurnResolver(deps: {
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
+  /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
+  serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
@@ -397,6 +406,7 @@ function createTurnResolver(deps: {
     switchNotice,
     internalSourceState,
     boundRepository,
+    serverSandboxAvailable,
     repositoryStore,
     sessionStore,
     memoryClient,
@@ -536,6 +546,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
@@ -712,6 +723,7 @@ function createTurnResolver(deps: {
       },
       logger,
       boundRepository,
+      serverSandboxAvailable,
       clientTimezone,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
@@ -1008,6 +1020,50 @@ async function resolveAndSubmitArtifactPersistence(params: {
   }
 }
 
+/** Outcome logging for an interactive turn: its retain persona, and the store to read the chat's persona after it. */
+export interface TurnOutcomeLog extends RetainOutcomeLog {
+  personaStore: Pick<IPersonaStore, 'getSessionPersona'>;
+  tenantId: string;
+}
+
+/**
+ * Logs when the turn's memory went to the vault of the persona it started with but the chat
+ * ended under another (a `use_persona` switch during the turn).
+ */
+async function logTurnPersonaSwitch(params: {
+  outcomeLog: TurnOutcomeLog;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { outcomeLog, sessionId, turnId, logger } = params;
+  let activePersonaName: string;
+  try {
+    const active = await outcomeLog.personaStore.getSessionPersona({
+      tenant_id: outcomeLog.tenantId,
+      session_id: sessionId,
+    });
+    activePersonaName = active?.persona_name ?? 'shared';
+  } catch (error) {
+    logger.warn('Could not read the chat persona after a turn; persona switch not checked', {
+      sessionId,
+      turnId,
+      ...extractErrorLogFields(error),
+    });
+    return;
+  }
+  if (activePersonaName === outcomeLog.personaName) {
+    return;
+  }
+  logger.info('Turn memory saved under the persona the turn started with', {
+    sessionId,
+    turnId,
+    personaName: outcomeLog.personaName,
+    activePersonaName,
+    reason: 'persona_switched',
+  });
+}
+
 /**
  * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
  * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
@@ -1036,6 +1092,8 @@ export interface DrainTurnEventsInput {
          * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
          */
         summarize?: SummarizeTurnContext | undefined;
+        /** Present only for interactive turns; scheduled turns log nothing at info. */
+        outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
@@ -1106,7 +1164,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
         if (memory !== undefined) {
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
-          await submitRetainWithVerification({
+          const stored = await submitRetainWithVerification({
             client: memory.client,
             sessionId,
             turnId,
@@ -1117,7 +1175,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
             logger,
             summarize: memory.summarize,
+            outcomeLog: memory.outcomeLog,
           });
+          // Only a stored turn can have gone to the persona it started with; a skipped or failed
+          // retain is already explained by its own reason line.
+          if (stored && memory.outcomeLog !== undefined) {
+            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+          }
         }
         if (profileLearning !== undefined) {
           // The assistant's reply is deliberately not passed here: it is not a source of facts
@@ -1271,6 +1335,11 @@ export async function beginTurnExecution(params: {
     turnId,
     startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
+    serverSandboxAvailable: await readServerSandboxAvailable({
+      store: deps.sandboxProviderStore,
+      tenant_id: session.tenant_id,
+      logger: deps.logger,
+    }),
     personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
     personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -1762,7 +1831,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
-    const body = c.req.valid('json');
+    const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
 
     const session = await deps.sessions.get({
@@ -1781,6 +1850,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
+
+    // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
+    const body = configuration.AMAN_EVAL_MODE
+      ? {
+          ...submitted,
+          input: await gateEvalApprovals({
+            session,
+            previous_turn_id: submitted.previous_turn_id,
+            input: submitted.input,
+          }),
+        }
+      : submitted;
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
@@ -2095,6 +2176,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchNotice: persona?.switchNotice,
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
+      serverSandboxAvailable: await readServerSandboxAvailable({
+        store: sandboxProviderStore,
+        tenant_id: requestContext.tenant_id,
+        logger: deps.logger,
+      }),
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,
@@ -2435,6 +2521,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,
+              outcomeLog: {
+                personaName: vaultScope?.personaName ?? 'shared',
+                personaStore: deps.personaStore,
+                tenantId: requestContext.tenant_id,
+              },
             },
       profileLearning,
       artifacts: {

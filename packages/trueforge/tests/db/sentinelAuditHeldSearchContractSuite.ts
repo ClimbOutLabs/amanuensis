@@ -87,7 +87,7 @@ export function runSentinelAuditHeldSearchContractSuite(getStore: () => ISentine
     const rows = await getStore().list({ ...OWNER, limit: 50, offset: 0 });
     expect(rows.map(row => row.outcome).sort()).toEqual(['approved', 'denied', 'logged']);
     for (const row of rows) {
-      expect(row.description).toContain('Search the web through finder');
+      expect(row.description).toContain('Search the web through the search provider');
       expect(row.description).not.toContain(query);
       expect(row.description).not.toContain(SERVER_KEY);
     }

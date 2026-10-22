@@ -6,6 +6,7 @@
 #        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
+#        install.sh instance email <name> [--remove]
 #        install.sh instance calendar <name> [--remove]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
@@ -18,7 +19,7 @@ set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
 # A password or key in the caller's environment is never used and must not reach a child process.
-unset AMAN_PASSWORD AMAN_TF_KEY NEBIUS_API_KEY
+unset AMAN_PASSWORD AMAN_TF_KEY EM_PASSWORD NEBIUS_API_KEY
 
 INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
@@ -62,6 +63,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/email.sh
+. "$INSTALLER_DIR/lib/email.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
 # shellcheck source=lib/import.sh
@@ -115,6 +118,13 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
+OPT_EMAIL_PROVIDER=
+OPT_EMAIL_ADDRESS=
+OPT_EMAIL_IMAP_HOST=
+OPT_EMAIL_IMAP_PORT=
+OPT_EMAIL_SMTP_HOST=
+OPT_EMAIL_SMTP_PORT=
+OPT_EMAIL_PASSWORD_STDIN=0
 OPT_CAL_PROVIDER=
 OPT_CAL_EMAIL=
 OPT_CAL_URL=
@@ -147,6 +157,9 @@ Amanuensis installer
                                   export your data from an older Aman in that folder; the old Aman is only read
   install.sh instance refresh <name>
                                   start the instance again with its current settings
+  install.sh instance email <name> [--remove]
+                                  connect, change or remove an email account of an instance, then restart it;
+                                  asks for the details unless the --email-* options are given
   install.sh instance calendar <name> [--remove]
                                   connect a calendar to an instance (asks for the details); --remove takes it away
   install.sh instance password [<name>]
@@ -175,8 +188,11 @@ Options
   --email ADDRESS       the email you sign in with
   --your-name NAME      what Aman should call you (default: asked, or the start of your email)
   --instance NAME       which instance demo-seed and password apply to (default: the only one)
-  --password-stdin      read the password from the first line of the input instead of asking for it
-  --token-factory-key-stdin  read the Token Factory key from the input (the line after the password with --password-stdin); never put the key on the command line
+  --password-stdin      read the sign-in password from the input instead of asking for it
+  --token-factory-key-stdin  read the Token Factory key from the input; never put the key on the command line
+                        Each option that ends in -stdin reads one line of the input. The lines come in this order:
+                        sign-in password, Token Factory key, calendar app password, email app password.
+                        Leave out the line of an option you do not give.
   --token-factory-model ID   the Token Factory model to use (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
   --demo                make the instance a demo and fill it with example data once it runs
@@ -196,12 +212,17 @@ Options
   --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
+  --email-provider NAME  with the email options: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde or other
+  --email-address ADDRESS  the email address to connect
+  --email-password-stdin  read the email app password from the input (see the line order above)
+  --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
+                        the incoming and outgoing servers, for --email-provider other only
   --calendar-provider NAME  the calendar provider: fastmail, yahoo, gmx, webde or other (with --yes: required)
   --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
   --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
   --calendar-user NAME  the calendar login name (default: the email address)
-  --calendar-password-stdin  read the calendar app password from the next input line (with --yes: required)
-  --remove              with instance calendar, remove the calendar connection
+  --calendar-password-stdin  read the calendar app password from the input (see the line order above; with --yes: required)
+  --remove              with instance email or instance calendar, remove that connection
   --print-root-steps    show the admin steps that install Docker, and stop
   --print-network       show every site the installer may contact, and stop
   --print-proxy-requirements  show what a reverse proxy in front of Aman must do, and stop
@@ -235,6 +256,7 @@ parse_args() {
       --verbose) UI_VERBOSE=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
+      --email-password-stdin) OPT_EMAIL_PASSWORD_STDIN=1 ;;
       --calendar-password-stdin) OPT_CAL_PASSWORD_STDIN=1 ;;
       --remove) OPT_REMOVE=1 ;;
       --install-docker) OPT_INSTALL_DOCKER=1 ;;
@@ -255,12 +277,12 @@ parse_args() {
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
-      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
+      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --calendar-provider=* | --calendar-email=* | --calendar-url=* | --calendar-user=*)
+      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --email-provider=* | --email-address=* | --email-imap-host=* | --email-imap-port=* | --email-smtp-host=* | --email-smtp-port=* | --calendar-provider=* | --calendar-email=* | --calendar-url=* | --calendar-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -317,6 +339,12 @@ set_option() {
     --display-name) OPT_DISPLAY_NAME=$2 ;;
     --from-compose) OPT_FROM_COMPOSE=$2 ;;
     --user) OPT_MIGRATE_USER=$2 ;;
+    --email-provider) OPT_EMAIL_PROVIDER=$2 ;;
+    --email-address) OPT_EMAIL_ADDRESS=$2 ;;
+    --email-imap-host) OPT_EMAIL_IMAP_HOST=$2 ;;
+    --email-imap-port) OPT_EMAIL_IMAP_PORT=$2 ;;
+    --email-smtp-host) OPT_EMAIL_SMTP_HOST=$2 ;;
+    --email-smtp-port) OPT_EMAIL_SMTP_PORT=$2 ;;
     --calendar-provider) OPT_CAL_PROVIDER=$2 ;;
     --calendar-email) OPT_CAL_EMAIL=$2 ;;
     --calendar-url) OPT_CAL_URL=$2 ;;
@@ -374,6 +402,11 @@ on_exit() {
   trap - EXIT
   AMAN_PASSWORD=
   AMAN_TF_KEY=
+  EM_PASSWORD=
+  CAL_PASSWORD=
+  STDIN_SIGNIN_PASSWORD=
+  STDIN_CAL_PASSWORD=
+  STDIN_EMAIL_PASSWORD=
   ui_step_abort
   upgrade_on_exit
   import_on_exit
@@ -392,6 +425,7 @@ main() {
   check_demo_options
   check_import_options
   check_migrate_options
+  check_email_options
   check_calendar_options
   cloud_guard
   trap 'exit 130' INT
@@ -419,6 +453,7 @@ main() {
       *) usage_die "--dry-run applies to install, upgrade, instance add and instance import" ;;
     esac
   fi
+  stdin_answers_read
   case "$COMMAND" in
     install) cmd_install ;;
     backup) cmd_backup ;;
@@ -436,9 +471,10 @@ main() {
         demo-seed) cmd_instance_demo_seed ;;
         import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
+        email) cmd_instance_email ;;
         password) cmd_instance_password ;;
         calendar) cmd_instance_calendar ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password|calendar" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar" ;;
       esac
       ;;
   esac
