@@ -4,7 +4,7 @@
  *
  * Built-ins live in the thread's host tool sets, not in the deferred server
  * map, so a wrapper naming one used to fall back to classifying call_tool
- * itself ("Aman doesn't know this tool yet: call_tool") and then fail at
+ * itself (its card read "This is a new tool from ..." instead of the real tool) and then fail at
  * dispatch with "expected the name of a configured MCP server". These tests
  * pin the fixed behavior: the real tool is judged with its real name and
  * arguments, its decision matches the direct call exactly, and the call
@@ -335,8 +335,9 @@ describe('call_tool naming something that does not exist', () => {
     });
     expect(stamped.tier).toBe(3);
     expect(stamped.is_approval_required).toBe(true);
-    expect(stamped.tier3_card?.plain_what).toContain('dance');
+    expect(stamped.tier3_card?.plain_what).toContain('This is a new tool from');
     expect(stamped.tier3_card?.plain_what).not.toContain('call_tool');
+    expect(stamped.tier3_card?.plain_what).not.toContain('dance');
   });
 
   it('keeps list_tools for an unknown server at Tier 1 and runs nothing', async () => {

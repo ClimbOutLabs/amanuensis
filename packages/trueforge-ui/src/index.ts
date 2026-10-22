@@ -223,7 +223,7 @@ export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './componen
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
-export type { AmanSetupState, FirstRunGuideState, MemoryBankStatus } from './components/AmanSetupContext.js';
+export type { AmanSetupState, FirstRunGuideState } from './components/AmanSetupContext.js';
 export { AmanTour, type AmanTourProps } from './components/AmanTour.js';
 export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
