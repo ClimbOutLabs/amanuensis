@@ -12,6 +12,8 @@ import { isPlaceholder } from '../spaceLinks';
 /** A picture a person's browser may show is kept this long in memory, and at most this many at once. */
 export const SPACE_PICTURE_CACHE_TTL_MS = 5 * 60 * 1000;
 export const SPACE_PICTURE_CACHE_MAX_ENTRIES = 16;
+/** Sent to the picture host. It names neither this instance nor the person asking. */
+export const SPACE_PICTURE_USER_AGENT = 'Mozilla/5.0 (compatible; image-fetch/1.0)';
 
 export type SpacePictureOutcome =
   | { status: 'shown'; bytes: Buffer; mime: string }
@@ -59,6 +61,11 @@ export function createSpacePictureService<TTransaction>(
 ): SpacePictureService {
   const cache = new Map<string, CachedPicture>();
 
+  // Each person gets their own entries, so a cached picture never serves another tenant or person.
+  function cacheKey(input: { tenant_id: string; created_by: string; url: string }): string {
+    return JSON.stringify([input.tenant_id, input.created_by, input.url]);
+  }
+
   async function isStoredPicture(input: { tenant_id: string; created_by: string; url: string }): Promise<boolean> {
     let offset = 0;
     for (;;) {
@@ -84,21 +91,21 @@ export function createSpacePictureService<TTransaction>(
     }
   }
 
-  function cached(url: string): CachedPicture | undefined {
-    const hit = cache.get(url);
+  function cached(key: string): CachedPicture | undefined {
+    const hit = cache.get(key);
     if (hit === undefined) {
       return undefined;
     }
     if (hit.expires_at <= deps.now()) {
-      cache.delete(url);
+      cache.delete(key);
       return undefined;
     }
     return hit;
   }
 
-  function remember(url: string, picture: CachedPicture): void {
-    cache.delete(url);
-    cache.set(url, picture);
+  function remember(key: string, picture: CachedPicture): void {
+    cache.delete(key);
+    cache.set(key, picture);
     while (cache.size > SPACE_PICTURE_CACHE_MAX_ENTRIES) {
       const oldest = cache.keys().next();
       if (oldest.done === true) {
@@ -117,13 +124,15 @@ export function createSpacePictureService<TTransaction>(
       if (!(await isStoredPicture(input))) {
         return { status: 'not_in_spaces' };
       }
-      const hit = cached(input.url);
+      const key = cacheKey(input);
+      const hit = cached(key);
       if (hit !== undefined) {
         return { status: 'shown', bytes: hit.bytes, mime: hit.mime };
       }
       const fetched = await fetchRemoteImage({
         url: input.url,
         allowUrl: url => url.protocol === 'https:',
+        userAgent: SPACE_PICTURE_USER_AGENT,
         deps: deps.fetchDeps,
       });
       if (!fetched.ok) {
@@ -134,7 +143,7 @@ export function createSpacePictureService<TTransaction>(
       if (mime === undefined) {
         return { status: 'refused', reason: 'unsupported_type' };
       }
-      remember(input.url, { bytes: fetched.bytes, mime, expires_at: deps.now() + SPACE_PICTURE_CACHE_TTL_MS });
+      remember(key, { bytes: fetched.bytes, mime, expires_at: deps.now() + SPACE_PICTURE_CACHE_TTL_MS });
       return { status: 'shown', bytes: fetched.bytes, mime };
     },
   };

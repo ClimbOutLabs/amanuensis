@@ -138,14 +138,14 @@ describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.getByText('Do a')).toBeInTheDocument();
-    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('approves a single Tier 2 call through the part, without a batch button', () => {
     const { onRespondToToolApproval } = renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: true }));
   });
 
@@ -202,7 +202,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('div.rounded-lg');
+    const tier3Card = screen.getByText('Do danger').closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
       expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Deny'));
+    fireEvent.click(firstButton('Not now'));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: false }));
     expect(respondToApproval).not.toHaveBeenCalled();
   });
@@ -273,7 +273,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
           ],
         },
       ]);
-      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
       expect(onRespondToToolApproval).toHaveBeenCalledWith(
         expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
       );
@@ -293,7 +293,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
         ],
       },
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     const [response] = onRespondToToolApproval.mock.calls[0] ?? [];
     expect(response).toMatchObject({ approvalId: 'a', approved: true });
     expect(response).not.toHaveProperty('optionId');
@@ -444,13 +444,13 @@ describe('ToolCallContainer "Change it"', () => {
       return { onRespondToToolApproval };
     }
 
-    it('offers Change it between Approve and Deny', () => {
+    it('offers Change it between the safe verb and the quiet no', () => {
       renderPersonaApproval();
       const labels = screen
         .getAllByRole('button')
         .map(button => button.textContent)
-        .filter(text => text === 'Approve' || text === 'Change it' || text === 'Deny');
-      expect(labels).toEqual(['Approve', 'Change it', 'Deny']);
+        .filter(text => text === 'Create it' || text === 'Change it' || text === 'Not now');
+      expect(labels).toEqual(['Create it', 'Change it', 'Not now']);
     });
 
     it('sends the words as the reason, declines the call, and never grants it', () => {

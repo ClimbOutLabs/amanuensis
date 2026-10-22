@@ -344,6 +344,7 @@ test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -364,6 +365,7 @@ test_root_steps_answered_yes_on_a_terminal() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -384,6 +386,7 @@ test_root_steps_declined_on_a_terminal() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -759,7 +762,7 @@ test_slots_come_back_after_a_restart() {
   install_machine
   local compose slots
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
-  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 4 "loopback, speech relay, app and dex"
+  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 5 "loopback, speech relay, app, dex and the calendar connector"
   slots=$(cat "$INSTALLER_DIR/../docker-compose.slots.yml")
   assert_contains "$slots" "restart: unless-stopped"
   sandbox_drop

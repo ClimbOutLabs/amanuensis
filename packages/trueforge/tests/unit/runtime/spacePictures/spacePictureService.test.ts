@@ -5,6 +5,7 @@ import { CHAT_IMAGE_REMOTE_MAX_BYTES } from '../../../../src/runtime/chatImages/
 import {
   createSpacePictureService,
   SPACE_PICTURE_CACHE_TTL_MS,
+  SPACE_PICTURE_USER_AGENT,
   type SpacePictureOutcome,
 } from '../../../../src/runtime/spacePictures/spacePictureService';
 import { EXAMPLE_COM_ADDRESS } from '../../../fixtures/exampleComAddress';
@@ -192,5 +193,61 @@ describe('space picture service', () => {
       bytes: PNG,
       mime: 'image/png',
     });
+  });
+  it('does not reuse a cached picture across people who both own the URL', async () => {
+    const seen: string[] = [];
+    const pictures = createSpacePictureService({
+      spaceStore: storeWith(space(`![chart](${PICTURE})`), { ...space(`![chart](${PICTURE})`), created_by: 'user-b' }),
+      fetchDeps: {
+        fetchImpl: async url => {
+          seen.push(String(url));
+          return image(PNG);
+        },
+        resolveAddresses,
+      },
+      now: () => 0,
+    });
+    await pictures.get({ tenant_id: TENANT_ID, created_by: OWNER, url: PICTURE });
+    await pictures.get({ tenant_id: TENANT_ID, created_by: 'user-b', url: PICTURE });
+    expect(seen).toEqual([PICTURE, PICTURE]);
+  });
+
+  it('does not reuse a cached picture across tenants', async () => {
+    const seen: string[] = [];
+    const pictures = createSpacePictureService({
+      spaceStore: {
+        listSpaces: async input => (input.created_by === OWNER ? [space(`![chart](${PICTURE})`)] : []),
+      },
+      fetchDeps: {
+        fetchImpl: async url => {
+          seen.push(String(url));
+          return image(PNG);
+        },
+        resolveAddresses,
+      },
+      now: () => 0,
+    });
+    await pictures.get({ tenant_id: TENANT_ID, created_by: OWNER, url: PICTURE });
+    await pictures.get({ tenant_id: 'other-tenant', created_by: OWNER, url: PICTURE });
+    expect(seen).toEqual([PICTURE, PICTURE]);
+  });
+
+  it('sends a fixed User-Agent that names neither the instance nor the person', async () => {
+    const agents: string[] = [];
+    const pictures = createSpacePictureService({
+      spaceStore: storeWith(space(`![chart](${PICTURE})`)),
+      fetchDeps: {
+        fetchImpl: async (_url, init) => {
+          const headers = new Headers(init?.headers);
+          agents.push(headers.get('user-agent') ?? '');
+          return image(PNG);
+        },
+        resolveAddresses,
+      },
+      now: () => 0,
+    });
+    await pictures.get({ tenant_id: TENANT_ID, created_by: OWNER, url: PICTURE });
+    expect(agents).toEqual([SPACE_PICTURE_USER_AGENT]);
+    expect(SPACE_PICTURE_USER_AGENT).not.toMatch(/amanuensis|user-a|default/i);
   });
 });
