@@ -15,6 +15,7 @@ test_prompts_state_their_rule() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -36,6 +37,7 @@ test_an_invalid_name_asks_again_with_the_reason() {
 Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -57,6 +59,7 @@ Name for this instance=>machine
 Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"Main\" has capital letters"
@@ -68,6 +71,7 @@ Go ahead?=>n"
 Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters. Use 1 to 24"
@@ -82,6 +86,7 @@ test_an_invalid_email_asks_again() {
 Your email=>not-an-email
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -144,6 +149,7 @@ test_a_short_password_asks_again_and_states_the_rule_each_time() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>short
@@ -164,6 +170,7 @@ test_five_bad_passwords_stop() {
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>a1

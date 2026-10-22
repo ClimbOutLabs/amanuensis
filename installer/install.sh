@@ -6,6 +6,7 @@
 #        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
+#        install.sh instance calendar <name> [--remove]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -73,6 +74,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/upgrade.sh"
 # shellcheck source=lib/plan.sh
 . "$INSTALLER_DIR/lib/plan.sh"
+# shellcheck source=lib/calendar.sh
+. "$INSTALLER_DIR/lib/calendar.sh"
 
 AMAN_HOME=${AMAN_HOME:-$HOME/.amanuensis}
 ASSUME_YES=0
@@ -112,6 +115,12 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
+OPT_CAL_PROVIDER=
+OPT_CAL_EMAIL=
+OPT_CAL_URL=
+OPT_CAL_USER=
+OPT_CAL_PASSWORD_STDIN=0
+OPT_REMOVE=0
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -138,6 +147,8 @@ Amanuensis installer
                                   export your data from an older Aman in that folder; the old Aman is only read
   install.sh instance refresh <name>
                                   start the instance again with its current settings
+  install.sh instance calendar <name> [--remove]
+                                  connect a calendar to an instance (asks for the details); --remove takes it away
   install.sh instance password [<name>]
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
@@ -185,6 +196,12 @@ Options
   --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
+  --calendar-provider NAME  the calendar provider: fastmail, yahoo, gmx, webde or other (with --yes: required)
+  --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
+  --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
+  --calendar-user NAME  the calendar login name (default: the email address)
+  --calendar-password-stdin  read the calendar app password from the next input line (with --yes: required)
+  --remove              with instance calendar, remove the calendar connection
   --print-root-steps    show the admin steps that install Docker, and stop
   --print-network       show every site the installer may contact, and stop
   --print-proxy-requirements  show what a reverse proxy in front of Aman must do, and stop
@@ -218,6 +235,8 @@ parse_args() {
       --verbose) UI_VERBOSE=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
+      --calendar-password-stdin) OPT_CAL_PASSWORD_STDIN=1 ;;
+      --remove) OPT_REMOVE=1 ;;
       --install-docker) OPT_INSTALL_DOCKER=1 ;;
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
@@ -236,12 +255,12 @@ parse_args() {
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
-      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
+      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
+      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --calendar-provider=* | --calendar-email=* | --calendar-url=* | --calendar-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -298,6 +317,10 @@ set_option() {
     --display-name) OPT_DISPLAY_NAME=$2 ;;
     --from-compose) OPT_FROM_COMPOSE=$2 ;;
     --user) OPT_MIGRATE_USER=$2 ;;
+    --calendar-provider) OPT_CAL_PROVIDER=$2 ;;
+    --calendar-email) OPT_CAL_EMAIL=$2 ;;
+    --calendar-url) OPT_CAL_URL=$2 ;;
+    --calendar-user) OPT_CAL_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -369,6 +392,7 @@ main() {
   check_demo_options
   check_import_options
   check_migrate_options
+  check_calendar_options
   cloud_guard
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -413,7 +437,8 @@ main() {
         import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
         password) cmd_instance_password ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password" ;;
+        calendar) cmd_instance_calendar ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password|calendar" ;;
       esac
       ;;
   esac

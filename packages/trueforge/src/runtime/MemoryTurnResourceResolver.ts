@@ -6,6 +6,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
+import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
 import {
   MAIL_CONNECTOR_NAME,
@@ -150,12 +151,17 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       server_name: MAIL_CONNECTOR_NAME,
       tools: MAIL_CONNECTOR_TOOL_NAMES,
     });
+    // The Calendar connector is offered only its eight tools on every thread, sub-agents included.
+    const calendarNarrowedSpec = narrowConnectorTools(mailNarrowedSpec, {
+      server_name: CALDAV_SERVER_NAME,
+      tools: CALDAV_TOOL_NAMES,
+    });
     const resolved = await super.resolveAgentDefinition({
       ...input,
       spec:
         searchProviderServerName === undefined
-          ? mailNarrowedSpec
-          : withSearchProviderAttached(mailNarrowedSpec, searchProviderServerName),
+          ? calendarNarrowedSpec
+          : withSearchProviderAttached(calendarNarrowedSpec, searchProviderServerName),
     });
     // Derive recallEnabled from the spec (defaults to true per schema)
     const recallEnabled = input.spec.config.memory.recall_enabled;
