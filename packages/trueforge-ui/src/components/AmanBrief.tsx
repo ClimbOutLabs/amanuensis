@@ -304,8 +304,8 @@ function BriefRow({
       className={cn(
         'group/row grid items-center gap-x-3 border-t border-border py-3 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink',
         isComing
-          ? 'grid-cols-[1.25rem_3.75rem_minmax(0,1fr)_max-content]'
-          : 'grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
+          ? 'grid-cols-[1.25rem_3.75rem_minmax(0,1fr)] sm:grid-cols-[1.25rem_3.75rem_minmax(0,1fr)_max-content]'
+          : 'grid-cols-[1.25rem_minmax(0,1fr)] sm:grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
         phase === 'fading' && 'opacity-0 transition-opacity duration-[225ms] ease-out',
       )}
     >
@@ -344,7 +344,10 @@ function BriefRow({
       {phase === 'undo' ? (
         <button
           type="button"
-          className="justify-self-end text-[0.875rem] whitespace-nowrap text-gold-ink underline underline-offset-2"
+          className={cn(
+            'justify-self-start text-[0.875rem] whitespace-nowrap text-gold-ink underline underline-offset-2 sm:justify-self-end sm:col-start-auto',
+            isComing ? 'col-start-3' : 'col-start-2',
+          )}
           onClick={() => onUndo(item.key)}
         >
           Undo
@@ -353,7 +356,10 @@ function BriefRow({
         <button
           ref={actionRef}
           type="button"
-          className="justify-self-end text-[0.875rem] whitespace-nowrap text-gold-ink underline underline-offset-2"
+          className={cn(
+            'justify-self-start text-[0.875rem] whitespace-nowrap text-gold-ink underline underline-offset-2 sm:justify-self-end sm:col-start-auto',
+            isComing ? 'col-start-3' : 'col-start-2',
+          )}
           onClick={runAction}
           aria-label={action.label}
         >
