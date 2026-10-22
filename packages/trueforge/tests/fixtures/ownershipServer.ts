@@ -246,6 +246,8 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -337,6 +339,8 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),

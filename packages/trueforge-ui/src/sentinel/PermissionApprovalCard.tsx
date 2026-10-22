@@ -6,7 +6,7 @@ import { useRef, useState, type FC } from 'react';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PERSONA_BADGE, PersonaDetails } from './PersonaDetails.js';
@@ -191,6 +191,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.destination_host !== null;
 
   const { email, calendar_event: calendarEvent, schedule, persona } = card;
+  // Approving a new-recipient send adds its addresses, so it never offers a grant and its labels say so.
+  const newRecipients = isNewRecipientCard(card);
+  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
+  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
   const badge =
     email !== null
       ? EMAIL_BADGES[email.action]
@@ -263,14 +267,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="primary"
             size="small"
-            title={APPROVAL_CHOICES.approve.hint}
+            title={approveChoice.hint}
             onClick={onApprove}
             disabled={disabled}
             className="flex-1"
           >
-            {APPROVAL_CHOICES.approve.label}
+            {approveChoice.label}
           </Button>
-          {onApproveForChat !== undefined && (
+          {onApproveForChat !== undefined && !newRecipients && (
             <Button
               variant="secondary"
               size="small"
@@ -282,7 +286,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               {APPROVAL_CHOICES.approveForChat.label}
             </Button>
           )}
-          {onApproveAlways !== undefined && (
+          {onApproveAlways !== undefined && !newRecipients && (
             <AlwaysAllowToolControl
               size="small"
               className="flex-1"
@@ -310,12 +314,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="secondary"
             size="small"
-            title={APPROVAL_CHOICES.deny.hint}
+            title={denyChoice.hint}
             onClick={onDeny}
             disabled={disabled}
             className="flex-1"
           >
-            {APPROVAL_CHOICES.deny.label}
+            {denyChoice.label}
           </Button>
         </div>
         {changing && onChangeRequest !== undefined && (
