@@ -138,11 +138,7 @@ const reportSchema = z
     mode: z
       .enum(['compact', 'full'])
       .default('compact')
-      .describe(
-        `compact (default) renders a bounded digest: max ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
-          `${String(DOCUMENT_REPORT_MAX_ROWS)} rows total, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
-          'full renders a multi-page report with no row or section cap, for long reports such as financial plans.',
-      ),
+      .describe('compact (default) is capped as described above; full has no cap, for long reports.'),
     title: z.string().trim().min(1).max(120),
     summary: z.string().refine(v => v.length <= 500, 'must be at most 500 characters'),
     sections: z.array(reportSectionSchema),
@@ -340,17 +336,17 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: CREATE_DOCUMENT_REPORT_TOOL_NAME,
       description:
-        `Render a document report as a downloadable DOCX; it does not interpret contents or calculate totals. ` +
-        `Compact mode (default) is a bounded digest: max ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
-        `${String(DOCUMENT_REPORT_MAX_ROWS)} rows total, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
-        'Full mode renders long reports such as financial plans across multiple pages with no row or section cap.',
+        `Render a downloadable DOCX report; it does not interpret contents or calculate totals. ` +
+        `compact (default) caps at ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
+        `${String(DOCUMENT_REPORT_MAX_ROWS)} rows and ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
+        'full has no cap.',
       schema: reportSchema,
       handler: (input, approvalDecision) => this.createReport(input, approvalDecision),
     }),
     defineTool({
       name: SUMMARIZE_NET_WORTH_TOOL_NAME,
       description:
-        'Explicit net-worth report mode: extract supplied files, validate each cited exact source span, preserve conflicts and uncertain claims, compute asset/liability totals deterministically, and render a downloadable DOCX.',
+        'Net-worth DOCX from supplied files: checks each cited source span, keeps conflicts and uncertain claims, and computes asset and liability totals deterministically.',
       schema: netWorthSchema,
       handler: (input, approvalDecision) =>
         this.createNetWorthReport(input.file_paths, input.observations, input.title, approvalDecision),
