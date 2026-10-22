@@ -289,7 +289,10 @@ function BriefRow({
 
   const titleText = (
     <span
-      className={cn('block truncate text-[1.0625rem] font-medium text-text-primary', done && 'text-text-secondary')}
+      className={cn(
+        'line-clamp-2 break-words text-[1.0625rem] font-medium text-text-primary sm:line-clamp-none sm:block sm:truncate',
+        done && 'text-text-secondary',
+      )}
     >
       {highlight ? <Highlight play={playHighlight}>{item.title}</Highlight> : item.title}
     </span>
