@@ -1,6 +1,10 @@
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
-import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
+import type {
+  ExtendedChatCompletionChunk,
+  InternalToolCallInfo,
+  RawAssistantMessageWithUsage,
+} from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -23,7 +27,10 @@ async function* toolCallStream(): AsyncGenerator<ExtendedChatCompletionChunk, Ra
 }
 
 /** Runs one attended turn whose only tool call waits for approval, and returns that call's `can_chat_allow`. */
-async function canChatAllow(tierReason: string): Promise<boolean | undefined> {
+async function canChatAllow(
+  tierReason: string,
+  extra: Partial<InternalToolCallInfo> = {},
+): Promise<boolean | undefined> {
   const toolSet = makeMockIMCPServer({ name: 'notes', preload: true });
   jest.mocked(toolSet.toolCallInfo).mockResolvedValue({
     type: 'mcp',
@@ -34,6 +41,7 @@ async function canChatAllow(tierReason: string): Promise<boolean | undefined> {
     effect: 'inspect',
     tier: 3,
     tier_reason: tierReason,
+    ...extra,
   });
   const modelClient: ILLM = { create: jest.fn(() => toolCallStream()), createNonStream: jest.fn() };
   const thread = new AgentThread({
@@ -65,5 +73,17 @@ describe('the approval event says whether chat scope is offered', () => {
   it('offers it for a plain read and withholds it for a send', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
     expect(await canChatAllow('connector_send')).toBe(false);
+  });
+
+  it('offers the chat choice for a search held after a private read', async () => {
+    expect(await canChatAllow('mcp_search_after_private_read', { search_provider_call: true, effect: undefined })).toBe(
+      true,
+    );
+  });
+
+  it('withholds the chat choice from a search held for any other reason', async () => {
+    expect(await canChatAllow('mcp_search_unreturned_url', { search_provider_call: true, effect: undefined })).toBe(
+      false,
+    );
   });
 });

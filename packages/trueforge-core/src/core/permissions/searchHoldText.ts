@@ -26,6 +26,7 @@ export const TAVILY_EXTRACT_WHAT_PREFIX = 'Read these web pages with Tavily: ';
 export const HOLD_SAY = {
   search_setting: 'Searches are set to ask, so Aman is checking with you first.',
   private_read: 'This chat has read your private data, so Aman is checking before searching.',
+  private_secret: 'This chat opened a file with passwords or keys, so Aman asks before every search.',
   search_limit: 'Aman has already searched a lot in this reply.',
   unseen_link: "This opens a link that didn't come from your search results.",
   site_limit: 'Aman has already opened a lot of pages on this site in this reply.',

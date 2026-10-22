@@ -112,7 +112,9 @@ export const SessionSchema = z
     updated_at: z.string().describe('ISO 8601 last-update timestamp.'),
     approval_grants: z
       .array(z.string())
-      .describe('Server-derived exact-tool grants created by "Approve for this chat" (server:tool pairs).'),
+      .describe(
+        'Server-derived grants created by "Approve for this chat" (server:tool pairs) and "Allow searches in this chat".',
+      ),
     metrics: SessionMetricsSchema,
     metadata: SessionMetadataSchema,
     source: SessionSourceSchema.nullable(),

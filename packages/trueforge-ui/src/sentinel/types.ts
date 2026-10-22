@@ -142,6 +142,8 @@ export type SentinelApprovalCard = {
   destination_host: string | null;
   /** True when part of outbound_text is cut and not shown in full. */
   outbound_truncated: boolean;
+  /** Arguments a search service adds on its own, shown behind a Details disclosure; null or absent when none. */
+  outbound_plumbing_text?: string | null | undefined;
   /** The whole message when the action is sending or saving mail, or null. */
   email: SentinelApprovalEmail | null;
   /** The whole event when the action adds or changes a calendar event, or null. */
@@ -543,6 +545,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
+    outbound_plumbing_text: cardString(value, { snake: 'outbound_plumbing_text', camel: 'outboundPlumbingText' }),
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),

@@ -175,6 +175,13 @@ export const Tier3CardSchema = z
       .nullable()
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
+    outbound_plumbing_text: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.',
+      ),
     email: Tier3EmailSchema.nullable().optional(),
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
