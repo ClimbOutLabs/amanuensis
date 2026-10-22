@@ -122,6 +122,13 @@ describe('AmanBrief', () => {
     expect(row?.querySelector('.bg-gold')).not.toBeNull();
   });
 
+  it('draws no highlight behind the first Check first title', () => {
+    renderBrief(BRIEF);
+    const title = screen.getAllByTestId('brief-row')[0]?.querySelector('.line-clamp-2');
+    expect(title?.textContent).toBe("Mateo's invite says 4:00am");
+    expect(document.querySelector('.aui-reward-highlight')).toBeNull();
+  });
+
   it('shows one verb-first action link per row, and sends a prompt through the composer', () => {
     renderBrief(BRIEF);
     fireEvent.click(screen.getByRole('button', { name: 'Draft a reply' }));

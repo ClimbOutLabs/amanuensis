@@ -24,6 +24,7 @@ describe('B2 look styles', () => {
       '.aui-row {',
       '.aui-row--2 {',
       '.aui-brief-card {',
+      '.aui-brief-action {',
       '.aui-underline::after {',
       '.aui-receipt {',
     ]) {
