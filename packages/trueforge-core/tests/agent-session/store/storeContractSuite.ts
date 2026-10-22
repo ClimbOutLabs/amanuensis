@@ -107,6 +107,10 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     last_call_signature: undefined,
     tool_markup_leaks_this_turn: 0,
     tool_markup_retries_this_turn: 0,
+    steps_by_thread: [],
+    removed_tools: [],
+    removed_tool_rejection_streak: 0,
+    unfinished_reason: null,
     ...overrides,
   };
 }

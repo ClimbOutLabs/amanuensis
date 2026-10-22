@@ -37,6 +37,7 @@ import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import type { ToolResultKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -195,7 +196,13 @@ export interface ToolCallMemoSnapshot {
    * How many times each distinct call (tool plus arguments) ran this turn, and the write count at its last
    * run. A snapshot written before the re-run rule omits the latter.
    */
-  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[];
+  call_signatures: {
+    key: string;
+    count: number;
+    writes_at_last_run?: number | undefined;
+    last_kind?: ToolResultKind | null | undefined;
+    retried?: boolean | undefined;
+  }[];
   denied_approval_identities: string[];
   repeated_denied_approval: boolean;
   inspection_calls_before_edit: number;
@@ -234,6 +241,13 @@ export interface ToolCallMemoSnapshot {
   /** Tool calls written as text in the turn, and the retries sent for them. */
   tool_markup_leaks_this_turn: number;
   tool_markup_retries_this_turn: number;
+  /** Steps (model calls) each thread of the turn has made, keyed by thread id. */
+  steps_by_thread: { thread_id: string; steps: number }[];
+  /** Tools removed from the rest of the reply after a decline or an unavailable result. */
+  removed_tools: string[];
+  removed_tool_rejection_streak: number;
+  /** Plain reason the last action did not finish, or null when it did. */
+  unfinished_reason: string | null;
 }
 
 /** The guard kinds that can defer a host-authored note before stopping the turn. */
@@ -286,6 +300,10 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'last_call_signature'
   | 'tool_markup_leaks_this_turn'
   | 'tool_markup_retries_this_turn'
+  | 'steps_by_thread'
+  | 'removed_tools'
+  | 'removed_tool_rejection_streak'
+  | 'unfinished_reason'
 > & {
   read_results: { key: string; response: CallToolResponse; failure: boolean; count: number }[];
   // Explicit `| undefined` (the repo's dominant optional-property convention under
@@ -295,7 +313,15 @@ type LegacyToolCallMemoSnapshot = Omit<
   consecutive_failed_batches: number | undefined;
   // `writes_at_last_run` is absent in snapshots written before the re-run rule; hydration treats the
   // call as not re-runnable until a write runs, the same as a call recorded in this turn.
-  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[] | undefined;
+  call_signatures:
+    | {
+        key: string;
+        count: number;
+        writes_at_last_run?: number | undefined;
+        last_kind?: ToolResultKind | null | undefined;
+        retried?: boolean | undefined;
+      }[]
+    | undefined;
   pending_identical_call_nudges?: (string | SnapshotPendingHostNote)[] | undefined;
   failed_batch_nudge_generation?: number | undefined;
   empty_inspection_nudge_generation?: number | undefined;
@@ -309,6 +335,11 @@ type LegacyToolCallMemoSnapshot = Omit<
   last_call_signature?: string | undefined;
   tool_markup_leaks_this_turn?: number | undefined;
   tool_markup_retries_this_turn?: number | undefined;
+  // Added with the reply step budget: a snapshot written before it omits these keys.
+  steps_by_thread?: { thread_id: string; steps: number }[] | undefined;
+  removed_tools?: string[] | undefined;
+  removed_tool_rejection_streak?: number | undefined;
+  unfinished_reason?: string | null | undefined;
 };
 
 /**
@@ -320,6 +351,10 @@ export interface CallSignatureRecord {
   count: number;
   /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
   writesAtLastRun: number;
+  /** Kind of the call's last result; a retryable error may be tried once more. */
+  lastKind: ToolResultKind | null;
+  /** Whether the one retry of a retryable error has already run. */
+  retried: boolean;
 }
 
 export interface TurnToolCallLedger {
@@ -337,6 +372,14 @@ export interface TurnToolCallLedger {
   toolMarkupRetriesThisTurn: number;
   /** Set when the write cap stopped the turn; the turn ends whichever thread hit it. */
   stoppedForWriteCap: boolean;
+  /** Model calls made per thread this turn. The reply's step budget is checked against each thread's own count. */
+  stepsByThread: Map<string, number>;
+  /** Tool names removed from the rest of the reply after a decline or an unavailable result. */
+  removedTools: string[];
+  /** Calls to removed tools in a row; two end the reply by forcing its answer. */
+  removedToolRejectionStreak: number;
+  /** Plain reason the last action did not finish, or null. Set by the latest batch that had calls. */
+  unfinishedReason: string | null;
 }
 
 export function createTurnToolCallLedger(): TurnToolCallLedger {
@@ -348,6 +391,10 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     toolMarkupLeaksThisTurn: 0,
     toolMarkupRetriesThisTurn: 0,
     stoppedForWriteCap: false,
+    stepsByThread: new Map(),
+    removedTools: [],
+    removedToolRejectionStreak: 0,
+    unfinishedReason: null,
   };
 }
 
@@ -359,14 +406,24 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
 export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[]): TurnToolCallLedger {
   const merged = createTurnToolCallLedger();
   merged.lastCallSignature = ledgers[0]?.lastCallSignature;
+  merged.unfinishedReason = ledgers[0]?.unfinishedReason ?? null;
   for (const ledger of ledgers) {
     for (const [signature, record] of ledger.callSignatures) {
       const existing = merged.callSignatures.get(signature);
+      // The record that ran most recently is the one with the higher count.
+      const latest = existing === undefined || record.count >= existing.count ? record : existing;
       merged.callSignatures.set(signature, {
         count: Math.max(existing?.count ?? 0, record.count),
         writesAtLastRun: Math.max(existing?.writesAtLastRun ?? 0, record.writesAtLastRun),
+        lastKind: latest.lastKind,
+        retried: (existing?.retried ?? false) || record.retried,
       });
     }
+    for (const [threadId, steps] of ledger.stepsByThread) {
+      merged.stepsByThread.set(threadId, Math.max(merged.stepsByThread.get(threadId) ?? 0, steps));
+    }
+    merged.removedTools = [...new Set([...merged.removedTools, ...ledger.removedTools])];
+    merged.removedToolRejectionStreak = Math.max(merged.removedToolRejectionStreak, ledger.removedToolRejectionStreak);
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
     merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
@@ -492,6 +549,9 @@ export function createToolCallMemoState(
     state.turn.callSignatures.set(entry.key, {
       count: entry.count,
       writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+      // A snapshot written before the retry rule omits these: the call has no retry left to spend.
+      lastKind: entry.last_kind ?? null,
+      retried: entry.retried ?? true,
     });
   }
   // Legacy snapshots stored a bare tool name, or a {signature, tool_name} pair with no `kind` or
@@ -520,6 +580,12 @@ export function createToolCallMemoState(
   state.turn.lastCallSignature = snapshot.last_call_signature;
   state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
   state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
+  for (const entry of snapshot.steps_by_thread ?? []) {
+    state.turn.stepsByThread.set(entry.thread_id, entry.steps);
+  }
+  state.turn.removedTools = [...(snapshot.removed_tools ?? [])];
+  state.turn.removedToolRejectionStreak = snapshot.removed_tool_rejection_streak ?? 0;
+  state.turn.unfinishedReason = snapshot.unfinished_reason ?? null;
   return state;
 }
 
@@ -574,7 +640,13 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     consecutive_failed_batches: state.consecutiveFailedBatches,
     call_signatures: [...state.turn.callSignatures.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, record]) => ({ key, count: record.count, writes_at_last_run: record.writesAtLastRun })),
+      .map(([key, record]) => ({
+        key,
+        count: record.count,
+        writes_at_last_run: record.writesAtLastRun,
+        last_kind: record.lastKind,
+        retried: record.retried,
+      })),
     denied_approval_identities: [...state.deniedApprovalIdentities].sort(),
     repeated_denied_approval: state.repeatedDeniedApproval,
     inspection_calls_before_edit: state.inspectionCallsBeforeEdit,
@@ -592,6 +664,12 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     last_call_signature: state.turn.lastCallSignature,
     tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
     tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,
+    steps_by_thread: [...state.turn.stepsByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, steps]) => ({ thread_id, steps })),
+    removed_tools: [...state.turn.removedTools],
+    removed_tool_rejection_streak: state.turn.removedToolRejectionStreak,
+    unfinished_reason: state.turn.unfinishedReason,
   };
 }
 
