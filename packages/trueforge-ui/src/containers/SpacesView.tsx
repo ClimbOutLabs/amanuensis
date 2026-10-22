@@ -479,7 +479,7 @@ function SpaceDetailPage({
       {body.trim().length === 0 ? null : space.format === 'html' ? (
         <SpaceHtmlFrame html={body} />
       ) : (
-        <Markdown content={body} readOnly className="space-markdown max-w-none" />
+        <Markdown content={body} readOnly spacePictures className="space-markdown max-w-none" />
       )}
       <DeleteSpaceModal space={space} open={deleteOpen} onOpenChange={setDeleteOpen} onDeleted={onDeleted} />
     </div>

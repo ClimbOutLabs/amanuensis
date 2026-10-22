@@ -466,6 +466,48 @@ describe('Markdown remote images', () => {
   });
 });
 
+describe('Markdown space pictures', () => {
+  const PICTURE = 'https://cdn.photos.test/chart.png';
+  const ROUTE = `/api/space-pictures?url=${encodeURIComponent(PICTURE)}`;
+
+  it('loads an https picture on its own through the owner’s picture route, with no referrer', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} spacePictures />);
+    expect(screen.queryByRole('button', { name: 'Show image: sales chart' })).toBeNull();
+    const img = screen.getByRole('img', { name: 'sales chart' });
+    expect(img).toHaveAttribute('src', ROUTE);
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('shows the one plain line when the picture cannot be shown', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} spacePictures />);
+    fireEvent.error(screen.getByRole('img', { name: 'sales chart' }));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByTestId('aui-space-picture-failed')).toHaveTextContent('This picture could not be shown.');
+  });
+
+  it('keeps a picture that is not https as a plain link, never an image', () => {
+    const { container } = render(<Markdown content="![sales chart](http://cdn.photos.test/chart.png)" spacePictures />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'sales chart' })).toHaveAttribute(
+      'href',
+      'http://cdn.photos.test/chart.png',
+    );
+  });
+
+  it('keeps a protocol-relative picture as a plain link', () => {
+    const { container } = render(<Markdown content="![x](//cdn.photos.test/chart.png)" spacePictures />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'x' })).toBeInTheDocument();
+  });
+
+  it('keeps the click-to-load thumbnail on read-only pages that are not spaces', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} readOnly />);
+    expect(screen.getByRole('button', { name: 'Show image: sales chart' })).toBeInTheDocument();
+    expect(document.querySelector('img')).toBeNull();
+  });
+});
+
 describe('markdownUrlTransform', () => {
   it('keeps data: and blob: URLs', async () => {
     const { markdownUrlTransform } = await import('@/atoms/Markdown.js');

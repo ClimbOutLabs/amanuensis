@@ -46,6 +46,11 @@ export type MarkdownProps = {
   readOnly?: boolean;
   /** Citation sources for resolving model-emitted citation markers like 【14†excerpts】. */
   citationSources?: Map<number | string, CitationSource> | CitationSource[] | null;
+  /**
+   * A space page: its remote https pictures load through the owner's picture route, which serves
+   * only pictures a stored space contains. Any other remote picture stays a plain link.
+   */
+  spacePictures?: boolean;
   className?: string;
 };
 
@@ -132,6 +137,47 @@ export function markdownUrlTransform(value: string): string {
   return '';
 }
 
+/** The owner's own picture route for a space picture; the server refuses any URL no stored space contains. */
+function spacePictureRouteUrl(src: string): string {
+  return `/api/space-pictures?url=${encodeURIComponent(src)}`;
+}
+
+function isHttpsSrc(src: string): boolean {
+  try {
+    return new URL(src.trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A picture on a space page, loaded on its own through the owner's picture route with no referrer.
+ * The one plain line below stands in when the route refuses or cannot fetch it.
+ */
+function SpacePicture({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span
+        className="my-2 flex h-24 w-40 max-w-full items-center justify-center rounded-lg border border-border bg-secondary-bg p-2 text-center text-xs text-text-secondary"
+        data-testid="aui-space-picture-failed"
+      >
+        This picture could not be shown.
+      </span>
+    );
+  }
+  return (
+    <img
+      src={spacePictureRouteUrl(src)}
+      alt={alt}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className="my-2 h-24 w-40 max-w-full rounded-lg border border-border bg-secondary-bg object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /**
  * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only when
  * the person asks, so an image URL in a prompt-injected page never reaches its host on render. Loads
@@ -190,11 +236,22 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
  * same-origin path), and every image of a turn without image access, is not rendered. Alt text is
  * always plain text.
  *
- * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
- * private data in an image URL. They show as a thumbnail that loads on request; same-origin, data:
- * and blob: images still render inline.
+ * Outside a chat turn remote images never auto-load: a prompt injection can hide private data in an
+ * image URL. They show as a thumbnail that loads on request. A space page (`spacePictures`) is the one
+ * exception: its https pictures load through the owner's picture route. Same-origin, data: and blob:
+ * images still render inline.
  */
-function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgProps: ComponentProps<'img'> }) {
+function MarkdownImage({
+  src,
+  alt,
+  imgProps,
+  spacePictures,
+}: {
+  src: string;
+  alt: string;
+  imgProps: ComponentProps<'img'>;
+  spacePictures: boolean;
+}) {
   const scope = useChatImageScope();
   if (useInsideChatTurn()) {
     if (scope !== null && isChatImageSrc(src)) {
@@ -207,6 +264,16 @@ function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgPr
   }
   if (isSafeInlineImageSrc(src)) {
     return <img {...imgProps} src={src} alt={alt} />;
+  }
+  if (spacePictures) {
+    if (isHttpsSrc(src)) {
+      return <SpacePicture src={src.trim()} alt={alt} />;
+    }
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+        {alt !== '' ? alt : src}
+      </a>
+    );
   }
   return <RemoteImageThumbnail src={src} alt={alt} />;
 }
@@ -261,6 +328,7 @@ function makeComponents(opts: {
   onDownloadArtifact?: (path: string, filename: string) => Promise<void>;
   onFetchFile?: (path: string) => Promise<Blob>;
   readOnly?: boolean;
+  spacePictures?: boolean;
   OpenUiFenceBlock: ComponentType<OpenUiFenceBlockProps>;
   SandboxArtifactDownload: ComponentType<SandboxArtifactDownloadProps>;
   SyntaxHighlighter: ComponentType<SyntaxHighlighterProps>;
@@ -274,6 +342,7 @@ function makeComponents(opts: {
     onDownloadArtifact,
     onFetchFile,
     readOnly,
+    spacePictures,
     OpenUiFenceBlock,
     SandboxArtifactDownload,
     SyntaxHighlighter,
@@ -303,7 +372,14 @@ function makeComponents(opts: {
       if (srcValue.trim() === '') {
         return null;
       }
-      return <MarkdownImage src={srcValue} alt={typeof alt === 'string' ? alt : ''} imgProps={props} />;
+      return (
+        <MarkdownImage
+          src={srcValue}
+          alt={typeof alt === 'string' ? alt : ''}
+          imgProps={props}
+          spacePictures={spacePictures === true}
+        />
+      );
     },
     // Strip default <pre> wrapper; each block renderer provides its own container.
     pre({ children }: { children?: ReactNode }) {
@@ -475,6 +551,7 @@ export function Markdown({
   onFetchFile,
   readOnly,
   citationSources,
+  spacePictures,
   className,
 }: MarkdownProps) {
   const mode = useThemeMode();
@@ -498,6 +575,7 @@ export function Markdown({
         onDownloadArtifact,
         onFetchFile,
         readOnly,
+        spacePictures,
         OpenUiFenceBlock,
         SandboxArtifactDownload,
         SyntaxHighlighter,
@@ -510,6 +588,7 @@ export function Markdown({
       onDownloadArtifact,
       onFetchFile,
       readOnly,
+      spacePictures,
       OpenUiFenceBlock,
       SandboxArtifactDownload,
       SyntaxHighlighter,
