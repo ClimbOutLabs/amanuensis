@@ -315,10 +315,20 @@ describe('"Allow searches in this chat" given during a reply', () => {
 
 describe('a turn whose fingerprints the store may not hold yet', () => {
   it('holds a search sent while the turn that read through a connector is still running', async () => {
-    const { session, session_id, services, loadChat, resolverForTurn, create, callTool, allowSearchesAfterMailRead } =
-      await setup();
+    const {
+      session,
+      session_id,
+      store,
+      services,
+      loadChat,
+      resolverForTurn,
+      create,
+      callTool,
+      allowSearchesAfterMailRead,
+    } = await setup();
     await allowSearchesAfterMailRead();
     const searchesBefore = callTool.mock.calls.length;
+    const saves = jest.spyOn(store, 'setPrivateFingerprints');
 
     // The connector read happens, then the reply is still thinking when the owner sends a new message.
     const reading = resolverForTurn();
@@ -363,6 +373,9 @@ describe('a turn whose fingerprints the store may not hold yet', () => {
 
     expect((await session.getTurn(next.id))?.state).toMatchObject(HELD);
     expect(callTool.mock.calls.length).toBe(searchesBefore);
+    // The turn the new message stopped still saves what it read, so a later turn's record covers it.
+    expect((await session.getTurn(outlookTurn.id))?.state).toMatchObject({ status: 'cancelled' });
+    expect(saves).toHaveBeenCalledTimes(2);
   });
 
   it('holds a later search when saving the connector-read turn failed', async () => {

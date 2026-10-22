@@ -411,9 +411,19 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       }
       this.stopCommandExecutionLeaseRenewals();
       if (lifecycle.frozenByStore) {
-        await resolver.close().catch((err: unknown) => {
-          resolver.logger.warn('TurnResourceResolver.close() failed', { err });
-        });
+        // A turn frozen by the next message still read what it read, so its fingerprints are saved too.
+        try {
+          await chatFingerprintSaves.finish({
+            session_id: this.turn.session_id,
+            state: resolver.webSearchTurn,
+            store: this.store,
+            logger: resolver.logger,
+          });
+        } finally {
+          await resolver.close().catch((err: unknown) => {
+            resolver.logger.warn('TurnResourceResolver.close() failed', { err });
+          });
+        }
       } else {
         const updatedAt = new Date();
         const createdAtIso = updatedAt.toISOString();
