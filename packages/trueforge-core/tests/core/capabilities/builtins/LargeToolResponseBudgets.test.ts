@@ -5,7 +5,7 @@ import {
   budgetSandboxOutput,
   budgetSpaceRead,
   CALENDAR_LIST_EVENT_BUDGET,
-  LargeToolResponseProcessor,
+  IngestionBudgetProcessor,
   PAGE_READ_TOKEN_BUDGET,
   SANDBOX_OUTPUT_EDGE_LINES,
   SPACE_READ_TOKEN_BUDGET,
@@ -16,7 +16,8 @@ import type { ToolCallResult } from '../../../../src/core/mcp/executeToolCalls';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
 import { FetchedPageStore, recordFetchedPages } from '../../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../../src/core/search/groundPlace';
-import { makeMockIMCPServer, makeSilentLogger } from '../../harnessMocks';
+import { TAVILY_EXTRACT_TOOL_NAME } from '../../../../src/core/search/TavilyClient';
+import { makeMockIMCPServer } from '../../harnessMocks';
 
 const NO_REQUEST: ReadonlySet<string> = new Set();
 
@@ -32,6 +33,37 @@ function longPage(sections: number): string {
     ),
   ).join('\n\n');
 }
+
+function toolResult(input: { content: string; toolName: string }): ToolCallResult {
+  return {
+    message: { role: 'tool', tool_call_id: 'call-1', content: input.content },
+    rawContent: input.content,
+    images: [],
+    toolCallInfo: { type: 'mcp', mcp_server_id: 'web', mcp_server_name: 'web', original_tool_name: input.toolName },
+    info: {
+      toolSet: makeMockIMCPServer({ name: 'web', preload: false }),
+      originalToolName: input.toolName,
+    },
+    screen: undefined,
+    failure: false,
+    isStructuredContent: false,
+    completedAt: new Date().toISOString(),
+    memoized: false,
+    repeatCount: 0,
+    blockedPrivateFallback: false,
+    repeatedSideEffect: false,
+    verificationReceiptCandidate: undefined,
+    disposition: 'executed_ok',
+    remediation: undefined,
+    admissionProvenance: { source: 'automatic' },
+  };
+}
+
+const EXECUTION: Readonly<AgentThreadExecutionContext> = {
+  threadId: 'thread-1',
+  currentContextUsage: getEmptyCurrentContextUsage(),
+  context: [],
+};
 
 describe('page budget', () => {
   it('leaves a page under the budget unchanged', () => {
@@ -127,16 +159,78 @@ describe('sandbox budget', () => {
 });
 
 describe('space read budget', () => {
-  it('trims a long space body to the space budget by heading', () => {
-    const body = longPage(60);
-    const content = JSON.stringify({ space: { id: 'space_1' }, body });
-    const trimmed = budgetSpaceRead({ content, request: NO_REQUEST });
+  // The get_space result: the record sits under `space` and its body is a string there. Shape from
+  // trueforge's spaceCapability (`read` → `toWire`), with the space record fields from SpaceSchema.
+  function getSpaceResult(body: string): string {
+    return JSON.stringify({
+      space: {
+        id: 'space_1',
+        name: 'Spain house search',
+        purpose: 'Candidate houses',
+        status: 'active',
+        format: 'markdown',
+        revision: 4,
+        updated_at: '2026-10-22T07:00:00.000Z',
+        body,
+      },
+      aggregate_revision: 9,
+    });
+  }
+
+  it('trims a long get_space body to the space budget by heading and keeps the rest of the result', () => {
+    const trimmed = budgetSpaceRead({ content: getSpaceResult(longPage(60)), request: NO_REQUEST });
     expect(trimmed).toBeDefined();
 
-    const parsed: { body: string } = JSON.parse(trimmed ?? '{}');
-    expect(estimateTokensForString(parsed.body)).toBeLessThanOrEqual(SPACE_READ_TOKEN_BUDGET + 60);
-    expect(parsed.body).toContain('## Section 0');
-    expect(parsed.body).toContain('shortened:');
+    const parsed: { space: { id: string; body: string }; aggregate_revision: number } = JSON.parse(trimmed ?? '{}');
+    expect(estimateTokensForString(parsed.space.body)).toBeLessThanOrEqual(SPACE_READ_TOKEN_BUDGET + 60);
+    expect(parsed.space.body).toContain('## Section 0');
+    expect(parsed.space.body).toContain('shortened:');
+    expect(parsed.space.id).toBe('space_1');
+    expect(parsed.aggregate_revision).toBe(9);
+  });
+
+  it('leaves a short get_space body unchanged', () => {
+    expect(budgetSpaceRead({ content: getSpaceResult('# Small\n\nOne line.'), request: NO_REQUEST })).toBeUndefined();
+  });
+
+  it('leaves list_blocks and get_space results without a body unchanged', () => {
+    const listBlocks = JSON.stringify({
+      space_id: 'space_1',
+      revision: 4,
+      preamble: null,
+      blocks: [{ anchor: 'pricing', preview: 'Pricing', occurrences: 1 }],
+    });
+    expect(budgetSpaceRead({ content: listBlocks, request: NO_REQUEST })).toBeUndefined();
+    const summary = JSON.stringify({ space: { id: 'space_1', name: 'x' }, aggregate_revision: 9 });
+    expect(budgetSpaceRead({ content: summary, request: NO_REQUEST })).toBeUndefined();
+  });
+});
+
+describe('extract budget', () => {
+  it('trims each page text in a Tavily extract result and keeps the JSON shape', async () => {
+    const pages = [
+      { url: 'https://guide.example.com/a', title: 'A', fetched_at: '2026-10-22T07:00:00.000Z', text: longPage(40) },
+      { url: 'https://guide.example.com/b', title: 'B', fetched_at: '2026-10-22T07:00:00.000Z', text: 'Short page.' },
+    ];
+    const content = JSON.stringify({
+      untrusted_web_text: true,
+      notice: 'n',
+      credits_estimate: 1,
+      pages,
+      not_fetched: [],
+    });
+    const result = toolResult({ content, toolName: TAVILY_EXTRACT_TOOL_NAME });
+
+    await new IngestionBudgetProcessor().process([result], EXECUTION);
+
+    const parsed: { pages: { url: string; text: string }[]; not_fetched: unknown[] } = JSON.parse(
+      result.message.content,
+    );
+    expect(parsed.pages).toHaveLength(2);
+    expect(estimateTokensForString(parsed.pages[0]?.text ?? '')).toBeLessThanOrEqual(PAGE_READ_TOKEN_BUDGET + 60);
+    expect(parsed.pages[0]?.text).toContain('shortened:');
+    expect(parsed.pages[1]?.text).toBe('Short page.');
+    expect(parsed.not_fetched).toEqual([]);
   });
 });
 
@@ -171,35 +265,10 @@ describe('maps grounding sees the full fetched page, not the budgeted result', (
 
   /** A long guide whose only mention of the place sits in a paragraph the budget drops. */
   function guideWithPlace(): string {
-    // The store keeps the first 8000 characters of a page, so the place must sit inside that window.
+    // The store keeps the first FETCHED_PAGE_TEXT_MAX_CHARS characters, so the place sits inside that window.
     const before = longPage(5);
     const placeParagraph = `${placeName} is at ${placeAddress}. ${'Stalls open at dawn with fruit and fish. '.repeat(4)}`;
     return `${before}\n\n${placeParagraph}\n\n${longPage(30)}`;
-  }
-
-  function fetchResult(content: string): ToolCallResult {
-    return {
-      message: { role: 'tool', tool_call_id: 'fetch-1', content },
-      rawContent: content,
-      images: [],
-      toolCallInfo: { type: 'mcp', mcp_server_id: 'web', mcp_server_name: 'web', original_tool_name: 'web_fetch' },
-      info: {
-        toolSet: makeMockIMCPServer({ name: 'web', preload: false }),
-        originalToolName: 'web_fetch',
-      },
-      screen: undefined,
-      failure: false,
-      isStructuredContent: false,
-      completedAt: new Date().toISOString(),
-      memoized: false,
-      repeatCount: 0,
-      blockedPrivateFallback: false,
-      repeatedSideEffect: false,
-      verificationReceiptCandidate: undefined,
-      disposition: 'executed_ok',
-      remediation: undefined,
-      admissionProvenance: { source: 'automatic' },
-    };
   }
 
   it('grounds a place from the recorded page after the model-facing text was shortened', async () => {
@@ -212,20 +281,8 @@ describe('maps grounding sees the full fetched page, not the budgeted result', (
       texts: [page],
     });
 
-    const result = fetchResult(page);
-    const processor = new LargeToolResponseProcessor({
-      dynamicSubAgentsPresent: false,
-      individualTokenThreshold: 1000,
-      totalTokenThreshold: 2000,
-      previewNumberOfCharacters: 100,
-      logger: makeSilentLogger(),
-    });
-    const execution: Readonly<AgentThreadExecutionContext> = {
-      threadId: 'thread-1',
-      currentContextUsage: getEmptyCurrentContextUsage(),
-      context: [],
-    };
-    await processor.process([result], execution);
+    const result = toolResult({ content: page, toolName: 'web_fetch' });
+    await new IngestionBudgetProcessor().process([result], EXECUTION);
 
     expect(result.message.content).not.toContain(placeName);
 

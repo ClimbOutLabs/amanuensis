@@ -203,7 +203,6 @@ export const SPACE_READ_TOKEN_BUDGET = 3_000;
 export const SANDBOX_OUTPUT_EDGE_LINES = 40;
 export const CALENDAR_LIST_EVENT_BUDGET = 20;
 
-const PAGE_TOOL_NAMES: ReadonlySet<string> = new Set(['web_fetch', TAVILY_EXTRACT_TOOL_NAME]);
 const SPACE_READ_TOOL_NAME_SET: ReadonlySet<string> = new Set<string>(SPACE_READ_TOOL_NAMES);
 
 /** Words of at least four letters or digits, lowercased: the terms a page section may be kept for. */
@@ -289,6 +288,32 @@ export function budgetPageText(input: { text: string; request: ReadonlySet<strin
   return `${body}\n\n(shortened: ${String(omitted)} more tokens; ask to read a named section to see more)`;
 }
 
+/** Trims each page's text in a Tavily extract result to the page budget. The JSON shape stays. */
+export function budgetExtractPages(input: { content: string; request: ReadonlySet<string> }): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed['pages'])) {
+    return undefined;
+  }
+  const pages: unknown[] = [];
+  let changed = false;
+  for (const page of parsed['pages']) {
+    const original = isRecord(page) ? page['text'] : undefined;
+    if (!isRecord(page) || typeof original !== 'string') {
+      pages.push(page);
+      continue;
+    }
+    const text = budgetPageText({ text: original, request: input.request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+    changed ||= text !== original;
+    pages.push({ ...page, text });
+  }
+  return changed ? JSON.stringify({ ...parsed, pages }) : undefined;
+}
+
 /** Keeps the first and last lines of a long stream; a short one is returned unchanged. */
 function keepEdgeLines(text: string): string {
   const lines = text.split('\n');
@@ -329,7 +354,7 @@ export function budgetSandboxOutput(content: string): string | undefined {
   return changed ? JSON.stringify(next) : undefined;
 }
 
-/** Trims a space read to its page-sized body, when the result carries one. */
+/** Trims a get_space result's body to the space budget. List and block reads carry no body and pass through. */
 export function budgetSpaceRead(input: { content: string; request: ReadonlySet<string> }): string | undefined {
   let parsed: unknown;
   try {
@@ -337,15 +362,16 @@ export function budgetSpaceRead(input: { content: string; request: ReadonlySet<s
   } catch {
     return undefined;
   }
-  if (!isRecord(parsed) || typeof parsed['body'] !== 'string') {
+  if (!isRecord(parsed)) {
     return undefined;
   }
-  const body = budgetPageText({
-    text: parsed['body'],
-    request: input.request,
-    maxTokens: SPACE_READ_TOKEN_BUDGET,
-  });
-  return body === parsed['body'] ? undefined : JSON.stringify({ ...parsed, body });
+  const space = parsed['space'];
+  if (!isRecord(space) || typeof space['body'] !== 'string') {
+    return undefined;
+  }
+  const original = space['body'];
+  const body = budgetPageText({ text: original, request: input.request, maxTokens: SPACE_READ_TOKEN_BUDGET });
+  return body === original ? undefined : JSON.stringify({ ...parsed, space: { ...space, body } });
 }
 
 /** Keeps the first calendar events in start order and counts the rest. */
@@ -391,7 +417,10 @@ function applyIngestionBudgets(input: {
     let budgeted: string | undefined;
     if (input.sandbox && result.info.toolSet === input.sandbox) {
       budgeted = budgetSandboxOutput(content);
-    } else if (PAGE_TOOL_NAMES.has(toolName)) {
+    } else if (toolName === TAVILY_EXTRACT_TOOL_NAME) {
+      request ??= requestWordsOf(input.context);
+      budgeted = budgetExtractPages({ content, request });
+    } else if (toolName === 'web_fetch') {
       request ??= requestWordsOf(input.context);
       const text = budgetPageText({ text: content, request, maxTokens: PAGE_READ_TOKEN_BUDGET });
       budgeted = text === content ? undefined : text;
@@ -406,6 +435,21 @@ function applyIngestionBudgets(input: {
       result.outputTransform = 'truncated';
     }
   }
+}
+
+/** Runs the ingestion budgets on every chat, before the size thresholds see the results. */
+export class IngestionBudgetProcessor implements ToolResponseProcessor {
+  process(
+    results: ToolCallResult[],
+    execution: Readonly<AgentThreadExecutionContext>,
+  ): Promise<ToolResponseProcessorResult> {
+    applyIngestionBudgets({ results, sandbox: execution.sandbox, context: execution.context });
+    return Promise.resolve({});
+  }
+}
+
+export function ingestionBudgets(): AgentCapability {
+  return { toolResponseProcessors: [new IngestionBudgetProcessor()] };
 }
 
 export class LargeToolResponseProcessor implements ToolResponseProcessor {
@@ -707,8 +751,6 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     execution: Readonly<AgentThreadExecutionContext>,
   ): Promise<ToolResponseProcessorResult> {
     const sandbox = execution.sandbox;
-    // Budgets run before measurement, so every later threshold sees what the history will hold.
-    applyIngestionBudgets({ results, sandbox, context: execution.context });
     const resultsWithInfo = this.buildResultsWithInfo(results, sandbox);
     let runningTotal = resultsWithInfo.reduce((sum, e) => sum + e.originalTokens, 0);
 
