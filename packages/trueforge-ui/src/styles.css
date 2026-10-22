@@ -30,7 +30,7 @@
 @layer tfy-agent-ui-base {
   .aui-theme-root {
     box-sizing: border-box;
-    /* Fallback palette: matches the `trueforge` preset so surfaces without
+    /* Fallback palette: matches the `paper` preset so surfaces without
      * ThemeProvider tokens render the same product (single token truth). */
     --color-white: #ffffff;
     --color-black: #09090b;
@@ -230,10 +230,10 @@
 }
 
 /*
- * Clone typography: conversation copy and composer text are regular weight;
+ * High contrast typography: conversation copy and composer text are regular weight;
  * controls and headings keep their component-level medium/semibold utilities.
  */
-.aui-theme-root:is([data-preset='claude'], [data-preset='chatgpt'], [data-preset='gemini'])
+.aui-theme-root[data-preset='high-contrast']
   :is(
     .aui-markdown,
     [data-slot='aui_user-message-content'],
@@ -245,8 +245,8 @@
 
 /*
  * Display type: prose and welcome surfaces use the display face; chrome keeps
- * the body face. Only the claude preset's display face is serif — for every
- * other preset this is a no-op because both faces are the same stack.
+ * the body face. Today every preset sets both faces to the same stack, so this
+ * is a no-op until a preset gives them different faces.
  */
 .aui-theme-root .aui-markdown.markdown-body,
 .aui-theme-root .aui-thread-welcome-message-inner {
@@ -727,8 +727,8 @@
   border-radius: inherit;
 }
 
-/* ChatGPT dark: transparent composer border + inset white edge */
-.aui-theme-root[data-preset='chatgpt'][data-theme='dark'] [data-slot='aui_composer-shell'] {
+/* High contrast dark: transparent composer border + inset white edge */
+.aui-theme-root[data-preset='high-contrast'][data-theme='dark'] [data-slot='aui_composer-shell'] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 
@@ -1477,43 +1477,43 @@
  * ──────────────────────────────────────────────────────────────────── */
 
 /* Time of day moves only the paper's lightness and chroma; the hue stays at the gold's 85.2.
- * ThemeProvider writes data-day from the local hour. Only the default preset takes these. */
-.aui-theme-root[data-preset='trueforge'][data-day='morning']:not(.dark) {
+ * ThemeProvider writes data-day from the local hour. Only the paper preset takes these. */
+.aui-theme-root[data-preset='paper'][data-day='morning']:not(.dark) {
   --paper: #faf2df;
   --paper: oklch(0.962 0.026 85.2);
   --paper-top: #fef4df;
   --paper-top: oklch(0.97 0.03 85.2);
 }
 
-.aui-theme-root[data-preset='trueforge'][data-day='midday']:not(.dark) {
+.aui-theme-root[data-preset='paper'][data-day='midday']:not(.dark) {
   --paper: #f9f6f0;
   --paper: oklch(0.974 0.008 85.2);
   --paper-top: #fdf9f0;
   --paper-top: oklch(0.982 0.012 85.2);
 }
 
-.aui-theme-root[data-preset='trueforge'][data-day='evening']:not(.dark) {
+.aui-theme-root[data-preset='paper'][data-day='evening']:not(.dark) {
   --paper: #f7edd8;
   --paper: oklch(0.948 0.03 85.2);
   --paper-top: #fbefd7;
   --paper-top: oklch(0.956 0.034 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='morning'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='morning'] {
   --paper: #2a2416;
   --paper: oklch(0.262 0.026 85.2);
   --paper-top: #2d2515;
   --paper-top: oklch(0.27 0.03 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='midday'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='midday'] {
   --paper: #292620;
   --paper: oklch(0.27 0.012 85.2);
   --paper-top: #2c281f;
   --paper-top: oklch(0.278 0.016 85.2);
 }
 
-.aui-theme-root.dark[data-preset='trueforge'][data-day='evening'] {
+.aui-theme-root.dark[data-preset='paper'][data-day='evening'] {
   --paper: #282112;
   --paper: oklch(0.252 0.028 85.2);
   --paper-top: #2b2311;
@@ -1983,6 +1983,11 @@
   .aui-theme-root {
     --grain: none;
   }
+}
+
+/* High contrast keeps its surfaces flat: no paper grain. */
+.aui-theme-root[data-preset='high-contrast'] {
+  --grain: none;
 }
 
 .aui-reward-tick {
