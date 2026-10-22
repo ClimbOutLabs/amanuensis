@@ -34,6 +34,14 @@ Sign-in: if your server asks you to sign in, put TRUEFORGE_TOKEN=<your ID token>
 named .env.eval-tokens at the repo root, or set it as an environment variable. Never pass it on the command line.
 `;
 
+/** The runner only ever talks to an instance started with AMAN_EVAL_MODE=true, never to a person's own instance. */
+export const NOT_EVAL_INSTANCE_MESSAGE =
+  'This server is not an eval instance. Start a second Aman with AMAN_EVAL_MODE=true, and run the eval against that one.';
+
+function isRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export class UsageProblem extends Error {
   constructor(message, options) {
     super(message, options);
@@ -182,9 +190,13 @@ export async function main({
     if (token === undefined) {
       stderr('No sign-in token found. Continuing without one, which works only on a server with no sign-in.\n');
     }
+    const client = createInstanceClient({ baseUrl: args.instance, token, fetchImpl });
+    const health = await client.getHealth();
+    if (!isRecord(health) || health.eval_mode !== true) {
+      throw new Error(NOT_EVAL_INSTANCE_MESSAGE);
+    }
     const tokenSet = await loadTokenSet(args.setPath ?? path.join(rootDir, ...DEFAULT_SET_PATH));
     const outDir = args.outDir ?? defaultOutDir({ rootDir, label: args.label, now });
-    const client = createInstanceClient({ baseUrl: args.instance, token, fetchImpl });
     const result = await runEvalTokens({
       client,
       tokenSet,

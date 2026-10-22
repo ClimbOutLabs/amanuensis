@@ -2,7 +2,7 @@
 
 The token eval runs a fixed set of 18 prompts against a running Aman instance. It records how many tokens and steps each reply used, so we can compare changes to token use over time.
 
-You run it yourself, against your own instance. Nothing in the eval calls a real account. The prompts use invented people, places, and documents.
+You run it yourself, against a second instance in eval mode. Nothing in the eval calls a real account. The prompts use invented people, places, and documents, and the eval instance reads only invented mail and calendar data.
 
 ## What is in the set
 
@@ -15,22 +15,37 @@ The prompts live in `packages/trueforge/evals/token-set.json`. Each prompt has:
 
 The set is versioned. Change it only in a new version, so results from different runs stay comparable.
 
-## Before you run it
+## Use a second instance, never your own
 
-1. Start your Aman instance and note its address, for example `http://localhost:8790`.
-2. If your instance asks you to sign in, put your sign-in token in a file named `.env.eval-tokens` at the repo root, as `TRUEFORGE_TOKEN=...`. You can also set `TRUEFORGE_TOKEN` as an environment variable. Never type the token on the command line.
+The eval must run against an instance started in eval mode. Keep your own Aman as it is, and start a second one next to it.
+
+1. Install a second Aman on the same computer with its own folder and port, for example `install.sh --home ~/.amanuensis-eval --name eval --port 8800`.
+2. Open the second instance's `.env` file and add the line `AMAN_EVAL_MODE=true`. The installer does not set this for you yet, so add it by hand, then restart that instance.
+3. Check the address. `http://localhost:8800/healthz` should show `"eval_mode": true`.
+4. If the instance asks you to sign in, put your sign-in token in a file named `.env.eval-tokens` at the repo root, as `TRUEFORGE_TOKEN=...`. You can also set `TRUEFORGE_TOKEN` as an environment variable. Never type the token on the command line.
+
+The runner checks this first. If the address does not show eval mode, the runner stops, sends no prompts, and writes nothing. Start an eval-mode instance and run it again.
 
 The file `.env.eval-tokens` is ignored by git. Keep it that way.
+
+## What eval mode changes
+
+In eval mode the instance is safe to test with, because:
+
+- Gmail and Google Calendar answer from the invented files in `packages/trueforge/evals/fixtures/`. No call goes to Google, and nothing is sent.
+- A mail draft or a calendar event lives only in that instance's memory. It is never written to a real account.
+- Only these approvals go through: mail reads and drafts, calendar reads and writes, maps, and web search. Any other approval is declined by the server, whatever the runner sends. Sending mail is never approved.
+- Maps and web search still use the internet, because they only read public places and pages.
 
 ## Run it
 
 ```sh
-pnpm eval:tokens -- --instance http://localhost:8790 --model <provider/model> --label "baseline" --runs 3 --temperature 0
+pnpm eval:tokens -- --instance http://localhost:8800 --model <provider/model> --label "baseline" --runs 3 --temperature 0
 ```
 
 The flags:
 
-- `--instance` is the address of your instance. It must start with `http://` or `https://`.
+- `--instance` is the address of your eval-mode instance. It must start with `http://` or `https://`.
 - `--model` is the model to use for every prompt.
 - `--label` names this run. Use a short name you will recognize later.
 - `--runs` is how many times to run each prompt. The default is 1.

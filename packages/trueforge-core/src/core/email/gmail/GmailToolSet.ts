@@ -18,7 +18,7 @@ import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox'
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
-import { GmailApi, mapSkippingMissing } from './gmailApi';
+import { mapSkippingMissing, type GmailApiPort } from './gmailApi';
 import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
@@ -75,7 +75,7 @@ export interface AttachmentStager {
 
 interface GmailToolSetOptions {
   tracing: AgentTracing;
-  api: GmailApi;
+  api: GmailApiPort;
   /** The connected address, named in every result. */
   account: string;
   /** Features Google actually granted: tools are offered only for these. */

@@ -408,7 +408,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     }
   }
 
-  app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
+  app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION, eval_mode: configuration.AMAN_EVAL_MODE }));
   mountCatalogLogos(app, {
     logos: [...deps.modelCatalog.list(), ...deps.mcpCatalog.list()].map(entry => entry.logo),
     authMiddleware: createUiSessionAuthMiddleware(deps.authenticator),

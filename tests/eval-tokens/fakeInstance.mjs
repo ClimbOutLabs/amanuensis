@@ -24,7 +24,7 @@ function isApprovalOnly(input) {
 /**
  * @param {{ token: string, metrics: Record<string, Record<string, unknown>> }} options
  */
-export async function startFakeInstance({ token, metrics }) {
+export async function startFakeInstance({ token, metrics, evalMode = true }) {
   const requests = [];
   const sessions = new Map();
   const turns = new Map();
@@ -94,6 +94,10 @@ export async function startFakeInstance({ token, metrics }) {
     }
     requests.push({ method: req.method, path: req.url, authorization: req.headers.authorization, body });
 
+    if (req.method === 'GET' && req.url === '/healthz') {
+      send(res, 200, { status: 'ok', version: 'fake', eval_mode: evalMode });
+      return;
+    }
     if (req.headers.authorization !== `Bearer ${token}`) {
       send(res, 401, { error: { message: 'Sign in again.' } });
       return;

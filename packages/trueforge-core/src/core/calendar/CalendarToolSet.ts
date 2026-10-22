@@ -15,7 +15,7 @@ import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowli
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { extractErrorLogFields } from '../util/errorLogFields';
-import { CalendarApi } from './CalendarApi';
+import type { CalendarApiPort } from './CalendarApi';
 import {
   hashEventWrite,
   resolveCreate,
@@ -59,7 +59,7 @@ const NO_WRITE_NOTE =
 
 interface CalendarToolSetOptions {
   tracing: AgentTracing;
-  api: CalendarApi;
+  api: CalendarApiPort;
   /** The connected address, named in every result. */
   account: string;
   /** Features Google actually granted: tools are offered only for these. */

@@ -59,6 +59,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { gateEvalApprovals } from '../eval/approvalGate';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -1757,7 +1758,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
-    const body = c.req.valid('json');
+    const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
 
     const session = await deps.sessions.get({
@@ -1776,6 +1777,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
+
+    // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
+    const body = configuration.AMAN_EVAL_MODE
+      ? {
+          ...submitted,
+          input: await gateEvalApprovals({
+            session,
+            previous_turn_id: submitted.previous_turn_id,
+            input: submitted.input,
+          }),
+        }
+      : submitted;
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.

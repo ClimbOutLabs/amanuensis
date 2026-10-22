@@ -189,6 +189,31 @@ test('a wrong token stops the run at once and writes no output', async () => {
   }
 });
 
+test('the runner refuses an instance that is not in eval mode and starts no session', async () => {
+  const fake = await startFakeInstance({ token: TOKEN, metrics: await loadFakeMetrics(), evalMode: false });
+  try {
+    await withTempDir(async dir => {
+      const out = [];
+      const err = [];
+      const code = await main({
+        argv: ['--instance', fake.baseUrl, '--model', 'fake/m', '--label', 'x'],
+        env: { TRUEFORGE_TOKEN: TOKEN },
+        rootDir: dir,
+        stdout: text => out.push(text),
+        stderr: text => err.push(text),
+        pollIntervalMs: 0,
+      });
+      assert.equal(code, 1);
+      assert.ok(err.join('').includes('not an eval instance'));
+      assert.ok(err.join('').includes('AMAN_EVAL_MODE=true'));
+      assert.ok(!fake.requests.some(request => request.path === '/api/v1/sessions'));
+      await assert.rejects(readFile(path.join(dir, 'eval-results'), 'utf8'));
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
 test('an unreachable instance stops the run with a plain message', async () => {
   const fake = await startFakeInstance({ token: TOKEN, metrics: await loadFakeMetrics() });
   const closedUrl = fake.baseUrl;

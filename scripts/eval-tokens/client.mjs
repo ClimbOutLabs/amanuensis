@@ -96,6 +96,10 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
 
   return {
     origin,
+    /** Reads `/healthz`, which says whether the instance runs in eval mode. */
+    async getHealth() {
+      return await request('GET', '/healthz');
+    },
     /**
      * @param {{ model: string, temperature: number }} options
      * @returns {Promise<string>} session id
