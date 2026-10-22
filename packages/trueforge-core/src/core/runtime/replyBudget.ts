@@ -41,7 +41,7 @@ export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 export type ForcedAnswer = 'budget' | 'removed_streak';
 
 export const STEP_BUDGET_SPENT_MESSAGE =
-  'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and they can reply "continue".';
+  'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and that they can ask you to continue.';
 
 export const REMOVED_TOOL_STREAK_MESSAGE =
   'Tools that were declined or are not available keep being called. Answer with what you have.';
