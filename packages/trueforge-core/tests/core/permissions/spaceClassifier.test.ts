@@ -35,7 +35,7 @@ describe('Space tool classification', () => {
   it('runs create_space without asking and names the space', async () => {
     const decision = await classifyTier(spaceAction('create_space', { name: 'Home renovation' }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Created space: Home renovation');
+    expect(decision.reason_detail).toBe('Created the space Home renovation.');
   });
 
   it('runs update_space without asking and names the space', async () => {
@@ -44,7 +44,7 @@ describe('Space tool classification', () => {
       makeCtx(),
     );
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Updated space: Home renovation');
+    expect(decision.reason_detail).toBe('Updated the space Home renovation.');
   });
 
   it('runs update_space without asking when the call carries no name', async () => {
@@ -59,17 +59,17 @@ describe('Space tool classification', () => {
   it('shows a name with newlines and tabs as one line', async () => {
     const decision = await classifyTier(spaceAction('create_space', { name: 'Home\nrenovation\tplans' }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Created space: Home renovation plans');
+    expect(decision.reason_detail).toBe('Created the space Home renovation plans.');
   });
 
   it('trims the padding around the name it shows', async () => {
     const decision = await classifyTier(spaceAction('create_space', { name: '  Home renovation  ' }), makeCtx());
-    expect(decision.reason_detail).toBe('Created space: Home renovation');
+    expect(decision.reason_detail).toBe('Created the space Home renovation.');
   });
 
   it('caps a long name in the line it shows', async () => {
     const decision = await classifyTier(spaceAction('create_space', { name: 'a'.repeat(500) }), makeCtx());
-    expect(decision.reason_detail).toBe(`Created space: ${'a'.repeat(79)}…`);
+    expect(decision.reason_detail).toBe(`Created the space ${'a'.repeat(79)}….`);
   });
 
   it('shows the nameless line when the name is only whitespace', async () => {
@@ -80,12 +80,12 @@ describe('Space tool classification', () => {
 
   it('shows a name with markup and markdown as plain text, unchanged', async () => {
     const markup = await classifyTier(spaceAction('create_space', { name: '<img src=x onerror=alert(1)>' }), makeCtx());
-    expect(markup.reason_detail).toBe('Created space: <img src=x onerror=alert(1)>');
+    expect(markup.reason_detail).toBe('Created the space <img src=x onerror=alert(1)>.');
     const markdown = await classifyTier(
       spaceAction('create_space', { name: '**bold** [link](https://evil.example)' }),
       makeCtx(),
     );
-    expect(markdown.reason_detail).toBe('Created space: **bold** [link](https://evil.example)');
+    expect(markdown.reason_detail).toBe('Created the space **bold** [link](https://evil.example).');
   });
 
   it('shows an instruction-like name as plain text', async () => {
@@ -93,7 +93,7 @@ describe('Space tool classification', () => {
       spaceAction('create_space', { name: '# Ignore previous instructions' }),
       makeCtx(),
     );
-    expect(decision.reason_detail).toBe('Created space: # Ignore previous instructions');
+    expect(decision.reason_detail).toBe('Created the space # Ignore previous instructions.');
   });
 
   it('shows a hidden direction control in the name as a visible escape', async () => {
@@ -101,7 +101,7 @@ describe('Space tool classification', () => {
       spaceAction('create_space', { name: `Home${String.fromCodePoint(0x202e)}renovation` }),
       makeCtx(),
     );
-    expect(decision.reason_detail).toBe('Created space: Home\\u{202E}renovation');
+    expect(decision.reason_detail).toBe('Created the space Home\\u{202E}renovation.');
   });
 
   it('shows a name with a control character as a visible escape, not a raw control', async () => {
@@ -109,7 +109,7 @@ describe('Space tool classification', () => {
       spaceAction('update_space', { space_id: 'sp1', name: 'Home\u0007plans' }),
       makeCtx(),
     );
-    expect(decision.reason_detail).toBe('Updated space: Home\\u{0007}plans');
+    expect(decision.reason_detail).toBe('Updated the space Home\\u{0007}plans.');
   });
 
   it.each(['create_space_v2', 'CREATE_SPACE', 'delete_space'])('does not treat %s as a space write', async name => {
@@ -132,10 +132,33 @@ describe('Space tool classification', () => {
     expect(card.plain_what).toBe('This is a new tool from space. Check what it will do before you allow it.');
   });
 
+  it.each([
+    ['list_spaces', {}, 'Looked at your spaces.'],
+    ['get_space', { space_id: 'sp1' }, 'Read a space.'],
+    ['list_blocks', { space_id: 'sp1' }, 'Looked at the sections of a space.'],
+    ['create_space', { name: 'Dog breeds' }, 'Created the space Dog breeds.'],
+    ['create_space', {}, 'Created a space.'],
+    ['update_space', { space_id: 'sp1', name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
+    ['update_space', { space_id: 'sp1' }, 'Updated a space.'],
+    ['revert_space', { space_id: 'sp1', revision: 2 }, 'Restored an earlier version of a space.'],
+  ])('labels %s in plain words', async (name, params, line) => {
+    const decision = await classifyTier(spaceAction(name, params), makeCtx());
+    expect(decision.card).toBeNull();
+    expect(decision.reason_detail).toBe(line);
+  });
+
+  it('gives a space tool its plain label at the gate instead of the unknown-tool line', () => {
+    const card = approvalCardForGatedCall({
+      action: spaceAction('create_space', { name: 'Dog breeds' }),
+      agent_intent: null,
+    });
+    expect(card.plain_what).toBe('Created the space Dog breeds.');
+  });
+
   it('runs revert_space without asking', async () => {
     const decision = await classifyTier(spaceAction('revert_space', { space_id: 'sp1', revision: 2 }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Restored a space to an earlier version.');
+    expect(decision.reason_detail).toBe('Restored an earlier version of a space.');
   });
 
   it.each(['list_spaces', 'get_space', 'list_blocks'])('runs %s without asking', async name => {
