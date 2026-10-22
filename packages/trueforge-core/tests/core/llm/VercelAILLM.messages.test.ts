@@ -12,6 +12,7 @@ import {
   toAssistantModelMessage,
   toFilePart,
   toUserContent,
+  VERCEL_AI_PROVIDER_NAMES,
 } from '../../../src/core/llm/VercelAILLM';
 
 // ─────────── parseMimeFromDataUri ───────────
@@ -348,10 +349,9 @@ describe('toAssistantModelMessage', () => {
 // ─────────── convertMessages ───────────
 
 describe('convertMessages', () => {
-  it('extracts system messages as instructions (joined with double newlines)', () => {
+  it('extracts the leading system message as instructions', () => {
     const messages: ChatCompletionMessageParam[] = [
       { role: 'system', content: 'Prompt A' },
-      { role: 'system', content: 'Prompt B' },
       { role: 'user', content: 'hi' },
     ];
     const { instructions, messages: result } = convertMessages({
@@ -359,9 +359,21 @@ describe('convertMessages', () => {
       provider: 'google-gemini',
       providerName: 'google-gemini',
     });
+    expect(instructions).toBe('Prompt A');
+    expect(result).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('keeps system messages as instructions when there is no user message to carry them', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Prompt A' },
+        { role: 'system', content: 'Prompt B' },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
     expect(instructions).toBe('Prompt A\n\nPrompt B');
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ role: 'user' });
+    expect(result).toEqual([]);
   });
 
   it('returns undefined instructions when there are no system messages', () => {
@@ -373,49 +385,7 @@ describe('convertMessages', () => {
     expect(instructions).toBeUndefined();
   });
 
-  it('anthropic: mid-conversation system context rides on the last user turn, not in instructions', () => {
-    const messages: ChatCompletionMessageParam[] = [
-      { role: 'system', content: 'Static instruction' },
-      { role: 'user', content: 'earlier question' },
-      { role: 'assistant', content: 'earlier answer' },
-      { role: 'system', content: 'Host context for this reply.' },
-      { role: 'system', content: '<aman-memory>remembered</aman-memory>' },
-      { role: 'user', content: 'current question' },
-    ];
-    const { instructions, messages: result } = convertMessages({
-      messages,
-      provider: 'anthropic',
-      providerName: 'anthropic',
-    });
-    expect(instructions).toBe('Static instruction');
-    expect(result).toEqual([
-      { role: 'user', content: 'earlier question' },
-      { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Host context for this reply.' },
-          { type: 'text', text: '<aman-memory>remembered</aman-memory>' },
-          { type: 'text', text: 'current question' },
-        ],
-      },
-    ]);
-  });
-
-  it('anthropic: keeps the last user turn plain when no system context sits before it', () => {
-    const { instructions, messages: result } = convertMessages({
-      messages: [
-        { role: 'system', content: 'Static instruction' },
-        { role: 'user', content: 'hi' },
-      ],
-      provider: 'anthropic',
-      providerName: 'anthropic',
-    });
-    expect(instructions).toBe('Static instruction');
-    expect(result).toEqual([{ role: 'user', content: 'hi' }]);
-  });
-
-  it('other providers keep mid-conversation system text in instructions', () => {
+  it('a later system message is per-reply context on the current user message, not instructions', () => {
     const { instructions, messages: result } = convertMessages({
       messages: [
         { role: 'system', content: 'Static instruction' },
@@ -427,8 +397,36 @@ describe('convertMessages', () => {
       provider: 'openai',
       providerName: 'openai',
     });
-    expect(instructions).toBe('Static instruction\n\nHost context for this reply.');
-    expect(result[result.length - 1]).toEqual({ role: 'user', content: 'current question' });
+    expect(instructions).toBe('Static instruction');
+    expect(result[result.length - 1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Host context for this reply.' },
+        { type: 'text', text: 'current question' },
+      ],
+    });
+  });
+
+  it('the static instruction is never a later system message, even with no history', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'hi' },
+      ],
+      provider: 'anthropic',
+      providerName: 'anthropic',
+    });
+    expect(instructions).toBe('Static instruction');
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: 'hi' },
+        ],
+      },
+    ]);
   });
 
   it('preserves user/assistant/tool message ordering', () => {
@@ -510,6 +508,82 @@ describe('convertMessages', () => {
 });
 
 // ─────────── convertTools ───────────
+
+const STATIC_INSTRUCTION = 'Static instruction';
+const REPLY_CONTEXT = "Today's date is 2026-10-22.";
+const RECALLED_BLOCK = '<aman-memory>\nFrom something Aman read: Robin moved to Lisbon.\n</aman-memory>';
+const EARLIER_HISTORY: ChatCompletionMessageParam[] = [
+  { role: 'user', content: 'earlier question' },
+  { role: 'assistant', content: 'earlier answer' },
+];
+
+/** The message list AgentThread sends for one reply: static instruction, history, per-reply block, recall, current message. */
+function replyMessages({
+  history,
+  recalled,
+  userText,
+}: {
+  history: ChatCompletionMessageParam[];
+  recalled: string;
+  userText: string;
+}): ChatCompletionMessageParam[] {
+  return [
+    { role: 'system', content: STATIC_INSTRUCTION },
+    ...history,
+    { role: 'system', content: REPLY_CONTEXT },
+    { role: 'system', content: recalled },
+    { role: 'user', content: userText },
+  ];
+}
+
+describe.each(VERCEL_AI_PROVIDER_NAMES)('convertMessages on %s', provider => {
+  it.each([
+    ['with history', EARLIER_HISTORY],
+    ['with no history', []],
+  ])('keeps the per-reply block and recalled memory out of the system prompt, %s', (_label, history) => {
+    const { instructions, messages: result } = convertMessages({
+      messages: replyMessages({ history, recalled: RECALLED_BLOCK, userText: 'current question' }),
+      provider,
+      providerName: provider,
+    });
+    expect(instructions).toBe(STATIC_INSTRUCTION);
+    expect(result.some(message => message.role === 'system')).toBe(false);
+    expect(result[result.length - 1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: REPLY_CONTEXT },
+        { type: 'text', text: RECALLED_BLOCK },
+        { type: 'text', text: 'current question' },
+      ],
+    });
+  });
+
+  it('two consecutive replies send byte-identical instructions', () => {
+    const firstReply = convertMessages({
+      messages: replyMessages({
+        history: [],
+        recalled: '<aman-memory>\nFrom something Aman read: Robin likes tea.\n</aman-memory>',
+        userText: 'Remember that Robin likes tea.',
+      }),
+      provider,
+      providerName: provider,
+    });
+    const secondReply = convertMessages({
+      messages: replyMessages({
+        history: [
+          { role: 'user', content: 'Remember that Robin likes tea.' },
+          { role: 'assistant', content: 'Saved.' },
+        ],
+        recalled: RECALLED_BLOCK,
+        userText: 'Where does Robin live now?',
+      }),
+      provider,
+      providerName: provider,
+    });
+    expect(secondReply.instructions).toBe(firstReply.instructions);
+    expect(secondReply.messages).not.toEqual(firstReply.messages);
+  });
+});
 
 describe('convertTools', () => {
   it('returns undefined for undefined input', () => {

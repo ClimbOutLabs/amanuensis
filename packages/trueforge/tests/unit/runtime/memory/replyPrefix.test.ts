@@ -169,6 +169,7 @@ async function runReply(
     toolCallMemo: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
+    turnToolCallLedger: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeLogger(),
     definition: {

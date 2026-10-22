@@ -21,6 +21,7 @@ import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import configuration from '../../../src/config';
+import { MEMORY_FRAMING_SENTENCE } from '../../../src/runtime/memory/memoryCapability';
 import { MEMORY_PROBE_QUERY } from '../../../src/runtime/memory/memoryProbe';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
@@ -472,16 +473,16 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(finalUserIndex).toBeGreaterThan(0);
       const finalUserMessage = turn1ModelRequest.messages[finalUserIndex];
       expect(contentText(finalUserMessage?.content)).toContain(USER_MESSAGE_1);
-      // The block is host context in the per-reply block, after the date. This provider's adapter
-      // folds system text into the leading system message, so the block is found there.
-      const memoryMessages = memoryBlockMessages(turn1ModelRequest.messages);
-      expect(memoryMessages).toHaveLength(1);
-      const injectedMessage = memoryMessages[0];
-      expect(injectedMessage?.role).toBe('system');
-      const injectedText = contentText(injectedMessage?.content);
-      expect(injectedText.indexOf("Today's date")).toBeGreaterThan(-1);
-      expect(injectedText.indexOf("Today's date")).toBeLessThan(injectedText.indexOf(MEMORY_BLOCK_OPENING));
-      expect(injectedText).toContain(CANNED_ITEM_TEXT);
+      // The block is host context, so it rides on the final user message: after the date, before the
+      // person's words. It never appears in a system message, since recalled text is data, not instructions.
+      expect(memoryBlockMessages(turn1ModelRequest.messages)).toEqual([finalUserMessage]);
+      const finalText = contentText(finalUserMessage?.content);
+      expect(finalText.indexOf("Today's date")).toBeGreaterThan(-1);
+      expect(finalText.indexOf("Today's date")).toBeLessThan(finalText.indexOf(MEMORY_BLOCK_OPENING));
+      expect(finalText.indexOf(MEMORY_BLOCK_OPENING)).toBeLessThan(finalText.indexOf(USER_MESSAGE_1));
+      expect(finalText).toContain(CANNED_ITEM_TEXT);
+      // The framing that marks recalled text as data stays inside the block the model reads.
+      expect(finalText).toContain(MEMORY_FRAMING_SENTENCE);
 
       // (c) the turn's own persisted events carry the recall outcome, injected_block included
       // verbatim.

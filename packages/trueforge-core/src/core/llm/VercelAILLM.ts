@@ -31,6 +31,7 @@ import type {
   ChatCompletionContentPart,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
+  ChatCompletionSystemMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
@@ -844,9 +845,11 @@ export interface ConvertedMessages {
 }
 
 /**
- * System messages are extracted into `instructions`, since SDK v7 no longer accepts
- * `{ role: 'system' }` in the messages array, except on Anthropic mid-conversation context (see below).
- * The toolCallId → toolName lookup is built first because tool result messages carry only the id.
+ * The first message, when it is a system message, is the static instruction and becomes `instructions`.
+ * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
+ * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
+ * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
+ * toolName lookup is built first because tool result messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -871,23 +874,25 @@ export function convertMessages({
     }
   }
 
-  const firstConversationIndex = messages.findIndex(msg => msg.role !== 'system');
   const lastUserIndex = findLastUserIndex(messages);
   const systemParts: string[] = [];
-  // Anthropic hoists system text above the whole conversation, which would move each reply's
-  // context ahead of the cached history. There, system text sent mid-conversation rides on the
-  // last user turn instead, in the same wording it has elsewhere.
+  // With no user message there is nothing to carry per-reply context, so it stays in instructions.
   const turnContextParts: string[] = [];
+  for (const [index, msg] of messages.entries()) {
+    if (msg.role !== 'system') {
+      continue;
+    }
+    const content = systemContentText(msg.content);
+    if (index === 0 || lastUserIndex === -1) {
+      systemParts.push(content);
+    } else {
+      turnContextParts.push(content);
+    }
+  }
+
   const result: ModelMessage[] = [];
   for (const [index, msg] of messages.entries()) {
     if (msg.role === 'system') {
-      const content = typeof msg.content === 'string' ? msg.content : msg.content.map(p => p.text).join('');
-      const midConversation = index > firstConversationIndex && lastUserIndex > index;
-      if (provider === 'anthropic' && midConversation) {
-        turnContextParts.push(content);
-      } else {
-        systemParts.push(content);
-      }
       continue;
     }
     if (msg.role === 'user') {
@@ -925,6 +930,13 @@ export function convertMessages({
     // 'developer' / 'function' roles — not used in the harness pipeline; skip.
   }
   return { instructions: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, messages: result };
+}
+
+function systemContentText(content: ChatCompletionSystemMessageParam['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return content.map(p => p.text).join('');
 }
 
 /** Index of the latest user message, or -1 when there is none. */
