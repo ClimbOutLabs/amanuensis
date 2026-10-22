@@ -51,7 +51,7 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
     const ticket = page.getByTestId('ticket-card');
     const plain = page.getByTestId('plain-card');
     const ticketChoices = ['Allow it', 'Not now', 'Allow searches in this chat'];
-    const plainChoices = ['Approve', 'Approve for this chat', 'Deny'];
+    const plainChoices = ['Allow it', 'Not now', 'Approve for this chat'];
     await ticket
       .getByRole('button', { name: ticketChoices[0] })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
@@ -60,14 +60,14 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
     assert.ok(pageWidth <= PHONE.width, `the page scrolls sideways: ${String(pageWidth)} px wide`);
 
     // Every choice shows without opening Details, and sits fully inside the screen.
-    for (const [card, names, role] of [
-      [ticket, ticketChoices, 'button'],
-      [plain, plainChoices, 'radio'],
+    for (const [card, names] of [
+      [ticket, ticketChoices],
+      [plain, plainChoices],
     ] as const) {
       for (const name of names) {
-        const choice = card.getByRole(role, { name, exact: true });
+        const choice = card.getByRole('button', { name, exact: true });
         assert.equal(await choice.isVisible(), true, `${name} is not visible`);
-        const box = await (role === 'radio' ? choice.locator('xpath=..') : choice).boundingBox();
+        const box = await choice.boundingBox();
         assert.ok(box !== null, `${name} has no box`);
         assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${name} runs off the screen`);
       }

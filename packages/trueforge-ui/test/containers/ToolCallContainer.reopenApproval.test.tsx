@@ -199,7 +199,7 @@ describe('a reopened chat with one held search', () => {
     });
   }
 
-  it('falls back to the plain card when the saved cards cannot be read', async () => {
+  it('falls back to the generic ticket, never the old radio card, when the saved cards cannot be read', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderChat(
       HELD_SEARCHES[0] ?? { name: '', say: '', can_chat_allow: false, can_always_allow: false },
@@ -207,7 +207,9 @@ describe('a reopened chat with one held search', () => {
         throw new Error('offline');
       }),
     );
-    await waitFor(() => expect(screen.getByRole('radiogroup')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
     expect(document.querySelector('[data-role="approval-loading"]')).toBeNull();
     consoleError.mockRestore();
   });

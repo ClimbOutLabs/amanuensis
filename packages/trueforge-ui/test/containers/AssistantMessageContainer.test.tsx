@@ -209,8 +209,8 @@ describe('AssistantMessageContainer', () => {
     ]);
 
     expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
@@ -241,7 +241,9 @@ describe('AssistantMessageContainer', () => {
 
     const internals = getAgentInternals();
     expect(within(internals).getByText(/1 step · 1 tool/)).toBeInTheDocument();
-    expect(within(internals).getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
+    expect(
+      within(internals).getByRole('heading', { name: 'Allow the assistant to use "write notes"?' }),
+    ).toBeInTheDocument();
   });
 
   it('counts mixed-turn approval tools only inside the agent internals disclosure', () => {
@@ -280,7 +282,7 @@ describe('AssistantMessageContainer', () => {
 
     const cardContent = within(getAgentInternals());
     expect(cardContent.getByText(/2 steps · 2 tools/)).toBeInTheDocument();
-    expect(cardContent.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
+    expect(cardContent.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
     expect(cardContent.queryByText('The lookup is complete.')).not.toBeInTheDocument();
   });
 
@@ -325,9 +327,9 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
     const card = within(internals);
-    expect(card.getByRole('radio', { name: 'Approve' })).toBeVisible();
-    expect(card.getByRole('radio', { name: 'Deny' })).toBeVisible();
-    fireEvent.click(card.getByRole('radio', { name: 'Approve' }));
+    expect(card.getByRole('button', { name: 'Allow it' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'Not now' })).toBeVisible();
+    fireEvent.click(card.getByRole('button', { name: 'Allow it' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -893,7 +895,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     ]);
 
     // The approval card sits inline with the call, not behind a collapsed disclosure.
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_map' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "render map"?' })).toBeInTheDocument();
     // No map card and no loading state anywhere while approval is pending.
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
@@ -1054,7 +1056,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
       },
     ]);
 
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_places' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "render places"?' })).toBeInTheDocument();
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
   });
 
@@ -1094,7 +1096,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     ]);
 
     expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
-    expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Allow the assistant to use "render map"?' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
   });
 });
