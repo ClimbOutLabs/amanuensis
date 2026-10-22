@@ -582,7 +582,10 @@ describe('POST /{session_id}/turns for a card whose request ended', () => {
 
   async function turnCount(app: OpenAPIHono): Promise<number> {
     const response = await app.request(`/${SESSION_ID}/turns`, { method: 'GET' });
-    const body: { data: unknown[] } = await response.json();
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
+      throw new Error('the turn list did not answer with data');
+    }
     return body.data.length;
   }
 
