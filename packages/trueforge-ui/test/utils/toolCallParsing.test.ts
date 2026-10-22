@@ -228,3 +228,24 @@ describe('toolCallParsing', () => {
     expect(labels).toEqual(['Approve', 'Approve for this chat', 'Deny']);
   });
 });
+
+describe('tool output decoding', () => {
+  it('reads a JSON string literal as text, so its line breaks and quotes are real', () => {
+    const stored = JSON.stringify('Dear Rui,\n\nThe "lease" is signed.');
+    expect(getJsonDisplayValue(stored)).toEqual({ value: 'Dear Rui,\n\nThe "lease" is signed.', isJson: false });
+    expect(getToolResultContent(stored)).toEqual({ data: 'Dear Rui,\n\nThe "lease" is signed.', isJson: false });
+  });
+
+  it('reads text inside an MCP content block the same way', () => {
+    const result = { content: [{ type: 'text', text: JSON.stringify('line one\nline two') }] };
+    expect(getToolResultContent(result)).toEqual({ data: 'line one\nline two', isJson: false });
+  });
+
+  it('still pretty-prints a JSON object result', () => {
+    expect(getJsonDisplayValue('{"ok":true}')).toEqual({ value: '{\n  "ok": true\n}', isJson: true });
+  });
+
+  it('shows plain text as stored', () => {
+    expect(getJsonDisplayValue('just a\nline')).toEqual({ value: 'just a\nline', isJson: false });
+  });
+});

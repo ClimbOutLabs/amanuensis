@@ -2,10 +2,8 @@ import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefou
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
-import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
-import { ACTIVITY_STATE_LABELS } from '../sentinel/activityVerbs.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
@@ -57,7 +55,7 @@ export type AmanRuntimeRailProps = {
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
-  /** Ids of the approvals waiting on the person in this chat, oldest first. Empty hides Needs you. */
+  /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
   pendingApprovalIds?: readonly string[];
   /**
    * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
@@ -89,15 +87,21 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   degraded: 'Degraded',
 };
 
-/** The status line: the connection when it is not fine, otherwise what Aman is doing now. */
+/**
+ * The status line: the connection when it is not fine, then the approval that waits on the person, otherwise
+ * what Aman is doing now.
+ */
 function statusLineLabel({
   status,
   activity,
+  waitingOnApproval,
 }: {
   status: AmanRuntimeRailStatus;
   activity: AmanAvatarActivity;
+  waitingOnApproval: boolean;
 }): string {
   if (status !== 'ready') return STATUS_LABELS[status];
+  if (waitingOnApproval) return 'Waiting on your approval';
   switch (activity) {
     case 'idle':
       return 'Ready';
@@ -198,7 +202,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const statusLabel = STATUS_LABELS[status];
-  const statusLine = statusLineLabel({ status, activity });
+  const pendingCount = pendingApprovalIds.length;
+  // While an approval waits the panda keeps its writing clip, and the status line says why.
+  const statusLine = statusLineLabel({ status, activity, waitingOnApproval: pendingCount > 0 });
+  const avatarActivity: AmanAvatarActivity = pendingCount > 0 ? 'writing' : activity;
   const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
   // Collapsed, the dot is the only status left. Its words carry the connection state only; the
@@ -206,14 +213,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const compactSummary = statusLabel;
   const personName = personDisplayName({ profile, signInName: userName });
   const trimmedPersonaName = personaName?.trim();
-  const pendingCount = pendingApprovalIds.length;
-  // Needs you is the rail's one gold card; the app's selection rule decides, not this component.
-  const highlightedCard = useHighlightedCard({
-    firstWaitingApprovalId: pendingApprovalIds[0] ?? null,
-    nextAppointmentId: null,
-  });
-  const needsYouHighlighted = pendingCount > 0 && highlightedCard === pendingApprovalIds[0];
-
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
       const next = !previous;
@@ -273,7 +272,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             aria-labelledby="aman-runtime-rail-title"
           >
             {avatarMotion ? (
-              <AmanAvatarMotion activity={activity} sources={avatarMotion} className="aman-runtime-rail__avatar" />
+              <AmanAvatarMotion
+                activity={avatarActivity}
+                sources={avatarMotion}
+                className="aman-runtime-rail__avatar"
+              />
             ) : avatarSrc ? (
               <img src={avatarSrc} alt={AVATAR_ALT} className="aman-runtime-rail__avatar" />
             ) : (
@@ -302,24 +305,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </button>
             )}
           </div>
-
-          {pendingCount === 0 ? null : (
-            <section
-              className={
-                needsYouHighlighted
-                  ? 'aui-ticket aui-ticket--selected aman-runtime-rail__needs-you'
-                  : 'aui-ticket aman-runtime-rail__needs-you'
-              }
-              data-section="needs-you"
-              aria-labelledby="aman-runtime-rail-needs-label"
-            >
-              <h3 id="aman-runtime-rail-needs-label" className="aman-runtime-rail__section-label">
-                Needs you · {pendingCount}
-              </h3>
-              <p className="aman-runtime-rail__needs-body">Answer {pendingCount === 1 ? 'it' : 'them'} in the chat.</p>
-              <p className="aui-panda__role text-gold-ink">{ACTIVITY_STATE_LABELS.waiting}</p>
-            </section>
-          )}
 
           {settings === null ? null : (
             <section

@@ -19,8 +19,20 @@ export const APPROVAL_CHOICES = {
  */
 export const NEW_RECIPIENT_CHOICES = {
   approve: { label: 'Add and send', hint: 'Add the addresses shown to your send list, then send.' },
-  cancel: { label: 'Cancel', hint: 'Do not send. Nothing is added to your send list.' },
+  cancel: { label: "Don't send", hint: 'Do not send. Nothing is added to your send list.' },
 } as const;
+
+/** The buttons on a mail card. Edit is the same path as Change it: the agent revises the mail first. */
+export const EMAIL_CHOICES = {
+  edit: { label: 'Edit', hint: 'Ask the agent to change this first. Nothing is sent now.' },
+  saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
+} as const;
+
+/**
+ * The server option that saves a mail as a draft instead of sending it. The card shows Save as draft
+ * only when the server offers this option on the approval, so nothing is faked on a server without it.
+ */
+export const SAVE_DRAFT_OPTION_ID = 'save_draft';
 
 export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
   return (card.mail_new_recipients ?? []).length > 0;

@@ -1,6 +1,5 @@
 'use client';
 
-import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useRef, useState, type FC } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
@@ -10,24 +9,19 @@ import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
-import {
-  approvalQuestion,
-  approvalSentLine,
-  approvalStub,
-  approvalTime,
-  approveVerb,
-  declineVerb,
-} from './approvalCopy.js';
+import { approvalQuestion, approvalStub, approvalTime, approveVerb, declineVerb } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
+import type { SentinelApprovalCard } from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
 
 export type PermissionApprovalCardProps = {
+  /** Id of the approval this card answers; the composer banner finds the card by it. */
+  approvalId: string;
   card: SentinelApprovalCard;
   /** True for the one card per screen that takes the gold fill and edge. Set by the container. */
   highlighted?: boolean;
@@ -82,7 +76,7 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 text-sm">
-      <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</dt>
+      <dt className="shrink-0 text-xs font-medium text-text-secondary">{label}</dt>
       <dd className="min-w-0">
         <FoldedText
           text={value}
@@ -94,60 +88,10 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
-  return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
-}
-
-/** What a change replaces, with the recipients of that saved draft. */
-function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
-  return (
-    <dl className="rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="Replaces" value={replaces.subject} />
-      <DetailRow label="Replaced draft to" value={mailboxListText(replaces.to)} />
-    </dl>
-  );
-}
-
-/** The whole message, never cut: the body scrolls in its own box instead of being folded. */
-function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
-  return (
-    <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
-      {email.reply_in_thread !== null && (
-        <dl className="mb-1">
-          <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
-          <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
-        </dl>
-      )}
-      <p className="break-words text-sm text-text-primary">To: {mailboxListText(email.to)}</p>
-      {email.cc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Copy: {mailboxListText(email.cc)}</p>
-      )}
-      {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
-      )}
-      <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
-      <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
-        Message, exactly as sent
-      </p>
-      <div
-        role="region"
-        aria-label="Message, exactly as sent"
-        tabIndex={0}
-        className="max-h-80 overflow-auto border-l-2 border-gold-ink bg-card-bg px-3 py-2"
-      >
-        <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
-          {email.body === '' ? 'This message has no text.' : email.body}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <p className="mb-1 text-xs font-medium text-text-secondary">Full request</p>
       {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
       <FoldedText
         text={text}
@@ -159,11 +103,12 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 }
 
 /**
- * Approval ticket for Tier 2 and Tier 3 actions. The question is the title, the rows show only what the
- * server sent, and the stub says what it is and where it stands. The raw request and the connector's
- * arguments fold into Details. The container passes `highlighted` only where the rail is hidden.
+ * Approval ticket for calendar, schedule, specialist and other non-mail actions. The question is the
+ * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
+ * raw request and the connector's arguments fold into Details. Mail uses EmailApprovalCard instead.
  */
 export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
+  approvalId,
   card,
   highlighted = false,
   othersWaiting,
@@ -188,7 +133,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email, calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
@@ -218,20 +163,15 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   return (
     <article
       data-role="approval-ticket"
+      data-approval-id={approvalId}
       className={cn('aui-ticket aui-ticket--stub aui-ticket--punch aui-settle', highlighted && 'aui-ticket--selected')}
     >
       <div className="min-w-0 space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
-          {sentAt === null ? (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              Waiting for you
-            </span>
-          ) : (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              {approvalSentLine(card, sentAt)}
-            </span>
-          )}
+          <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+            {sentAt === null ? 'Waiting for you' : `Done · ${sentAt}`}
+          </span>
         </div>
         {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
 
@@ -246,8 +186,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
-        {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
-
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
             {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
@@ -257,8 +195,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
           </dl>
         )}
-
-        {email !== null && <EmailMessage email={email} />}
 
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
