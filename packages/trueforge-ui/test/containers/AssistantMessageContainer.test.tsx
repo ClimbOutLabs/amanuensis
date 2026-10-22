@@ -711,8 +711,9 @@ describe('AssistantMessageContainer with agent details off', () => {
     );
     await settleAgentDetails();
 
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeVisible();
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeVisible();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
