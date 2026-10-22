@@ -9,7 +9,7 @@ import {
 
 type Baseline = { total: number; rows: Record<string, number> };
 
-/** Measured 2026-10-22 (built-in tools sent in bundles); the memory provider's tools are not captured yet, so they are not counted. */
+/** Measured 2026-10-22 (built-in tools sent in bundles, after the tool description trim); the memory provider's tools are not captured yet, so they are not counted. */
 const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>> = {
   personal: {
     'core-only': {
@@ -33,7 +33,7 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
       },
     },
     calendar: {
-      total: 2215,
+      total: 2205,
       rows: {
         'agent-identity': 97,
         'current-date': 36,
@@ -51,7 +51,7 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
         ask_user_question: 261,
         load_bundle: 96,
         get_current_datetime: 100,
-        create_schedule: 324,
+        create_schedule: 314,
         delete_schedule: 91,
         list_schedules: 75,
         pause_schedule: 94,
@@ -105,7 +105,7 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
       },
     },
     calendar: {
-      total: 3300,
+      total: 3263,
       rows: {
         'agent-identity': 97,
         'current-date': 36,
@@ -129,8 +129,8 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
         list_inbox_threads: 141,
         read_email: 81,
         get_event: 88,
-        list_events: 468,
-        create_schedule: 324,
+        list_events: 441,
+        create_schedule: 314,
         delete_schedule: 91,
         list_schedules: 75,
         pause_schedule: 94,

@@ -287,7 +287,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. It runs as the assistant in this chat. Never say something is scheduled unless this succeeded. If how often or when is unclear, ask first. Times use the user's time zone. For a morning brief, set morning_brief, not task. The user approves a card before anything is saved.",
+          "The only way to make a recurring task; it runs as the assistant here. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
