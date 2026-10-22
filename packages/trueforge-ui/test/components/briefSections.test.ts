@@ -68,7 +68,7 @@ describe('parseBrief', () => {
 });
 
 describe('summarizeBriefAudit', () => {
-  it('counts quiet reads and actions that ran or were approved', () => {
+  it('counts reads allowed by settings and actions that ran or were approved', () => {
     expect(
       summarizeBriefAudit([
         { outcome: 'logged' },
@@ -76,10 +76,10 @@ describe('summarizeBriefAudit', () => {
         { outcome: 'approved' },
         { outcome: 'denied' },
       ]),
-    ).toEqual({ readQuietly: 2, actionsRan: 1 });
+    ).toEqual({ readAllowed: 2, actionsRan: 1 });
   });
 
   it('reports nothing for an empty log', () => {
-    expect(summarizeBriefAudit([])).toEqual({ readQuietly: 0, actionsRan: 0 });
+    expect(summarizeBriefAudit([])).toEqual({ readAllowed: 0, actionsRan: 0 });
   });
 });

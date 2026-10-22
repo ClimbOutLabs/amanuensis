@@ -21,6 +21,8 @@ export interface ReviewableDraft {
   fromName: string;
   /** Whether a recipient's name was left off because it looked like an address, so the card says so. */
   nameLeftOff: boolean;
+  /** The address replies go to when it is not the sending account; null when replies go to the sender. */
+  replyTo: string | null;
 }
 
 /** Hash of everything a send delivers. */

@@ -2,10 +2,7 @@ import { forwardRef, type ComponentPropsWithRef, type CSSProperties } from 'reac
 
 import { cn } from './lib/cn.js';
 
-const THREAD_CSS_VARS: CSSProperties & { '--prose-max-width': string; '--composer-padding': string } = {
-  // The message column fills the space beside the rail, so cards and tables use all of it. Plain
-  // chat text stops at ~48rem, the line length that stays comfortable to read.
-  '--prose-max-width': '48rem',
+const THREAD_CSS_VARS: CSSProperties & { '--composer-padding': string } = {
   '--composer-padding': '0.75rem',
 };
 

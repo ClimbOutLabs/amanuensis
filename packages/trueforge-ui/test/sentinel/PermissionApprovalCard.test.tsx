@@ -213,6 +213,7 @@ describe('PermissionApprovalCard for mail', () => {
     body: 'Thursday works.\n\nBest,\nAda',
     replaces: null,
     reply_in_thread: null,
+    reply_to: null,
   };
 
   function renderMail(overrides: Partial<SentinelApprovalEmail> = {}) {
@@ -269,6 +270,7 @@ describe('PermissionApprovalCard for mail', () => {
               body: 'Thursday works.',
               replaces: null,
               reply_in_thread: null,
+              reply_to: null,
             },
           },
         },
@@ -330,6 +332,16 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.getByText('Old lease')).toBeInTheDocument();
     expect(screen.getByText('Replaced draft to')).toBeInTheDocument();
     expect(screen.getByText('Sam Lee (sam@example.com)')).toBeInTheDocument();
+  });
+
+  it('shows an address replies go to, on its own line, before the person approves', () => {
+    renderMail({ reply_to: 'mallory@example.com' });
+    expect(screen.getByText('Replies go to: mallory@example.com')).toBeInTheDocument();
+  });
+
+  it('shows no reply line when replies go to the sender', () => {
+    renderMail({ reply_to: null });
+    expect(screen.queryByText(/Replies go to/)).not.toBeInTheDocument();
   });
 
   it('says which thread a reply is in, as separate labelled fields', () => {
@@ -479,6 +491,7 @@ describe('PermissionApprovalCard "Change it"', () => {
       body: 'Lunch at noon?',
       replaces: null,
       reply_in_thread: null,
+      reply_to: null,
     },
   };
 

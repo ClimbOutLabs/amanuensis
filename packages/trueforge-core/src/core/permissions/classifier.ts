@@ -44,8 +44,12 @@ import {
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import {
   CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
   isSpaceReadToolName,
   isSpaceWriteToolName,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
   SPACE_SERVER_ID,
   UPDATE_SPACE_TOOL_NAME,
 } from '../spaces/toolContract';
@@ -91,7 +95,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
+import { fingerprintLeak, privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -151,11 +155,15 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
+  chatPrivateReadHeld,
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateFingerprintsUsable,
   privateTextForChecks,
+  SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
+  SEARCH_CHAT_GRANTED_SILENT_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1741,6 +1749,27 @@ async function outboundGuard(input: {
 }
 
 /**
+ * The search service's own plumbing lines of a held search's card. The card's "Exactly what will be sent" still
+ * lists every argument; these lines are also named here so the card can fold them behind a Details disclosure.
+ */
+function searchPlumbingText(input: {
+  params: Record<string, unknown> | undefined;
+  plumbingFields: readonly string[];
+}): string | null {
+  if (input.params === undefined) {
+    return null;
+  }
+  const plumbing = new Set(input.plumbingFields);
+  const hidden: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input.params)) {
+    if (plumbing.has(key)) {
+      hidden[key] = value;
+    }
+  }
+  return renderOutboundArguments(hidden).text;
+}
+
+/**
  * A designated-provider call that stops for approval. The card shows the exact text the call would
  * send. An unattended run holds it for the owner like any other call that asks.
  */
@@ -1755,6 +1784,8 @@ async function holdSearchCall(input: {
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
   params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
+  /** True when the chat read a secret or key file, so no chat-wide allow is offered on this card. */
+  secret_path_read: boolean;
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
   const shown =
@@ -1784,12 +1815,17 @@ async function holdSearchCall(input: {
       amount: null,
       parsed_command: null,
       outbound_text: fields.outbound_text,
+      outbound_plumbing_text: searchPlumbingText({
+        params: input.params,
+        plumbingFields: action.mcp_search_plumbing_fields ?? [],
+      }),
       destination_host: fields.destination_host,
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
     reason_detail: input.say,
     sensitive_read: false,
+    secret_path_read: input.secret_path_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -1832,7 +1868,16 @@ async function classifySearchProviderTool(input: {
   const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
+    holdSearchCall({
+      action,
+      ctx,
+      reason,
+      say,
+      summary,
+      params: action.canonical_params,
+      fields: extraction.fields,
+      secret_path_read: false,
+    });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1856,6 +1901,7 @@ async function classifySearchProviderTool(input: {
         outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
         outbound_truncated: outbound?.truncated ?? false,
       },
+      secret_path_read: false,
     });
   };
 
@@ -1870,27 +1916,62 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
   }
+  // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
   const readMode = hasReadPrivateData(ctx.web_search);
-  if (readMode) {
-    const texts = privateTextForChecks(ctx.web_search);
-    if (texts === undefined || strings === undefined) {
-      return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+  const privateReadHeld = chatPrivateReadHeld({
+    state: ctx.web_search,
+    markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx),
+  });
+  // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
+  const chatGranted =
+    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted() && privateFingerprintsUsable(ctx.web_search);
+  // A chat that read a secret or key file asks before every search, whatever the grant says.
+  const heldPrivate = (): Promise<TierDecision> =>
+    ctx.web_search.chatFingerprints.secret
+      ? holdSearchCall({
+          action,
+          ctx,
+          reason: SEARCH_AFTER_PRIVATE_READ_REASON,
+          say: HOLD_SAY.private_secret,
+          summary,
+          params: action.canonical_params,
+          fields: extraction.fields,
+          secret_path_read: true,
+        })
+      : held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
+  if (chatGranted) {
+    if (strings === undefined) {
+      return heldPrivate();
     }
-    const leak = privateTextLeak({
+    const leak = fingerprintLeak({
       mode: 'search',
       strings,
       earlier: ctx.web_search.sentText,
-      privateTexts: texts,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
     });
     if (leak !== null) {
-      return ctx.services.unattended
-        ? privateTextSkipped(leak)
-        : held('mcp_search_after_private_read', HOLD_SAY.private_read);
+      return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
     }
-  }
-  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
-  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
-    return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+  } else {
+    if (readMode) {
+      const texts = privateTextForChecks(ctx.web_search);
+      if (texts === undefined || strings === undefined) {
+        return heldPrivate();
+      }
+      const leak = privateTextLeak({
+        mode: 'search',
+        strings,
+        earlier: ctx.web_search.sentText,
+        privateTexts: texts,
+      });
+      if (leak !== null) {
+        return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
+      }
+    }
+    if (privateReadHeld) {
+      return heldPrivate();
+    }
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', HOLD_SAY.search_limit);
@@ -1905,7 +1986,11 @@ async function classifySearchProviderTool(input: {
     return held('mcp_search_host_limit', HOLD_SAY.site_limit);
   }
   return tier1Decision({
-    reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
+    reason: chatGranted
+      ? SEARCH_CHAT_GRANTED_SILENT_REASON
+      : readMode
+        ? SEARCH_AFTER_READ_SILENT_REASON
+        : SEARCH_SILENT_REASON,
     reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
@@ -1968,7 +2053,9 @@ async function classifyMapsSilently(input: {
   if (!verdict.ok) {
     return undefined;
   }
-  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+  if (
+    chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
+  ) {
     return undefined;
   }
   const readMode = hasReadPrivateData(ctx.web_search);
@@ -2066,6 +2153,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     `to ${recipientList(content.to) === '' ? 'no one' : recipientList(content.to)}`,
     ...(content.cc.length > 0 ? [`Copy: ${recipientList(content.cc)}`] : []),
     ...(content.bcc.length > 0 ? [`Hidden copy: ${recipientList(content.bcc)}`] : []),
+    ...(content.replyTo === null ? [] : [`Replies go to: ${escapeDisplayText(content.replyTo)}`]),
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
@@ -2107,6 +2195,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       bcc: content.bcc.map(escapedMailbox),
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
+      reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
       replaces:
         replaces === undefined
           ? null
@@ -2507,11 +2596,12 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
  * that revert_space can restore. Any other name fails closed.
  */
 function classifySpaceTool(action: SentinelAction): TierDecision {
-  if (isSpaceWriteToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_write', reason_detail: spaceWriteLine(action), sensitive_read: false });
+  const line = spaceToolLine(action);
+  if (line !== null && isSpaceWriteToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_write', reason_detail: line, sensitive_read: false });
   }
-  if (isSpaceReadToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_read', reason_detail: 'Read your spaces.', sensitive_read: false });
+  if (line !== null && isSpaceReadToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_read', reason_detail: line, sensitive_read: false });
   }
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
@@ -2537,19 +2627,31 @@ function spaceDisplayName(name: string | null): string | null {
 }
 
 /**
- * The plain line a space write shows instead of a card, parallel to the line a silent search shows.
- * Create and update calls carry the space's name; a revert call names only the space's id, so its
- * line cannot.
+ * The plain line for a space tool, in the words the activity rail shows. A name is shown only when
+ * the call carries one: get_space, list_blocks and revert_space name the space by id alone, so their
+ * lines say "a space". Null for any tool that is not the host's own space tool.
  */
-function spaceWriteLine(action: SentinelAction): string {
-  const shown = spaceDisplayName(stringParam(action.canonical_params, 'name'));
-  if (action.tool_name === CREATE_SPACE_TOOL_NAME) {
-    return shown === null ? 'Created a space.' : `Created space: ${shown}`;
+function spaceToolLine(action: SentinelAction): string | null {
+  if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
+    return null;
   }
-  if (action.tool_name === UPDATE_SPACE_TOOL_NAME) {
-    return shown === null ? 'Updated a space.' : `Updated space: ${shown}`;
+  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
+  switch (action.tool_name) {
+    case LIST_SPACES_TOOL_NAME:
+      return 'Looked at your spaces.';
+    case GET_SPACE_TOOL_NAME:
+      return 'Read a space.';
+    case LIST_BLOCKS_TOOL_NAME:
+      return 'Looked at the sections of a space.';
+    case CREATE_SPACE_TOOL_NAME:
+      return name === null ? 'Created a space.' : `Created the space ${name}.`;
+    case UPDATE_SPACE_TOOL_NAME:
+      return name === null ? 'Updated a space.' : `Updated the space ${name}.`;
+    case REVERT_SPACE_TOOL_NAME:
+      return 'Restored an earlier version of a space.';
+    default:
+      return null;
   }
-  return 'Restored a space to an earlier version.';
 }
 
 /**
@@ -2863,6 +2965,7 @@ function connectorApprovalCard(input: {
   const { fields } = extraction;
   return {
     plain_what:
+      spaceToolLine(action) ??
       extraction.connector_what ??
       `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
     plain_why: plainWhy(input.agent_intent),
@@ -3096,6 +3199,13 @@ export async function classifyHostToolCall(input: {
   // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
   if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
     ctx.services.private_reads.markPrivateDataRead(ctx);
+    // Its text is never fingerprinted, so the chat's fingerprints miss it and a search grant cannot lift the hold.
+    ctx.web_search.fingerprintsLost = true;
+  }
+  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life. Only a read
+  // that names one counts; an argument that merely looks like a path, such as a link, does not.
+  if (decision.auto_deny === null && decision.sensitive_read && containsSecretPath(action.canonical_params)) {
+    ctx.web_search.chatFingerprints.secret = true;
   }
   await recordClassificationAudit({
     services: ctx.services,

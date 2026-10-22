@@ -1,4 +1,5 @@
 import { assessDraft } from '../../../../src/core/email/gmail/draftAssessment';
+import { hashDraft } from '../../../../src/core/email/gmail/draftReview';
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { b64url, message, plainDraft } from './fixtures';
 
@@ -46,6 +47,7 @@ describe('assessDraft', () => {
         references: '<a@mail.example.com>',
         fromName: 'Ada Lovelace',
         nameLeftOff: false,
+        replyTo: null,
       },
     });
   });
@@ -85,13 +87,93 @@ describe('assessDraft', () => {
     expect(reasonOf(forSend(message({ id: 'd1', body: 'x', html: '<b>x</b>' })))).toContain('formatting');
   });
 
-  it.each(['Reply-To', 'Sender', 'Disposition-Notification-To', 'X-Anything', 'Return-Path'])(
-    'refuses a %s header, which could change who gets the message',
+  it.each(['Sender', 'Disposition-Notification-To', 'X-Anything', 'Return-Path'])(
+    'refuses a %s header by name, since it could change who gets the message',
     name => {
       const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name, value: 'mallory@example.com' }] });
-      expect(reasonOf(forSend(mail))).toContain('headers');
+      expect(reasonOf(forSend(mail))).toContain(`(${name})`);
     },
   );
+
+  it('names the header it cannot check, in words the person can act on', () => {
+    const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name: 'X-Foo', value: 'x' }] });
+    expect(reasonOf(forSend(mail))).toBe(
+      'This draft has a header Aman cannot check (X-Foo), so it was not sent. Ask Aman to write it again without it.',
+    );
+  });
+
+  it('shows a Reply-To elsewhere as the address replies go to', () => {
+    const mail = plainDraft({
+      id: 'd1',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Mallory <Mallory@Example.com>' }],
+    });
+    expect(forSend(mail)).toMatchObject({ ok: true, draft: { replyTo: 'mallory@example.com' } });
+  });
+
+  it.each([
+    'mallory@example.com, <ada@example.com>',
+    'mallory@example.com, Ada <ada@example.com>',
+    'mallory@example.com <ada@example.com>',
+    'Team: mallory@example.com, <ada@example.com>',
+    '(mallory@example.com) <ada@example.com>',
+    'mallory@example.com,<grace@example.com>',
+  ])('refuses a Reply-To or Sender that is not one plain mailbox: %s', value => {
+    for (const name of ['Reply-To', 'Sender']) {
+      const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name, value }] });
+      expect(reasonOf(forSend(mail))).toContain(`${name} line is not one plain address`);
+    }
+    // Without a Reply-To, replies go to every From mailbox, so From is held to the same rule.
+    expect(reasonOf(forSend(plainDraft({ id: 'd1', from: value, body: 'x' })))).toBe(
+      "This draft's From line is not one plain address, so Aman cannot show you exactly where it goes. Ask me to write it again.",
+    );
+  });
+
+  it('says plainly why a Sender for another address is refused, and what to do next', () => {
+    const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name: 'Sender', value: 'mallory@example.com' }] });
+    expect(reasonOf(forSend(mail))).toBe(
+      'This draft says it is sent on behalf of another address (Sender), so it was not sent. Ask me to write it again from your own address.',
+    );
+  });
+
+  it('still sends from the account with a quoted name that has a comma', () => {
+    expect(forSend(plainDraft({ id: 'd1', from: '"Lovelace, Ada" <ada@example.com>', body: 'x' })).ok).toBe(true);
+  });
+
+  it('reads a quoted name with a comma in a Reply-To as one mailbox', () => {
+    const mail = plainDraft({
+      id: 'd1',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: '"Lovelace, Ada" <ada@example.com>' }],
+    });
+    expect(forSend(mail)).toMatchObject({ ok: true, draft: { replyTo: null } });
+  });
+
+  it('will not change a saved draft that replies elsewhere, since the change would drop that reply address', () => {
+    const elsewhere = plainDraft({
+      id: 'd1',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com' }],
+    });
+    expect(reasonOf(forEdit(elsewhere))).toContain('cannot keep');
+    const ownAddress = plainDraft({
+      id: 'd1',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'ada@example.com' }],
+    });
+    expect(forEdit(ownAddress).ok).toBe(true);
+  });
+
+  it('counts a changed reply address in the review hash, so a change after review voids the approval', () => {
+    const plain = forSend(plainDraft({ id: 'd1', body: 'x' }));
+    const elsewhere = forSend(
+      plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com' }] }),
+    );
+    if (!plain.ok || !elsewhere.ok) {
+      throw new Error('both drafts should be sendable');
+    }
+    expect(hashDraft(elsewhere.draft)).not.toBe(hashDraft(plain.draft));
+  });
 
   it('refuses a header that appears twice', () => {
     const mail = plainDraft({ id: 'd1', body: 'x', extraHeaders: [{ name: 'Subject', value: 'Again' }] });

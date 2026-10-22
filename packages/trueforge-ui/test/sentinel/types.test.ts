@@ -10,6 +10,7 @@ import {
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
+  SENTINEL_AUDIT_OUTCOME_LABELS,
   sentinelAuditLabel,
 } from '@/sentinel/types.js';
 
@@ -267,6 +268,7 @@ describe('extractSentinelFromEvent', () => {
       body: 'Thursday works.\n\nAda',
       replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
       reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
+      reply_to: null,
     });
   });
 
@@ -290,6 +292,7 @@ describe('extractSentinelFromEvent', () => {
       body: 'b',
       replaces: null,
       reply_in_thread: null,
+      reply_to: null,
     });
   });
 
@@ -662,10 +665,14 @@ describe('parseAuditEntries', () => {
 });
 
 describe('sentinelAuditLabel', () => {
-  it('says a silent Tier 1 run went ahead without asking, and a held Tier 2 or 3 call is held', () => {
-    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done without asking');
-    expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Held for you');
-    expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Held for you');
+  it('says a Tier 1 run the settings allow is done, and a Tier 2 or 3 call is waiting for the person', () => {
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done · allowed by your settings');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Waiting for you');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Waiting for you');
+  });
+
+  it('names the logged outcome in the audit filter with the same two phrases', () => {
+    expect(SENTINEL_AUDIT_OUTCOME_LABELS.logged).toBe('Allowed by your settings, or waiting for you');
   });
 
   it('keeps the plain label for every other outcome', () => {

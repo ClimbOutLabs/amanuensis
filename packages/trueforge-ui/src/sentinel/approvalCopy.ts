@@ -1,5 +1,5 @@
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard, SentinelApprovalMailbox } from './types.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard, type SentinelApprovalMailbox } from './types.js';
 
 /** Labels over the text an approval sends. Every card kind reads them from here. */
 export const SENT_CONTENT_LABELS = {
@@ -125,6 +125,6 @@ export function approvalStub(card: SentinelApprovalCard, { sentAt }: { sentAt: s
   return {
     what: stubWhat(card),
     detail: stubDetail(card),
-    state: sentAt === null ? 'Waiting for you' : `${doneWord(card)} ${sentAt}`,
+    state: sentAt === null ? WAITING_FOR_YOU_LABEL : `${doneWord(card)} ${sentAt}`,
   };
 }

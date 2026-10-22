@@ -89,7 +89,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
       {error !== null && (
         <p className="flex items-center gap-1.5 py-2 text-xs text-failure-bg" role="alert">
           <Icon name="circle-exclamation" className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 break-words">Could not load the receipt: {error}</span>
+          <span className="min-w-0 flex-1 break-words">Could not load recent actions: {error}</span>
           <button type="button" className="shrink-0 underline" onClick={() => void load()}>
             Try again
           </button>

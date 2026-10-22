@@ -3,13 +3,6 @@
 import { createContext, useContext, type FC, type ReactNode } from 'react';
 
 /**
- * A memory bank as the runtime rail reports it. `connected` is false while the connector still
- * waits on this user's sign-in: a flagged bank the user cannot reach recalls nothing, so it must
- * not read as on.
- */
-export type MemoryBankStatus = { name: string; connected: boolean };
-
-/**
  * The first-run checklist's put-away state, kept by the host on the server so it follows the
  * owner across browsers. `dismiss` is fire and forget; the host reports the new state back.
  */

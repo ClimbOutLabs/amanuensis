@@ -19,13 +19,10 @@ describe('ThreadRootShell', () => {
     expect(root.style.color).toBe('red');
   });
 
-  it('defaults plain chat text to a readable measure', () => {
-    const ref = createRef<HTMLDivElement>();
-    render(<ThreadRootShell ref={ref} data-testid="thread-root" />);
+  it('leaves the reading measure to the stylesheet, so every chat surface shares it', () => {
+    render(<ThreadRootShell data-testid="thread-root" />);
 
-    const root = screen.getByTestId('thread-root');
-    // Only prose uses this measure; cards and tables take the full column beside the rail.
-    expect(root.style.getPropertyValue('--prose-max-width')).toBe('48rem');
+    expect(screen.getByTestId('thread-root').style.getPropertyValue('--prose-max-width')).toBe('');
   });
 });
 

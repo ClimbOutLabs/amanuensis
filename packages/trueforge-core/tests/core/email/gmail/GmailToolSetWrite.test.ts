@@ -323,6 +323,89 @@ describe('send_draft', () => {
     expect(google.bodies.at(-1)).toEqual({ id: 'd1' });
   });
 
+  it('sends a draft as Gmail holds it, with a Reply-To naming the account, once approved', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'Thursday works.',
+      extraHeaders: [
+        { name: 'Reply-To', value: 'Ada <ada@example.com>' },
+        { name: 'Message-ID', value: '<draft-1@mail.example.com>' },
+        { name: 'Date', value: 'Thu, 22 Oct 2026 09:14:02 -0700' },
+      ],
+    });
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.tier3_card?.plain_what).not.toContain('Replies go to');
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', status: 'sent' });
+    expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
+  });
+
+  it('shows a reply address elsewhere on the card, and sends only after that card is approved', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Mallory <mallory@example.com>' }],
+    });
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    expect(info.tier3_card?.plain_what).toContain('Replies go to: mallory@example.com');
+    expect(info.tier3_card?.email).toMatchObject({ reply_to: 'mallory@example.com' });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', status: 'sent' });
+    expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
+  });
+
+  it('will not send when the reply address changed after the card was shown', async () => {
+    let live: GmailMessage = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Mallory <mallory@example.com>' }],
+    });
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+        sendRoute,
+      ],
+    });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    live = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Eve <eve@example.com>' }],
+    });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(text(response)).toContain('changed after you approved it');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('tells the model to stop once the same send refusal comes back a second time', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'X-Foo', value: 'x' }],
+    });
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail)] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const first = await tools.toolCallInfo(call);
+    expect(first.pre_dispatch_failure?.message).toContain('header Aman cannot check (X-Foo)');
+    expect(first.pre_dispatch_failure?.message).not.toContain('Do not retry');
+    const second = await tools.toolCallInfo(call);
+    expect(second.pre_dispatch_failure?.message).toContain(
+      'Do not retry; tell the person: This draft has a header Aman cannot check (X-Foo)',
+    );
+  });
+
   it('will not send a draft nobody approved, by whatever route the call arrives', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
     const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
@@ -563,24 +646,54 @@ describe('send_draft', () => {
         says: 'cannot show you in full',
       },
       {
-        name: 'a Reply-To',
-        mail: plainDraft({
-          id: 'd-m1',
-          to: 'grace@example.com',
-          body: 'x',
-          extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com' }],
-        }),
-        says: 'reply address or sender',
-      },
-      {
-        name: 'a Sender',
+        name: 'a Sender from another address',
         mail: plainDraft({
           id: 'd-m1',
           to: 'grace@example.com',
           body: 'x',
           extraHeaders: [{ name: 'Sender', value: 'mallory@example.com' }],
         }),
-        says: 'reply address or sender',
+        says: 'Sender',
+      },
+      {
+        name: 'a Reply-To that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Reply-To',
+      },
+      {
+        name: 'a Sender that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Sender', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Sender',
+      },
+      {
+        name: 'a From that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          from: 'mallory@example.com, <ada@example.com>',
+          to: 'grace@example.com',
+          body: 'x',
+        }),
+        says: 'From line is not one plain address',
+      },
+      {
+        name: 'a header Aman cannot check',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'X-Foo', value: 'mallory@example.com' }],
+        }),
+        says: 'header Aman cannot check (X-Foo)',
       },
       {
         name: 'a different From',
