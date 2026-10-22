@@ -73,8 +73,7 @@ export function LogoutButton() {
             setConfirmOpen(next);
           }
         }}
-        title="Log out"
-        description="Sure to logout?"
+        title="Log out?"
         contentSized
       >
         <div className="harness-logout-confirm">
@@ -86,10 +85,10 @@ export function LogoutButton() {
               setConfirmOpen(false);
             }}
           >
-            Cancel
+            Stay
           </button>
           <button type="button" className="harness-logout-submit" disabled={busy} onClick={handleConfirm}>
-            {busy ? 'Logging out…' : 'Confirm'}
+            {busy ? 'Logging out…' : 'Log out'}
           </button>
         </div>
       </CenteredModal>

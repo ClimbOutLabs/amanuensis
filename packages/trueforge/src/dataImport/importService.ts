@@ -30,6 +30,7 @@ import path from 'node:path';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from '../dataExport/archiveLimits';
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
@@ -41,6 +42,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
+import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
@@ -1279,6 +1281,20 @@ async function acquireImportLock<TTransaction>(
   return lock;
 }
 
+/**
+ * A chat that was with the archived guide is kept with this owner's Iris, who is installed for them.
+ * Any other activation is returned as it was.
+ */
+function pointAtCurrentGuide<T extends { persona_id: string | null; persona_name: string | null }>(
+  activation: T,
+  subjectId: string,
+): T {
+  if (activation.persona_id === null || !isAnyAmanGuideId(activation.persona_id)) {
+    return activation;
+  }
+  return { ...activation, persona_id: amanGuidePersonaId(subjectId), persona_name: AMAN_GUIDE_NAME };
+}
+
 /** Imports for one tenant in this process never overlap; the marker keeps other processes out. */
 const importsInFlight = new Set<string>();
 
@@ -1336,7 +1352,20 @@ async function importArchive<TTransaction>(
     catalogConnectorNames: new Set(deps.mcpCatalog.list().map(preset => preset.name)),
     logger: deps.logger,
   });
-  const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
+  const {
+    manifest,
+    sessions,
+    folders,
+    personas: archivedPersonas,
+    personalization,
+    spaces,
+    schedules,
+    settings,
+    audit,
+  } = contents;
+  // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
+  // Its memory still maps to the person's own guide, and the summary still counts it.
+  const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
   const connectors = normalizeImportedConnectors(contents.connectors);
   const connectorNames = new Set(connectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
@@ -1402,7 +1431,7 @@ async function importArchive<TTransaction>(
 
   const personaSegBySource = new Map<string, string>();
   const personaWireBySourceSeg = new Map<string, string>();
-  for (const { persona } of personas) {
+  for (const { persona } of archivedPersonas) {
     const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
@@ -1482,7 +1511,7 @@ async function importArchive<TTransaction>(
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
-      personas: personas.length,
+      personas: archivedPersonas.length,
       spaces: spaces.length,
       schedules: schedules.length,
       folders: folders.length,
@@ -1738,7 +1767,11 @@ async function importArchive<TTransaction>(
       for (const entry of sessions.entries()) {
         for (const activation of entry.persona_activations) {
           await deps.personaStore.recordPersonaActivation(
-            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
+            {
+              tenant_id: tenantId,
+              session_id: entry.session.session_id,
+              ...pointAtCurrentGuide(activation, subjectId),
+            },
             tx,
           );
         }
@@ -1792,7 +1825,7 @@ async function importArchive<TTransaction>(
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
-      personas: personas.length,
+      personas: archivedPersonas.length,
       spaces: spaces.length,
       schedules: schedules.length,
       folders: folders.length,
