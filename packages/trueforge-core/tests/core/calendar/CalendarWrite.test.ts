@@ -1,5 +1,6 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { clearRecentCalendarCreates } from '../../../src/core/calendar/recentCreates';
+import { CALENDAR_SERVER_ID } from '../../../src/core/calendar/toolContract';
 import { MAX_IDEOGRAPHIC_SELECTORS } from '../../../src/core/email/gmail/mimeText';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
@@ -147,7 +148,7 @@ describe('the approval card', () => {
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York). Google emails lin@example.com and sam@example.com about it.',
+      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York). Google emails lin@example.com and sam@example.com about it. This change sends an invitation to other people, so Aman always asks.',
     );
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });
@@ -318,13 +319,23 @@ describe('the write tool itself', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
     const response = await built.tools.callTool(
       { name: 'create_event', arguments: { ...DENTIST, title: 'Dentist and lunch' } },
-      undefined,
+      { status: 'allow' },
       {
         admission_provenance: { source: 'user_approval', decision: 'allow' },
         approved_params: info.mint_canonical_params,
       },
     );
     expect(text(response)).toContain('changed after you approved them');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+  it('writes nothing for the exact approved call when no answer to that call came with it', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
+      admission_provenance: { source: 'user_approval', decision: 'allow' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).toContain('not approved');
     expect(writes(built.google.urls)).toEqual([]);
   });
 });
@@ -466,15 +477,23 @@ describe('the permissions log', () => {
 });
 
 describe('durable approvals', () => {
-  it('never offers approve-for-this-chat or always-allow for a calendar write', async () => {
+  it('never offers approve-for-this-chat or always-allow for a change that reaches guests', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
     const info = await built.tools.toolCallInfo({
       name: 'create_event',
       arguments: { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'all' },
     });
-    expect(info.tier_reason).toBe('calendar_write');
+    expect(info.tier_reason).toBe('calendar_write_guests');
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('offers approve-for-this-chat and always-allow for a new event with no guests', async () => {
+    const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: { ...DENTIST } });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
   });
 });
 
@@ -620,10 +639,14 @@ describe('on a demo instance', () => {
       services: { ...services, demoSendAllowlist: [ALLOWED] },
       google,
     });
-    const response = await demo.tools.callTool({ name: 'create_event', arguments: args }, undefined, {
-      admission_provenance: { source: 'user_approval', decision: 'allow' },
-      approved_params: approvedInfo.mint_canonical_params,
-    });
+    const response = await demo.tools.callTool(
+      { name: 'create_event', arguments: args },
+      { status: 'allow' },
+      {
+        admission_provenance: { source: 'user_approval', decision: 'allow' },
+        approved_params: approvedInfo.mint_canonical_params,
+      },
+    );
     expect(text(response)).toContain(DEMO_SEND_REFUSAL);
     expect(writes(google.urls)).toEqual([]);
   });
@@ -736,5 +759,48 @@ describe('card date wording and duplicate creates', () => {
     });
     expect(info.pre_dispatch_failure?.message).toContain('That event was already removed.');
     expect(info.pre_dispatch_failure?.message).not.toContain('no such event');
+  });
+});
+
+describe('the write tool under a standing grant', () => {
+  it('writes an event with no guests under an Always grant, with no answer to that call', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
+    await services.tool_grants.recordToolGrant({
+      tenant_id: built.sentinel.tenant_id,
+      created_by: built.sentinel.created_by,
+      mcp_server_name: CALENDAR_SERVER_ID,
+      tool_name: 'create_event',
+      mcp_server_host: null,
+    });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant' });
+    const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
+      admission_provenance: { source: 'automatic' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).not.toContain('not approved');
+    expect(writes(built.google.urls)).toHaveLength(1);
+  });
+
+  it('writes nothing for an event with guests under an Always grant, when no answer came with it', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
+    await services.tool_grants.recordToolGrant({
+      tenant_id: built.sentinel.tenant_id,
+      created_by: built.sentinel.created_by,
+      mcp_server_name: CALENDAR_SERVER_ID,
+      tool_name: 'create_event',
+      mcp_server_host: null,
+    });
+    const guestArgs = { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'all' as const };
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: guestArgs });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write_guests' });
+    const response = await built.tools.callTool({ name: 'create_event', arguments: guestArgs }, undefined, {
+      admission_provenance: { source: 'automatic' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toEqual([]);
   });
 });

@@ -79,7 +79,7 @@ describe('AgentThread ambient current date', () => {
     jest.useRealTimers();
   });
 
-  it("puts today's UTC date in the system prompt, date only so daily prefix caching survives", async () => {
+  it("puts today's UTC date in the per-reply block and never in the static instruction", async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
@@ -90,7 +90,11 @@ describe('AgentThread ambient current date', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(m => m.role === 'system');
+    const systemMessage = request?.messages.find(
+      m => m.role === 'system' && String(m.content).includes('<reply-context>'),
+    );
+    const staticInstruction = request?.messages.find(m => m.role === 'system');
+    expect(String(staticInstruction?.content)).not.toContain('Today');
     expect(systemMessage?.content).toContain('<current-date>');
     expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
     // Date only: a time-of-day component would change the prompt prefix every
@@ -110,7 +114,9 @@ describe('AgentThread ambient current date', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(m => m.role === 'system');
+    const systemMessage = request?.messages.find(
+      m => m.role === 'system' && String(m.content).includes('<reply-context>'),
+    );
     expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
     expect(systemMessage?.content).toContain("The user's local date is 2026-03-14 (America/Los_Angeles, UTC-07:00)");
   });
@@ -126,17 +132,19 @@ describe('AgentThread ambient current date', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(m => m.role === 'system');
+    const systemMessage = request?.messages.find(
+      m => m.role === 'system' && String(m.content).includes('<reply-context>'),
+    );
     expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
     expect(systemMessage?.content).not.toContain("The user's local date is");
   });
 
-  it('refreshes the date at request time when the thread crosses UTC midnight', async () => {
+  it('keeps the date the reply started with when the reply crosses UTC midnight', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
-    // Construct just before midnight, so the instruction is first built with
-    // the old date, then step the clock past the rollover before any request.
+    // Construct just before midnight: the per-reply block is built once, when the reply starts,
+    // so a later step past the rollover still sends the reply's date (one fixed block per reply).
     jest.setSystemTime(new Date('2026-03-14T23:59:59Z'));
     const thread = makeThread(modelClient);
     jest.setSystemTime(new Date('2026-03-15T00:00:05Z'));
@@ -147,9 +155,10 @@ describe('AgentThread ambient current date', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(m => m.role === 'system');
-    expect(systemMessage?.content).toContain("Today's date is 2026-03-15 (UTC)");
-    expect(systemMessage?.content).not.toContain('2026-03-14');
+    const systemMessage = request?.messages.find(
+      m => m.role === 'system' && String(m.content).includes('<reply-context>'),
+    );
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
   });
 });
 

@@ -19,6 +19,10 @@ import { createSentinelHostContext, defaultSentinelServices } from '../../src/co
 import { WRITE_CAP_STOP_MESSAGE } from '../../src/core/runtime/replyActionChecks';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
+// Guard tests run longer replies than the production step budget, and so would stop at it before the
+// guard under test can fire. The budget itself is covered by replyStepBudget.test.ts at production values.
+const RAISED_REPLY_STEP_BUDGET = { main: 1000, sub: 1000 };
+
 const OWNER = { subject_id: 'user-1', subject_type: 'user' as const, subject_display_name: 'user-1' };
 const SUB_AGENT_ARGS = JSON.stringify({ name: 'mailer', input: 'send the remaining notes' });
 
@@ -150,6 +154,7 @@ async function setup({ cards, script }: { cards: boolean; script: Reply[] }) {
       });
       return {
         ...resolved,
+        definition: { ...resolved.definition, stepBudget: RAISED_REPLY_STEP_BUDGET },
         extraCapabilities: [
           ...(resolved.extraCapabilities ?? []),
           dynamicSubAgents({ sandboxAvailable: false, tracing: base.createTracing() }),

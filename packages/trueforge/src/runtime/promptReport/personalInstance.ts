@@ -34,13 +34,15 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
-export type PersonalInstanceName = 'personal' | 'personal-with-google' | 'personal-no-sandbox';
+export type PersonalInstanceName =
+  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox';
 
 /** Every standard setup the report measures, in report order. */
 export const PERSONAL_INSTANCE_NAMES = [
   'personal',
   'personal-with-google',
   'personal-no-sandbox',
+  'personal-no-server-sandbox',
 ] satisfies PersonalInstanceName[];
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
@@ -75,7 +77,7 @@ const GOOGLE_WRITE_SCOPES = [
 export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
+  recallMaxTokens: 600,
   recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
@@ -286,6 +288,7 @@ export async function buildPersonalInstance(input: {
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
     schedules: scheduleContext(logger),
+    startsAnswer: true,
   };
   const resolver = new SpaceTurnResourceResolver(
     {
@@ -323,7 +326,7 @@ export async function buildPersonalInstance(input: {
     },
   );
   // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name !== 'personal-no-sandbox';
+  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
   const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
@@ -366,12 +369,13 @@ export async function measurePersonalInstance(input: {
     googleAccess: 'read',
     sentinelServices: undefined,
   });
-  // The server has a sandbox; the no-sandbox setup turns it off for this chat, so the report shows the sandbox-off line.
+  // 'personal-no-sandbox' turns the sandbox off for this chat while the server still has one (sandbox-off line).
+  // 'personal-no-server-sandbox' has no server sandbox at all (no-sandbox line).
   return measurePromptRequest({
     definition,
     capabilities,
     sandbox,
-    serverSandboxAvailable: true,
+    serverSandboxAvailable: input.name !== 'personal-no-server-sandbox',
     message: PROMPT_REPORT_TURNS[input.turn],
   });
 }

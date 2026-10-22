@@ -3,6 +3,7 @@ import type { ILLM } from '../llm/ILLM';
 import type { LLMUserMessage } from '../llm/LLMTypes';
 import type { ResponseFormat } from '../llm/responseFormat';
 import type { IToolSet } from '../mcp/IMCPServer';
+import type { ReplyStepBudget } from './replyBudget';
 
 export type ModelParams = Record<string, unknown>;
 
@@ -97,6 +98,11 @@ export interface AgentDefinition {
    * `toolCallBudget` is set; ignored otherwise.
    */
   budgetedTools?: readonly string[] | undefined;
+  /**
+   * Model calls one reply may make on the main thread and on each sub-agent. Undefined uses the
+   * production budget; only tests raise it, to exercise guards that need longer replies.
+   */
+  stepBudget?: ReplyStepBudget | undefined;
 
   toolSets?: readonly IToolSet[] | undefined;
   /**

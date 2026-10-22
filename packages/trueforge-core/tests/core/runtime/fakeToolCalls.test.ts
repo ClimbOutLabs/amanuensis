@@ -726,17 +726,22 @@ describe('mergeTurnToolCallLedgers', () => {
     const root = createTurnToolCallLedger();
     root.writeCallsThisTurn = 2;
     root.lastCallSignature = 'root-call';
-    root.callSignatures.set('shared', { count: 1, writesAtLastRun: 1 });
+    root.callSignatures.set('shared', { count: 1, writesAtLastRun: 1, lastKind: null, retried: false });
     const child = createTurnToolCallLedger();
     child.writeCallsThisTurn = 4;
     child.lastCallSignature = 'child-call';
-    child.callSignatures.set('shared', { count: 2, writesAtLastRun: 4 });
+    child.callSignatures.set('shared', { count: 2, writesAtLastRun: 4, lastKind: null, retried: false });
 
     const merged = mergeTurnToolCallLedgers([root, child]);
 
     expect(merged.writeCallsThisTurn).toBe(4);
     expect(merged.lastCallSignature).toBe('root-call');
-    expect(merged.callSignatures.get('shared')).toEqual({ count: 2, writesAtLastRun: 4 });
+    expect(merged.callSignatures.get('shared')).toEqual({
+      count: 2,
+      writesAtLastRun: 4,
+      lastKind: null,
+      retried: false,
+    });
   });
 });
 

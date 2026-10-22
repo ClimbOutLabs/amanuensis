@@ -13,6 +13,7 @@ import {
   type ContextMessage,
 } from '../../../src/core/runtime/AgentThread.types';
 import { LENGTH_CUT_OFF_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import { STEP_BUDGET_SPENT_MESSAGE, type ReplyStepBudget } from '../../../src/core/runtime/replyBudget';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -39,11 +40,13 @@ function makeThread({
   modelParams,
   reasoningEfforts,
   finishReason = 'stop',
+  stepBudget,
 }: {
   context?: ContextMessage[];
   modelParams?: ModelParams;
   reasoningEfforts: readonly string[] | undefined;
   finishReason?: 'stop' | 'length';
+  stepBudget?: ReplyStepBudget;
 }) {
   const create = jest.fn(() => answerStream(finishReason));
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
@@ -64,6 +67,7 @@ function makeThread({
       toolSets: [],
       modelProperties: { contextLength: undefined, reasoningEfforts },
       modelParams,
+      stepBudget,
     },
     context: context ?? [{ role: 'user', content: 'A question.' }],
     capabilities: [],
@@ -157,6 +161,25 @@ describe('per-step reasoning effort and output cap', () => {
     await drain(thread);
 
     const body = firstRequest(create);
+    expect(body['reasoning_effort']).toBe('medium');
+    expect(body['max_tokens']).toBe(FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS);
+  });
+
+  it('a forced answer after a tool call counts as a final-answer step', async () => {
+    const { thread, create } = makeThread({
+      context: [
+        { role: 'user', content: 'Look it up.' },
+        { role: 'tool', tool_call_id: 'call-1', content: 'result' },
+      ],
+      modelParams: { reasoning_effort: 'high', max_tokens: 16_000, reasoning_effort_mode: 'automatic' },
+      reasoningEfforts: supported,
+      // A spent step budget forces the answer, and a notice for the model joins the context first.
+      stepBudget: { main: 0, sub: 0 },
+    });
+    await drain(thread);
+
+    const body = firstRequest(create);
+    expect(JSON.stringify(body['messages'])).toContain(STEP_BUDGET_SPENT_MESSAGE);
     expect(body['reasoning_effort']).toBe('medium');
     expect(body['max_tokens']).toBe(FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS);
   });
