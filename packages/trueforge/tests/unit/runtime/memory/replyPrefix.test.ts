@@ -280,20 +280,17 @@ describe('reply prefix stability', () => {
     expect(prefixThroughHistory(secondReply)).toBe(prefixThroughHistory(firstReply));
   });
 
-  it('a reply that loads a bundle changes the static prefix only by adding that bundle sections', async () => {
+  it('a reply that routes a bundle keeps the static prefix and brings the guidance in the per-reply block', async () => {
     const [firstReply] = await runReply('Remember that Robin likes tea.');
     // A question mark routes the web bundle, so this reply loads it.
     const [secondReply] = await runReply('Where does Robin live now?', ['Robin moved to Lisbon in May.']);
     if (!firstReply || !secondReply) {
       throw new Error('expected a model step in both replies');
     }
-    const firstInstruction = String(firstReply.messages[0]?.content);
-    const secondInstruction = String(secondReply.messages[0]?.content);
-    expect(secondInstruction).toContain('<source-discovery>');
-    expect(firstInstruction).not.toContain('<source-discovery>');
-    const withoutWebSections = secondInstruction
-      .replace(/\n\n<source-discovery>[\s\S]*?<\/source-discovery>/, '')
-      .replace(/\n\n<web-images>[\s\S]*?<\/web-images>/, '');
-    expect(withoutWebSections).toBe(firstInstruction);
+    expect(JSON.stringify(secondReply.messages[0])).toBe(JSON.stringify(firstReply.messages[0]));
+    const replyBlock = secondReply.messages.find(
+      message => message.role === 'system' && String(message.content).includes('<reply-context>'),
+    );
+    expect(String(replyBlock?.content)).toContain('<source-discovery>');
   });
 });

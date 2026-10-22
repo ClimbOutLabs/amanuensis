@@ -32,12 +32,6 @@ export const TOOL_BUNDLES_SERVER_ID = 'bundles';
 export const LOAD_BUNDLE_TOOL_NAME = 'load_bundle';
 const TOOL_BUNDLES_INSTRUCTION = 'tool-bundles';
 
-/** Most bundles one chat keeps loaded on request; the least recently loaded drops first. */
-export const MAX_LOADED_BUNDLES = 4;
-
-/** Earlier replies whose tools keep their bundles loaded for the next message. */
-const RECENT_REPLIES = 3;
-
 const ToolBundlesStateSchema = z.object({ loaded: z.array(z.string()) });
 
 type ToolBundlesState = z.infer<typeof ToolBundlesStateSchema>;
@@ -48,6 +42,10 @@ const loadBundleSchema = z.object({
 
 const TOOL_BUNDLES_GUIDE = dedent`
   More tools come in bundles. A loaded bundle's tools are in your tool list. To use another bundle, call ${LOAD_BUNDLE_TOOL_NAME} with its name first; it stays loaded for the rest of this chat. Never call a tool you cannot see in your tool list.`;
+
+function sameBundles(input: { a: readonly ToolBundleName[]; b: readonly ToolBundleName[] }): boolean {
+  return input.a.length === input.b.length && input.a.every((name, i) => name === input.b[i]);
+}
 
 function isToolBundleName(name: string): name is ToolBundleName {
   return TOOL_BUNDLE_NAMES.some(bundle => bundle === name);
@@ -75,33 +73,39 @@ function isPersonMessage(message: ContextMessage): boolean {
 }
 
 /**
- * Groups of built-in tools sent only when a turn needs them. A router picks bundles from the
- * person's message before the first model call; `load_bundle` adds one for the rest of the chat.
- * A tool keeps its own name either way, so it is checked and run exactly as when always sent.
+ * Groups of built-in tools sent only once a chat needs them. A router picks bundles from the
+ * person's message before a reply's first model call; `load_bundle` adds one mid-reply. A bundle
+ * stays for the rest of the chat and its tools go at the end of the list, so the system prompt and
+ * tool list only grow at their end and a provider's cached prefix stays valid. A tool keeps its own
+ * name either way, so it is checked and run exactly as when always sent.
  */
 export class ToolBundles {
   private readonly toolSet: LoadBundleTool;
   private bundleByTool = new Map<string, ToolBundleName>();
   private offered: ToolBundleName[] = [];
-  // Loaded on request, oldest first; saved with the chat.
-  private loaded: ToolBundleName[] = [];
-  // Sent this turn: the router's choice first, then each later load at the end, never re-sorted.
-  private active: ToolBundleName[] = [];
+  // Every bundle this chat has sent, in the order it was first sent, as saved; never dropped or re-sorted.
+  private saved: ToolBundleName[] = [];
+  // The router's picks for this reply that are not saved yet; they go after the saved list.
+  private routedPicks: ToolBundleName[] = [];
   private routed = false;
   // Tools left out of every request: the connector lookup tools while no connector needs them,
   // and load_bundle while there is nothing to load.
   private unused = new Set<string>();
   private readonly sectionBundles: ReadonlySet<ToolBundleName>;
   private readonly routeSignals: () => Pick<BundleRouteSignals, 'repositoryAttached'>;
+  private readonly guidance: (name: ToolBundleName) => string;
 
   constructor(input: {
     tracing: AgentTracing;
     /** Bundles that write prompt sections, so they are offered even without tools. */
     sectionBundles: ReadonlySet<ToolBundleName>;
     routeSignals: () => Pick<BundleRouteSignals, 'repositoryAttached'>;
+    /** A bundle's prompt sections, sent with its load instead of in the system prompt. */
+    guidance: (name: ToolBundleName) => string;
   }) {
     this.sectionBundles = input.sectionBundles;
     this.routeSignals = input.routeSignals;
+    this.guidance = input.guidance;
     this.toolSet = new LoadBundleTool({ tracing: input.tracing, bundles: this });
   }
 
@@ -138,9 +142,37 @@ export class ToolBundles {
     ]);
   }
 
-  /** Whether a bundle's tools and prompt sections are sent now. */
+  /** Whether a bundle's tools are sent now. */
   isLoaded(name: ToolBundleName): boolean {
-    return this.active.includes(name);
+    return this.sent().includes(name);
+  }
+
+  /** The bundles sent now, in the order each was first sent. */
+  private sent(): ToolBundleName[] {
+    return [...this.saved, ...this.routedPicks.filter(name => !this.saved.includes(name))];
+  }
+
+  /** A bundle's prompt sections. */
+  guidanceOf(name: ToolBundleName): string {
+    return this.guidance(name);
+  }
+
+  /**
+   * Sent bundles whose guidance no `load_bundle` result in the context carries: the router's
+   * picks, and loads whose result a compaction dropped. Their guidance rides with the reply.
+   */
+  guidanceDue(context: readonly ContextMessage[]): ToolBundleName[] {
+    const carried = new Set(
+      context.flatMap(message =>
+        isLLMContextMessage(message) && message.role === 'assistant'
+          ? (message.tool_calls ?? []).flatMap(call => {
+              const bundle = this.loadedBy(call);
+              return bundle === undefined ? [] : [bundle];
+            })
+          : [],
+      ),
+    );
+    return this.sent().filter(name => !carried.has(name));
   }
 
   /** The tool names a bundle holds in this chat, in the order they are sent. */
@@ -154,39 +186,30 @@ export class ToolBundles {
   }
 
   /**
-   * Brings the bundles sent this turn up to date before a model request: the first time, from the
-   * person's message and the last few replies; after that, by adding bundles loaded since. Returns
-   * whether anything was added, so the caller rebuilds the prompt.
+   * Before a thread's first model request, adds the bundles the person's message calls for after
+   * those the chat already sends; the next save keeps them. Returns whether this was that first
+   * call, so the caller builds the reply's guidance once.
    */
-  refresh(context: readonly ContextMessage[]): boolean {
-    const before = this.active.length;
-    if (!this.routed) {
-      this.routed = true;
-      const person = [...context].reverse().find(isPersonMessage);
-      const { text, attachments } = person === undefined ? { text: '', attachments: false } : readPersonMessage(person);
-      const wanted = new Set([
-        ...routeBundles({ message: text, signals: { attachments, ...this.routeSignals() } }),
-        ...this.usedRecently(context),
-        ...this.loaded,
-      ]);
-      this.active = TOOL_BUNDLE_NAMES.filter(name => wanted.has(name));
+  route(context: readonly ContextMessage[]): boolean {
+    if (this.routed) {
+      return false;
     }
-    for (const name of this.loaded) {
-      if (!this.active.includes(name)) {
-        this.active.push(name);
-      }
-    }
-    return this.active.length !== before;
+    this.routed = true;
+    const person = [...context].reverse().find(isPersonMessage);
+    const { text, attachments } = person === undefined ? { text: '', attachments: false } : readPersonMessage(person);
+    const wanted = routeBundles({ message: text, signals: { attachments, ...this.routeSignals() } });
+    this.routedPicks = TOOL_BUNDLE_NAMES.filter(name => wanted.has(name));
+    return true;
   }
 
-  /** Always-sent tools in their own order, then each sent bundle's tools in the order it was loaded. */
+  /** Always-sent tools in their own order, then each sent bundle's tools in the order it was first sent. */
   requestTools(tools: readonly ChatCompletionTool[]): ChatCompletionTool[] {
     const bundleOf = (tool: ChatCompletionTool) =>
       tool.type === 'function' ? this.bundleByTool.get(tool.function.name) : undefined;
     const always = tools.filter(
       tool => bundleOf(tool) === undefined && (tool.type !== 'function' || !this.unused.has(tool.function.name)),
     );
-    const bundled = this.active.flatMap(name => tools.filter(tool => bundleOf(tool) === name));
+    const bundled = this.sent().flatMap(name => tools.filter(tool => bundleOf(tool) === name));
     return [...always, ...bundled];
   }
 
@@ -194,7 +217,8 @@ export class ToolBundles {
     if (this.offered.length === 0) {
       return;
     }
-    const lines = this.offered.map(name => `${bundleIndexLine(name)}${this.isLoaded(name) ? ' (loaded)' : ''}`);
+    // Fixed for the chat: whether a bundle is loaded shows in the tool list, never here.
+    const lines = this.offered.map(bundleIndexLine);
     builder.addSection(TOOL_BUNDLES_INSTRUCTION, [TOOL_BUNDLES_GUIDE, ...lines].join('\n'));
   }
 
@@ -211,64 +235,29 @@ export class ToolBundles {
     return 'found' in lookup ? lookup.found : undefined;
   }
 
-  /** Bundles whose tools the replies to the last few messages used or loaded, this turn's included. */
-  private usedRecently(context: readonly ContextMessage[]): Set<ToolBundleName> {
-    const used = new Set<ToolBundleName>();
-    let messages = 0;
-    for (const message of [...context].reverse()) {
-      if (isPersonMessage(message)) {
-        messages++;
-        if (messages > RECENT_REPLIES) {
-          break;
-        }
-        continue;
-      }
-      if (!isLLMContextMessage(message) || message.role !== 'assistant') {
-        continue;
-      }
-      for (const call of message.tool_calls ?? []) {
-        const bundle = this.bundleByTool.get(call.function.name) ?? this.loadedBy(call);
-        if (bundle !== undefined) {
-          used.add(bundle);
-        }
-      }
-    }
-    return used;
-  }
-
-  /** The loaded list after the given calls, oldest first and bounded; a bundle loaded again moves to the end. */
-  private loadedAfter(calls: readonly RawToolCall[]): ToolBundleName[] {
-    const next = [...this.loaded];
-    for (const call of calls) {
-      const bundle = this.loadedBy(call);
-      if (bundle === undefined) {
-        continue;
-      }
-      const at = next.indexOf(bundle);
-      if (at !== -1) {
-        next.splice(at, 1);
-      }
-      next.push(bundle);
-    }
-    return next.slice(-MAX_LOADED_BUNDLES);
-  }
-
-  /** Records the calls' loads: the new list is saved before this chat uses it. */
+  /** Saves the router's picks and the calls' loads at the end of the list. */
   private async *recordLoads(calls: readonly RawToolCall[]) {
     await Promise.resolve();
-    const next = this.loadedAfter(calls);
-    if (next.length === this.loaded.length && next.every((name, i) => name === this.loaded[i])) {
+    const next = this.sent();
+    for (const call of calls) {
+      const bundle = this.loadedBy(call);
+      if (bundle !== undefined && !next.includes(bundle)) {
+        next.push(bundle);
+      }
+    }
+    if (sameBundles({ a: next, b: this.saved })) {
       return;
     }
     const state: ToolBundlesState = { loaded: next };
     yield { type: InternalEventType.CAPABILITY_STATE, key: TOOL_BUNDLES_STATE_KEY, state };
-    this.loaded = next;
+    this.saved = next;
+    this.routedPicks = [];
   }
 
   /**
-   * Durable loads: restored from the chat's saved state, and refreshed from the chat's calls once
-   * their results are in (so the next request already carries the tools) and again before each
-   * model request (covering a chat resumed after a restart or an approval).
+   * Durable bundles: restored from the chat's saved state, and saved again once a call's result is
+   * in (so the next request already carries the tools) and before each model request (covering the
+   * router's picks and a chat resumed after a restart or an approval).
    */
   capability(): AgentCapability {
     const recordFromContext = (execution: Readonly<AgentThreadExecutionContext>) =>
@@ -283,7 +272,8 @@ export class ToolBundles {
         key: TOOL_BUNDLES_STATE_KEY,
         load: (state: JsonValue) => {
           const parsed = ToolBundlesStateSchema.safeParse(state);
-          this.loaded = parsed.success ? parsed.data.loaded.filter(isToolBundleName).slice(-MAX_LOADED_BUNDLES) : [];
+          const loaded = parsed.success ? parsed.data.loaded.filter(isToolBundleName) : [];
+          this.saved = loaded.filter((name, i) => loaded.indexOf(name) === i);
         },
       },
       preLLMProcessors: [{ processPreLLM: recordFromContext }],
@@ -320,11 +310,17 @@ export class LoadBundleTool extends LocalToolMCP {
             );
           }
           const tools = bundles.toolsOf(lookup.found);
-          const what = tools.length === 0 ? 'Its guidance is' : `Its tools (${tools.join(', ')}) are`;
           const state = bundles.isLoaded(lookup.found) ? 'is already loaded' : 'is loaded';
+          const ready =
+            tools.length === 0
+              ? 'Its guidance follows.'
+              : `Its tools (${tools.join(', ')}) are ready from your next step. Call each tool directly by its name.`;
+          // The guidance lands here, at the end of the chat, so the system prompt never changes.
+          const guidance = bundles.guidanceOf(lookup.found);
+          const intro = `${lookup.found} ${state}. ${ready}`;
           return Promise.resolve(
             toolResultResponse({
-              text: `${lookup.found} ${state}. ${what} available from your next step. Call each tool directly by its name.`,
+              text: guidance === '' ? intro : `${intro}\nFollow this guidance when you use it:\n${guidance}`,
             }),
           );
         },

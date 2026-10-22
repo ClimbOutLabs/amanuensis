@@ -70,8 +70,10 @@ describe('AgentThread ability boundaries instruction', () => {
       // Draining is enough; the assertion is on the request sent to the model.
     }
 
-    const systemMessage = create.mock.calls[0]?.[0].messages.find(m => m.role === 'system');
-    expect(systemMessage?.content).toContain('<web-images>');
-    expect(systemMessage?.content).toContain(WEB_IMAGES_PROMPT.trim());
+    // The web bundle's guidance rides in the per-reply block, never the system prompt.
+    const [system, reply] = (create.mock.calls[0]?.[0].messages ?? []).filter(m => m.role === 'system');
+    expect(system?.content).not.toContain('<web-images>');
+    expect(reply?.content).toContain('<web-images>');
+    expect(reply?.content).toContain(WEB_IMAGES_PROMPT.trim());
   });
 });

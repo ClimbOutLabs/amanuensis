@@ -179,7 +179,8 @@ function bundleToLoad({ match, request }: { match: string; request: ChatCompleti
   const bundle = BUNDLE_FOR_TOOL.find(([part]) => match.includes(part))?.[1];
   const system = messageText(request.messages.find(message => message.role === 'system')?.content);
   const offered = new RegExp(`^- ${bundle ?? ''}: .*$`, 'm').exec(system)?.[0];
-  return bundle === undefined || offered === undefined || offered.endsWith('(loaded)') ? undefined : bundle;
+  // A loaded bundle's tools are in the request, so a tool that is not sent means its bundle is not loaded.
+  return bundle === undefined || offered === undefined ? undefined : bundle;
 }
 
 /** The text of the last tool result in the conversation, if a tool has answered. */

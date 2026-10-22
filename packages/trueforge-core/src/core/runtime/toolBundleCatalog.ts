@@ -1,4 +1,4 @@
-/** Built-in tool bundles, in the order their tools are sent at the start of a turn. */
+/** Built-in tool bundles, in the order the router adds the ones it picks together. */
 export const TOOL_BUNDLE_NAMES = [
   'google',
   'web',

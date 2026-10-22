@@ -33,7 +33,12 @@ describe('source discovery contract at the model request boundary', () => {
     }
 
     const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(message => message.role === 'system');
+    // The system prompt and the per-reply block, where the routed web bundle brings its guidance.
+    const systemMessage = {
+      content: (request?.messages ?? [])
+        .flatMap(message => (message.role === 'system' && typeof message.content === 'string' ? [message.content] : []))
+        .join('\n'),
+    };
     expect(systemMessage?.content).toContain('<source-discovery>');
     // No sandbox in this chat or on the server: the contract must not name an exec tool, and the server-level
     // no-sandbox line says the server has no place to run commands.

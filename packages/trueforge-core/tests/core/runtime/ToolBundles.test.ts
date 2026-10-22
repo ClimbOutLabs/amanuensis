@@ -13,7 +13,7 @@ import {
   TOOL_BUNDLE_NAMES,
   type ToolBundleName,
 } from '../../../src/core/runtime/toolBundleCatalog';
-import { MAX_LOADED_BUNDLES, TOOL_BUNDLES_STATE_KEY, ToolBundles } from '../../../src/core/runtime/ToolBundles';
+import { TOOL_BUNDLES_STATE_KEY, ToolBundles } from '../../../src/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeSilentLogger, unknownToolStream } from '../harnessMocks';
 
@@ -127,6 +127,27 @@ function toolResults(request: LLMCreateParamsStreaming | undefined): string[] {
   );
 }
 
+/** The per-reply block: every system message after the system prompt. */
+function replyBlock(request: LLMCreateParamsStreaming | undefined): string {
+  return (request?.messages ?? [])
+    .slice(1)
+    .flatMap(message => (message.role === 'system' && typeof message.content === 'string' ? [message.content] : []))
+    .join('\n');
+}
+
+function toolsBlock(request: LLMCreateParamsStreaming | undefined): string[] {
+  return (request?.tools ?? []).map(tool => JSON.stringify(tool));
+}
+
+/** Whether `next` sends `previous`'s tool definitions byte for byte, then possibly more at the end. */
+function extendsTools(input: {
+  previous: LLMCreateParamsStreaming | undefined;
+  next: LLMCreateParamsStreaming | undefined;
+}) {
+  const previous = toolsBlock(input.previous);
+  return toolsBlock(input.next).slice(0, previous.length).join('\n') === previous.join('\n');
+}
+
 function bundleIndex(request: LLMCreateParamsStreaming | undefined): string {
   return /<tool-bundles>\n([\s\S]*?)\n<\/tool-bundles>/.exec(systemPrompt(request))?.[1] ?? '';
 }
@@ -140,21 +161,65 @@ describe('tool bundles in a turn', () => {
     expect(systemPrompt(requests[0])).not.toContain('Spaces hold the notes');
   });
 
-  it("routes a bundle from the person's message before the first model call", async () => {
-    const { requests } = await runTurn({ steps: ['answer'], message: 'Show the Belem Tower on a map.' });
-    expect(sentNames(requests[0])).toEqual(['load_bundle', 'what_time', 'render_map']);
-    expect(bundleIndex(requests[0])).toContain('- maps: show places, routes and maps (loaded)');
+  it("routes a bundle from the person's message before the first model call, with its guidance in the reply block", async () => {
+    const { requests, thread } = await runTurn({ steps: ['answer'], message: 'Add a note: call the plumber.' });
+    expect(sentNames(requests[0])).toEqual(['load_bundle', 'what_time', 'add_note', 'list_notes']);
+    expect(bundleIndex(requests[0])).not.toContain('(loaded)');
+    expect(systemPrompt(requests[0])).not.toContain('Spaces hold the notes');
+    expect(replyBlock(requests[0])).toContain('Spaces hold the notes');
+    expect(thread.toSnapshot().capability_state).toEqual({ [TOOL_BUNDLES_STATE_KEY]: { loaded: ['spaces'] } });
   });
 
-  it('adds a loaded bundle at the end of the tool list with its prompt section, and saves it for the chat', async () => {
+  it('keeps the system prompt and earlier tools byte-identical when a bundle loads mid-reply', async () => {
     const { requests, thread } = await runTurn({
       message: 'Show the Belem Tower on a map.',
       steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'],
     });
     expect(sentNames(requests[1])).toEqual(['load_bundle', 'what_time', 'render_map', 'add_note', 'list_notes']);
-    expect(systemPrompt(requests[1])).toContain('Spaces hold the notes');
-    expect(toolResults(requests[1])[0]).toContain('spaces is loaded. Its tools (add_note, list_notes) are available');
-    expect(thread.toSnapshot().capability_state).toEqual({ [TOOL_BUNDLES_STATE_KEY]: { loaded: ['spaces'] } });
+    expect(systemPrompt(requests[1])).toBe(systemPrompt(requests[0]));
+    expect(extendsTools({ previous: requests[0], next: requests[1] })).toBe(true);
+    expect(replyBlock(requests[1])).toBe(replyBlock(requests[0]));
+    expect(thread.toSnapshot().capability_state).toEqual({ [TOOL_BUNDLES_STATE_KEY]: { loaded: ['maps', 'spaces'] } });
+  });
+
+  it("returns a loaded bundle's guidance in the load_bundle result", async () => {
+    const { requests } = await runTurn({ steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'] });
+    const result = toolResults(requests[1])[0];
+    expect(result).toContain('spaces is loaded. Its tools (add_note, list_notes) are ready from your next step.');
+    expect(result).toContain('Spaces hold the notes');
+    expect(systemPrompt(requests[1])).not.toContain('Spaces hold the notes');
+    expect(replyBlock(requests[1])).not.toContain('Spaces hold the notes');
+  });
+
+  it("starts the next reply with the previous reply's system prompt and tools, adding new bundles at the end", async () => {
+    const first = await runTurn({
+      message: 'Thanks!',
+      steps: [{ name: 'load_bundle', args: { name: 'maps' } }, 'answer'],
+    });
+    const lastOfFirst = first.requests[first.requests.length - 1];
+    const snapshot = first.thread.toSnapshot();
+    const second = await runTurn({
+      message: 'Add a note: call the plumber.',
+      steps: ['answer'],
+      history: snapshot.context,
+      capabilityState: snapshot.capability_state ?? undefined,
+    });
+    const firstOfSecond = second.requests[0];
+    expect(systemPrompt(firstOfSecond)).toBe(systemPrompt(lastOfFirst));
+    expect(extendsTools({ previous: lastOfFirst, next: firstOfSecond })).toBe(true);
+    expect(sentNames(firstOfSecond)).toEqual(['load_bundle', 'what_time', 'render_map', 'add_note', 'list_notes']);
+    expect(second.thread.toSnapshot().capability_state).toEqual({
+      [TOOL_BUNDLES_STATE_KEY]: { loaded: ['maps', 'spaces'] },
+    });
+  });
+
+  it('keeps the saved order across replies instead of re-sorting it', async () => {
+    const { requests } = await runTurn({
+      message: 'Show the Belem Tower on a map.',
+      steps: ['answer'],
+      capabilityState: { [TOOL_BUNDLES_STATE_KEY]: { loaded: ['spaces'] } },
+    });
+    expect(sentNames(requests[0])).toEqual(['load_bundle', 'what_time', 'add_note', 'list_notes', 'render_map']);
   });
 
   it('loads a bundle by another name for it', async () => {
@@ -180,53 +245,15 @@ describe('tool bundles in a turn', () => {
     expect(sentNames(newChat.requests[0])).not.toContain('add_note');
   });
 
-  it('keeps a bounded number of bundles loaded, dropping the least recently loaded', async () => {
+  it('keeps every loaded bundle for the rest of the chat', async () => {
     const loaded: ToolBundleName[] = ['google', 'web', 'sandbox', 'maps'];
-    expect(loaded).toHaveLength(MAX_LOADED_BUNDLES);
     const { thread } = await runTurn({
       steps: [{ name: 'load_bundle', args: { name: 'spaces' } }],
       capabilityState: { [TOOL_BUNDLES_STATE_KEY]: { loaded } },
     });
     expect(thread.toSnapshot().capability_state?.[TOOL_BUNDLES_STATE_KEY]).toEqual({
-      loaded: ['web', 'sandbox', 'maps', 'spaces'],
+      loaded: ['google', 'web', 'sandbox', 'maps', 'spaces'],
     });
-  });
-
-  it('keeps the bundles of tools used in the last three replies', async () => {
-    const usedMap: ContextMessage[] = [
-      { role: 'user', content: 'Where is the Oceanarium?' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {
-            id: 'old-1',
-            type: 'function',
-            function: { name: 'render_map', arguments: '{"text":"x"}' },
-            tool_info: {
-              type: 'truefoundry-system',
-              mcp_server_id: 'maps',
-              mcp_server_name: 'maps',
-              original_tool_name: 'render_map',
-            },
-          },
-        ],
-      },
-      { role: 'tool', tool_call_id: 'old-1', content: 'done' },
-      { role: 'assistant', content: 'Here it is.' },
-    ];
-    const recent = await runTurn({ steps: ['answer'], history: usedMap });
-    expect(sentNames(recent.requests[0])).toContain('render_map');
-
-    const older = [
-      ...usedMap,
-      ...['One.', 'Two.', 'Three.'].flatMap((content): ContextMessage[] => [
-        { role: 'user', content },
-        { role: 'assistant', content: 'Fine.' },
-      ]),
-    ];
-    const stale = await runTurn({ steps: ['answer'], history: older });
-    expect(sentNames(stale.requests[0])).not.toContain('render_map');
   });
 
   it('runs a tool of a bundle that is not loaded under its own name', async () => {
@@ -239,6 +266,7 @@ describe('tool bundles in a turn', () => {
       tracing: NOOP_AGENT_TRACING,
       sectionBundles: new Set(TOOL_BUNDLE_NAMES),
       routeSignals: () => ({ repositoryAttached: false }),
+      guidance: () => '',
     });
     bundles.load({ converted: { tools: [], toolMapping: new Map() }, metaToolSet: undefined, deferredServers: false });
     const builder = new InstructionBuilder('test');

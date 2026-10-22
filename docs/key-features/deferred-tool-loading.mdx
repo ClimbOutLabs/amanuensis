@@ -62,9 +62,13 @@ The meta tools are only sent while at least one connector has `preload` off. The
 
 Built-in tools are grouped in bundles: `google` (email and calendar), `web`, `maps`, `sandbox`, `spaces`, `documents`, `schedules`, `sub_agents` and `extras`. The system prompt lists each bundle in one short line. A few built-in tools, such as `ask_user_question`, go out on every turn. Connector tools follow their `preload` setting, except that the search connector goes with `web` and the first-party email and calendar accounts go with `google`.
 
-Before the first model call of a turn, a router picks the bundles the message needs. It reads the message's words (a link or a question picks `web`, an email or a meeting picks `google`, and so on), whether files are attached, and the bundles used in the last three replies of the chat. It includes a bundle when unsure. A bundle's tools and its guidance in the system prompt go out together.
+Before the first model call of a turn, a router picks the bundles the message needs. It reads the message's words (a link or a question picks `web`, an email or a meeting picks `google`, and so on) and whether files are attached. It includes a bundle when unsure. The guidance for the bundles it picks goes in the block sent with that message.
 
-The model can call `load_bundle` with a bundle name to add a bundle for the rest of the chat. Its tools are added at the end of the tool list. The chat remembers up to four loaded bundles. Each tool keeps its own name in every bundle, so its permission check, approval card and audit record are the same however it was loaded.
+The model can call `load_bundle` with a bundle name to add a bundle in the middle of a reply. The bundle's guidance comes back in the tool result. Its tools are ready from the next step.
+
+A bundle stays for the rest of the chat, whether the router picked it or the model loaded it. Its tools go at the end of the tool list, in the order the bundles were first added, and the chat saves that order. The system prompt and the bundle list in it never change during a chat. So a model server that caches the start of a request can reuse that cache on every step and every reply. The cost is that a long chat keeps sending the tools of every bundle it has used.
+
+Each tool keeps its own name in every bundle, so its permission check, approval card and audit record are the same however it was loaded.
 
 ## Selective preloading
 

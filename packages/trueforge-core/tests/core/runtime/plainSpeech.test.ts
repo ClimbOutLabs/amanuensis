@@ -35,8 +35,10 @@ async function systemPrompt(input: {
     // Draining is enough; the assertion is on the request sent to the model.
   }
 
-  const content = create.mock.calls[0]?.[0].messages.find(message => message.role === 'system')?.content;
-  return typeof content === 'string' ? content : '';
+  // The system prompt and the per-reply block, where routed bundles bring their guidance.
+  return (create.mock.calls[0]?.[0].messages ?? [])
+    .flatMap(message => (message.role === 'system' && typeof message.content === 'string' ? [message.content] : []))
+    .join('\n');
 }
 
 describe('host-owned plain speech rule', () => {
