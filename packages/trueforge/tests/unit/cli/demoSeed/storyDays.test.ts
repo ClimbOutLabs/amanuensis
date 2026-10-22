@@ -1,5 +1,13 @@
+import { isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
-import { addDays, dayInZone, dayLabels, isoDay, parseDemoDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
+import {
+  addDays,
+  dayInZone,
+  dayLabels,
+  parseDemoDay,
+  STORY,
+  weekdayOffset,
+} from '../../../../src/cli/demoSeed/storyDays.mjs';
 
 describe('calendar', () => {
   it('reads today in the target zone, not in UTC', () => {
@@ -41,5 +49,34 @@ describe('dayLabels', () => {
     expect(labels.monthDay(1)).toBe('Oct 27');
     expect(labels.long(2)).toBe('Wednesday, October 28');
     expect(labels.monthDay(10)).toBe('Nov 5');
+  });
+});
+
+describe('weekdayOffset', () => {
+  // The GP visit sits three days after today, moved on to Monday when that day is a weekend.
+  const visitOffsetOn = (today: { year: number; month: number; day: number }): number =>
+    weekdayOffset({ today, offset: STORY.GP_VISIT_EARLIEST });
+
+  it.each([
+    ['Monday', 19, 3, 'Thursday'],
+    ['Tuesday', 20, 3, 'Friday'],
+    ['Wednesday', 21, 5, 'Monday'],
+    ['Thursday', 22, 4, 'Monday'],
+    ['Friday', 23, 3, 'Monday'],
+    ['Saturday', 24, 3, 'Tuesday'],
+    ['Sunday', 25, 3, 'Wednesday'],
+  ])('puts the GP visit on a weekday when today is a %s', (_name, dayOfMonth, offset, visitWeekday) => {
+    const today = { year: 2026, month: 10, day: dayOfMonth };
+    expect(visitOffsetOn(today)).toBe(offset);
+    expect(dayLabels(today).weekday(offset)).toBe(visitWeekday);
+  });
+
+  it('never lands a visit on a weekend, on any day of the week', () => {
+    for (let dayOfMonth = 19; dayOfMonth <= 25; dayOfMonth += 1) {
+      const today = { year: 2026, month: 10, day: dayOfMonth };
+      const offset = visitOffsetOn(today);
+      expect(offset).toBeGreaterThanOrEqual(STORY.GP_VISIT_EARLIEST);
+      expect(['Saturday', 'Sunday']).not.toContain(dayLabels(today).weekday(offset));
+    }
   });
 });

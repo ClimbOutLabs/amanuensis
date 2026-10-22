@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
 import { buildMessages } from '../demo/fixtures/mailbox/generate-fixtures.mjs';
 import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
-import { parseDemoDay } from '../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
+import { parseDemoDay, STORY, weekdayOffset } from '../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
 
 const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
 
@@ -244,12 +244,13 @@ for (const { label, day } of DAYS) {
         assert.equal(weekdayOf(mentioned), mention.weekday, `${message.file}: day ${mention.day} is not that weekday`);
       }
     }
-    const gp = plusDays(day, 3);
+    const gp = plusDays(day, weekdayOffset({ today: day, offset: STORY.GP_VISIT_EARLIEST }));
+    assert.ok(![0, 6].includes(weekdayOf(gp)), 'the GP appointment falls on a weekday');
     assert.ok(
       weekdayMentions(textOf(byFile['02-gp-appointment-confirmation.eml'])).some(
         mention => mention.day === gp.day && mention.month === gp.month && mention.weekday === weekdayOf(gp),
       ),
-      'the GP appointment is three days ahead',
+      'the GP appointment is on the first weekday three days ahead',
     );
     const dueDay = plusDays(day, 11);
     const due = /Pagar até: (\d{1,2}) de (\w+) de (\d{4})/.exec(
@@ -297,6 +298,16 @@ test('the bill is named for the month it bills, and the closing names the homewo
     buildMessages({ today: parseDemoDay('2026-12-31') })['21-portuguese-class-homework.eml'],
   );
   assert.match(newYear, /Até sábado!/);
+});
+
+test('the bill Message-ID names the billed month, so a bill for a later month is not skipped', () => {
+  const billMessageId = day => {
+    const eml = buildMessages({ today: parseDemoDay(day) })['03-portuguese-electricity-bill.eml'];
+    return /^Message-ID: <(fatura-\d{6})\./m.exec(eml)?.[1];
+  };
+  assert.equal(billMessageId('2026-10-19'), 'fatura-202609');
+  assert.equal(billMessageId('2026-11-10'), 'fatura-202610');
+  assert.equal(billMessageId('2026-12-31'), 'fatura-202611');
 });
 
 test('mail made for two different days has different Message-IDs', () => {

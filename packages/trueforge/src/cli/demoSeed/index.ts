@@ -1,9 +1,10 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
 import type { DemoSeedSession } from './session';
-import { parseDemoDay, type CalendarDay } from './storyDays.mjs';
+import { parseDemoDay } from './storyDays.mjs';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
 const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]

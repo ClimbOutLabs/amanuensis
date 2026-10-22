@@ -1,9 +1,10 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../db/sqlite/types';
 import type { DemoKnowledgeLibrary } from './knowledgeLibrary';
 import { resetDemoWorld, seedDemoWorld, type ResetReport, type SeedReport } from './seed';
 import { createSqliteDemoSeedStores } from './stores';
-import { dayInZone, type CalendarDay } from './storyDays.mjs';
+import { dayInZone } from './storyDays.mjs';
 import { buildDemoWorld } from './world';
 
 /** What the command needs from an open instance; the command itself never touches a store. */

@@ -1,5 +1,7 @@
 /** Types for storyDays.mjs, the demo story's calendar owner. */
 
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+
 export const DEMO_TIME_ZONE: string;
 
 export const STORY: {
@@ -13,7 +15,7 @@ export const STORY: {
   readonly TOUR_SECOND_DAY: number;
   readonly NEIGHBORHOOD_DECISION: number;
   readonly CAMERA_PICKUP: number;
-  readonly GP_VISIT: number;
+  readonly GP_VISIT_EARLIEST: number;
   readonly FLIGHT_MAIL: number;
   readonly LISBON_FLIGHT: number;
   readonly GP_BOOKING_MAIL: number;
@@ -52,12 +54,6 @@ export const STORY: {
   readonly BELEM_SESSION: number;
 };
 
-export interface CalendarDay {
-  year: number;
-  month: number;
-  day: number;
-}
-
 export interface DayLabels {
   /** `Tuesday` */
   weekday(offset: number): string;
@@ -70,8 +66,8 @@ export interface DayLabels {
 }
 
 export function dayInZone(options: { now?: Date; timeZone: string }): CalendarDay;
+export function weekdayOffset(options: { today: CalendarDay; offset: number }): number;
 export function parseDemoDay(text: string): CalendarDay;
 export function addDays(options: { day: CalendarDay; days: number }): CalendarDay;
-export function isoDay(day: CalendarDay): string;
 export function formatDay(options: { day: CalendarDay; options: Intl.DateTimeFormatOptions; locale?: string }): string;
 export function dayLabels(today: CalendarDay): DayLabels;

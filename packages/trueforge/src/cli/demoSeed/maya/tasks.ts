@@ -1,4 +1,5 @@
-import { dayLabels, STORY, type CalendarDay, type DayLabels } from '../storyDays.mjs';
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { dayLabels, STORY, weekdayOffset, type DayLabels } from '../storyDays.mjs';
 import { CAMERA_SHOP, GP_CLINIC, VISA_CLINIC } from './places';
 
 type TaskState = 'done' | 'in_progress' | 'open';
@@ -13,7 +14,8 @@ interface MayaTask {
   notes: string | null;
 }
 
-function mayaTasks(days: DayLabels): readonly MayaTask[] {
+function mayaTasks({ days, today }: { days: DayLabels; today: CalendarDay }): readonly MayaTask[] {
+  const gpVisit = weekdayOffset({ today, offset: STORY.GP_VISIT_EARLIEST });
   return [
     {
       title: 'Book flight to Lisbon',
@@ -49,7 +51,7 @@ function mayaTasks(days: DayLabels): readonly MayaTask[] {
       state: 'in_progress',
       doneOffset: null,
       dueOffset: null,
-      notes: `GP appointment ${days.longYear(STORY.GP_VISIT)}, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
+      notes: `GP appointment ${days.longYear(gpVisit)}, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
     },
     {
       title: 'Complete visa medical',
@@ -108,7 +110,7 @@ function taskLine({ task, days }: { task: MayaTask; days: DayLabels }): string {
 /** The Tasks space for `today`: open work first, then what is finished. */
 export function tasksSpaceBody(today: CalendarDay): string {
   const days = dayLabels(today);
-  const tasks = mayaTasks(days);
+  const tasks = mayaTasks({ days, today });
   const lines = (done: boolean): string[] =>
     tasks.filter(task => (task.state === 'done') === done).map(task => taskLine({ task, days }));
   return [

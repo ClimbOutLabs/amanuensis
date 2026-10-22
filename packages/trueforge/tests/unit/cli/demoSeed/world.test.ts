@@ -4,7 +4,8 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { dayInZone, parseDemoDay, type CalendarDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { dayInZone, parseDemoDay, STORY, weekdayOffset } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
@@ -63,15 +64,19 @@ const weekdayAfter = (seedDay: string, offset: number): string =>
   afterSeedDay({ seedDay, offset, options: { weekday: 'long' } });
 
 describe('buildDemoWorld dates', () => {
-  it.each(SEED_DAYS)('counts every date from the seed day %s, so the GP visit is three days ahead', seedDay => {
-    const body = tasksBody(worldOn(day(seedDay)));
+  it.each(SEED_DAYS)(
+    'counts every date from the seed day %s, with the GP visit on a weekday three days ahead',
+    seedDay => {
+      const body = tasksBody(worldOn(day(seedDay)));
+      const gpOffset = weekdayOffset({ today: day(seedDay), offset: STORY.GP_VISIT_EARLIEST });
 
-    expect(body).toContain(`GP appointment ${longAfter(seedDay, 3)}, 2026, 09:30`);
-    expect(body).toContain(`Appointment ${monthDayAfter(seedDay, 2)}, 10:00`);
-    expect(body).toContain(`Pick up the 35mm-equivalent camera lens - due ${longAfter(seedDay, 3)}`);
-    expect(body).toContain('- [ ] Find English-speaking GP (in progress)');
-    expect(body).not.toContain('- [x] Find English-speaking GP');
-  });
+      expect(body).toContain(`GP appointment ${longAfter(seedDay, gpOffset)}, 2026, 09:30`);
+      expect(body).toContain(`Appointment ${monthDayAfter(seedDay, 2)}, 10:00`);
+      expect(body).toContain(`Pick up the 35mm-equivalent camera lens - due ${longAfter(seedDay, 3)}`);
+      expect(body).toContain('- [ ] Find English-speaking GP (in progress)');
+      expect(body).not.toContain('- [x] Find English-speaking GP');
+    },
+  );
 
   it.each(SEED_DAYS)('dates what is finished before the seed day %s', seedDay => {
     expect(tasksBody(worldOn(day(seedDay)))).toContain(`- [x] Get NIF (tax number) - done ${longAfter(seedDay, -8)}`);
@@ -81,7 +86,7 @@ describe('buildDemoWorld dates', () => {
     const note = tasksBody(worldOn(day('2026-12-31')))
       .split('\n')
       .find(line => line.includes('GP appointment'));
-    expect(note).toContain('GP appointment Sunday, January 3, 2027, 09:30');
+    expect(note).toContain('GP appointment Monday, January 4, 2027, 09:30');
 
     const nextYear = tasksBody(worldOn(day('2027-01-02')));
     expect(nextYear).toContain('GP appointment Tuesday, January 5, 2027, 09:30');

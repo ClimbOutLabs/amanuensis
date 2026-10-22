@@ -1,5 +1,6 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { DemoNote } from '../model';
-import { dayLabels, STORY, type CalendarDay } from '../storyDays.mjs';
+import { dayLabels, STORY } from '../storyDays.mjs';
 
 /** Maya's long-term memory for `today`, one note per fact; a date in it is the one her mail and calendar hold. */
 export function mayaMemoryNotes(today: CalendarDay): DemoNote[] {

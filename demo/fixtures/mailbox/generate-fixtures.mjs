@@ -39,6 +39,7 @@ import {
   formatDay,
   parseDemoDay,
   STORY,
+  weekdayOffset,
 } from '../../../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
 
 const OUT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1525,6 +1526,7 @@ function previousMonthRange(day) {
 export function buildMessages({ today }) {
   const messages = {};
   const at = offset => addDays({ day: today, days: offset });
+  const gpVisit = weekdayOffset({ today, offset: STORY.GP_VISIT_EARLIEST });
   // Message-IDs carry the day the mail was made for, so mail made on a later day is a new message.
   const mid = raw => raw.replace('@', `.${compactDay(today)}@`);
 
@@ -1599,15 +1601,15 @@ export function buildMessages({ today }) {
     from: 'Brightwater Family Clinic <appointments@brightwater-clinic.example.org>',
     to: OWNER,
     date: mailDate({ day: at(STORY.GP_BOOKING_MAIL), time: '10:00:05', zone: DEMO_TIME_ZONE }),
-    subject: `Appointment confirmed: ${enLong(at(STORY.GP_VISIT))} at 09:30`,
-    msgid: mid(`<appt-${compactDay(at(STORY.GP_VISIT))}@brightwater-clinic.example.org>`),
+    subject: `Appointment confirmed: ${enLong(at(gpVisit))} at 09:30`,
+    msgid: mid(`<appt-${compactDay(at(gpVisit))}@brightwater-clinic.example.org>`),
     body: crlfJoin([
       'Hi Maya,',
       '',
       'Your first appointment is confirmed:',
       '',
       '  What:     New patient check-up',
-      `  When:     ${enLongYear(at(STORY.GP_VISIT))} at 09:30`,
+      `  When:     ${enLongYear(at(gpVisit))} at 09:30`,
       '  Where:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '  Doctor:   Dra. Helena Rocha',
       '',
@@ -1627,6 +1629,7 @@ export function buildMessages({ today }) {
   const billPeriod = previousMonthRange(billMailDay);
   const billMonth = ptMonth(billPeriod.first);
   const billYear = billMailDay.year;
+  const billedMonthKey = `${billPeriod.first.year}${String(billPeriod.first.month).padStart(2, '0')}`;
   const billDue = at(STORY.BILL_DUE);
   const billPdf = makeTextPdf(`Fatura FT ${billYear}/118842`, [
     'LUZ DO TEJO ENERGIA - FATURA DE ELETRICIDADE',
@@ -1646,7 +1649,7 @@ export function buildMessages({ today }) {
     to: OWNER,
     date: mailDate({ day: billMailDay, time: '08:30:11', zone: DEMO_TIME_ZONE }),
     subject: `A sua fatura de eletricidade de ${billMonth} já está disponível`,
-    msgid: mid('<fatura-202609@luz-do-tejo.example.net>'),
+    msgid: mid(`<fatura-${billedMonthKey}@luz-do-tejo.example.net>`),
     body: [
       'Olá, Maya,',
       '',
@@ -2347,14 +2350,14 @@ export function buildMessages({ today }) {
     to: OWNER,
     date: mailDate({ day: at(STORY.GP_CONSULTA_MAIL), time: '09:12:00', zone: DEMO_TIME_ZONE }),
     subject: 'Confirmação de consulta / Appointment confirmation',
-    msgid: mid(`<consulta-${compactDay(at(STORY.GP_VISIT))}@brightwater-clinic.example.org>`),
+    msgid: mid(`<consulta-${compactDay(at(gpVisit))}@brightwater-clinic.example.org>`),
     body: [
       'Olá, Maya,',
       '',
       'A sua consulta de clínica geral está confirmada:',
       '',
       '  Médica:  Dra. Helena Rocha',
-      `  Quando:  ${ptWeekday(at(STORY.GP_VISIT))}, ${ptDateYear(at(STORY.GP_VISIT))}, às 09:30`,
+      `  Quando:  ${ptWeekday(at(gpVisit))}, ${ptDateYear(at(gpVisit))}, às 09:30`,
       '  Onde:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '',
       'Traga o passaporte, o NIF e o cartão do seguro de saúde.',
@@ -2368,7 +2371,7 @@ export function buildMessages({ today }) {
       'Your GP appointment is confirmed:',
       '',
       '  Doctor: Dra. Helena Rocha',
-      `  When:   ${enWeekday(at(STORY.GP_VISIT))}, ${at(STORY.GP_VISIT).day} ${enMonth(at(STORY.GP_VISIT))} ${at(STORY.GP_VISIT).year}, at 09:30`,
+      `  When:   ${enWeekday(at(gpVisit))}, ${at(gpVisit).day} ${enMonth(at(gpVisit))} ${at(gpVisit).year}, at 09:30`,
       '  Where:  Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
       '',
       'Please bring your passport, your NIF and your health insurance card.',

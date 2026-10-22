@@ -214,7 +214,7 @@ describe('demo seed against the real stores', () => {
 
     expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
     const body = await spaceBody(stores, DEMO_TASKS_SPACE_ID);
-    expect(body).toContain('GP appointment Sunday, January 3, 2027, 09:30');
+    expect(body).toContain('GP appointment Monday, January 4, 2027, 09:30');
     expect(body).not.toContain('October 29');
   });
 

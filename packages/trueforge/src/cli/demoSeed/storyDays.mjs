@@ -21,7 +21,7 @@ export const STORY = Object.freeze({
   TOUR_SECOND_DAY: 3,
   NEIGHBORHOOD_DECISION: 11,
   CAMERA_PICKUP: 3,
-  GP_VISIT: 3,
+  GP_VISIT_EARLIEST: 3,
   FLIGHT_MAIL: -5,
   LISBON_FLIGHT: 19,
   GP_BOOKING_MAIL: -5,
@@ -98,10 +98,21 @@ export function addDays({ day, days }) {
   return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
 }
 
-/** `2026-10-15`; also the stable per-day key stored on seeded records. */
-export function isoDay(day) {
-  const two = value => String(value).padStart(2, '0');
-  return `${String(day.year)}-${two(day.month)}-${two(day.day)}`;
+function weekdayIndex(day) {
+  return new Date(Date.UTC(day.year, day.month - 1, day.day, 12)).getUTCDay();
+}
+
+/**
+ * The offset of the first Monday-to-Friday day at or after `offset` days from `today`. Appointments
+ * use it, so a visit never falls on a weekend; `offset` must be ahead of today (1 or more).
+ */
+export function weekdayOffset({ today, offset }) {
+  let shifted = offset;
+  const isWeekend = weekday => weekday === 0 || weekday === 6;
+  while (isWeekend(weekdayIndex(addDays({ day: today, days: shifted })))) {
+    shifted += 1;
+  }
+  return shifted;
 }
 
 /** Named days are formatted from UTC noon, so no zone can move them to the day before. */
