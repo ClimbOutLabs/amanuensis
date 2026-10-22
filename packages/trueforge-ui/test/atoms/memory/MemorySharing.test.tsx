@@ -109,6 +109,17 @@ describe('MemorySharing', () => {
     expect(chip('Beta can see the finance memories')).toBeTruthy();
   });
 
+  it('puts topic chips on their own line labelled Topics, apart from the specialist chips', () => {
+    renderSharing({ personas: [ALPHA, BETA], namespaces: [{ value: 'finance', label: 'finance' }] });
+
+    const topics = within(row('Alpha')).getByRole('group', { name: 'Topics Alpha can see' });
+    expect(within(topics).getByText('Topics:')).toBeTruthy();
+    expect(within(topics).getAllByRole('button')).toHaveLength(1);
+    expect(within(row('Alpha')).getByRole('group', { name: 'What Alpha can see' }).textContent).not.toContain(
+      'Topics:',
+    );
+  });
+
   it('keeps grants for memories it no longer lists', async () => {
     const { onSave } = renderSharing({
       personas: [ALPHA, BETA],

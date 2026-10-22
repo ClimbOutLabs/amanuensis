@@ -14,13 +14,13 @@ export type MemorySharingPersona = { id: string; displayName: string };
 /** One chip on a specialist's row. `subject` completes "X can see …" for the accessible name. */
 type SharingChoice = { value: string; label: string; subject: string };
 
-/** Every choice a specialist can be given: the other specialists, then the topics. */
+/** The choices a specialist can be given: the other specialists, then the topics. */
 function sharingChoices(options: {
   persona: MemorySharingPersona;
   personas: MemorySharingPersona[];
   topics: Array<{ value: string; label: string }>;
-}): SharingChoice[] {
-  const otherSpecialists = options.personas
+}): { specialists: SharingChoice[]; topics: SharingChoice[] } {
+  const specialists = options.personas
     .filter(other => other.id !== options.persona.id)
     .map(other => ({
       value: personaVaultNamespace(other.displayName),
@@ -32,7 +32,7 @@ function sharingChoices(options: {
     label: topic.label,
     subject: `the ${topic.label} memories`,
   }));
-  return [...otherSpecialists, ...topics];
+  return { specialists, topics };
 }
 
 /**
@@ -80,6 +80,24 @@ export function MemorySharing(props: {
     }
   }
 
+  function renderChip(persona: MemorySharingPersona, choice: SharingChoice, granted: string[]) {
+    const on = granted.includes(choice.value);
+    return (
+      <button
+        key={choice.value}
+        type="button"
+        aria-pressed={on}
+        aria-label={`${persona.displayName} can see ${choice.subject}`}
+        disabled={saving}
+        onClick={() => toggle(persona.id, choice.value, !on)}
+        className="aui-chip focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-60"
+      >
+        {on ? <Icon name="check" className="h-3 w-3 shrink-0" /> : null}
+        {choice.label}
+      </button>
+    );
+  }
+
   if (props.personas.length === 0) {
     return <p className="text-sm text-text-secondary">No specialists are set up yet, so there is nothing to share.</p>;
   }
@@ -91,36 +109,42 @@ export function MemorySharing(props: {
       </p>
       <ul aria-label="Memory sharing by specialist" className="flex flex-col gap-3">
         {props.personas.map(persona => {
-          const choices = sharingChoices({ persona, personas: props.personas, topics: props.namespaces });
+          const { specialists, topics } = sharingChoices({
+            persona,
+            personas: props.personas,
+            topics: props.namespaces,
+          });
           const granted = draft[persona.id] ?? [];
-          const anyOn = choices.some(choice => granted.includes(choice.value));
+          const anyOn = [...specialists, ...topics].some(choice => granted.includes(choice.value));
           return (
-            <li key={persona.id} className="aui-row aui-row--2 aui-row--stack">
+            <li key={persona.id} className="aui-row aui-row--2 aui-row--stack aui-row--sharing">
               <div className="min-w-0">
                 <span className="text-sm font-medium text-text-primary">{persona.displayName}</span>
                 {anyOn ? null : <span className="block text-xs text-text-secondary">None</span>}
               </div>
-              {choices.length === 0 ? (
+              {specialists.length === 0 && topics.length === 0 ? (
                 <p className="text-sm text-text-secondary">No other specialists to share with yet.</p>
               ) : (
-                <div className="flex flex-wrap gap-1.5" role="group" aria-label={`What ${persona.displayName} can see`}>
-                  {choices.map(choice => {
-                    const on = granted.includes(choice.value);
-                    return (
-                      <button
-                        key={choice.value}
-                        type="button"
-                        aria-pressed={on}
-                        aria-label={`${persona.displayName} can see ${choice.subject}`}
-                        disabled={saving}
-                        onClick={() => toggle(persona.id, choice.value, !on)}
-                        className="aui-chip focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-60"
-                      >
-                        {on ? <Icon name="check" className="h-3 w-3 shrink-0" /> : null}
-                        {choice.label}
-                      </button>
-                    );
-                  })}
+                <div className="flex min-w-0 flex-col gap-2">
+                  {specialists.length > 0 ? (
+                    <div
+                      className="flex min-w-0 flex-wrap gap-1.5"
+                      role="group"
+                      aria-label={`What ${persona.displayName} can see`}
+                    >
+                      {specialists.map(choice => renderChip(persona, choice, granted))}
+                    </div>
+                  ) : null}
+                  {topics.length > 0 ? (
+                    <div
+                      className="flex min-w-0 flex-wrap items-center gap-1.5"
+                      role="group"
+                      aria-label={`Topics ${persona.displayName} can see`}
+                    >
+                      <span className="text-xs text-text-secondary">Topics:</span>
+                      {topics.map(choice => renderChip(persona, choice, granted))}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </li>

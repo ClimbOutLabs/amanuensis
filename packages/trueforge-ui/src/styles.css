@@ -1716,6 +1716,16 @@
   white-space: nowrap;
 }
 
+/* Sharing rows: the name keeps a fixed column and the chips wrap inside the rest of the row. */
+.aui-row--2.aui-row--sharing {
+  grid-template-columns: 8rem minmax(0, 1fr);
+}
+
+.aui-row--sharing .aui-chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* Toggle chip: a pressed chip takes the gold-ink edge and a check mark, never a gold fill. */
 .aui-chip {
   display: inline-flex;

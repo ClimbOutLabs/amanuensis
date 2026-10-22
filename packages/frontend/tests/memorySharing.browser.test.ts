@@ -50,8 +50,63 @@ async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; foot
   };
 }
 
+type Box = { left: number; right: number; top: number; bottom: number };
+
+/** Measures the settings scroll area around the sharing list, each specialist name, and each chip. */
+async function sharingGeometry(page: Page): Promise<{ panel: Box; names: Box[]; chips: Box[]; chipRows: Box[][] }> {
+  const list = page.getByRole('list', { name: LIST_NAME });
+  // Plain rects only: a named helper here would be rewritten by the test transform and fail in the page.
+  const geometry = await list.evaluate(element => {
+    let panelElement: Element | null = element.parentElement;
+    while (panelElement !== null && !['auto', 'scroll'].includes(getComputedStyle(panelElement).overflowY)) {
+      panelElement = panelElement.parentElement;
+    }
+    if (panelElement === null) throw new Error('No scrolling settings panel around the sharing list');
+    const rows = Array.from(element.querySelectorAll(':scope > li'));
+    return {
+      panel: panelElement.getBoundingClientRect().toJSON(),
+      names: rows.map(row => (row.querySelector('span.text-sm.font-medium') ?? row).getBoundingClientRect().toJSON()),
+      chipRows: rows.map(row =>
+        Array.from(row.querySelectorAll('button')).map(chip => chip.getBoundingClientRect().toJSON()),
+      ),
+    };
+  });
+  return {
+    panel: geometry.panel,
+    names: geometry.names,
+    chips: geometry.chipRows.flat(),
+    chipRows: geometry.chipRows,
+  };
+}
+
+function overlaps(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** Every chip sits inside the settings panel, and no chip covers a specialist name or another chip in its row. */
+function assertChipsInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
+  assert.ok(geometry.chips.length > 0, `there are chips to check (${label})`);
+  for (const chip of geometry.chips) {
+    assert.ok(
+      chip.left >= geometry.panel.left && chip.right <= geometry.panel.right,
+      `chip ${JSON.stringify(chip)} runs past the panel ${JSON.stringify(geometry.panel)} (${label})`,
+    );
+  }
+  geometry.names.forEach((name, rowIndex) => {
+    for (const chip of geometry.chipRows[rowIndex] ?? []) {
+      assert.ok(!overlaps(name, chip), `a chip covers the name in row ${rowIndex} (${label})`);
+    }
+    const rowChips = geometry.chipRows[rowIndex] ?? [];
+    rowChips.forEach((chip, chipIndex) => {
+      for (const other of rowChips.slice(chipIndex + 1)) {
+        assert.ok(!overlaps(chip, other), `two chips overlap in row ${rowIndex} (${label})`);
+      }
+    });
+  });
+}
+
 test(
-  'the last sharing row scrolls fully above the footer bar at desktop and phone width',
+  'sharing chips stay inside the panel and clear the names, and the last row clears the footer, at desktop and phone width',
   { timeout: 300_000 },
   async () => {
     const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -97,6 +152,7 @@ test(
             (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
             `sharing overflows horizontally at ${viewport.name} ${theme}`,
           );
+          assertChipsInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
 
           await page.screenshot({ path: join(outDir, `memory-sharing-${viewport.name}-${theme}.png`) });
           await context.close();
