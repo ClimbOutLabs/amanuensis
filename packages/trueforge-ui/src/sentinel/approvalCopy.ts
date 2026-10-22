@@ -1,5 +1,25 @@
+import { HOLD_SAY, isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard, type SentinelApprovalMailbox } from './types.js';
+import type { SentinelApprovalCard, SentinelApprovalMailbox } from './types.js';
+
+/** Title of a held web search card; its query and reason sit under it as body text. */
+export const HELD_SEARCH_TITLE = 'Web search';
+
+/**
+ * The query and the reason of a held search card, read back from its sentence. Undefined for any other
+ * card, and for a saved search sentence that does not end in a known reason.
+ */
+export function searchHoldParts(text: string): { query: string; reason: string } | undefined {
+  if (!isSearchHoldCardText(text)) return undefined;
+  const reason = Object.values(HOLD_SAY).find(say => text.endsWith(` ${say}`));
+  if (reason === undefined) return undefined;
+  // The sentence reads "<prefix>: <query>. <reason>"; the prefix ends at the first ": ".
+  const subject = text.slice(0, text.length - reason.length - 1);
+  const start = subject.indexOf(': ');
+  const query = start === -1 ? '' : subject.slice(start + 2).replace(/\.$/, '');
+  return { query, reason };
+}
 
 /** The people a card sends to, in plain words: the first name, then how many more. */
 function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string {
@@ -35,6 +55,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
       : `Delete the schedule "${schedule.name}"?`;
   }
   if (persona !== null) return `Add the specialist "${persona.name}"?`;
+  if (isSearchHoldCardText(card.plain_what)) return HELD_SEARCH_TITLE;
   return card.plain_what;
 }
 
@@ -79,14 +100,15 @@ export function approvalSentLine(card: SentinelApprovalCard, time: string): stri
 export type ApprovalStub = {
   /** What the ticket is, in a few words: REPLY TO RUI, NEW SCHEDULE. */
   what: string;
-  /** What it holds: the subject, the event or the schedule name. */
-  detail: string;
-  /** The state: WAITING FOR YOU, or SENT with the time. */
-  state: string;
+  /** What it holds: the subject, the event or the schedule name. Null when nothing more useful is known. */
+  detail: string | null;
+  /** The state once sent: SENT with the time. Null while it waits, since the badge already says so. */
+  state: string | null;
 };
 
 function stubWhat(card: SentinelApprovalCard): string {
   const { email, calendar_event: event, schedule, persona } = card;
+  if (isSearchHoldCardText(card.plain_what)) return HELD_SEARCH_TITLE;
   if (email !== null) {
     switch (email.action) {
       case 'send':
@@ -105,13 +127,13 @@ function stubWhat(card: SentinelApprovalCard): string {
   return 'Action';
 }
 
-function stubDetail(card: SentinelApprovalCard): string {
+function stubDetail(card: SentinelApprovalCard): string | null {
   const { email, calendar_event: event, schedule, persona } = card;
   if (email !== null) return email.subject === '' ? 'No subject' : email.subject;
   if (event !== null) return event.title;
   if (schedule !== null) return schedule.name;
   if (persona !== null) return persona.name;
-  return card.destination ?? card.recipient ?? 'Open Details to see what it does';
+  return card.destination ?? card.recipient ?? null;
 }
 
 /** The stub of an approval ticket. `sentAt` is the time it was sent, or null while it waits. */
@@ -119,6 +141,6 @@ export function approvalStub(card: SentinelApprovalCard, { sentAt }: { sentAt: s
   return {
     what: stubWhat(card),
     detail: stubDetail(card),
-    state: sentAt === null ? WAITING_FOR_YOU_LABEL : `${doneWord(card)} ${sentAt}`,
+    state: sentAt === null ? null : `${doneWord(card)} ${sentAt}`,
   };
 }

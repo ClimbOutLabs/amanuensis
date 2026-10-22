@@ -168,7 +168,7 @@ describe('PermissionApprovalCard', () => {
   it('asks its question as the heading, with no approval label, lock or tier word', () => {
     renderCard();
     expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
-    expect(screen.getAllByText('Waiting for you')).toHaveLength(2);
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(screen.queryByText('Approval needed')).not.toBeInTheDocument();
     expect(screen.queryByText(/Needs your OK|Review carefully|Tier \d/)).not.toBeInTheDocument();
   });

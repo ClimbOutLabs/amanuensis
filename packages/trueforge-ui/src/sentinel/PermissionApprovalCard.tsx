@@ -18,6 +18,7 @@ import {
   approvalTime,
   approveVerb,
   declineVerb,
+  searchHoldParts,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -32,6 +33,8 @@ import {
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
+/** A held search's query is a few lines on a phone; the rest waits behind "Show all". */
+const QUERY_PREVIEW_CHARS = 160;
 
 export type PermissionApprovalCardProps = {
   card: SentinelApprovalCard;
@@ -61,11 +64,21 @@ export type PermissionApprovalCardProps = {
 };
 
 /** Text folded after a preview, cut on code points so a surrogate pair is never split. */
-function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 'span'; className: string }) {
+function FoldedText({
+  text,
+  as: Tag,
+  className,
+  previewChars = FOLD_PREVIEW_CHARS,
+}: {
+  text: string;
+  as: 'pre' | 'span';
+  className: string;
+  previewChars?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
   const points = Array.from(text);
-  const isLong = points.length > FOLD_PREVIEW_CHARS;
-  const shown = isLong && !expanded ? `${points.slice(0, FOLD_PREVIEW_CHARS).join('')}...` : text;
+  const isLong = points.length > previewChars;
+  const shown = isLong && !expanded ? `${points.slice(0, previewChars).join('')}...` : text;
   return (
     <>
       <Tag className={className}>{shown}</Tag>
@@ -78,10 +91,27 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
           aria-expanded={expanded}
           className="mt-1 block text-xs font-medium text-text-secondary underline hover:text-text-primary"
         >
-          {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
+          {expanded ? 'Show less' : `Show all (${String(points.length - previewChars)} more characters)`}
         </button>
       )}
     </>
+  );
+}
+
+/** A held search: the query in a quiet mono quote, then the reason in body text. */
+function HeldSearchText({ query, reason }: { query: string; reason: string }) {
+  return (
+    <div className="space-y-2">
+      {query !== '' && (
+        <FoldedText
+          text={query}
+          as="pre"
+          previewChars={QUERY_PREVIEW_CHARS}
+          className="whitespace-pre-wrap break-words border-l-2 border-border pl-3 font-mono text-sm text-text-primary"
+        />
+      )}
+      <p className="text-sm text-text-primary">{reason}</p>
+    </div>
   );
 }
 
@@ -231,6 +261,9 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
+  const heldSearch = searchHoldParts(card.plain_what);
+  // A held search whose sentence has no known reason: its whole sentence is body text, not the title.
+  const heldSearchSentence = heldSearch === undefined && isSearchHoldCardText(card.plain_what) ? card.plain_what : null;
   // A held search's chat choice only lifts its private-read check, so it says what it lets through.
   const chatChoice = isSearchHoldCardText(card.plain_what)
     ? APPROVAL_CHOICES.allowSearchesForChat
@@ -256,8 +289,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const stubContent = (
     <>
       <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
-      <p className="aui-ticket__detail text-sm text-text-primary">{stub.detail}</p>
-      <p className="aui-ticket__label text-gold-ink">{stub.state}</p>
+      {stub.detail !== null && <p className="aui-ticket__detail text-sm text-text-primary">{stub.detail}</p>}
+      {stub.state !== null && <p className="aui-ticket__label text-gold-ink">{stub.state}</p>}
     </>
   );
 
@@ -279,6 +312,16 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             </span>
           )}
         </div>
+        {heldSearch !== undefined && <HeldSearchText query={heldSearch.query} reason={heldSearch.reason} />}
+        {heldSearchSentence !== null && (
+          <FoldedText
+            text={heldSearchSentence}
+            as="span"
+            previewChars={QUERY_PREVIEW_CHARS}
+            className="block break-words text-sm text-text-primary"
+          />
+        )}
+
         {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
 
         {card.cannot_be_undone !== null && (

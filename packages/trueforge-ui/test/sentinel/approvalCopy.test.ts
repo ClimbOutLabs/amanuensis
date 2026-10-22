@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
+import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+
 import {
   approvalQuestion,
   approvalSentLine,
   approvalStub,
   approveVerb,
   declineVerb,
+  searchHoldParts,
 } from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
 
@@ -53,7 +56,7 @@ describe('approval copy', () => {
     expect(approvalStub(card, { sentAt: null })).toEqual({
       what: 'Reply to Rui',
       detail: 'Lease renewal',
-      state: 'Waiting for you',
+      state: null,
     });
   });
 
@@ -64,8 +67,8 @@ describe('approval copy', () => {
       destination_host: 'Tavily',
     });
     const stub = approvalStub(card, { sentAt: null });
-    expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
-    expect(stub.detail).toBe('Open Details to see what it does');
+    expect(stub.what).toBe('Web search');
+    expect(stub.detail).toBeNull();
   });
 
   it('counts the other recipients of a new email', () => {
@@ -129,5 +132,16 @@ describe('approval copy', () => {
     expect(approvalSentLine(card, '09:14')).toBe('Sent to Rui · 09:14');
     expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Sent 09:14');
     expect(approvalSentLine(cardWith({}), '09:14')).toBe('Done · 09:14');
+  });
+});
+
+describe('searchHoldParts', () => {
+  it('reads the query and the reason back from a held search sentence', () => {
+    const text = searchHoldCardText({ summary: 'lamp: brass, 2 pack', say: HOLD_SAY.private_read });
+    expect(searchHoldParts(text)).toEqual({ query: 'lamp: brass, 2 pack', reason: HOLD_SAY.private_read });
+  });
+
+  it('returns undefined for a card that is not a held search', () => {
+    expect(searchHoldParts('Send $250 to Acme Corp')).toBeUndefined();
   });
 });
