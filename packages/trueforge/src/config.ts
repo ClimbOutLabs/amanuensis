@@ -1472,6 +1472,12 @@ export interface SharedServerConfiguration {
    */
   STT_URL: string;
   /**
+   * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
+   * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * Env: `TTS_URL`. Default `http://aman-tts:8002`.
+   */
+  TTS_URL: string;
+  /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
    */
@@ -2220,6 +2226,7 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),
