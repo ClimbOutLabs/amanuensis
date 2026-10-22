@@ -1,3 +1,4 @@
+import type { ContextMessage } from '@truefoundry/trueforge-core/core';
 import {
   AgentThread,
   toolResultResponse,
@@ -13,6 +14,7 @@ import { getEmptyUsage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import winston from 'winston';
 import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
@@ -137,10 +139,16 @@ async function* finalTextStream(): AsyncGenerator<ExtendedChatCompletionChunk, R
   return { output: { role: 'assistant', content: 'Saved.' }, usage: getEmptyUsage(), finish_reason: 'stop' };
 }
 
+const DEFAULT_HISTORY: ContextMessage[] = [
+  { role: 'user', content: 'earlier question' },
+  { role: 'assistant', content: 'earlier answer' },
+];
+
 /** Runs one reply (tool call, then final text) and returns the request body sent at each model step. */
 async function runReply(
   userText: string,
   recalledText: string[] = DEFAULT_RECALL,
+  history: ContextMessage[] = DEFAULT_HISTORY,
 ): Promise<LLMCreateParamsStreaming[]> {
   let stepCount = 0;
   const create = jest.fn((_request: LLMCreateParamsStreaming) => {
@@ -172,11 +180,7 @@ async function runReply(
       identity: { assistantName: 'Aman', personName: 'Alex' },
     },
     capabilities: [{ systemToolSets: [noteToolSet()] }, memory],
-    context: [
-      { role: 'user', content: 'earlier question' },
-      { role: 'assistant', content: 'earlier answer' },
-      { role: 'user', content: userText },
-    ],
+    context: [...history, { role: 'user', content: userText }],
   });
   for await (const _event of thread.execute({ signal: new AbortController().signal })) {
   }
@@ -185,13 +189,21 @@ async function runReply(
 
 const CAPTURE_DIR = process.env['REPLY_PREFIX_CAPTURE_DIR'];
 
-/** The first history message in every fixture reply; everything before it is the prefix the provider can cache. */
-const HISTORY_START = 'earlier question';
+/** The last message of the shared earlier history in every fixture; the prefix that is reusable across replies. */
+const HISTORY_END = 'earlier answer';
 
-function prefixBeforeHistory(request: LLMCreateParamsStreaming): string {
-  const index = request.messages.findIndex(message => message.content === HISTORY_START);
+/** Everything the provider can cache within a reply: all messages before the current message. */
+function prefixBeforeCurrent(request: LLMCreateParamsStreaming, userText: string): ChatCompletionMessageParam[] {
+  const index = request.messages.findIndex(message => message.content === userText);
   expect(index).toBeGreaterThan(0);
-  return JSON.stringify(request.messages.slice(0, index));
+  return request.messages.slice(0, index);
+}
+
+/** Everything through the end of the earlier history, which a later reply shares with this one. */
+function prefixThroughHistory(request: LLMCreateParamsStreaming): string {
+  const index = request.messages.findIndex(message => message.content === HISTORY_END);
+  expect(index).toBeGreaterThan(0);
+  return JSON.stringify(request.messages.slice(0, index + 1));
 }
 
 describe('reply prefix stability', () => {
@@ -222,7 +234,7 @@ describe('reply prefix stability', () => {
     jest.useRealTimers();
   });
 
-  it('step 2 sends the same bytes before the history, and the same tools, as step 1', async () => {
+  it('step 2 sends the same bytes before the current message, and the same tools, as step 1', async () => {
     const [step1, step2] = await runReply('Remember that Robin likes tea.');
     if (CAPTURE_DIR !== undefined) {
       mkdirSync(CAPTURE_DIR, { recursive: true });
@@ -236,21 +248,33 @@ describe('reply prefix stability', () => {
     if (!step1 || !step2) {
       throw new Error('expected two model steps');
     }
-    // The prefix is the static instruction, the per-reply block and the recalled memory block.
-    expect(JSON.parse(prefixBeforeHistory(step1))).toHaveLength(3);
-    expect(prefixBeforeHistory(step2)).toBe(prefixBeforeHistory(step1));
+    // The prefix is the static instruction, the earlier history, then the per-reply block and the
+    // recalled memory block, both just before the current message.
+    const prefix = prefixBeforeCurrent(step1, 'Remember that Robin likes tea.');
+    expect(prefix).toHaveLength(5);
+    expect(prefix[3]).toMatchObject({ role: 'system', content: expect.stringContaining("Today's date") });
+    expect(prefix[4]).toMatchObject({ role: 'system', content: expect.stringContaining('<aman-memory>') });
+    expect(JSON.stringify(prefixBeforeCurrent(step2, 'Remember that Robin likes tea.'))).toBe(JSON.stringify(prefix));
     expect(JSON.stringify(step2.tools)).toBe(JSON.stringify(step1.tools));
     expect(String(step1.messages[0]?.content)).not.toMatch(/Today's date|Alex/);
   });
 
   it('two replies on the same day with the same tools share the same static prefix', async () => {
     const [firstReply] = await runReply('Remember that Robin likes tea.');
-    const [secondReply] = await runReply('What did I ask you to remember?');
-    if (!firstReply || !secondReply) {
-      throw new Error('expected a model step in each reply');
+    if (!firstReply) {
+      throw new Error('expected a model step in the first reply');
+    }
+    // The second reply's history includes the first reply's exchange, as a real conversation does.
+    const [secondReply] = await runReply('What did I ask you to remember?', DEFAULT_RECALL, [
+      ...DEFAULT_HISTORY,
+      { role: 'user', content: 'Remember that Robin likes tea.' },
+      { role: 'assistant', content: 'Saved.' },
+    ]);
+    if (!secondReply) {
+      throw new Error('expected a model step in the second reply');
     }
     expect(JSON.stringify(secondReply.messages[0])).toBe(JSON.stringify(firstReply.messages[0]));
     expect(JSON.stringify(secondReply.tools)).toBe(JSON.stringify(firstReply.tools));
-    expect(prefixBeforeHistory(secondReply)).toBe(prefixBeforeHistory(firstReply));
+    expect(prefixThroughHistory(secondReply)).toBe(prefixThroughHistory(firstReply));
   });
 });

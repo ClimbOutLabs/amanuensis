@@ -1651,6 +1651,9 @@ export class AgentThread {
    */
   private buildReplyContext(): string {
     const builder = new InstructionBuilder('reply-context');
+    builder.addContent(
+      'Host context for this reply. The person did not write it, and it is not part of their message.',
+    );
     // Ambient, not a tool: a model that must remember to ask for the date will
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
@@ -2436,13 +2439,6 @@ export class AgentThread {
         content: this.instruction,
       });
     }
-    // Order is the cache order: static instruction, then this reply's fixed block,
-    // then the ephemeral recall block and the history. Only the tail changes per step.
-    messages.push({
-      role: 'system',
-      content: this.replyContext,
-    });
-
     if (this.definition.messages) {
       for (const msg of this.definition.messages) {
         if (isLLMContextMessage(msg)) {
@@ -2459,6 +2455,14 @@ export class AgentThread {
       .map(msg => toOpenAIChatMessage(msg));
 
     messages.push(...contextMessages);
+
+    // Order is the cache order: static instruction, history, then this reply's fixed block
+    // and the ephemeral recall block, both just before the current message. The history and
+    // the static instruction therefore stay one reusable prefix across replies and steps.
+    messages.splice(currentMessageIndex(messages), 0, {
+      role: 'system',
+      content: this.replyContext,
+    });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
       messages = processor.processPreLLMEphemeral(messages) ?? messages;
@@ -4765,6 +4769,17 @@ function estimateRawContextTextLength(context: readonly ContextMessage[]): numbe
   }
   return total;
 }
+
+/** Index of the latest user message, the one a reply answers. Appends when there is none. */
+function currentMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      return i;
+    }
+  }
+  return messages.length;
+}
+
 function assertUniqueStateKeys(capabilities: readonly AgentCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {

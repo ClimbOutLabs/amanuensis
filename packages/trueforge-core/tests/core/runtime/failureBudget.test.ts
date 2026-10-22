@@ -940,12 +940,16 @@ describe('repeat budget', () => {
     );
     expect(assistantBatchIndex).toBeGreaterThanOrEqual(0);
     const messagesAfterBatch = finalMessages.slice(assistantBatchIndex + 1);
-    // Both tool results, then the nudge — never a user message ahead of a tool result from the
-    // same batch, and the request message sequence stays assistant, tool, tool, user.
+    // Both tool results come first, never a user message ahead of them. The per-reply block sits
+    // just before the latest user message, which here is the nudge.
     expect(messagesAfterBatch[0]).toMatchObject({ role: 'tool' });
     expect(messagesAfterBatch[1]).toMatchObject({ role: 'tool' });
-    expect(messagesAfterBatch[2]).toMatchObject({ role: 'user' });
-    expect(JSON.stringify(messagesAfterBatch[2])).toContain(nudgeText);
+    expect(messagesAfterBatch[2]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('<reply-context>'),
+    });
+    expect(messagesAfterBatch[3]).toMatchObject({ role: 'user' });
+    expect(JSON.stringify(messagesAfterBatch[3])).toContain(nudgeText);
   });
 
   it('defers the nudge until a sub-agent launched from the same batch finishes', async () => {

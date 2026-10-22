@@ -455,7 +455,7 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(recallBody.query).toBe(USER_MESSAGE_1);
 
       // (b) the scripted model saw the `<aman-memory>` block, carrying the canned memory text,
-      // spliced in immediately before the real final user message.
+      // placed before the real final user message.
       const modelRequests = server.model.requests();
       const turn1ModelRequest = modelRequests[modelRequests.length - 1];
       if (!turn1ModelRequest) {
@@ -464,9 +464,15 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const finalUserIndex = lastUserMessageIndex(turn1ModelRequest.messages);
       expect(finalUserIndex).toBeGreaterThan(0);
       const finalUserMessage = turn1ModelRequest.messages[finalUserIndex];
-      const injectedMessage = turn1ModelRequest.messages[finalUserIndex - 1];
       expect(contentText(finalUserMessage?.content)).toContain(USER_MESSAGE_1);
-      expect(injectedMessage?.role).toBe('user');
+      // The block is host context, so it is a system message placed before the final user message.
+      const memoryIndex = turn1ModelRequest.messages.findIndex(message =>
+        contentText(message.content).includes('<aman-memory>'),
+      );
+      expect(memoryIndex).toBeGreaterThan(0);
+      expect(memoryIndex).toBeLessThan(finalUserIndex);
+      const injectedMessage = turn1ModelRequest.messages[memoryIndex];
+      expect(injectedMessage?.role).toBe('system');
       const injectedText = contentText(injectedMessage?.content);
       expect(injectedText).toContain('<aman-memory>');
       expect(injectedText).toContain(CANNED_ITEM_TEXT);

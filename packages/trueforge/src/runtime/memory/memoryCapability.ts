@@ -1437,14 +1437,20 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       return undefined;
     }
     const block = this.cachedBlock;
-    // Placed before the history, right after the static instruction and the per-reply block,
-    // so the recalled block is fixed for the whole reply and never sits inside the history.
-    let firstHistoryIndex = messages.findIndex(message => message.role !== 'system');
-    if (firstHistoryIndex === -1) {
-      firstHistoryIndex = messages.length;
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === 'user') {
+        lastUserIndex = i;
+        break;
+      }
     }
+    if (lastUserIndex === -1) {
+      return undefined;
+    }
+    // Just before the current message, after the per-reply block. System role: the host wrote
+    // it, so the model must not read it as the person's words.
     const next = messages.slice();
-    next.splice(firstHistoryIndex, 0, { role: 'user', content: block });
+    next.splice(lastUserIndex, 0, { role: 'system', content: block });
     return next;
   }
 

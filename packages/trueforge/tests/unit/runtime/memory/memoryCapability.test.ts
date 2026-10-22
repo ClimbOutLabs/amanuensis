@@ -410,7 +410,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(result?.[0]?.content).toBe(event['injected_block']);
   });
 
-  it('inserts the block after the leading system messages, before the history, without mutating the input array', async () => {
+  it('inserts the block as a system message just before the current message, without mutating the input array', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
       results: [{ id: '1', type: 'world', occurred_start: '2026-08-14', text: 'fact' }],
@@ -446,9 +446,9 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     }
     expect(result).toHaveLength(5);
     expect(result[0]).toMatchObject({ role: 'system', content: 'sys' });
-    expect(result[1]).toMatchObject({ role: 'user', content: expect.stringContaining('<aman-memory>') });
-    expect(result[2]).toMatchObject({ role: 'user', content: 'first' });
-    expect(result[3]).toMatchObject({ role: 'assistant', content: 'reply' });
+    expect(result[1]).toMatchObject({ role: 'user', content: 'first' });
+    expect(result[2]).toMatchObject({ role: 'assistant', content: 'reply' });
+    expect(result[3]).toMatchObject({ role: 'system', content: expect.stringContaining('<aman-memory>') });
     expect(result[4]).toMatchObject({ role: 'user', content: 'second' });
   });
 
