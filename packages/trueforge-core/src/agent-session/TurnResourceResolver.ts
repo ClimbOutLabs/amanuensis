@@ -21,6 +21,7 @@ import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { ToolBundleName } from '../core/runtime/toolBundleCatalog';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
+import type { PageFixtureSource } from '../core/search/pageFixtures';
 import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
 import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
@@ -162,6 +163,11 @@ export class TurnResourceResolver<
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
       sandboxProvider?: TurnSandboxFactory | undefined;
+      /**
+       * Page links the Tavily page reader answers from local fixtures instead of the web. Set only on an
+       * eval instance; absent, every link is read from the web.
+       */
+      pageFixtures?: PageFixtureSource | undefined;
       /**
        * Named-agent lookup (registry id → live AgentSpec). Required when a
        * session is bound by reference; omit only if all sessions use inline agents.
@@ -411,6 +417,7 @@ export class TurnResourceResolver<
                 }),
                 pages: fetchedPages,
                 scope: pageScope,
+                pageFixtures: this.deps.pageFixtures,
               });
             }
             return new RemoteMCP({

@@ -75,7 +75,7 @@ import type {
   TurnRecordWithoutSnapshot,
 } from './store/ISessionStore';
 import { ApprovalRequestEndedError, TurnNotFoundError } from './store/SessionStoreErrors';
-import { TurnHandle } from './TurnHandle';
+import { cancelStreamingTurn, TurnHandle } from './TurnHandle';
 
 /** How many recent ancestors SessionHandle persists on each turn. Store-local. */
 const MAX_TURN_ANCESTORS = 20;
@@ -942,6 +942,13 @@ export class SessionHandle<
     reason: CancellationReason;
     handoff?: AbnormalHandoff | undefined;
   }): Promise<TurnRecord<TTurnCustom>> {
+    // A stream running here writes the steps it already ran before its terminal state, so the
+    // fence below cannot drop them. Its own terminal write then wins; the freeze is a no-op.
+    await cancelStreamingTurn({
+      session_id: this.session.session_id,
+      turn_id: input.turn_id,
+      reason: input.reason,
+    });
     const state: CancelledTurnState = {
       status: 'cancelled',
       reason: input.reason,

@@ -9,7 +9,7 @@ import { contextCompaction, type CompactionModel } from '../core/capabilities/bu
 import { currentDateTime } from '../core/capabilities/builtins/CurrentDateTime';
 import { documentCapability } from '../core/capabilities/builtins/DocumentTools';
 import { dynamicSubAgents } from '../core/capabilities/builtins/DynamicSubAgents';
-import { largeToolResponse } from '../core/capabilities/builtins/LargeToolResponse';
+import { ingestionBudgets, largeToolResponse } from '../core/capabilities/builtins/LargeToolResponse';
 import { openUI } from '../core/capabilities/builtins/OpenUI';
 import { repositoryBindingContext } from '../core/capabilities/builtins/RepositoryBindingContext';
 import {
@@ -115,6 +115,9 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
       }),
     );
   }
+
+  // Before largeToolResponse: the size thresholds must measure what the budgets leave in the history.
+  capabilities.push(ingestionBudgets());
 
   if (config.context_management.large_tool_response.enabled) {
     capabilities.push(

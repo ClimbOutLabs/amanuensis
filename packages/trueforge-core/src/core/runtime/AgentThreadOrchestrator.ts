@@ -354,9 +354,16 @@ export class AgentThreadOrchestrator {
    */
   public getMetrics(): AgentThreadMetrics {
     const total = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(total, this.finishedSubAgentMetrics);
+    addAgentThreadMetrics({ target: total, source: this.finishedSubAgentMetrics, isSubAgent: false });
     for (const thread of this.agentThreads.values()) {
-      addAgentThreadMetrics(total, thread.getAgentThreadMetrics());
+      const threadMetrics = thread.getAgentThreadMetrics();
+      const isSubAgent = thread.parent !== undefined;
+      addAgentThreadMetrics({ target: total, source: threadMetrics, isSubAgent });
+      if (!isSubAgent) {
+        // The reply's own signals come from the root thread only; sub-agents report their own.
+        total.claim_mismatch = threadMetrics.claim_mismatch;
+        total.time_to_first_token_ms = threadMetrics.time_to_first_token_ms;
+      }
     }
     return total;
   }
@@ -520,7 +527,11 @@ export class AgentThreadOrchestrator {
           yield chunk;
           // Move metrics to the finished bucket and drop the live entry with no `yield` between,
           // so getMetrics() counts this sub-agent once. After `yield chunk` per durable-state.
-          addAgentThreadMetrics(this.finishedSubAgentMetrics, currentThread.getAgentThreadMetrics());
+          addAgentThreadMetrics({
+            target: this.finishedSubAgentMetrics,
+            source: currentThread.getAgentThreadMetrics(),
+            isSubAgent: true,
+          });
           this.agentThreads.delete(chunk.thread_id);
           // The write cap ends the whole turn, even when a sub-agent is the thread that hit it.
           return { shouldStopExecution: currentThread.turnToolCallLedger.stoppedForWriteCap };

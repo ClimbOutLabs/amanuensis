@@ -1013,6 +1013,13 @@ export interface SharedServerConfiguration {
   LOG_LEVEL: string;
   /** Log one line per HTTP request (except `/healthz`). Env: `ACCESS_LOGS`. Default true. */
   ACCESS_LOGS: boolean;
+  /**
+   * Token eval instance: Gmail and Calendar answer from the eval fixtures, and only approvals for the
+   * fixture-backed tools and maps and search are allowed through. Env: `AMAN_EVAL_MODE`. Default false.
+   */
+  AMAN_EVAL_MODE: boolean;
+  /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */
+  EVAL_FIXTURE_DIR: string;
   /** Node environment. Env: `NODE_ENV`. */
   NODE_ENV: string | undefined;
   /**
@@ -1381,7 +1388,7 @@ export interface SharedServerConfiguration {
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
-   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
+   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
   /**
@@ -1925,6 +1932,8 @@ const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
+  AMAN_EVAL_MODE: parseBoolean({ envKey: 'AMAN_EVAL_MODE', raw: getEnv('AMAN_EVAL_MODE'), defaultValue: false }),
+  EVAL_FIXTURE_DIR: path.join(PACKAGE_ROOT, 'evals', 'fixtures'),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
   BUG_REPORT_HANDOFF_URL: parseHandoffUrl(getEnv('BUG_REPORT_HANDOFF_URL')),
@@ -2148,7 +2157,7 @@ const shared: SharedServerConfiguration = {
   MEMORY_RECALL_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_MAX_TOKENS',
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
-    defaultValue: 2048,
+    defaultValue: 600,
   }),
   MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
