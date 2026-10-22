@@ -188,8 +188,9 @@ function createChatSync({
       // Surface the approval card (or the turn the decision started) even
       // when nothing was old enough to auto-deny.
       reload();
-    } else if (tip.status === 'running' || (lastTip !== undefined && tip.turnId !== lastTip)) {
-      // A reply still running may have lost its stream without an error while the page slept.
+    } else if (tip.status === 'running' || ports.isRunning || (lastTip !== undefined && tip.turnId !== lastTip)) {
+      // A reply still running may have lost its stream without an error while the page slept, and one
+      // that finished meanwhile leaves the page showing it as running until it reloads.
       reload();
     }
     lastTip = tip.turnId;

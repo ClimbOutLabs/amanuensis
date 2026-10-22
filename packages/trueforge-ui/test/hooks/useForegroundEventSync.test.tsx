@@ -326,6 +326,15 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('reloads a reply that finished while the page was hidden, so it does not stay shown as running', async () => {
+    threadRunning.current = true;
+    peekSessionTip.mockResolvedValue(tipWith({ status: 'done' }));
+    renderSync();
+    await backgroundThenForeground(6_000);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it('starts from the Connection lost state of a failed reload and ends resynced without a page reload', async () => {
     // The first read after a phone wakes can fail before the network is back; the chat reports it
     // as a lost connection and must then resync by itself.
