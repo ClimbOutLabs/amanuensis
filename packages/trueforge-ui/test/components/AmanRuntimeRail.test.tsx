@@ -203,8 +203,9 @@ describe('AmanRuntimeRail', () => {
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
     const selector = '.aman-runtime-rail__avatar {';
     // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations.
-    expect(stylesheet.split(selector)).toHaveLength(2);
+    // would let this read an earlier rule and pass on stale declarations. The one extra block
+    // is the dark-mode override, which swaps the feather for a radial mask.
+    expect(stylesheet.split(selector)).toHaveLength(3);
     const rule = stylesheet.slice(stylesheet.indexOf(selector));
     const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
 

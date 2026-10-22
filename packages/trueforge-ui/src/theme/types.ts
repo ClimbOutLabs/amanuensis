@@ -88,6 +88,10 @@ export type SemanticTokens = {
   goldSoft: string;
   /** Edge for a gold-soft fill, where a bright edge alone would be too faint. */
   goldLine: string;
+  /** Centre of the panda's frame, sampled from the picture: parchment in light, the wall's glow in dark. */
+  pandaGlowFrom: string;
+  /** Rim of the panda's frame, sampled from the picture: wood in light, the deep wall in dark. */
+  pandaGlowTo: string;
   radius: string;
   composerRadius: string;
   overlay: string;
@@ -299,6 +303,8 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   goldInk: '--gold-ink',
   goldSoft: '--gold-soft',
   goldLine: '--gold-line',
+  pandaGlowFrom: '--panda-glow-from',
+  pandaGlowTo: '--panda-glow-to',
   radius: '--radius',
   composerRadius: '--composer-radius',
   overlay: '--overlay',
