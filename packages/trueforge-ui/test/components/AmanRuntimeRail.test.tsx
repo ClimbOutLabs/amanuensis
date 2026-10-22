@@ -50,7 +50,7 @@ describe('AmanRuntimeRail', () => {
     );
 
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Amanuensis' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     expect(screen.getByText('local-model')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveAttribute(
       'src',
