@@ -40,6 +40,7 @@ describe('useCompactionStatus', () => {
   const server: HarnessChatServerExtensions = {
     peekSessionTip: vi.fn(async () => null),
     dismissPendingApprovals: vi.fn(async () => ({ dismissed: 0, alreadyResolved: true })),
+    dismissEndedApproval: vi.fn(async () => undefined),
     answerHeldAction: vi.fn<HarnessChatServerExtensions['answerHeldAction']>(async () => 'done'),
     getLastCompactionStatus,
     getLastTurnInputTokens,

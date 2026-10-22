@@ -3,37 +3,22 @@ import { test } from 'node:test';
 import { isSetupComplete, mergeSetupRead } from '../src/setupStatus';
 
 test('setup is complete with a model and a first chat or no count', () => {
-  const bank = { name: 'amantest', connected: true };
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: true }), true);
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: undefined }), true);
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: false }), false);
-  assert.equal(isSetupComplete({ modelName: null, memoryBank: bank, hasChatted: true }), false);
-  assert.equal(isSetupComplete({ modelName: '  ', memoryBank: bank, hasChatted: true }), false);
-});
-
-test('memory never holds setup back', () => {
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: undefined, hasChatted: true }), true);
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: null, hasChatted: true }), true);
-  assert.equal(
-    isSetupComplete({ modelName: 'local', memoryBank: { name: 'amantest', connected: false }, hasChatted: true }),
-    true,
-  );
+  assert.equal(isSetupComplete({ modelName: 'local', hasChatted: true }), true);
+  assert.equal(isSetupComplete({ modelName: 'local', hasChatted: undefined }), true);
+  assert.equal(isSetupComplete({ modelName: 'local', hasChatted: false }), false);
+  assert.equal(isSetupComplete({ modelName: null, hasChatted: true }), false);
+  assert.equal(isSetupComplete({ modelName: '  ', hasChatted: true }), false);
 });
 
 test('a failed re-read keeps what was known and a successful one replaces it', () => {
-  const previous = { modelName: 'local', memoryBank: { name: 'amantest', connected: true }, hasChatted: true };
-  assert.deepEqual(
-    mergeSetupRead(previous, { modelName: undefined, memoryBank: undefined, hasChatted: undefined }),
-    previous,
-  );
-  assert.deepEqual(mergeSetupRead(previous, { modelName: null, memoryBank: null, hasChatted: false }), {
+  const previous = { modelName: 'local', hasChatted: true };
+  assert.deepEqual(mergeSetupRead(previous, { modelName: undefined, hasChatted: undefined }), previous);
+  assert.deepEqual(mergeSetupRead(previous, { modelName: null, hasChatted: false }), {
     modelName: null,
-    memoryBank: null,
     hasChatted: false,
   });
-  assert.deepEqual(mergeSetupRead(null, { modelName: undefined, memoryBank: undefined, hasChatted: undefined }), {
+  assert.deepEqual(mergeSetupRead(null, { modelName: undefined, hasChatted: undefined }), {
     modelName: null,
-    memoryBank: undefined,
     hasChatted: undefined,
   });
 });
