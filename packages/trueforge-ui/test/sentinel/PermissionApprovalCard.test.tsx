@@ -30,9 +30,7 @@ function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partia
   const card: SentinelApprovalCard = { ...baseCard(), ...overrides };
   const onApprove = vi.fn();
   const onDeny = vi.fn();
-  render(
-    <PermissionApprovalCard toolName="payment" card={card} tier={3} onApprove={onApprove} onDeny={onDeny} {...props} />,
-  );
+  render(<PermissionApprovalCard card={card} othersWaiting={0} onApprove={onApprove} onDeny={onDeny} {...props} />);
   return { onApprove, onDeny };
 }
 
@@ -46,9 +44,9 @@ describe('PermissionApprovalCard', () => {
       why_asked_again: 'the earlier approval expired',
     });
     expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
-    expect(screen.getByText('Agent says: You asked the assistant to pay the invoice.')).toBeInTheDocument();
+    expect(screen.getByText('Why: You asked the assistant to pay the invoice.')).toBeInTheDocument();
     expect(screen.getByText('Destination')).toBeInTheDocument();
-    expect(screen.getByText('acme-corp')).toBeInTheDocument();
+    expect(screen.getAllByText('acme-corp')[0]).toBeInTheDocument();
     expect(screen.getByText('Recipient')).toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('Amount')).toBeInTheDocument();
@@ -130,7 +128,7 @@ describe('PermissionApprovalCard', () => {
 
   it("labels the reason as the agent's own words", () => {
     renderCard({ plain_why: 'Looking up a listing.' });
-    expect(screen.getByText('Agent says: Looking up a listing.')).toBeInTheDocument();
+    expect(screen.getByText('Why: Looking up a listing.')).toBeInTheDocument();
   });
 
   it('shows one plain line above the payload when part of it is cut', () => {
@@ -146,12 +144,13 @@ describe('PermissionApprovalCard', () => {
   it('breaks long recipient values and folds them behind Show all', () => {
     const recipients = Array.from({ length: 60 }, (_, index) => `person${String(index)}@example.com`).join(', ');
     renderCard({ recipient: recipients });
-    const folded = screen.getByText(/^person0@example\.com.*\.\.\.$/);
+    const folded = screen.getAllByText(/^person0@example\.com.*\.\.\.$/).at(0);
+    if (folded === undefined) throw new Error('recipients were not folded');
     expect(folded.className).toContain('break-words');
     expect(folded.parentElement?.className).toContain('min-w-0');
     expect(folded.textContent).not.toContain('person59@example.com');
     fireEvent.click(screen.getByRole('button', { name: /show all/i }));
-    expect(screen.getByText(recipients)).toBeInTheDocument();
+    expect(screen.getAllByText(recipients)[0]).toBeInTheDocument();
   });
 
   it('folds a long destination too', () => {
@@ -166,30 +165,26 @@ describe('PermissionApprovalCard', () => {
     expect(folded.textContent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
-  it('is headed "Approval needed"', () => {
+  it('asks its question as the heading, with no approval label, lock or tier word', () => {
     renderCard();
-    expect(screen.getByText('Approval needed')).toBeInTheDocument();
-    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(2);
+    expect(screen.queryByText('Approval needed')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Needs your OK|Review carefully|Tier \d/)).not.toBeInTheDocument();
   });
 
-  it('calls Approve and Deny', () => {
+  it('calls the safe verb', () => {
     const { onApprove, onDeny } = renderCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onDeny).not.toHaveBeenCalled();
+  });
+
+  it('calls the quiet no', () => {
+    const { onApprove, onDeny } = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onDeny).toHaveBeenCalledTimes(1);
-  });
-
-  it('labels the tier the server sent', () => {
-    renderCard({}, { tier: 2 });
-    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
-    expect(screen.queryByText('Review carefully')).not.toBeInTheDocument();
-  });
-
-  it('labels a Tier 3 card for careful review without tier jargon', () => {
-    renderCard({}, { tier: 3 });
-    expect(screen.getByText('Review carefully')).toBeInTheDocument();
-    expect(screen.queryByText(/Tier \d/)).not.toBeInTheDocument();
+    expect(onApprove).not.toHaveBeenCalled();
   });
 
   it('offers Approve all only when the container passes a batch handler', () => {
@@ -199,7 +194,7 @@ describe('PermissionApprovalCard', () => {
 
   it('calls the batch handler from Approve all and shows how many calls it covers', () => {
     const onApproveAll = vi.fn();
-    const { onApprove } = renderCard({}, { tier: 2, onApproveAll, batchSize: 3 });
+    const { onApprove } = renderCard({}, { onApproveAll, batchSize: 3 });
     fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
     expect(onApproveAll).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
@@ -228,13 +223,15 @@ describe('PermissionApprovalCard for mail', () => {
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         email: { ...email, ...overrides },
       },
-      { toolName: 'send_draft' },
+      {},
     );
   }
 
   it('lists the recipients once, in the box, besides the sentence the server wrote', () => {
     renderMail();
-    expect(screen.getByText(/^Send "Lease" from your Gmail to grace@example.com/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Send this email to grace@example.com and 1 more?' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
     expect(screen.getByText('Hidden copy: audit@example.com')).toBeInTheDocument();
@@ -277,7 +274,7 @@ describe('PermissionApprovalCard for mail', () => {
         },
       ],
     });
-    renderCard({ email: approval?.card.email ?? null }, { toolName: 'send_draft' });
+    renderCard({ email: approval?.card.email ?? null });
     expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
   });
@@ -288,18 +285,20 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText('To: boss@example.com')).not.toBeInTheDocument();
   });
 
-  it('names the action in the badge instead of the tool id', () => {
+  it('asks the question in plain words, not the tool id', () => {
     renderMail();
-    expect(screen.getByText('Send email')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Send this email to grace@example.com and 1 more?' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('send_draft')).not.toBeInTheDocument();
   });
 
   it.each([
-    ['save', 'Save draft'],
-    ['change', 'Change draft'],
-  ] as const)('labels a %s as "%s"', (action, badge) => {
+    ['save', 'Save this draft?'],
+    ['change', 'Change this saved draft?'],
+  ] as const)('asks a %s as "%s"', (action, question) => {
     renderMail({ action });
-    expect(screen.getByText(badge)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: question })).toBeInTheDocument();
   });
 
   it('shows the whole message in its own labelled box, with its line breaks, and no gutters or brackets', () => {
@@ -355,25 +354,19 @@ describe('PermissionApprovalCard for mail', () => {
 
   it('uses surface tokens that flip with the theme, not a tint of the button colour', () => {
     const { container } = render(
-      <PermissionApprovalCard
-        toolName="send_draft"
-        card={{ ...baseCard(), email }}
-        tier={3}
-        onApprove={vi.fn()}
-        onDeny={vi.fn()}
-      />,
+      <PermissionApprovalCard card={{ ...baseCard(), email }} othersWaiting={0} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
     const root = container.firstElementChild;
-    expect(root).toHaveClass('bg-card-bg');
+    expect(root).toHaveClass('aui-ticket');
     expect(root?.className).not.toContain('primary-button-bg');
   });
 
-  it('keeps Approve and Deny', () => {
+  it("keeps Send it and Don't send", () => {
     const { onApprove, onDeny } = renderMail();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
-    expect(onApprove).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
     expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Send it' })).toBeInTheDocument();
   });
 
   describe('a calendar event', () => {
@@ -399,7 +392,9 @@ describe('PermissionApprovalCard for mail', () => {
 
     it('shows before and after, the calendar, local time with its zone, length, place and every guest', () => {
       renderCard({ plain_what: 'Change "Team sync" in your Google Calendar.', calendar_event: event });
-      expect(screen.getByText('Change event')).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Change "Team sync (online)" in your calendar?' }),
+      ).toBeInTheDocument();
       expect(screen.queryByText('payment')).not.toBeInTheDocument();
       const shown = screen.getByText('Now').parentElement?.parentElement;
       expect(shown).toHaveTextContent('Title: Team sync');
@@ -421,7 +416,7 @@ describe('PermissionApprovalCard for mail', () => {
       renderCard({
         calendar_event: { ...event, action: 'create', attendees: [], guests_emailed: false, before: null },
       });
-      expect(screen.getByText('Add event')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add it' })).toBeInTheDocument();
       expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
       expect(screen.getByText('None')).toBeInTheDocument();
       expect(screen.queryByText(/Google will/)).not.toBeInTheDocument();
@@ -491,9 +486,8 @@ describe('PermissionApprovalCard "Change it"', () => {
     const handlers = { onApprove: vi.fn(), onDeny: vi.fn(), onChangeRequest: vi.fn() };
     render(
       <PermissionApprovalCard
-        toolName="send_email"
         card={mailCard}
-        tier={2}
+        othersWaiting={0}
         onApprove={handlers.onApprove}
         onDeny={handlers.onDeny}
         onChangeRequest={handlers.onChangeRequest}
@@ -506,13 +500,11 @@ describe('PermissionApprovalCard "Change it"', () => {
   it('shows Change it between Approve and Deny when the container passes a handler', () => {
     renderChangeable();
     const labels = screen.getAllByRole('button').map(button => button.textContent);
-    expect(labels).toEqual(['Approve', 'Change it', 'Deny']);
+    expect(labels).toEqual(['Send it', 'Change it', "Don't send"]);
   });
 
   it('shows no Change it when the container passes no handler', () => {
-    render(
-      <PermissionApprovalCard toolName="payment" card={baseCard()} tier={3} onApprove={vi.fn()} onDeny={vi.fn()} />,
-    );
+    render(<PermissionApprovalCard card={baseCard()} othersWaiting={0} onApprove={vi.fn()} onDeny={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
   });
 
