@@ -11,7 +11,9 @@ import {
   toolResultKind,
   ToolResultKindSchema,
   unfinishedKindFor,
+  UnfinishedKindSchema,
   unfinishedNotice,
+  withoutUnfinishedNotices,
 } from '../../../src/core/runtime/replyBudget';
 
 const ok = {
@@ -19,6 +21,7 @@ const ok = {
   failure: false,
   unavailable: false,
   removed: false,
+  expired: false,
 } as const;
 
 describe('toolResultKind', () => {
@@ -34,6 +37,12 @@ describe('toolResultKind', () => {
   it('keeps a rule block to its own call: it is a block, never a decline', () => {
     expect(toolResultKind({ ...ok, disposition: 'policy_blocked' })).toBe('blocked');
     expect(unfinishedKindFor('blocked')).toBe('blocked');
+  });
+
+  it('tells a card that expired unanswered from the person saying no', () => {
+    expect(toolResultKind({ ...ok, disposition: 'denied', expired: true })).toBe('expired');
+    expect(unfinishedKindFor('expired')).toBe('expired');
+    expect(unfinishedNotice('expired')).not.toMatch(/you said no|declined|held off/i);
   });
 
   it('marks an executed call that reported a failure as retryable', () => {
@@ -131,6 +140,25 @@ describe('unfinished reply', () => {
     expect(declined).toBe('declined');
     expect(clearUnfinished({ current: declined })).toBe('declined');
     expect(clearUnfinished({ current: 'failed' })).toBeUndefined();
+  });
+
+  it('keeps an expired card as the reason through a clean step', () => {
+    expect(recordUnfinished({ current: 'failed', kind: 'expired' })).toBe('expired');
+    expect(clearUnfinished({ current: 'expired' })).toBe('expired');
+  });
+
+  it('only says "You said no" for the person\'s own decline', () => {
+    for (const kind of UnfinishedKindSchema.options) {
+      expect(/you said no/i.test(unfinishedNotice(kind))).toBe(kind === 'declined');
+    }
+  });
+
+  it('leaves the host line out of an earlier reply the model reads again', () => {
+    const answer = 'Understood, skipping the reminder.';
+    for (const kind of UnfinishedKindSchema.options) {
+      expect(withoutUnfinishedNotices(`${answer}\n\n${unfinishedNotice(kind)}`)).toBe(answer);
+    }
+    expect(withoutUnfinishedNotices(answer)).toBe(answer);
   });
 });
 

@@ -46,8 +46,9 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
-/** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
+/** Machine-readable reasons a Tier 3 action is auto-denied: without a card, or after its card went unanswered. */
 export const AUTO_DENY_REASONS = [
+  'approval_expired',
   'destination_unverifiable',
   'incomplete_send_card',
   'offline_mode',

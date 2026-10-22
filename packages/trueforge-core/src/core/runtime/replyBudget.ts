@@ -2,7 +2,8 @@
  * How one reply stays within a fixed number of steps, and how each tool result is sorted for that.
  *
  * A tool the person declined, or that is not available, is removed for the rest of the reply, since
- * asking again cannot change the answer. A rule that blocks one call blocks that call only. A
+ * asking again cannot change the answer. A card nobody answered in time is not a decline: it says it
+ * expired. A rule that blocks one call blocks that call only. A
  * retryable error gets exactly one more try. A reply past its step budget is answered with no tools
  * at all. The turn ledger holds the counts and the reason a reply did not finish; this module holds
  * the rules and the words.
@@ -13,6 +14,7 @@ import type { ToolResultDisposition } from '../events/schema';
 export const ToolResultKindSchema = z.enum([
   'ok',
   'declined',
+  'expired',
   'blocked',
   'unavailable',
   'error_retryable',
@@ -21,7 +23,7 @@ export const ToolResultKindSchema = z.enum([
 export type ToolResultKind = z.infer<typeof ToolResultKindSchema>;
 
 /** Why a reply did not finish. The kind is saved; the words are built when the reply is written. */
-export const UnfinishedKindSchema = z.enum(['declined', 'blocked', 'unavailable', 'failed', 'budget']);
+export const UnfinishedKindSchema = z.enum(['declined', 'expired', 'blocked', 'unavailable', 'failed', 'budget']);
 export type UnfinishedKind = z.infer<typeof UnfinishedKindSchema>;
 
 /** Model calls one reply may make: the main thread, and each sub-agent. */
@@ -70,19 +72,22 @@ export function removedToolMessage({
 
 /**
  * The kind of one finished tool call. `disposition` is how the call ended. Only the person's own
- * answer is a decline; a rule that blocks a call is a block, which ends that call and nothing else.
- * A call whose tool was already removed from the reply is always final, since it was rejected unrun.
+ * answer is a decline: a card the app closed unanswered (`expired`) is not, and a rule that blocks a
+ * call is a block, which ends that call and nothing else. A call whose tool was already removed from
+ * the reply is always final, since it was rejected unrun.
  */
 export function toolResultKind({
   disposition,
   failure,
   unavailable,
   removed,
+  expired,
 }: {
   disposition: ToolResultDisposition;
   failure: boolean;
   unavailable: boolean;
   removed: boolean;
+  expired: boolean;
 }): ToolResultKind {
   if (unavailable) {
     return 'unavailable';
@@ -94,7 +99,7 @@ export function toolResultKind({
     case 'executed_ok':
       return failure ? 'error_retryable' : 'ok';
     case 'denied':
-      return 'declined';
+      return expired ? 'expired' : 'declined';
     case 'policy_blocked':
       return 'blocked';
     case 'executed_nonzero':
@@ -139,6 +144,8 @@ export function unfinishedKindFor(kind: ToolResultKind): UnfinishedKind | null {
       return null;
     case 'declined':
       return 'declined';
+    case 'expired':
+      return 'expired';
     case 'blocked':
       return 'blocked';
     case 'unavailable':
@@ -149,12 +156,12 @@ export function unfinishedKindFor(kind: ToolResultKind): UnfinishedKind | null {
   }
 }
 
-/** A decline or an unavailable tool stays the reason the reply did not finish, until the reply ends. */
+/** A decline, an expired card or an unavailable tool stays the reason the reply did not finish, until the reply ends. */
 function staysForReply(kind: UnfinishedKind): boolean {
-  return kind === 'declined' || kind === 'unavailable';
+  return kind === 'declined' || kind === 'expired' || kind === 'unavailable';
 }
 
-/** Records why a reply did not finish. The first reason stays, except that a decline or unavailable tool replaces it. */
+/** Records why a reply did not finish. The first reason stays, except that a reason that stays for the reply replaces it. */
 export function recordUnfinished({
   current,
   kind,
@@ -165,9 +172,26 @@ export function recordUnfinished({
   return current === undefined || staysForReply(kind) ? kind : current;
 }
 
-/** A step that finished clears the reason, except a decline or unavailable tool, which still stands. */
+/** A step that finished clears the reason, except one that stays for the reply, which still stands. */
 export function clearUnfinished({ current }: { current: UnfinishedKind | undefined }): UnfinishedKind | undefined {
   return current !== undefined && staysForReply(current) ? current : undefined;
+}
+
+/** Every line `unfinishedNotice` can add. A later reply's model request leaves them out; see withoutUnfinishedNotices. */
+function allUnfinishedNotices(): string[] {
+  return UnfinishedKindSchema.options.map(kind => unfinishedNotice(kind));
+}
+
+/**
+ * An earlier reply's text as the model reads it: without the line the host added for the person. The
+ * line is about that reply only; left in, the model repeats it on replies it does not fit.
+ */
+export function withoutUnfinishedNotices(text: string): string {
+  let result = text;
+  for (const notice of allUnfinishedNotices()) {
+    result = result.split(`\n\n${notice}`).join('').split(notice).join('');
+  }
+  return result;
 }
 
 /** The one sentence the person reads when a reply did not finish: what stopped it, and what to do next. */
@@ -175,6 +199,8 @@ export function unfinishedNotice(kind: UnfinishedKind): string {
   switch (kind) {
     case 'declined':
       return 'You said no to one step, so Aman did not finish. Ask again if you want that step done.';
+    case 'expired':
+      return 'Aman asked for your OK on one step, but the request expired before you answered, so that step was not done. Ask again if you still want it.';
     case 'blocked':
       return 'Aman could not do one step because it is not allowed here. Tell Aman another way to do it, or ask for something else.';
     case 'unavailable':

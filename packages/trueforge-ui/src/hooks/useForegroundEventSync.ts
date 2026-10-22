@@ -2,12 +2,14 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import {
+  APPROVAL_EXPIRY_MINUTES,
+  approvalExpiredReason,
+} from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { useToasterOptional } from '../containers/ToasterContainer.js';
 import {
-  APPROVAL_AUTO_DENY_MINUTES,
-  approvalAutoDenyReason,
   subscribeToBlockedSend,
   type HarnessChatServerExtensions,
   type SessionTipInfo,
@@ -69,9 +71,10 @@ export type SessionEventSyncReason = 'foreground' | 'blocked-send';
  * a full reload happens only when the tip moved or carries pending approvals,
  * so an idle background/foreground cycle costs one tiny read and no reload.
  *
- * Pending approvals older than `APPROVAL_AUTO_DENY_MINUTES` are denied
- * automatically (fail-closed) using the persisted approval event timestamp,
- * which keeps working while the browser was backgrounded or closed.
+ * Pending approvals older than `APPROVAL_EXPIRY_MINUTES` expire (fail-closed:
+ * nothing runs) using the persisted approval event timestamp, which keeps
+ * working while the browser was backgrounded or closed. The server tells an
+ * expired card from the person's own "no" by its reason.
  */
 export function useSessionEventSync(): {
   syncNow: (reason: SessionEventSyncReason) => void;
@@ -103,11 +106,11 @@ export function useSessionEventSync(): {
         if (tip == null) return;
         if (tip.pendingApprovals.length > 0) {
           const oldestMs = Math.min(...tip.pendingApprovals.map(approval => Date.parse(approval.createdAt)));
-          if (Number.isFinite(oldestMs) && Date.now() - oldestMs > APPROVAL_AUTO_DENY_MINUTES * 60_000) {
+          if (Number.isFinite(oldestMs) && Date.now() - oldestMs > APPROVAL_EXPIRY_MINUTES * 60_000) {
             const result = await currentServer
               .dismissPendingApprovals({
                 sessionId: currentSessionId,
-                reason: approvalAutoDenyReason(),
+                reason: approvalExpiredReason(),
               })
               .catch((error: unknown) => {
                 // The chat moved on while we looked; nothing to deny. A background cleanup
@@ -116,13 +119,12 @@ export function useSessionEventSync(): {
                 throw error;
               });
             if (!result.alreadyResolved) {
-              const plural = result.dismissed === 1 ? '' : 's';
+              const one = result.dismissed === 1;
               currentToaster?.showSuccess({
-                title: 'Expired approvals denied',
+                title: one ? 'A request for your OK expired' : 'Requests for your OK expired',
                 description:
-                  `${result.dismissed} tool approval${plural} went unanswered for ` +
-                  `${APPROVAL_AUTO_DENY_MINUTES} minutes and ` +
-                  `${result.dismissed === 1 ? 'was' : 'were'} automatically denied.`,
+                  `${one ? 'It' : 'They'} went unanswered for ${APPROVAL_EXPIRY_MINUTES} minutes, so nothing was done. ` +
+                  'Ask again in the chat if you still want it.',
               });
             }
           }

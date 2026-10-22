@@ -10,6 +10,7 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
+import { APPROVAL_EXPIRED_RESULT, isApprovalExpiredReason } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
@@ -69,6 +70,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function deniedToolCallText(reason: string | undefined): string {
   if (reason !== undefined && isChangeRequestReason(reason)) {
     return reason;
+  }
+  if (isApprovalExpiredReason(reason)) {
+    return JSON.stringify({ error: APPROVAL_EXPIRED_RESULT });
   }
   return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
 }

@@ -120,6 +120,7 @@ import {
   requiresNetwork,
   toDispatchSentinelContext,
 } from '../permissions';
+import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
@@ -250,6 +251,7 @@ import {
   toolResultKind,
   unfinishedKindFor,
   unfinishedNotice,
+  withoutUnfinishedNotices,
   type ForcedAnswer,
   type ToolResultKind,
   type UnfinishedKind,
@@ -1477,6 +1479,14 @@ export function replaceImagePartsForNonVisionModel(
   });
 }
 
+/** An earlier reply as the model reads it: the line the host added for the person is left out. */
+function withoutHostNotices(message: ChatCompletionMessageParam): ChatCompletionMessageParam {
+  if (message.role !== 'assistant' || typeof message.content !== 'string') {
+    return message;
+  }
+  return { ...message, content: withoutUnfinishedNotices(message.content) };
+}
+
 export class AgentThread {
   readonly threadId: string;
   readonly parent?: AgentParent | undefined;
@@ -2546,7 +2556,7 @@ export class AgentThread {
     const contextMessages = this.context
       .filter(message => !isLegacyIncompleteReasoningMessage(message))
       .filter(isLLMContextMessage)
-      .map(msg => toOpenAIChatMessage(msg));
+      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
 
     messages.push(...contextMessages);
 
@@ -3940,7 +3950,9 @@ export class AgentThread {
     const admissionProvenance = new Map([...admissions].map(([id, admission]) => [id, admission.admission_provenance]));
     const nextToolCallMemo = cloneToolCallMemoState(toolCallMemo);
     for (const call of openCalls) {
-      if (decisions.get(call.id)?.status === 'deny') {
+      const decision = decisions.get(call.id);
+      // A card that expired unanswered was never turned down, so asking again is not a repeat of a "no".
+      if (decision?.status === 'deny' && !isExpiredApproval(decision)) {
         nextToolCallMemo.deniedApprovalIdentities.add(approvalGrantKey(call.tool_info));
       }
     }
@@ -4495,6 +4507,7 @@ export class AgentThread {
         failure: result.failure,
         unavailable: !toolMapping.has(call.function.name),
         removed: wasRemoved,
+        expired: isExpiredApproval(decisions.get(call.id)),
       });
       // A call to a removed tool was rejected unrun, so it says nothing about the reply's last action.
       if (!wasRemoved) {
