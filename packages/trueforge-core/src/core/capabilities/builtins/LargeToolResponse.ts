@@ -1,9 +1,13 @@
 import dedent from 'dedent';
 import type { Logger } from 'winston';
+import { CALENDAR_SERVER_ID, LIST_EVENTS_TOOL_NAME } from '../../calendar/toolContract';
 import { estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
+import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
 import { createSandboxLargeToolResponseGuidance, SANDBOX_SCHEMA_INFER_TAG } from '../../sandbox/Sandbox';
+import { TAVILY_EXTRACT_TOOL_NAME } from '../../search/TavilyClient';
+import { SPACE_READ_TOOL_NAMES, SPACE_SERVER_ID } from '../../spaces/toolContract';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { extractErrorLogFields } from '../../util/errorLogFields';
 import type { AgentCapability } from '../AgentCapability';
@@ -187,6 +191,221 @@ function sandboxRawOutputStorageGuidance(content: string): string {
     return 'Raw output storage: raw_output.storage_status=failed; durable storage failed, so the complete output is not available from a raw_output artifact.';
   }
   return 'Raw output storage: raw_output.storage_status=unavailable; this unbounded result has no durable raw_output artifact.';
+}
+
+/**
+ * Ingestion budgets. Each one bounds what a tool result contributes to the history the model
+ * resends on every later step. The full result is never changed upstream: grounding records fetched
+ * page text in ToolSet before this pass runs.
+ */
+export const PAGE_READ_TOKEN_BUDGET = 2_500;
+export const SPACE_READ_TOKEN_BUDGET = 3_000;
+export const SANDBOX_OUTPUT_EDGE_LINES = 40;
+export const CALENDAR_LIST_EVENT_BUDGET = 20;
+
+const PAGE_TOOL_NAMES: ReadonlySet<string> = new Set(['web_fetch', TAVILY_EXTRACT_TOOL_NAME]);
+const SPACE_READ_TOOL_NAME_SET: ReadonlySet<string> = new Set<string>(SPACE_READ_TOOL_NAMES);
+
+/** Words of at least four letters or digits, lowercased: the terms a page section may be kept for. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+}
+
+function userMessageText(message: ContextMessage): string | undefined {
+  if (!('role' in message) || message.role !== 'user') {
+    return undefined;
+  }
+  const { content } = message;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  return content.map(part => (part.type === 'text' ? part.text : '')).join(' ');
+}
+
+/** The words of the latest user message: the request a fetched page section is kept for. */
+function requestWordsOf(context: readonly ContextMessage[]): Set<string> {
+  for (const message of [...context].reverse()) {
+    const text = userMessageText(message);
+    if (text !== undefined) {
+      return new Set(wordsOf(text));
+    }
+  }
+  return new Set();
+}
+
+function mentionsRequest(block: string, request: ReadonlySet<string>): boolean {
+  return wordsOf(block).some(word => request.has(word));
+}
+
+/**
+ * Keeps each heading with its first paragraph, and any paragraph that mentions a word from the
+ * request, in page order, until the token budget is spent. The note says how much was left out.
+ */
+export function budgetPageText(input: { text: string; request: ReadonlySet<string>; maxTokens: number }): string {
+  const { text, request, maxTokens } = input;
+  const totalTokens = estimateTokensForString(text);
+  if (totalTokens <= maxTokens) {
+    return text;
+  }
+  const blocks = text.split(/\n{2,}/);
+  // A group is one block to keep whole: a heading with its first paragraph, or one paragraph.
+  const structural: number[][] = [];
+  const requested: number[][] = [];
+  let openHeading: number[] | undefined;
+  blocks.forEach((block, index) => {
+    if (/^#{1,6}\s/.test(block.trim())) {
+      openHeading = [index];
+      structural.push(openHeading);
+      return;
+    }
+    if (openHeading !== undefined) {
+      openHeading.push(index);
+      openHeading = undefined;
+      return;
+    }
+    if (mentionsRequest(block, request)) {
+      requested.push([index]);
+    }
+  });
+
+  const kept = new Set<number>();
+  let keptTokens = 0;
+  for (const group of [...structural, ...requested]) {
+    const cost = group.reduce((sum, index) => sum + estimateTokensForString(blocks[index] ?? ''), 0);
+    if (keptTokens + cost > maxTokens) {
+      continue;
+    }
+    for (const index of group) {
+      kept.add(index);
+    }
+    keptTokens += cost;
+  }
+
+  const body = blocks.filter((_block, index) => kept.has(index)).join('\n\n');
+  const omitted = Math.max(0, Math.round(totalTokens - estimateTokensForString(body)));
+  return `${body}\n\n(shortened: ${String(omitted)} more tokens; ask to read a named section to see more)`;
+}
+
+/** Keeps the first and last lines of a long stream; a short one is returned unchanged. */
+function keepEdgeLines(text: string): string {
+  const lines = text.split('\n');
+  if (lines.length <= SANDBOX_OUTPUT_EDGE_LINES * 2) {
+    return text;
+  }
+  const omitted = lines.length - SANDBOX_OUTPUT_EDGE_LINES * 2;
+  return [
+    ...lines.slice(0, SANDBOX_OUTPUT_EDGE_LINES),
+    `... ${String(omitted)} lines omitted; the first and last ${String(SANDBOX_OUTPUT_EDGE_LINES)} lines are kept ...`,
+    ...lines.slice(-SANDBOX_OUTPUT_EDGE_LINES),
+  ].join('\n');
+}
+
+/** Trims long stdout and stderr in a sandbox result. The exit code is a separate field and stays. */
+export function budgetSandboxOutput(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  const next: Record<string, unknown> = { ...parsed };
+  let changed = false;
+  for (const key of ['stdout', 'stderr']) {
+    const value = parsed[key];
+    if (typeof value === 'string') {
+      const trimmed = keepEdgeLines(value);
+      if (trimmed !== value) {
+        next[key] = trimmed;
+        changed = true;
+      }
+    }
+  }
+  return changed ? JSON.stringify(next) : undefined;
+}
+
+/** Trims a space read to its page-sized body, when the result carries one. */
+export function budgetSpaceRead(input: { content: string; request: ReadonlySet<string> }): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed['body'] !== 'string') {
+    return undefined;
+  }
+  const body = budgetPageText({
+    text: parsed['body'],
+    request: input.request,
+    maxTokens: SPACE_READ_TOKEN_BUDGET,
+  });
+  return body === parsed['body'] ? undefined : JSON.stringify({ ...parsed, body });
+}
+
+/** Keeps the first calendar events in start order and counts the rest. */
+export function budgetCalendarList(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed['events'])) {
+    return undefined;
+  }
+  const events = parsed['events'];
+  if (events.length <= CALENDAR_LIST_EVENT_BUDGET) {
+    return undefined;
+  }
+  return JSON.stringify({
+    ...parsed,
+    events: events.slice(0, CALENDAR_LIST_EVENT_BUDGET),
+    events_omitted: events.length - CALENDAR_LIST_EVENT_BUDGET,
+  });
+}
+
+/**
+ * Applies each tool's ingestion budget to the results in place, before the processor measures them.
+ * Failures and screened-out results are left alone: the first is already a short message, the second
+ * is never shown to the model.
+ */
+function applyIngestionBudgets(input: {
+  results: ToolCallResult[];
+  sandbox: Sandbox | undefined;
+  context: readonly ContextMessage[];
+}): void {
+  let request: Set<string> | undefined;
+  for (const result of input.results) {
+    if (result.failure || result.screen?.action === 'withheld' || !result.info) {
+      continue;
+    }
+    const content = result.message.content;
+    const toolName = result.info.originalToolName;
+    const serverId = result.info.toolSet.id;
+    let budgeted: string | undefined;
+    if (input.sandbox && result.info.toolSet === input.sandbox) {
+      budgeted = budgetSandboxOutput(content);
+    } else if (PAGE_TOOL_NAMES.has(toolName)) {
+      request ??= requestWordsOf(input.context);
+      const text = budgetPageText({ text: content, request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+      budgeted = text === content ? undefined : text;
+    } else if (SPACE_READ_TOOL_NAME_SET.has(toolName) && serverId === SPACE_SERVER_ID) {
+      request ??= requestWordsOf(input.context);
+      budgeted = budgetSpaceRead({ content, request });
+    } else if (toolName === LIST_EVENTS_TOOL_NAME && serverId === CALENDAR_SERVER_ID) {
+      budgeted = budgetCalendarList(content);
+    }
+    if (budgeted !== undefined) {
+      result.message.content = budgeted;
+      result.outputTransform = 'truncated';
+    }
+  }
 }
 
 export class LargeToolResponseProcessor implements ToolResponseProcessor {
@@ -488,6 +707,8 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     execution: Readonly<AgentThreadExecutionContext>,
   ): Promise<ToolResponseProcessorResult> {
     const sandbox = execution.sandbox;
+    // Budgets run before measurement, so every later threshold sees what the history will hold.
+    applyIngestionBudgets({ results, sandbox, context: execution.context });
     const resultsWithInfo = this.buildResultsWithInfo(results, sandbox);
     let runningTotal = resultsWithInfo.reduce((sum, e) => sum + e.originalTokens, 0);
 
