@@ -222,6 +222,16 @@ interface PendingApproval {
 }
 
 /** The turn's single pending approval, or undefined when the turn paused for nothing. */
+/** Every tool call ref the turn is waiting on for approval, across all approval events. */
+function approvalCallRefs(turn: Turn) {
+  if (turn.state.status !== 'done') {
+    throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+  }
+  return turn.state.required_actions.flatMap(action =>
+    action.type === 'tool.approval_required' ? action.tool_calls : [],
+  );
+}
+
 function pendingApproval(turn: Turn): PendingApproval | undefined {
   if (turn.state.status !== 'done') {
     throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
@@ -752,6 +762,22 @@ describe('approval gate over an inert connector', () => {
         expect(ref?.tier3_card?.plain_what).toContain(INERT_READ_TOOL);
         expect(ref?.tier3_card?.outbound_text).toContain('text: inert');
         expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'tells the live card that Always allow is offered for a read, and not for a call that writes',
+      async () => {
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const read = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(approvalCallRefs(read)).toEqual([
+          expect.objectContaining({ tier3_card: expect.any(Object), can_always_allow: true }),
+        ]);
+
+        const writeSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const write = await runTurn({ server, sessionId: writeSessionId, input: userMessage(INERT_WRITE_TOOL) });
+        expect(approvalCallRefs(write)).toEqual([expect.objectContaining({ can_always_allow: false })]);
       },
       TURN_TIMEOUT_MS,
     );

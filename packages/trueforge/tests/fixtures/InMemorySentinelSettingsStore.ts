@@ -22,6 +22,7 @@ export class InMemorySentinelSettingsStore implements ISentinelSettingsStore {
       tier2_auto_allow: normalizeTier2AutoAllow(input.tier2_auto_allow ?? current.tier2_auto_allow),
       search_without_asking: input.search_without_asking ?? current.search_without_asking,
       maps_without_asking: input.maps_without_asking ?? current.maps_without_asking,
+      sandbox_without_asking: input.sandbox_without_asking ?? current.sandbox_without_asking,
     };
     this.#rows.set(this.#key(input), next);
     return next;

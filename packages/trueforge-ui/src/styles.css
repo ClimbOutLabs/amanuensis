@@ -38,15 +38,26 @@
       'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-display:
       'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-receipt: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Each palette colour is a hex line, then the same colour in oklch(); engines that read oklch() take the second. */
     --sidebar-bg: #efe7d8;
+    --sidebar-bg: oklch(0.93 0.022 83.3);
     --topbar-bg: #fbf8f2;
     --primary-bg: #f7f2e8;
+    --primary-bg: oklch(0.962 0.014 84.6);
+    /* The page paper. Time of day overrides it below for the default preset. */
+    --paper: var(--primary-bg);
+    --paper-top: var(--primary-bg);
     --secondary-bg: #ebe2d3;
+    --secondary-bg: oklch(0.916 0.022 80.7);
     --border: #d9ccb6;
+    --border: oklch(0.85 0.033 81);
     --input-box-bg: #fffdf8;
     --input-border: #d7c7aa;
     --text-primary: #2c2a26;
+    --text-primary: oklch(0.286 0.008 84.6);
     --text-secondary: #746b5d;
+    --text-secondary: oklch(0.532 0.024 79);
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -55,6 +66,7 @@
     --text-xl: 1.25rem;
     --text-2xl: 1.5rem;
     --card-bg: #fffdf8;
+    --card-bg: oklch(0.994 0.007 88.6);
     --surface-elevated: #fffdf8;
     --dropdown-selected-item-bg: #e9ddc9;
     --dropdown-selected-item-text: #2c2a26;
@@ -72,17 +84,25 @@
     --ghost-button-hover: #ebe2d3;
     --ghost-button-text: #2c2a26;
     --success-bg: #4b8060;
+    --success-bg: oklch(0.553 0.076 156.4);
     --success-text: #fffdf8;
     --failure-bg: #a95445;
+    --failure-bg: oklch(0.546 0.115 31.4);
     --failure-text: #fffdf8;
     --warning-bg: #b5894c;
     --warning-text: #fffdf8;
-    /* Figma Agents approval banner (light 6747:4232): blue-50 / blue-500 / blue-600 */
-    --approval-banner-bg: #eff6ff;
-    --approval-banner-border: #3b82f6;
-    --approval-banner-fg: #2563eb;
-    --approval-banner-accent: #3b82f6;
-    --focus-ring: #b5894c;
+    /* The one highlight. Bright gold carries marks and fills; gold-ink carries words, edges and focus. */
+    --gold: #e9b949;
+    --gold: oklch(0.809 0.138 85.2);
+    --gold-ink: #7d5f15;
+    --gold-ink: oklch(0.503 0.095 84.8);
+    --gold-soft: #fbf0cc;
+    --gold-soft: oklch(0.955 0.048 93);
+    --gold-line: #c9a95a;
+    --gold-line: oklch(0.747 0.105 87.7);
+    --focus-ring: #7d5f15;
+    --focus-ring: oklch(0.503 0.095 84.8);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.16 0 0 0 0 0.15 0 0 0 0.16 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
     /* Brand accent: the theme's brass. Shares the focus-ring token so a host
      * that restyles the accent moves the mark's flourish with it. */
     --brand-accent: var(--focus-ring);
@@ -106,14 +126,22 @@
     --font-display:
       'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --sidebar-bg: #221f19;
+    --sidebar-bg: oklch(0.241 0.012 84.6);
     --topbar-bg: #221f19;
     --primary-bg: #28241c;
+    --primary-bg: oklch(0.262 0.016 84.5);
+    --paper: var(--primary-bg);
+    --paper-top: var(--primary-bg);
     --secondary-bg: #2f2a21;
+    --secondary-bg: oklch(0.287 0.017 82.2);
     --border: #3e382b;
+    --border: oklch(0.343 0.023 86.1);
     --input-box-bg: #2f2a21;
     --input-border: #3e382b;
     --text-primary: #f2ecdd;
+    --text-primary: oklch(0.944 0.021 88.7);
     --text-secondary: #a89a7f;
+    --text-secondary: oklch(0.691 0.041 83.8);
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -122,6 +150,7 @@
     --text-xl: 1.25rem;
     --text-2xl: 1.5rem;
     --card-bg: #2f2a21;
+    --card-bg: oklch(0.287 0.017 82.2);
     --surface-elevated: #38332a;
     --dropdown-selected-item-bg: #3e382b;
     --dropdown-selected-item-text: #f2ecdd;
@@ -139,17 +168,24 @@
     --ghost-button-hover: #3e382b;
     --ghost-button-text: #f2ecdd;
     --success-bg: #4b8060;
+    --success-bg: oklch(0.553 0.076 156.4);
     --success-text: #f2ecdd;
     --failure-bg: #a95445;
+    --failure-bg: oklch(0.546 0.115 31.4);
     --failure-text: #f2ecdd;
     --warning-bg: #b5894c;
     --warning-text: #221f19;
-    /* Figma Agents approval banner (dark 6748:1977): #202636 / blue-600 top / Base_gray/750 text */
-    --approval-banner-bg: #202636;
-    --approval-banner-border: #2563eb;
-    --approval-banner-fg: #dfdfe2;
-    --approval-banner-accent: #2563eb;
-    --focus-ring: #b5894c;
+    --gold: #e9b949;
+    --gold: oklch(0.809 0.138 85.2);
+    --gold-ink: #e9b949;
+    --gold-ink: oklch(0.809 0.138 85.2);
+    --gold-soft: #3d3419;
+    --gold-soft: oklch(0.328 0.044 91.4);
+    --gold-line: #8a6a2a;
+    --gold-line: oklch(0.544 0.091 81.9);
+    --focus-ring: #e9b949;
+    --focus-ring: oklch(0.809 0.138 85.2);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.12 0 0 0 0 0.15 0 0 0 0.12 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
     --overlay: rgb(0 0 0 / 0.65);
     --shadow-color: #000000;
     --scrollbar-thumb: #6e6350;
@@ -358,12 +394,9 @@
   display: flex;
 }
 
-/* Static avatar, no box or tint: a plain image at the rail button hit-area footprint,
-   centered horizontally in the runtime rail (owner decision — no motion, no container). */
+/* The panda sits in a ticket frame at the top of the rail: the picture, then its caption. */
 .aman-runtime-rail__avatar-card {
-  display: flex;
   width: 100%;
-  justify-content: center;
 }
 
 /* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
@@ -449,16 +482,6 @@
   background: color-mix(in oklab, var(--text-primary) 8%, transparent);
 }
 
-/* Memory recall reads as one control: the box and its word share a hit area. */
-.aman-runtime-rail__switch {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
 .aman-runtime-rail__identity {
   padding: 0.25rem 0 1rem;
 }
@@ -469,6 +492,29 @@
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.75rem;
+}
+
+/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
+.aman-runtime-rail__needs-you {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.75rem;
+}
+
+.aman-runtime-rail__needs-body {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.aman-runtime-rail__rules {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  list-style: none;
 }
 
 /* Grouped rail sections: small-caps label over one value line. The top border carries
@@ -496,6 +542,14 @@
   font-size: 0.85rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.aman-runtime-rail__link {
+  justify-self: start;
+  color: var(--gold-ink);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
 }
 
 .aman-runtime-rail__section-value a {
@@ -638,6 +692,10 @@
   --color-chart-7: var(--chart-7);
   --color-chart-8: var(--chart-8);
   --color-focus-ring: var(--focus-ring);
+  --color-gold: var(--gold);
+  --color-gold-ink: var(--gold-ink);
+  --color-gold-soft: var(--gold-soft);
+  --color-gold-line: var(--gold-line);
   --color-surface-elevated: var(--surface-elevated);
   --color-white: var(--color-white);
   --color-black: var(--color-black);
@@ -1195,7 +1253,7 @@
 }
 
 .maps-card .maps-card-route {
-  stroke: var(--info, var(--approval-banner-accent));
+  stroke: var(--gold-ink);
 }
 
 /* Quiet loading state while the tool call runs. */
@@ -1333,6 +1391,30 @@
   color: var(--text-secondary);
 }
 
+.maps-card-details {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-details summary {
+  cursor: pointer;
+}
+
+.maps-card-refused {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+
+.maps-card-refused-label {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+
+.maps-card-refused-name {
+  font-weight: 600;
+}
+
 .maps-place-source {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
@@ -1400,4 +1482,563 @@
   .maps-card-footer {
     padding: 0.5rem 0.75rem;
   }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * B2 look: time-of-day paper, tickets, the row grid, chapter stops, the
+ * receipt, the underline and the reward pieces. Motion is off under
+ * prefers-reduced-motion: every reward shows its end state.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* Time of day moves only the paper's lightness and chroma; the hue stays at the gold's 85.2.
+ * ThemeProvider writes data-day from the local hour. Only the default preset takes these. */
+.aui-theme-root[data-preset='trueforge'][data-day='morning']:not(.dark) {
+  --paper: #faf2df;
+  --paper: oklch(0.962 0.026 85.2);
+  --paper-top: #fef4df;
+  --paper-top: oklch(0.97 0.03 85.2);
+}
+
+.aui-theme-root[data-preset='trueforge'][data-day='midday']:not(.dark) {
+  --paper: #f9f6f0;
+  --paper: oklch(0.974 0.008 85.2);
+  --paper-top: #fdf9f0;
+  --paper-top: oklch(0.982 0.012 85.2);
+}
+
+.aui-theme-root[data-preset='trueforge'][data-day='evening']:not(.dark) {
+  --paper: #f7edd8;
+  --paper: oklch(0.948 0.03 85.2);
+  --paper-top: #fbefd7;
+  --paper-top: oklch(0.956 0.034 85.2);
+}
+
+.aui-theme-root.dark[data-preset='trueforge'][data-day='morning'] {
+  --paper: #2a2416;
+  --paper: oklch(0.262 0.026 85.2);
+  --paper-top: #2d2515;
+  --paper-top: oklch(0.27 0.03 85.2);
+}
+
+.aui-theme-root.dark[data-preset='trueforge'][data-day='midday'] {
+  --paper: #292620;
+  --paper: oklch(0.27 0.012 85.2);
+  --paper-top: #2c281f;
+  --paper-top: oklch(0.278 0.016 85.2);
+}
+
+.aui-theme-root.dark[data-preset='trueforge'][data-day='evening'] {
+  --paper: #282112;
+  --paper: oklch(0.252 0.028 85.2);
+  --paper-top: #2b2311;
+  --paper-top: oklch(0.26 0.032 85.2);
+}
+
+/* Ticket: a card with a punch hole and a dashed tear line. */
+.aui-ticket {
+  position: relative;
+  background-color: var(--card-bg);
+  background-image: var(--grain);
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.0625rem 0.125rem rgb(70 50 20 / 0.1);
+  color: var(--text-primary);
+}
+
+.aui-theme-root.dark .aui-ticket {
+  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
+}
+
+/* The right-hand stub, split from the body by a dashed line. Stacks under the face on a phone. */
+.aui-ticket--stub {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+}
+
+.aui-ticket__stub {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-left: 0.125rem dashed var(--border);
+}
+
+.aui-ticket--punch::before {
+  content: '';
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999rem;
+  background: var(--primary-bg);
+  box-shadow: inset 0 0 0 0.0625rem var(--border);
+}
+
+/* Only one card per screen takes the selected look; useHighlightedCard picks it. */
+.aui-ticket--selected {
+  border-color: var(--gold-ink);
+  background-color: var(--gold-soft);
+}
+
+.aui-ticket--mark {
+  border-color: var(--gold-line);
+  background-color: var(--gold-soft);
+}
+
+.aui-ticket__tear {
+  border-top: 0.125rem dashed var(--border);
+}
+
+/* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
+.aui-ticket__title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.aui-ticket__label {
+  font-family: var(--font-receipt);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* A stub holds a short line: a long recipient list is cut to three lines, the full text stays in Details. */
+.aui-ticket__detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Keyboard focus on a ticket is a solid ring in --focus-ring, not a faded one: it keeps 3:1 on the card and the gold fill. */
+.aui-theme-root .aui-ticket :focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
+}
+
+/* Underline: a hand-drawn stroke under one phrase. Mask keeps the colour a theme token. */
+.aui-underline {
+  position: relative;
+  isolation: isolate;
+}
+
+.aui-underline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.08em;
+  height: 0.45em;
+  z-index: -1;
+  background-color: var(--gold);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
+    0 0 / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
+    0 0 / 100% 100% no-repeat;
+}
+
+/* Chapter: a label column beside its rows, split from the chapter above by a dashed line. */
+.aui-chapter {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  column-gap: 1rem;
+  padding-block: 0.7rem;
+  border-top: 0.125rem dashed var(--border);
+}
+
+/* Row grid shared by chapter lines, receipt rows and rail rows: mark · when · text · action. */
+.aui-row {
+  display: grid;
+  grid-template-columns: 1.25rem 3.75rem minmax(0, 1fr) max-content;
+  column-gap: 0.75rem;
+  align-items: baseline;
+  padding-block: 0.2rem;
+}
+
+.aui-row > .mark {
+  width: 0.9rem;
+  height: 0.9rem;
+  align-self: center;
+}
+
+.aui-row > .when {
+  font-family: var(--font-receipt);
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.aui-row > .text {
+  min-width: 0;
+}
+
+.aui-row > .text .meta {
+  display: block;
+  margin-top: 0.1rem;
+  font-family: var(--font-receipt);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.aui-row > .action {
+  justify-self: end;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--gold-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.aui-row > .action.quiet {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+/* Two-column rows (receipt, rail): verb and count on the left, state on the right. */
+.aui-row--2 {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.aui-row--2 > .state {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+/* Receipt: a mono list on a card face. */
+.aui-receipt {
+  padding: 0.5rem 0.75rem;
+  background-color: var(--card-bg);
+  background-image: var(--grain);
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  font-family: var(--font-receipt);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+}
+
+.aui-receipt .aui-row + .aui-row {
+  border-top: 0.0625rem dotted var(--border);
+}
+
+/* The rail is too narrow for verb and state side by side: the state sits under its verb. */
+.aman-runtime-rail .aui-receipt .aui-row--2 {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.1rem;
+}
+
+.aman-runtime-rail .aui-receipt .aui-row--2 > .state {
+  justify-self: start;
+}
+
+/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
+.aui-panda {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border-color: var(--gold-line);
+}
+
+.aui-panda__caption {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0 0.25rem 0.25rem;
+}
+
+.aui-panda__role {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-receipt);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
+.aui-brief-display {
+  font-family: var(--font-display);
+}
+
+.aui-brief-mono {
+  font-family: var(--font-receipt);
+}
+
+/* An action in a row is a button; it keeps the look of the link it replaces. */
+.aui-row > button.action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Phone: the chapter label stacks above its rows and the when column narrows. */
+@media (max-width: 40rem) {
+  .aui-chapter {
+    grid-template-columns: 1fr;
+    row-gap: 0.3rem;
+  }
+
+  .aui-row {
+    grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
+  }
+
+  .aui-ticket--stub {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aui-ticket__stub {
+    border-left: 0;
+    border-top: 0.125rem dashed var(--border);
+  }
+}
+
+/* Settle: anything that appears. Lay: stubs and tiles. */
+.aui-settle {
+  animation: aui-settle 300ms ease-out both;
+}
+
+.aui-lay {
+  animation: aui-lay 320ms ease-out both;
+}
+
+.aui-press:active {
+  animation: aui-press 160ms ease-out;
+}
+
+/* Busy pulse: the same keyframes drive the rail dot, the status dot and the avatar's thinking state. */
+.aui-pulse {
+  animation: aui-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes aui-settle {
+  from {
+    opacity: 0.001;
+    transform: translateY(0.5rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aui-lay {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aui-press {
+  50% {
+    transform: scale(0.97);
+  }
+}
+
+@keyframes aui-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Rewards. Each piece renders its end state with no data-play; data-play="true" runs the motion. */
+.aui-reward-tick path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.aui-reward-tick[data-play='true'] path {
+  animation: aui-tick-draw 250ms ease-out both;
+}
+
+.aui-reward-highlight {
+  background-image: linear-gradient(var(--gold), var(--gold));
+  background-repeat: no-repeat;
+  background-position: 0 88%;
+  background-size: 100% 0.42em;
+}
+
+.aui-reward-highlight[data-play='true'] {
+  animation: aui-highlight-sweep 350ms ease-out both;
+}
+
+/* Tear layer: a clone of the stub, removed by the consumer after onDone. */
+.aui-reward-tear {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: aui-tear 450ms ease-in both;
+}
+
+.aui-reward-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+  animation: aui-sweep 700ms ease-out 500ms both;
+}
+
+.aui-reward-fleck {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999rem;
+  background: var(--gold);
+  pointer-events: none;
+  animation: aui-fleck 900ms ease-out 700ms both;
+}
+
+.aui-reward-fleck:nth-child(1) {
+  --fleck-x: -4.5rem;
+  --fleck-y: -2.5rem;
+}
+
+.aui-reward-fleck:nth-child(2) {
+  --fleck-x: 4.25rem;
+  --fleck-y: -2rem;
+}
+
+.aui-reward-fleck:nth-child(3) {
+  --fleck-x: -3rem;
+  --fleck-y: 2.25rem;
+}
+
+.aui-reward-fleck:nth-child(4) {
+  --fleck-x: 3.5rem;
+  --fleck-y: 2.5rem;
+}
+
+.aui-reward-fleck:nth-child(5) {
+  --fleck-x: 0.25rem;
+  --fleck-y: -3.25rem;
+}
+
+.aui-reward-fleck:nth-child(6) {
+  --fleck-x: 5.5rem;
+  --fleck-y: 0.25rem;
+}
+
+.aui-reward-line[data-play='true'],
+.aui-reward-note[data-play='true'] {
+  animation: aui-note-fade 300ms ease-out 1100ms both;
+}
+
+.aui-reward-note[data-play='true'] {
+  animation-duration: 400ms;
+  animation-delay: 800ms;
+}
+
+@keyframes aui-tick-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes aui-highlight-sweep {
+  from {
+    background-size: 0 0.42em;
+  }
+
+  to {
+    background-size: 100% 0.42em;
+  }
+}
+
+@keyframes aui-tear {
+  to {
+    opacity: 0;
+    transform: translate(3.5rem, 9rem) rotate(-14deg);
+  }
+}
+
+@keyframes aui-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes aui-fleck {
+  from {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(var(--fleck-x), var(--fleck-y));
+  }
+}
+
+@keyframes aui-note-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aui-settle,
+  .aui-lay,
+  .aui-press:active,
+  .aui-pulse,
+  .aui-reward-tick[data-play='true'] path,
+  .aui-reward-highlight[data-play='true'],
+  .aui-reward-line[data-play='true'],
+  .aui-reward-note[data-play='true'] {
+    animation: none;
+  }
+
+  .aui-reward-tear,
+  .aui-reward-sweep,
+  .aui-reward-fleck {
+    display: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .aui-theme-root {
+    --grain: none;
+  }
+}
+
+.aui-reward-tick {
+  stroke: var(--gold-ink);
+}
+
+.aui-reward-all-clear {
+  position: relative;
+  overflow: hidden;
+}
+
+.aui-reward-note {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--text-primary);
 }

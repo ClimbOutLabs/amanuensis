@@ -14,6 +14,7 @@ export enum OpenApiTag {
   REPOSITORIES = 'Repositories',
   AGENT_SESSIONS = 'Agent Sessions',
   SPACES = 'Spaces',
+  HELP = 'Help',
 }
 
 /** Document-level tag order for `/api/v1/docs` and Mintlify. */
@@ -32,4 +33,5 @@ export const OPENAPI_DOCUMENT_TAGS: { name: OpenApiTag }[] = [
   { name: OpenApiTag.REPOSITORIES },
   { name: OpenApiTag.AGENT_SESSIONS },
   { name: OpenApiTag.SPACES },
+  { name: OpenApiTag.HELP },
 ];

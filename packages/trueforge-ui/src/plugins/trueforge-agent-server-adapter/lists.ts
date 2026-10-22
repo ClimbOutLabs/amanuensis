@@ -3,7 +3,6 @@
  * Not the settings catalog ports (`catalogs/*`).
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
-import type { MemoryBankStatus } from '../../components/AmanSetupContext.js';
 
 export async function listModels(client: TrueForge): Promise<TrueForgeApi.AvailableModel[]> {
   const body = await client.models.list();
@@ -36,20 +35,11 @@ export async function getCapabilities(client: TrueForge): Promise<TrueForgeApi.C
 }
 
 /**
- * The status name the rail and welcome screen show for each server-side memory backend.
- * Matches the Settings › Memory status card so the two surfaces agree.
- */
-const MEMORY_BACKEND_STATUS_NAME = {
-  markdown: 'Markdown (local files)',
-  hindsight: 'Hindsight (experimental)',
-} as const;
-
-/**
  * The memory backend the server resolved (`MEMORY_BACKEND`), read defensively from the
  * `memory_defaults` capability. Undefined when the capability is missing, malformed, or
  * names an unknown backend — the caller then reports memory as unknown rather than guessing.
  */
-export function readMemoryBackend(capabilities: unknown): keyof typeof MEMORY_BACKEND_STATUS_NAME | undefined {
+export function readMemoryBackend(capabilities: unknown): 'markdown' | 'hindsight' | undefined {
   if (typeof capabilities !== 'object' || capabilities === null) {
     return undefined;
   }
@@ -61,23 +51,4 @@ export function readMemoryBackend(capabilities: unknown): keyof typeof MEMORY_BA
   }
   const backend: unknown = Reflect.get(defaults, 'backend');
   return backend === 'markdown' || backend === 'hindsight' ? backend : undefined;
-}
-
-/**
- * The memory status the welcome screen and runtime rail report, read from the server's
- * `memory_defaults` capability (`MEMORY_BACKEND` as resolved). Markdown and Hindsight are
- * both server-side backends with nothing to connect, so naming one means memory reads as
- * on — there is no bank to connect and no sign-in to wait on.
- *
- * Null when the capability is missing or names an unknown backend: the screens then say
- * nothing about memory rather than guessing. A failed capabilities read throws, and the
- * host treats that as "unknown" rather than as off.
- */
-export async function getMemoryBankStatus(client: TrueForge): Promise<MemoryBankStatus | null> {
-  const capabilities = await client.server.getCapabilities();
-  const backend = readMemoryBackend(capabilities.data);
-  if (backend === undefined) {
-    return null;
-  }
-  return { name: MEMORY_BACKEND_STATUS_NAME[backend], connected: true };
 }

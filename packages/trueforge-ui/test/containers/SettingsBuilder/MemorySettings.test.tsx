@@ -8,6 +8,18 @@ import { ServerProvider, useOptionalRefreshServerCapabilities } from '@/server/S
 import type { AgentBuilderCapabilitiesResponse, AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
+/** The agent spec the recall switch reads and writes; the runtime hooks are stubbed around it. */
+const recallState = vi.hoisted(() => ({ enabled: true }));
+const updateAgentSpec = vi.hoisted(() => vi.fn());
+
+vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
+  ...(await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>()),
+  useTrueFoundryAgentSpec: () => ({
+    agentSpec: { config: { memory: { recallEnabled: recallState.enabled } } },
+  }),
+  useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+}));
+
 /** Memory-defaults fixture per the generated SDK type. The page only reads `backend` and
  * `markdownDir` from it; the tuning fields exist to satisfy the type. */
 const MARKDOWN_DEFAULTS = {
@@ -591,5 +603,46 @@ describe('MemorySettings (backend honesty)', () => {
       });
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
+  });
+});
+
+describe('MemorySettings (use memories in replies)', () => {
+  it('turns recall off and back on from the Settings > Memory switch', async () => {
+    recallState.enabled = true;
+    updateAgentSpec.mockClear();
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+    });
+    const page = () => (
+      <ServerProvider server={server}>
+        <MemorySettings />
+      </ServerProvider>
+    );
+    const { rerender } = render(page());
+
+    const recall = await screen.findByRole('switch', { name: 'Use memories in replies' });
+    expect(recall).toBeChecked();
+
+    fireEvent.click(recall);
+    expect(updateAgentSpec).toHaveBeenLastCalledWith({
+      config: { memory: { recallEnabled: false } },
+    });
+
+    recallState.enabled = false;
+    rerender(page());
+    expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Use memories in replies' }));
+    expect(updateAgentSpec).toHaveBeenLastCalledWith({
+      config: { memory: { recallEnabled: true } },
+    });
+  });
+
+  it('hides the recall switch while the memory backend is not confirmed', async () => {
+    renderMemory(capabilitiesWith({}));
+
+    expect(await screen.findByText('Memory status unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Use memories in replies' })).not.toBeInTheDocument();
   });
 });

@@ -5,6 +5,9 @@ import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'r
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 
 /** Where the panda's motion clips live. The two idle variants rotate to conceal the loop. */
+/** The one accessible name for the panda, whatever it is doing. */
+export const AVATAR_ALT = 'Aman, drawn as a panda writing with a quill';
+
 export type AmanAvatarMotionSources = {
   idle: readonly string[];
   thinking: string;
@@ -163,8 +166,7 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
   }, [display]);
 
   const src = display === 'idle' ? sources.idle[idleVariant] : sources[display];
-  // Reduced-motion and screen-reader users get no motion; the name still reports the state.
-  const accessibleName = `Amanuensis avatar, ${display}`;
+  // Reduced-motion and screen-reader users get no motion; the name is the same in every state.
 
   const handleVideoError = useCallback(
     (event: SyntheticEvent<HTMLVideoElement>): void => {
@@ -239,7 +241,7 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
   if (reducedMotion || !mediaLive || videoFailed) {
     // Static poster: before the first non-idle activity (no video bytes on an idle page),
     // when the user prefers reduced motion, or when a clip failed to load.
-    return <img src={sources.poster} alt={accessibleName} className={className} />;
+    return <img src={sources.poster} alt={AVATAR_ALT} className={className} />;
   }
 
   return (
@@ -247,7 +249,7 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
       ref={attachVideo}
       className={className}
       role="img"
-      aria-label={accessibleName}
+      aria-label={AVATAR_ALT}
       muted
       playsInline
       disablePictureInPicture
