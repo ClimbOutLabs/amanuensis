@@ -10,6 +10,7 @@ import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOr
 import type { CreateDynamicSubAgentThread } from '../../../src/core/runtime/CreateDynamicSubAgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
+import { offeredTools } from '../fixtures/offeredTools';
 import { makeMockILLM, makeSilentLogger } from '../harnessMocks';
 
 async function* createSubAgentStream(
@@ -67,7 +68,7 @@ describe('AgentThreadOrchestrator dynamic child cancellation', () => {
     const model: ILLM = {
       create: jest.fn(body => {
         let toolName: string | undefined;
-        for (const candidate of body.tools ?? []) {
+        for (const candidate of offeredTools(body)) {
           if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
             toolName = candidate.function.name;
             break;

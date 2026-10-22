@@ -1,20 +1,15 @@
 /**
- * call_tool naming a built-in tool set (maps, spaces and the like) or a name
- * that does not exist at all.
+ * call_tool and get_tool_info against the tool index, and names that exist nowhere.
  *
- * Built-ins live in the thread's host tool sets, not in the deferred server
- * map, so a wrapper naming one used to fall back to classifying call_tool
- * itself (its card read "This is a new tool from ..." instead of the real tool) and then fail at
- * dispatch with "expected the name of a configured MCP server". These tests
- * pin the fixed behavior: the real tool is judged with its real name and
- * arguments, its decision matches the direct call exactly, and the call
- * runs. A name that exists nowhere fails closed with a plain reason and
- * never becomes an approval card for call_tool.
+ * Built-in tools are listed by name only. A call_tool call naming one becomes a direct call of
+ * that tool before anything judges it, so it is checked, carded and run exactly as a direct call
+ * (the thread-level parity test runs every real tool both ways). A name that exists nowhere fails
+ * closed with a plain reason and never becomes an approval card for call_tool.
  */
 import { createLogger } from 'winston';
 import { z } from 'zod';
 import { RemoteMCP, ToolSet } from '../../../src/core';
-import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
+import type { InternalToolCallInfo, RawAssistantMessage } from '../../../src/core/llm/LLMTypes';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { isCallToolResponseResult, toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
@@ -29,6 +24,7 @@ import {
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { builtInToolIndex } from '../fixtures/toolIndex';
 import '../harnessMocks';
 import { makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
@@ -104,55 +100,6 @@ class MapLikeTools extends LocalToolMCP {
   }
 }
 
-/** A spaces-like built-in: writes declare themselves through hints on toolCallInfo, like the production space tool set. */
-class SpaceLikeTools extends LocalToolMCP {
-  readonly name = 'space';
-  readonly displayName = 'Spaces';
-
-  readonly updateCalls: Array<{ space_id: string; name?: string | undefined }> = [];
-
-  constructor() {
-    super({ tracing: NOOP_AGENT_TRACING });
-  }
-
-  private readonly tools: ToolDefinition[] = [
-    defineTool({
-      name: 'create_space',
-      description: 'Creates a space.',
-      schema: z.object({ name: z.string() }).strict(),
-      handler: () => Promise.resolve(textResult('created')),
-    }),
-    defineTool({
-      name: 'update_space',
-      description: 'Updates a space.',
-      schema: z.object({ space_id: z.string(), name: z.string().optional() }).strict(),
-      handler: (input: { space_id: string; name?: string | undefined }) => {
-        this.updateCalls.push(input);
-        return Promise.resolve(textResult('updated'));
-      },
-    }),
-  ];
-
-  protected getTools(): ToolDefinition[] {
-    return this.tools;
-  }
-
-  override async toolCallInfo(
-    params: Parameters<LocalToolMCP['toolCallInfo']>[0],
-    resolveUnderlyingTool?: boolean,
-  ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
-    const info = await super.toolCallInfo(params, resolveUnderlyingTool);
-    const isRead = params.name === 'list_spaces' || params.name === 'get_space';
-    return {
-      ...info,
-      effect: isRead ? 'inspect' : 'edit',
-      read_only_hint: isRead,
-      destructive_hint: false,
-      open_world_hint: false,
-    };
-  }
-}
-
 function textResult(text: string) {
   return toolResultResponse({ text });
 }
@@ -166,7 +113,7 @@ function makeSentinel(): SentinelHostContext {
   });
 }
 
-function makeDeferred(hostToolSets: LocalToolMCP[]): DeferredTool {
+async function makeDeferred(builtIns: LocalToolMCP[]): Promise<DeferredTool> {
   const server = makeMockIMCPServer({
     name: 'notes',
     preload: false,
@@ -175,7 +122,7 @@ function makeDeferred(hostToolSets: LocalToolMCP[]): DeferredTool {
   return new DeferredTool([server], {
     tracing: NOOP_AGENT_TRACING,
     logger: silentLogger,
-    hostToolSets,
+    index: (await builtInToolIndex(builtIns)).index,
   });
 }
 
@@ -209,140 +156,99 @@ async function stamp(input: {
   });
 }
 
-describe('call_tool naming the built-in maps server', () => {
+function callToolMessage(wrapper: Record<string, unknown>): RawAssistantMessage {
+  return {
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      { id: 'call-1', type: 'function', function: { name: 'call_tool', arguments: JSON.stringify(wrapper) } },
+    ],
+  };
+}
+
+describe('the tool index behind get_tool_info and call_tool', () => {
   const inner = { from_place: 'Chiado, Lisboa', to_place: 'Alfama, Lisboa' };
-  const wrapper = { mcp_server: 'maps', tool_name: 'render_route', input: inner };
 
-  it('judges the wrapped route by the real tool and arguments, matching the direct call', async () => {
-    const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
-    const sentinel = makeSentinel();
-
-    const directInfo = await maps.toolCallInfo({ name: 'render_route', arguments: inner });
-    const direct = await stamp({
-      sentinel,
-      info: directInfo,
-      canonical_params: inner,
-      connector: maps.resolveConnector(),
+  it('answers get_tool_info for an indexed tool with its full arguments and how to call it', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    const response = await deferred.callTool({
+      name: 'get_tool_info',
+      arguments: { mcp_server: 'maps', tool_name: 'render_route' },
     });
-
-    const wrappedInfo = await deferred.toolCallInfo({ name: 'call_tool', arguments: wrapper });
-    expect(wrappedInfo.original_tool_name).toBe('render_route');
-    expect(wrappedInfo.is_deferred).toBe(true);
-    const wrapped = await stamp({
-      sentinel,
-      info: wrappedInfo,
-      canonical_params: wrapper,
-      connector: deferred.resolveConnector({ name: 'call_tool', arguments: wrapper }),
-    });
-
-    expect(wrapped.tier).toBe(3);
-    expect(wrapped.tier).toBe(direct.tier);
-    expect(wrapped.tier_reason).toBe(direct.tier_reason);
-    expect(wrapped.tier3_card).toEqual(direct.tier3_card);
-    expect(wrapped.tier3_card?.plain_what).toContain('Chiado, Lisboa');
-    expect(wrapped.tier3_card?.plain_what).not.toContain('call_tool');
-    expect(wrapped.is_approval_required).toBe(true);
-    expect(wrapped.approval_token_id).not.toBeNull();
-  });
-
-  it('runs the route on the maps tool set instead of rejecting the server name', async () => {
-    const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
-
-    const { text, isError } = await callToolText(deferred, wrapper);
-
-    expect(isError).toBe(false);
-    expect(text).toBe('route ok');
-    expect(text).not.toContain('configured MCP server');
-    expect(maps.routeCalls).toEqual([inner]);
-  });
-
-  it('names the maps connector for the approval binding', () => {
-    const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
-    expect(deferred.resolveConnector({ name: 'call_tool', arguments: wrapper })).toEqual({
-      server_id: 'maps',
-      destination_host: MAPS_DESTINATION_HOST,
+    if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+      throw new Error('expected a text result');
+    }
+    const info: unknown = JSON.parse(response.result.content[0].text);
+    expect(info).toMatchObject({
+      inputSchema: { properties: { from_place: { type: 'string' }, to_place: { type: 'string' } } },
+      next_step: 'Call render_route directly by name. It stays loaded for the rest of this chat.',
     });
   });
-});
 
-describe('call_tool naming the built-in spaces server', () => {
-  const inner = { space_id: 'sp1', name: 'Home renovation' };
-  const wrapper = { mcp_server: 'space', tool_name: 'update_space', input: inner };
-
-  it('judges the wrapped space write by the real tool, matching the direct call', async () => {
-    const spaces = new SpaceLikeTools();
-    const deferred = makeDeferred([spaces]);
-    const sentinel = makeSentinel();
-
-    const directInfo = await spaces.toolCallInfo({ name: 'update_space', arguments: inner });
-    const direct = await stamp({
-      sentinel,
-      info: directInfo,
-      canonical_params: inner,
-      connector: undefined,
+  it('finds an indexed tool by its name even when the server is misnamed', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    expect(await deferred.resolveIndexedTool({ server: 'map', name: 'render_route' })).toMatchObject({
+      name: 'render_route',
+      server: 'maps',
     });
-
-    const wrappedInfo = await deferred.toolCallInfo({ name: 'call_tool', arguments: wrapper });
-    expect(wrappedInfo.original_tool_name).toBe('update_space');
-    const wrapped = await stamp({
-      sentinel,
-      info: wrappedInfo,
-      canonical_params: wrapper,
-      connector: deferred.resolveConnector({ name: 'call_tool', arguments: wrapper }),
-    });
-
-    expect(wrapped.tier).toBe(direct.tier);
-    expect(wrapped.tier_reason).toBe(direct.tier_reason);
-    expect(wrapped.tier3_card).toEqual(direct.tier3_card);
-    expect(wrapped.tier3_card?.plain_what ?? '').not.toContain('call_tool');
   });
 
-  it('runs the write on the space tool set', async () => {
-    const spaces = new SpaceLikeTools();
-    const deferred = makeDeferred([spaces]);
+  it('turns call_tool naming an indexed tool into a direct call with the inner arguments', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    const { message, rewritten } = await deferred.toDirectCalls(
+      callToolMessage({ mcp_server: 'maps', tool_name: 'render_route', input: inner }),
+    );
+    expect(message.tool_calls).toEqual([
+      { id: 'call-1', type: 'function', function: { name: 'render_route', arguments: JSON.stringify(inner) } },
+    ]);
+    expect(rewritten.get('call-1')?.name).toBe('render_route');
+  });
 
-    const { text, isError } = await callToolText(deferred, wrapper);
+  it('leaves a call to a tool the not-listed connector really has with call_tool', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    const original = callToolMessage({ mcp_server: 'notes', tool_name: 'search', input: { q: 'x' } });
+    const { message, rewritten } = await deferred.toDirectCalls(original);
+    expect(message).toEqual(original);
+    expect(rewritten.size).toBe(0);
+  });
 
-    expect(isError).toBe(false);
-    expect(text).toBe('updated');
-    expect(spaces.updateCalls).toEqual([inner]);
+  it('runs an indexed tool directly when the model names a connector that does not have it', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    const { message } = await deferred.toDirectCalls(
+      callToolMessage({ mcp_server: 'notes', tool_name: 'render_route', input: inner }),
+    );
+    expect(message.tool_calls?.[0]?.function.name).toBe('render_route');
+  });
+
+  it('leaves a call naming nothing indexed with call_tool, which fails it closed', async () => {
+    const deferred = await makeDeferred([new MapLikeTools()]);
+    const original = callToolMessage({ mcp_server: 'maps', tool_name: 'dance', input: {} });
+    expect((await deferred.toDirectCalls(original)).message).toEqual(original);
   });
 });
 
 describe('call_tool naming something that does not exist', () => {
-  it('fails closed on a tool the named built-in does not have, naming the real tool', async () => {
+  it('fails closed without a card on a tool the named built-in does not have, naming its tools', async () => {
     const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
+    const deferred = await makeDeferred([maps]);
     const wrapper = { mcp_server: 'maps', tool_name: 'dance', input: {} };
 
     const { text, isError } = await callToolText(deferred, wrapper);
     expect(isError).toBe(true);
-    expect(text).toContain("expected the name of a tool on 'maps'");
-    expect(text).toContain('render_route');
+    expect(text).toContain("'maps' has no tool named 'dance'. Its tools: render_map, render_route.");
     expect(maps.routeCalls).toEqual([]);
     expect(maps.mapCalls).toEqual([]);
 
     const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: wrapper });
-    expect(info.original_tool_name).toBe('dance');
-    const stamped = await stamp({
-      sentinel: makeSentinel(),
-      info,
-      canonical_params: wrapper,
-      connector: deferred.resolveConnector({ name: 'call_tool', arguments: wrapper }),
-    });
-    expect(stamped.tier).toBe(3);
-    expect(stamped.is_approval_required).toBe(true);
-    expect(stamped.tier3_card?.plain_what).toContain('This is a new tool from');
-    expect(stamped.tier3_card?.plain_what).not.toContain('call_tool');
-    expect(stamped.tier3_card?.plain_what).not.toContain('dance');
+    expect(info.tier).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain("'maps' has no tool named 'dance'");
+    const stamped = await stamp({ sentinel: makeSentinel(), info, canonical_params: wrapper, connector: undefined });
+    expect(stamped).toBe(info);
   });
 
   it('keeps list_tools for an unknown server at Tier 1 and runs nothing', async () => {
     const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
+    const deferred = await makeDeferred([maps]);
     const params = { name: 'list_tools', arguments: { mcp_server: 'gmail' } };
 
     const info = await deferred.toolCallInfo(params);
@@ -362,7 +268,7 @@ describe('call_tool naming something that does not exist', () => {
 
   it('fails closed without a card when the named server exists nowhere', async () => {
     const maps = new MapLikeTools();
-    const deferred = makeDeferred([maps]);
+    const deferred = await makeDeferred([maps]);
     const wrapper = { mcp_server: 'nope', tool_name: 'search', input: {} };
 
     const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: wrapper });
@@ -380,7 +286,7 @@ describe('call_tool naming something that does not exist', () => {
   });
 
   it('fails closed without a card when the wrapper itself does not parse', async () => {
-    const deferred = makeDeferred([new MapLikeTools()]);
+    const deferred = await makeDeferred([new MapLikeTools()]);
     const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: { tool_name: 'search' } });
     expect(info.tier).toBeUndefined();
     expect(info.pre_dispatch_failure?.kind).toBe('pre_dispatch_failed');

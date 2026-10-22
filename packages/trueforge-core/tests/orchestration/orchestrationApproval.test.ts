@@ -57,7 +57,13 @@ const DENY_TOOL_CONTENT = createToolResponseV2({
   remediation: undefined,
 }).model_message.content;
 
-const WRITE_NOTE_TOOLS = [{ function: { name: WRITE_NOTE_TOOL_NAME } }];
+const LOOKUP_TOOLS = ['call_tool', 'get_tool_info', 'get_tool_output_schema', 'list_tools'].map(name => ({
+  function: { name },
+}));
+// write_note is listed by name only until the chat uses it; from then on it is sent in full.
+const WRITE_NOTE_TOOLS_BEFORE_USE = LOOKUP_TOOLS;
+const WRITE_NOTE_TOOLS_AFTER_USE = [...LOOKUP_TOOLS, { function: { name: WRITE_NOTE_TOOL_NAME } }];
+const PROMOTED_EVENT = { type: InternalEventType.CAPABILITY_STATE, thread_id: ROOT_ID, key: 'tfy.tool_index' };
 
 const EXPECTED_TURN_1_EVENTS = [
   { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
@@ -101,7 +107,7 @@ const TURN_1_OUTPUT = {
 
 const EXPECTED_TURN_1_LLM_INPUT = [
   {
-    tools: WRITE_NOTE_TOOLS,
+    tools: WRITE_NOTE_TOOLS_BEFORE_USE,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
       { role: 'user', content: 'hello' },
@@ -123,6 +129,7 @@ describe('orchestration: pause then resume on tool approval', () => {
         thread_id: ROOT_ID,
         context: [{ role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: WRITE_NOTE_TOOL_RESULT_CONTENT }],
       },
+      PROMOTED_EVENT,
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
       {
@@ -139,7 +146,7 @@ describe('orchestration: pause then resume on tool approval', () => {
     };
 
     const EXPECTED_TURN_2_INPUT = {
-      tools: WRITE_NOTE_TOOLS,
+      tools: WRITE_NOTE_TOOLS_AFTER_USE,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
         { role: 'user', content: 'hello' },
@@ -203,6 +210,7 @@ describe('orchestration: pause then resume on tool approval', () => {
         thread_id: ROOT_ID,
         context: [{ role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT }],
       },
+      PROMOTED_EVENT,
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
       {
@@ -219,7 +227,7 @@ describe('orchestration: pause then resume on tool approval', () => {
     };
 
     const EXPECTED_TURN_2_INPUT = {
-      tools: WRITE_NOTE_TOOLS,
+      tools: WRITE_NOTE_TOOLS_AFTER_USE,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
         { role: 'user', content: 'hello' },

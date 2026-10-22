@@ -7,6 +7,7 @@ import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
 import { createWebSearchTurnState } from '../../../../src/core/permissions/webSearch';
 import { DeferredTool } from '../../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
+import { builtInToolIndex } from '../../fixtures/toolIndex';
 import { makeMockIMCPServer, OBJECT_INPUT_SCHEMA } from '../../harnessMocks';
 import { plainDraft } from './fixtures';
 import { build, json, text, type Route } from './harness';
@@ -88,7 +89,28 @@ describe('an approved send at dispatch', () => {
 });
 
 describe('a send reached through call_tool on a connector', () => {
-  it('is not run: the connector would show a generic card, so the model is told to call send_draft directly', async () => {
+  it("becomes a direct send_draft call, so it gets the Gmail card instead of the connector's generic one", async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [] });
+    const connector = makeMockIMCPServer({
+      name: 'notes',
+      preload: false,
+      tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
+    });
+    const deferred = new DeferredTool([connector], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      index: (await builtInToolIndex([tools])).index,
+    });
+    const wrapper = { mcp_server: 'notes', tool_name: 'send_draft', input: { draft_id: 'd1' } };
+    const { message } = await deferred.toDirectCalls({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'c1', type: 'function', function: { name: 'call_tool', arguments: JSON.stringify(wrapper) } }],
+    });
+    expect(message.tool_calls?.[0]?.function).toEqual({ name: 'send_draft', arguments: '{"draft_id":"d1"}' });
+  });
+
+  it('is not run by call_tool itself: the model is told to call send_draft directly', async () => {
     const { tools, google } = await build({
       features: [...COMPOSE],
       routes: [
@@ -107,7 +129,7 @@ describe('a send reached through call_tool on a connector', () => {
     const deferred = new DeferredTool([connector], {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
-      hostToolSets: [tools],
+      index: (await builtInToolIndex([tools])).index,
     });
     const response = await deferred.callTool({
       name: 'call_tool',
@@ -117,7 +139,7 @@ describe('a send reached through call_tool on a connector', () => {
       throw new Error('expected a resolved response');
     }
     expect(response.result.isError).toBe(true);
-    expect(text(response)).toContain('call send_draft directly');
+    expect(text(response)).toContain('Call send_draft directly');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 });

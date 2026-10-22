@@ -147,6 +147,10 @@ export class CalendarToolSet extends LocalToolMCP {
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     const prepared = isCalendarWriteToolName(params.name) ? await this.#prepareWrite(params) : undefined;
     if (prepared !== undefined && 'failure' in prepared) {
       return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: prepared.failure } };

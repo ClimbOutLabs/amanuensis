@@ -23,8 +23,14 @@ describe('measurePromptRequest', () => {
     expect(names).toContain('agent-capabilities');
     expect(names).toContain('agent-capabilities/plain-speech');
     expect(names).toContain('user-instructions');
-    // Non-preloaded tool sets add the deferred dispatchers ahead of the listed tools.
-    expect(report.tools.map(row => row.name)).toContain('read_note');
+    // The tool is listed in the index section and sent only once used; the lookup tools are sent.
+    expect(names).toContain('agent-capabilities/deferred-tools-instructions');
+    expect(report.tools.map(row => row.name)).toEqual([
+      'call_tool',
+      'get_tool_info',
+      'get_tool_output_schema',
+      'list_tools',
+    ]);
   });
 
   it('counts each top-level section once and adds the tools to the total', async () => {

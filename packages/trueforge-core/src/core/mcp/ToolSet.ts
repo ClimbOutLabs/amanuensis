@@ -551,6 +551,10 @@ export class ToolSet implements IToolSet {
       };
     }
     const info = { ...toolEffectHints(tool), ...sourceInfo };
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return { info, classification: undefined };
+    }
     const caldavEvent = await this.caldavEventFor(params);
     const decision = await classifyHostToolCall({
       sentinel,

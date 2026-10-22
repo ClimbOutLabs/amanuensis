@@ -14,6 +14,7 @@ import {
 } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { llmCreateInputs, runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
+import { offeredTools } from '../fixtures/offeredTools';
 import { makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
 
 const SANDBOX_TOOL_NAMES = [
@@ -95,7 +96,11 @@ describe('AgentThread read-only definitions', () => {
   it('offers the sandbox tools to a definition that is not read-only, so the check above is not vacuous', async () => {
     const { modelClient, orchestrator } = threadFor({ readOnly: false, sandbox: makeStubPublicSandbox() });
     await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
-    const requests = JSON.stringify(llmCreateInputs(modelClient));
-    expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
+    const offered = jest
+      .mocked(modelClient)
+      .create.mock.calls.flatMap(([request]) =>
+        offeredTools(request).flatMap(tool => (tool.type === 'function' ? [tool.function.name] : [])),
+      );
+    expect(offered).toContain(SANDBOX_RUN_CODE_TOOL_NAME);
   });
 });

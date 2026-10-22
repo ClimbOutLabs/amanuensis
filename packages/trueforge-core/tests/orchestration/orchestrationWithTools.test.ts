@@ -63,6 +63,8 @@ const EXPECTED_EVENTS = [
   },
   // create_sub_agent tool path yields an empty append before THREAD_CREATED.
   { type: InternalEventType.AGENT_CONTEXT_APPEND, thread_id: ROOT_ID, context: [] },
+  // create_sub_agent was used, so the chat keeps it loaded.
+  { type: InternalEventType.CAPABILITY_STATE, thread_id: ROOT_ID, key: 'tfy.tool_index' },
   {
     type: EventType.THREAD_CREATED,
     title: 'worker',

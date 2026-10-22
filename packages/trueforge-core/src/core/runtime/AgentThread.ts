@@ -199,7 +199,7 @@ import {
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
-import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput, withToolSchema } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
@@ -230,6 +230,7 @@ import {
   type TaskState,
 } from './taskState';
 import { TaskStateToolSet } from './TaskStateToolSet';
+import { ToolIndex, type ToolIndexEntry } from './ToolIndex';
 import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
@@ -1447,6 +1448,8 @@ export class AgentThread {
   private instructionBuilders: readonly ((builder: InstructionBuilder) => void)[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
+  // Tools listed by name only until the chat first uses them. Absent for a read-only definition, which offers no tools.
+  private readonly toolIndex: ToolIndex | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
   // Messages send() added for held-action decisions. They reach the stream at the start of execute(),
@@ -1582,7 +1585,11 @@ export class AgentThread {
       ? new Map(this.toolCallMemo.callSignatures)
       : new Map<string, number>();
 
-    const capabilities = input.capabilities ?? [];
+    this.toolIndex = this.definition.readOnly ? undefined : new ToolIndex();
+    const capabilities = [
+      ...(this.toolIndex === undefined ? [] : [this.toolIndex.capability()]),
+      ...(input.capabilities ?? []),
+    ];
     // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
     this.systemToolSets = this.definition.readOnly ? [] : capabilities.flatMap(c => c.systemToolSets ?? []);
     this.preLLMContextProcessors = capabilities.flatMap(c => c.preLLMProcessors ?? []);
@@ -1611,14 +1618,11 @@ export class AgentThread {
       }
     }
 
-    const connectorToolSets = this.definition.readOnly ? [] : (this.definition.toolSets ?? []);
-    if (connectorToolSets.length) {
-      this.deferredTool = new DeferredTool(connectorToolSets, {
+    if (this.toolIndex !== undefined) {
+      this.deferredTool = new DeferredTool(this.definition.toolSets ?? [], {
         tracing: this.tracing,
         logger: input.logger,
-        // Lets call_tool route a mis-addressed host (built-in) tool name to the real
-        // host tool instead of failing. See DeferredTool's host-tool routing.
-        hostToolSets: this.systemToolSets,
+        index: this.toolIndex,
       });
     }
 
@@ -2683,6 +2687,15 @@ export class AgentThread {
     });
     this.convertedTools = convertedTools;
     this.tfyManagedServerNames = new Set(tfyManagedServers.map(s => s.name));
+    if (this.toolIndex !== undefined) {
+      this.toolIndex.load({
+        converted: convertedTools,
+        metaToolSet: this.deferredTool,
+        deferredServers: userServers.some(server => !server.preload),
+      });
+      // The index lists tools the thread only knows once they are listed, so the prompt is built again with it.
+      this.instruction = this.buildInstruction(this.definition.instruction);
+    }
     return { initializationInfo, authRequirementInfo };
   }
 
@@ -3238,18 +3251,33 @@ export class AgentThread {
     // every call, but calls that will be held for the owner's approval do not count toward
     // the cap there, and which ones those are is only known once each call is classified.
     const unattended = this.sentinel?.services.unattended === true;
+    const uniqueIdReply: RawAssistantMessage = {
+      ...result.value.output,
+      ...(result.value.output.tool_calls === undefined
+        ? {}
+        : {
+            tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
+          }),
+    };
+    // A call_tool call naming an indexed tool becomes a direct call before anything checks it,
+    // so its arguments, approval, run and record are exactly those of a direct call.
+    const direct =
+      this.deferredTool === undefined
+        ? { message: uniqueIdReply, rewritten: new Map<string, ToolIndexEntry>() }
+        : await this.deferredTool.toDirectCalls(uniqueIdReply);
     const replyGuard = guardModelReply({
-      message: {
-        ...result.value.output,
-        ...(result.value.output.tool_calls === undefined
-          ? {}
-          : {
-              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
-            }),
-      },
-      tools,
+      message: direct.message,
+      // Every tool's schema, not only the ones sent: an indexed tool can be called before it is promoted.
+      tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
     });
+    // Its schema goes with the correction, so a model that has not loaded the tool can fix the call in one step.
+    for (const [id, problem] of replyGuard.invalidCalls) {
+      const entry = direct.rewritten.get(id);
+      if (entry !== undefined) {
+        replyGuard.invalidCalls.set(id, withToolSchema({ problem, entry }));
+      }
+    }
     if (replyGuard.tooManyCalls && !unattended) {
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -4518,7 +4546,7 @@ export class AgentThread {
       for (;;) {
         // Re-read each iteration: the tool list is memoized and rebuilt only
         // after invalidation, so the next model call sees the current list.
-        const { tools, toolMapping } = this.getConvertedTools();
+        const { tools: allTools, toolMapping } = this.getConvertedTools();
         for (;;) {
           const sandboxCreatedEvent = this.pendingSandboxCreatedEvents.shift();
           if (sandboxCreatedEvent === undefined) {
@@ -4580,6 +4608,12 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
+            const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
+            if (this.toolIndex?.withhold(available) === true) {
+              // A tool withheld while offline leaves the index too, so the model is not told it can use it.
+              this.instruction = this.buildInstruction(this.definition.instruction);
+            }
+            const tools = this.toolIndex?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;
             const finalAnswerPhase = taskBudget !== undefined && this.taskState.phase === 'final_answer';
             const budgetedTools = this.definition.budgetedTools ?? [];
@@ -4599,15 +4633,10 @@ export class AgentThread {
                       toolMapping.get(tool.function.name)?.originalToolName !== ASK_USER_QUESTION_TOOL_NAME,
                   )
                 : tools;
-            const llmResult = yield* this.stepLLMCall(
-              await this.withoutOfflineBlockedTools(requestTools, toolMapping),
-              toolMapping,
-              signal,
-              {
-                emptyTerminalFallback: undefined,
-                retryModelMessageEventId: pendingRetryModelMessageEventId,
-              },
-            );
+            const llmResult = yield* this.stepLLMCall(requestTools, toolMapping, signal, {
+              emptyTerminalFallback: undefined,
+              retryModelMessageEventId: pendingRetryModelMessageEventId,
+            });
             outcome = llmResult.outcome;
             currentModelMessageEventId = llmResult.modelMessageEventId;
             pendingRetryModelMessageEventId = llmResult.retryModelMessageEventId;

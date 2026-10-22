@@ -26,7 +26,7 @@ Each connector in the **Save Agent** dialog has a book-icon **preload toggle** â
 | `preload`         | Behavior                                                                                                     | Best for                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | `false` (default) | Only the server's name and description are in context. Tool schemas are discovered on demand via meta tools. | Large tool catalogs, servers used only occasionally          |
-| `true`            | Full tool definitions are loaded into context at startup.                                                    | Small, frequently-used servers where every turn calls a tool |
+| `true`            | Each tool is listed by name and one sentence in the tool index, and loaded in full on first use.            | Small, frequently-used servers where every turn calls a tool |
 
 When `preload` is off, the harness exposes four **meta tools** instead of the individual tool definitions:
 
@@ -55,6 +55,14 @@ sequenceDiagram
 ```
 
 The extra discovery round-trips only happen the first time a tool is needed â€” and they are far cheaper than carrying every schema in context on every model call.
+
+## The tool index
+
+Built-in tools and tools from preloaded servers are listed in the system prompt by name only, one short line each, grouped by server. Only `ask_user_question`, `get_current_datetime` and the meta tools are sent in full on every turn.
+
+The first time the model looks a tool up with `get_tool_info`, or calls it, that tool's full definition is sent for the rest of the chat, so later calls are ordinary direct calls. The chat remembers which tools it loaded, so a restart does not reset them. A chat keeps at most 24 tools loaded; the least recently used one drops back to the index.
+
+A `call_tool` call that names a listed tool runs as a direct call of that tool. It gets the same permission check, the same approval card and the same audit record. If its arguments are wrong, the reply includes the tool's schema so the model can fix the call in one step.
 
 ## Selective preloading
 

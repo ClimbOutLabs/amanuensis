@@ -24,6 +24,7 @@ import { identicalCallSignatureMarker } from '../../../src/core/runtime/contextU
 import type { CreateDynamicSubAgentThread } from '../../../src/core/runtime/CreateDynamicSubAgentThread';
 import { EXITED_NOTE } from '../../../src/core/sandbox/execResultSemantics';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { offeredTools } from '../fixtures/offeredTools';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 /**
@@ -775,7 +776,7 @@ describe('repeat budget', () => {
     const rootModel: ILLM = {
       create: jest.fn(body => {
         round += 1;
-        const tool = (body.tools ?? []).find(
+        const tool = offeredTools(body).find(
           candidate => 'function' in candidate && candidate.function.name.includes('create_sub_agent'),
         );
         if (tool === undefined || !('function' in tool)) {
@@ -858,7 +859,7 @@ describe('repeat budget', () => {
         return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
       }
       if (round === 2) {
-        const questionTool = request.tools?.find(
+        const questionTool = offeredTools(request).find(
           tool => tool.type === 'function' && tool.function.name.endsWith(ASK_USER_QUESTION_TOOL_NAME),
         );
         const questionToolName =
@@ -969,7 +970,7 @@ describe('repeat budget', () => {
           return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
         }
         if (round === 2) {
-          const spawnTool = request.tools?.find(
+          const spawnTool = offeredTools(request).find(
             tool => tool.type === 'function' && tool.function.name.includes('create_sub_agent'),
           );
           if (spawnTool === undefined || !('function' in spawnTool)) {

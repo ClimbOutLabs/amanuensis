@@ -22,6 +22,7 @@ import {
 import { InternalEventType } from '../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../src/core/runtime/contextUsage';
 import { withTimeout } from '../../src/core/util/promiseUtils';
+import { offeredTools } from '../core/fixtures/offeredTools';
 import { makeMockIMCPServer, makeStubPublicSandbox } from '../core/harnessMocks';
 import {
   emptyLlmStream,
@@ -474,7 +475,7 @@ describe('TurnHandle.stream()', () => {
         if (createCalls !== 1) {
           throw new Error('consumer-abandonment cleanup must not invoke the model');
         }
-        const tool = [...(body.tools ?? [])].find(
+        const tool = offeredTools(body).find(
           candidate => 'function' in candidate && candidate.function.name.includes('create_sub_agent'),
         );
         if (!tool || !('function' in tool)) {
@@ -543,7 +544,7 @@ describe('TurnHandle.stream()', () => {
         if (createCalls !== 1) {
           throw new Error('child cleanup must not invoke a second model call');
         }
-        const tool = [...(body.tools ?? [])].find(
+        const tool = offeredTools(body).find(
           candidate => 'function' in candidate && candidate.function.name.includes('create_sub_agent'),
         );
         if (!tool || !('function' in tool)) {
@@ -1147,7 +1148,7 @@ describe('TurnHandle.stream()', () => {
         createCalls += 1;
         if (createCalls === 1) {
           let toolName: string | undefined;
-          for (const candidate of body.tools ?? []) {
+          for (const candidate of offeredTools(body)) {
             if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
               toolName = candidate.function.name;
               break;
@@ -1264,7 +1265,7 @@ describe('TurnHandle.stream()', () => {
         createCalls += 1;
         if (createCalls === 1) {
           let toolName: string | undefined;
-          for (const candidate of body.tools ?? []) {
+          for (const candidate of offeredTools(body)) {
             if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
               toolName = candidate.function.name;
               break;
@@ -1336,7 +1337,7 @@ describe('TurnHandle.stream()', () => {
         if (modelCalls !== 1) {
           throw new Error('child model must not run after cancellation');
         }
-        const toolName = [...(body.tools ?? [])].find(
+        const toolName = offeredTools(body).find(
           candidate => 'function' in candidate && candidate.function.name.includes('create_sub_agent'),
         );
         if (!toolName || !('function' in toolName)) {
@@ -1399,7 +1400,7 @@ describe('TurnHandle.stream()', () => {
     const modelClient: ILLM = {
       create: jest.fn(body => {
         let toolName: string | undefined;
-        for (const candidate of body.tools ?? []) {
+        for (const candidate of offeredTools(body)) {
           if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
             toolName = candidate.function.name;
             break;
@@ -1468,7 +1469,7 @@ describe('TurnHandle.stream()', () => {
     const modelClient: ILLM = {
       create: jest.fn(body => {
         let toolName: string | undefined;
-        for (const candidate of body.tools ?? []) {
+        for (const candidate of offeredTools(body)) {
           if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
             toolName = candidate.function.name;
             break;
@@ -1533,7 +1534,7 @@ describe('TurnHandle.stream()', () => {
     const modelClient: ILLM = {
       create: jest.fn(body => {
         let toolName: string | undefined;
-        for (const candidate of body.tools ?? []) {
+        for (const candidate of offeredTools(body)) {
           if ('function' in candidate && candidate.function.name.includes('create_sub_agent')) {
             toolName = candidate.function.name;
             break;

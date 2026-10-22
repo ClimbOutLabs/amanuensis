@@ -4,7 +4,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { InternalToolCallInfo, RawAssistantMessage, RawToolCall } from '../llm/LLMTypes';
 import {
   type AgentToolSchema,
   type CallToolResponse,
@@ -17,10 +17,12 @@ import {
   toolResultResponse,
 } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
+import { parseToolCallArguments } from '../mcp/toolArgumentCheck';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
+import type { ToolIndex, ToolIndexEntry } from './ToolIndex';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
 const DEFERRED_TOOLS_INSTRUCTION = 'deferred-tools-instructions';
@@ -61,6 +63,27 @@ function boundedNameList(names: readonly string[]): string {
     return names.join(', ');
   }
   return `${names.slice(0, MAX_LISTED_NAMES).join(', ')}, and ${String(names.length - MAX_LISTED_NAMES)} more`;
+}
+
+/** How the tool index works, in the words the model reads before the index itself. */
+export const TOOL_INDEX_GUIDE = dedent`
+  Tool index: the tools below are listed by name only, grouped by server. Before you use one for the first time, call ${GET_TOOL_INFO_NAME} with its server and name to see its arguments. Then call it directly by name. From then on it is fully loaded for the rest of this chat. Never guess a tool's arguments.`;
+
+/** One line per tool under a line naming its server, in the order the tools are sent. */
+export function renderIndex(entries: readonly ToolIndexEntry[]): string {
+  const byServer = new Map<string, ToolIndexEntry[]>();
+  for (const entry of entries) {
+    byServer.set(entry.server, [...(byServer.get(entry.server) ?? []), entry]);
+  }
+  return [...byServer.entries()]
+    .map(([server, tools]) => [`${server}:`, ...tools.map(tool => `- ${tool.name}: ${tool.summary}`)].join('\n'))
+    .join('\n');
+}
+
+/** A call_tool argument correction with the tool's own schema, so the model can fix the call in one step. */
+export function withToolSchema(input: { problem: string; entry: ToolIndexEntry }): string {
+  const { entry } = input;
+  return `${input.problem} The arguments of ${entry.name} must match this schema: ${JSON.stringify(entry.definition.function.parameters ?? {})}. Call ${entry.name} directly by name with matching arguments.`;
 }
 
 const listToolsSchema = z.object({
@@ -123,53 +146,100 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
-  /**
-   * Host (built-in, systemToolSets) tool providers, e.g. get_current_datetime. Their tools
-   * are called directly by name, never through call_tool, but a model that has just learned
-   * server tools live behind call_tool sometimes addresses a host tool the same way. See
-   * routeToHostTool.
-   */
-  private readonly hostToolSets: readonly IToolSet[];
+  /** Tools listed by name only; their lookups are answered here, and their calls run directly. */
+  private readonly index: ToolIndex | undefined;
 
   constructor(
     servers: readonly IToolSet[],
     options: {
       tracing: AgentTracing;
       logger: Logger;
-      hostToolSets?: readonly IToolSet[];
+      index?: ToolIndex | undefined;
     },
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
     this.serverMap = new Map(servers.map(s => [s.name, s]));
-    this.hostToolSets = options.hostToolSets ?? [];
+    this.index = options.index;
     this.tools = this.buildTools();
   }
 
   buildInstruction(builder: InstructionBuilder): void {
-    const servers = [...this.serverMap.values()];
-
+    const indexed = this.index?.listed() ?? [];
     // Membership follows `preload` only (origin/main). Selective `preload_tools` /
     // `hasPreloadedTools` must not hide a server from deferred discovery instructions.
-    const deferredServers = servers.filter(s => !s.preload);
-
-    if (deferredServers.length === 0) {
+    const deferredServers = [...this.serverMap.values()].filter(s => !s.preload);
+    if (indexed.length === 0 && deferredServers.length === 0) {
       return;
     }
+    const parts: string[] = [];
+    if (indexed.length > 0) {
+      parts.push(TOOL_INDEX_GUIDE, renderIndex(indexed));
+    }
+    if (deferredServers.length > 0) {
+      const deferredList = deferredServers
+        .map(s => (s.description ? `- ${s.name}: "${s.description.slice(0, MAX_DESCRIPTION_LENGTH)}"` : `- ${s.name}`))
+        .join('\n');
+      parts.push(
+        `These servers' tools are not listed. Use ${LIST_TOOLS_NAME} with the server name, then ${GET_TOOL_INFO_NAME}, then ${CALL_TOOL_NAME}.\n${deferredList}`,
+      );
+    }
+    builder.addSection(DEFERRED_TOOLS_INSTRUCTION, parts.join('\n\n'));
+  }
 
-    const deferredList = deferredServers
-      .map(s => (s.description ? `- ${s.name}: "${s.description.slice(0, MAX_DESCRIPTION_LENGTH)}"` : `- ${s.name}`))
-      .join('\n');
+  /**
+   * The indexed tool a server and tool name mean. A tool a not-listed connector really serves
+   * stays with that connector, so a built-in tool of the same name never shadows it.
+   */
+  async resolveIndexedTool(input: { server: string; name: string }): Promise<ToolIndexEntry | undefined> {
+    const index = this.index;
+    if (index === undefined) {
+      return undefined;
+    }
+    const exact = index.list().find(entry => entry.server === input.server && entry.originalName === input.name);
+    if (exact !== undefined) {
+      return exact;
+    }
+    const server = this.resolveServer(input.server);
+    if (server !== undefined) {
+      const listed = await server.listTools();
+      if (isAuthRequired(listed) || listed.result.tools.some(t => t.name === input.name)) {
+        return undefined;
+      }
+    }
+    return index.find(input);
+  }
 
-    builder.addSection(
-      DEFERRED_TOOLS_INSTRUCTION,
-      dedent`
-        The following MCP servers have deferred tool loading. Their tools are NOT pre-loaded.
-        ${deferredList}
-
-        The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.
-        Built-in tools are called directly by name, never through ${LIST_TOOLS_NAME}.`,
-    );
+  /**
+   * Turns each `call_tool` call that names an indexed tool into a direct call of that tool, so it
+   * is checked, approved, run and recorded exactly as a direct call. A call naming nothing indexed
+   * stays as it is and is judged here, failing closed when it names no tool.
+   */
+  async toDirectCalls(message: RawAssistantMessage): Promise<{
+    message: RawAssistantMessage;
+    /** Rewritten call ids, each with the indexed tool it now calls. */
+    rewritten: Map<string, ToolIndexEntry>;
+  }> {
+    const rewritten = new Map<string, ToolIndexEntry>();
+    if (message.tool_calls === undefined) {
+      return { message, rewritten };
+    }
+    const calls: RawToolCall[] = [];
+    for (const call of message.tool_calls) {
+      const wrapper =
+        call.function.name === CALL_TOOL_NAME ? tryParseCallToolWrapper(parseToolCallArguments(call) ?? {}) : undefined;
+      const entry =
+        wrapper === undefined
+          ? undefined
+          : await this.resolveIndexedTool({ server: wrapper.mcp_server, name: wrapper.tool_name });
+      if (wrapper === undefined || entry === undefined) {
+        calls.push(call);
+        continue;
+      }
+      rewritten.set(call.id, entry);
+      calls.push({ ...call, function: { name: entry.name, arguments: JSON.stringify(wrapper.input) } });
+    }
+    return { message: { ...message, tool_calls: calls }, rewritten };
   }
 
   protected getTools(): ToolDefinition[] {
@@ -221,39 +291,27 @@ export class DeferredTool extends LocalToolMCP {
       });
       return { ...underlying, is_deferred: true };
     }
-    // Built-in tool sets (maps, spaces, schedules and the like) are named the
-    // same way from call_tool; judge the real tool through its own tool set,
-    // exactly as a direct call is judged.
-    const hostSet = this.resolveHostServer(parsed.data.mcp_server);
-    if (hostSet) {
-      const underlying = await hostSet.toolCallInfo({
-        name: parsed.data.tool_name,
-        arguments: parsed.data.input,
-      });
-      return { ...underlying, is_deferred: true };
-    }
     this.logger.warn(`Server not found for toolCallInfo`, {
       mcpServer: parsed.data.mcp_server,
       toolName: parsed.data.tool_name,
       availableServers: [...this.serverMap.keys()],
     });
-    // The named server is neither configured nor built in: fail closed with
-    // the reason, never with an approval card for call_tool itself.
+    // An indexed tool never gets here: the thread runs it as a direct call. Whatever is left names
+    // no tool at all, so fail closed with the reason, never with an approval card for call_tool.
     return {
       ...(await super.toolCallInfo(params)),
       is_deferred: true,
       pre_dispatch_failure: {
         kind: 'pre_dispatch_failed',
-        message: this.serverNotFoundText(parsed.data.mcp_server),
+        message: this.serverNotFoundText({ mcpServer: parsed.data.mcp_server, toolName: parsed.data.tool_name }),
       },
     };
   }
 
   /**
    * The params an approval for a `call_tool` call is re-checked against at dispatch, as the
-   * wrapped tool set re-derives them (a Gmail draft as it stands now, a calendar write's settled
-   * request), exactly as for a direct call to that set. The wrapper's own tools bind only to
-   * their arguments, so anything that is not a resolved server or host call returns undefined.
+   * wrapped connector re-derives them, exactly as for a direct call to it. The wrapper's own
+   * tools bind only to their arguments, so anything that is not a resolved server returns undefined.
    */
   async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
     if (params.name !== CALL_TOOL_NAME) {
@@ -263,7 +321,7 @@ export class DeferredTool extends LocalToolMCP {
     if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
       return undefined;
     }
-    const server = this.resolveServer(parsed.data.mcp_server) ?? this.resolveHostServer(parsed.data.mcp_server);
+    const server = this.resolveServer(parsed.data.mcp_server);
     return server?.liveMintParams?.({ name: parsed.data.tool_name, arguments: parsed.data.input });
   }
 
@@ -276,7 +334,7 @@ export class DeferredTool extends LocalToolMCP {
     if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
       return undefined;
     }
-    const server = this.resolveServer(parsed.data.mcp_server) ?? this.resolveHostServer(parsed.data.mcp_server);
+    const server = this.resolveServer(parsed.data.mcp_server);
     return server?.resolveConnector?.({
       name: parsed.data.tool_name,
       arguments: parsed.data.input,
@@ -287,167 +345,38 @@ export class DeferredTool extends LocalToolMCP {
     return this.serverMap.get(name);
   }
 
-  /** The built-in (host) tool set a `call_tool` wrapper names as its server, if any. */
-  private resolveHostServer(name: string): IToolSet | undefined {
-    return this.hostToolSets.find(s => s.name === name);
-  }
-
-  /**
-   * Finds the host (systemToolSets) provider exposing `toolName`, if any. Host tools are
-   * normally called directly by name, not through call_tool, so this only runs after the
-   * named MCP server has already failed to resolve the name, so it never shadows a real
-   * server tool of the same name.
-   */
-  private async findHostToolProvider(toolName: string): Promise<IToolSet | undefined> {
-    for (const hostSet of this.hostToolSets) {
-      const listed = await hostSet.listTools();
-      if (isAuthRequired(listed)) {
-        continue;
-      }
-      if (listed.result.tools.some(t => t.name === toolName)) {
-        return hostSet;
-      }
+  /** Short and plain: the servers that exist, and where an indexed tool is called instead. */
+  private serverNotFoundText(input: { mcpServer: string; toolName: string | undefined }): string {
+    const indexed =
+      input.toolName === undefined ? undefined : this.index?.find({ server: input.mcpServer, name: input.toolName });
+    if (indexed !== undefined) {
+      return `'${indexed.name}' is in the tool index. Call ${indexed.name} directly by name.`;
     }
-    return undefined;
-  }
-
-  /**
-   * Routes a call_tool invocation whose tool_name is not on the named MCP server, but matches
-   * a host tool instead, running the host tool directly rather than rejecting the call. Returns
-   * undefined when no host tool matches, so the caller falls back to the ordinary rejection.
-   */
-  private async routeToHostTool({
-    toolName,
-    args,
-    approvalDecision,
-    context,
-  }: {
-    toolName: string;
-    args: Record<string, unknown>;
-    approvalDecision: ApprovalDecision | undefined;
-    context: ToolInvocationContext | undefined;
-  }): Promise<CallToolResponse | undefined> {
-    const hostSet = await this.findHostToolProvider(toolName);
-    if (!hostSet) {
-      return undefined;
+    const onServer = (this.index?.list() ?? []).filter(entry => entry.server === input.mcpServer);
+    if (onServer.length > 0) {
+      return `'${input.mcpServer}' has no tool named '${input.toolName ?? ''}'. Its tools: ${boundedNameList(onServer.map(entry => entry.name))}.`;
     }
-    // An approval belongs to the card the user saw, which names the requested server; it never covers a host tool.
-    if (approvalDecision !== undefined) {
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: `'${toolName}' is a host tool, not a tool on the requested MCP server, so the approval given does not cover it. Call ${toolName} directly.`,
-        }),
-        isError: true,
-      });
-    }
-    // Only a call that needs no approval is routed. Anything else must be called directly, so the host classifies
-    // it, shows its own card and checks its own approval; a connector's generic card would not cover it.
-    const info = await hostSet.toolCallInfo({ name: toolName, arguments: args });
-    if (
-      (info.tier !== undefined && info.tier > 1) ||
-      info.is_approval_required === true ||
-      info.pre_dispatch_failure !== undefined
-    ) {
-      return toolResultResponse({
-        text: JSON.stringify({ error: `'${toolName}' is a built-in tool, so call ${toolName} directly.` }),
-        isError: true,
-      });
-    }
-    const response = await hostSet.callTool({ name: toolName, arguments: args }, undefined, context);
-    return this.withHostRoutingNote(response, toolName);
-  }
-
-  /** Prepends a short note to a routed host-tool result, without disturbing its content. */
-  private withHostRoutingNote(response: CallToolResponse, toolName: string): CallToolResponse {
-    if (!isCallToolResponseResult(response)) {
-      return response;
-    }
-    const note = {
-      type: 'text' as const,
-      text: `Note: routed to the host tool '${toolName}'; it is not on the requested MCP server. Call ${toolName} directly next time instead of through ${CALL_TOOL_NAME}.`,
-    };
-    return {
-      ...response,
-      result: { ...response.result, content: [note, ...response.result.content] },
-    };
-  }
-
-  /**
-   * Short and plain: the servers that exist, then where built-in tools live. Built-in tools are never on a server,
-   * so models that look for one through list_tools need the reminder, not a structured rejection.
-   */
-  private serverNotFoundText(mcpServer: string): string {
-    const servers = [...this.serverMap.keys()];
+    const indexedServers = new Set((this.index?.list() ?? []).map(entry => entry.server));
+    const servers = [...this.serverMap.keys(), ...indexedServers];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, not through list_tools.`;
+    const next =
+      indexedServers.size > 0
+        ? 'Use a server and tool name from the tool index.'
+        : 'Built-in tools are called directly by name, not through list_tools.';
+    return `No server named '${input.mcpServer}'. Servers: ${serverList}. ${next}`;
   }
 
-  private serverNotFoundResponse(mcpServer: string): CallToolResponse {
+  private serverNotFoundResponse(input: { mcpServer: string; toolName: string | undefined }): CallToolResponse {
     return toolResultResponse({
-      text: JSON.stringify({ error: this.serverNotFoundText(mcpServer) }),
+      text: JSON.stringify({ error: this.serverNotFoundText(input) }),
       isError: true,
     });
-  }
-
-  /**
-   * Runs a call_tool invocation whose mcp_server names a built-in tool set rather than a
-   * configured MCP server. Classification judged the real tool (see toolCallInfo), so the
-   * approval decision and the invocation context forward to the tool set exactly as a
-   * direct call's would. A tool
-   * the named set does not have falls back to the by-name host routing, then to a
-   * rejection naming that set's tools.
-   */
-  private async runHostServerCall(input: {
-    hostSet: IToolSet;
-    toolName: string;
-    args: Record<string, unknown>;
-    approvalDecision: ApprovalDecision | undefined;
-    context: ToolInvocationContext | undefined;
-  }): Promise<CallToolResponse> {
-    const { hostSet, toolName, args, approvalDecision, context } = input;
-    if (META_TOOL_NAMES.has(toolName)) {
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: structuredEditRejection({
-            tool: CALL_TOOL_NAME,
-            what: 'the tool_name',
-            received: `'${toolName}'`,
-            expected: `the name of a tool on '${hostSet.name}'`,
-            hint: `'${toolName}' is a top-level tool, not a server tool; call it directly instead of through ${CALL_TOOL_NAME}.`,
-          }),
-        }),
-        isError: true,
-      });
-    }
-    const listed = await hostSet.listTools();
-    if (isAuthRequired(listed)) {
-      return listed;
-    }
-    if (!listed.result.tools.some(t => t.name === toolName)) {
-      const hostRoute = await this.routeToHostTool({ toolName, args, approvalDecision, context });
-      if (hostRoute) {
-        return hostRoute;
-      }
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: structuredEditRejection({
-            tool: CALL_TOOL_NAME,
-            what: 'the tool_name',
-            received: `'${toolName}'`,
-            expected: `the name of a tool on '${hostSet.name}'`,
-            hint: `Tools on '${hostSet.name}': ${boundedNameList(listed.result.tools.map(t => t.name))}.`,
-          }),
-        }),
-        isError: true,
-      });
-    }
-    return hostSet.callTool({ name: toolName, arguments: args }, approvalDecision, context);
   }
 
   private async resolveServerTools(input: { mcpServer: string }): Promise<CallToolResponse | ResolvedServerTools> {
     const server = this.resolveServer(input.mcpServer);
     if (!server) {
-      return this.serverNotFoundResponse(input.mcpServer);
+      return this.serverNotFoundResponse({ mcpServer: input.mcpServer, toolName: undefined });
     }
 
     const listResponse = await server.listTools();
@@ -464,6 +393,10 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runListTools(input: { mcp_server: string }): Promise<CallToolResponse> {
     try {
+      const indexed = (this.index?.list() ?? []).filter(entry => entry.server === input.mcp_server);
+      if (indexed.length > 0 && this.resolveServer(input.mcp_server) === undefined) {
+        return toolResultResponse({ text: `${input.mcp_server}:\n  ${indexed.map(entry => entry.name).join(', ')}` });
+      }
       const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
@@ -499,6 +432,17 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolInfo(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
+      const indexed = await this.resolveIndexedTool({ server: input.mcp_server, name: input.tool_name });
+      if (indexed !== undefined) {
+        return toolResultResponse({
+          text: JSON.stringify({
+            description: indexed.definition.function.description ?? indexed.summary,
+            inputSchema: indexed.definition.function.parameters ?? {},
+            outputSchema: null,
+            next_step: `Call ${indexed.name} directly by name. It stays loaded for the rest of this chat.`,
+          }),
+        });
+      }
       const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
@@ -548,9 +492,9 @@ export class DeferredTool extends LocalToolMCP {
     return defineTool({
       name: GET_TOOL_INFO_NAME,
       description: dedent`
-        Get description, inputSchema and outputSchema for a specific tool on an MCP server.
+        Get description, inputSchema and outputSchema for a tool, by its server and name.
         If outputSchema is null, it will NOT be present in ${GET_TOOL_OUTPUT_SCHEMA_NAME} as well.
-        The Agent MUST call ${LIST_TOOLS_NAME} first to know which tools are available.`,
+        For a server not in the tool index, call ${LIST_TOOLS_NAME} first to know which tools it has.`,
       schema: getToolInfoSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
       handler: async (input: { mcp_server: string; tool_name: string }) => this.runGetToolInfo(input),
@@ -559,6 +503,9 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolOutputSchema(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
+      if ((await this.resolveIndexedTool({ server: input.mcp_server, name: input.tool_name })) !== undefined) {
+        return toolResultResponse({ text: JSON.stringify({ outputSchema: null }) });
+      }
       const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
@@ -661,8 +608,8 @@ export class DeferredTool extends LocalToolMCP {
     return defineTool({
       name: CALL_TOOL_NAME,
       description: dedent`
-        Call a tool on an MCP server.
-        The Agent MUST call ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} before calling a tool.
+        Call a tool by its server and name.
+        The Agent MUST call ${GET_TOOL_INFO_NAME} before calling a tool, and should call a tool from the tool index directly by name.
         ${LIST_TOOLS_NAME}, ${GET_TOOL_INFO_NAME} and ${GET_TOOL_OUTPUT_SCHEMA_NAME} are also accepted as
         ${CALL_TOOL_NAME}'s tool_name: it runs that meta tool directly with the given input, since they
         are meta tools rather than tools on an MCP server.`,
@@ -674,31 +621,7 @@ export class DeferredTool extends LocalToolMCP {
       ) => {
         const server = this.resolveServer(input.mcp_server);
         if (!server) {
-          const hostSet = this.resolveHostServer(input.mcp_server);
-          if (hostSet !== undefined) {
-            try {
-              return await this.runHostServerCall({
-                hostSet,
-                toolName: input.tool_name,
-                args: input.input,
-                approvalDecision,
-                context,
-              });
-            } catch (error) {
-              this.logger.error('call_tool failed', {
-                ...extractErrorLogFields(error),
-                mcpServer: input.mcp_server,
-                toolName: input.tool_name,
-              });
-              return toolResultResponse({
-                text: JSON.stringify({
-                  error: `Tool call failed: ${error instanceof Error ? error.message : 'unknown'}`,
-                }),
-                isError: true,
-              });
-            }
-          }
-          return this.serverNotFoundResponse(input.mcp_server);
+          return this.serverNotFoundResponse({ mcpServer: input.mcp_server, toolName: input.tool_name });
         }
 
         if (ALIASABLE_META_TOOL_NAMES.has(input.tool_name)) {
@@ -726,15 +649,7 @@ export class DeferredTool extends LocalToolMCP {
             return resolved;
           }
           if (!resolved.tools.some(t => t.name === input.tool_name)) {
-            const hostRoute = await this.routeToHostTool({
-              toolName: input.tool_name,
-              args: input.input,
-              approvalDecision,
-              context,
-            });
-            if (hostRoute) {
-              return hostRoute;
-            }
+            const indexed = this.index?.find({ server: input.mcp_server, name: input.tool_name });
             return toolResultResponse({
               text: JSON.stringify({
                 error: structuredEditRejection({
@@ -742,7 +657,10 @@ export class DeferredTool extends LocalToolMCP {
                   what: 'the tool_name',
                   received: `'${input.tool_name}'`,
                   expected: `the name of a tool on '${input.mcp_server}'`,
-                  hint: `Tools on '${input.mcp_server}': ${boundedNameList(resolved.tools.map(t => t.name))}.`,
+                  hint:
+                    indexed === undefined
+                      ? `Tools on '${input.mcp_server}': ${boundedNameList(resolved.tools.map(t => t.name))}.`
+                      : `'${indexed.name}' is in the tool index. Call ${indexed.name} directly by name.`,
                 }),
               }),
               isError: true,

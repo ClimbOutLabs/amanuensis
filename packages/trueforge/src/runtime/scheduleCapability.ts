@@ -340,6 +340,10 @@ export class ScheduleToolSet extends LocalToolMCP {
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
     const call = withoutRetiredAgent(params);
     const info = await super.toolCallInfo(call, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     const prepared = isScheduleWriteToolName(call.name) ? await this.#prepareWrite(call) : undefined;
     if (prepared !== undefined && !prepared.ok) {
       // Not a permission wall: the model can fix the call or ask the user. A policy block would count toward

@@ -1,16 +1,13 @@
 /**
- * An approved write that reaches its tool through call_tool, end to end:
- * DeferredTool classifies the wrapper on the real tool, the owner approves,
- * and executeToolCalls verifies and dispatches the wrapper.
+ * An approved write that reaches its tool through call_tool, end to end: the
+ * wrapper becomes a direct call of the indexed tool, the tool set classifies it,
+ * the owner approves, and executeToolCalls verifies and dispatches it.
  *
  * The approval is minted over the tool set's own approved params, which the
  * wire arguments alone do not carry (a Gmail draft's review hash, a calendar
- * write's settled request and zone). Verification must re-derive those params
- * through the wrapped tool set, and dispatch must hand the tool the approved
- * params it was shown, exactly as a direct call does. Before the fix, the
- * verifier fell back to comparing the raw inner arguments with the approved
- * params and every such call failed with "Tool arguments changed since
- * approval", and the tool never received its approved params either.
+ * write's settled request and zone). Verification must re-derive those params,
+ * and dispatch must hand the tool the approved params it was shown, exactly as
+ * a direct call does, because after the rewrite it is a direct call.
  */
 import { createLogger } from 'winston';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
@@ -18,39 +15,52 @@ import type { GmailMessage } from '../../../src/core/email/gmail/gmailWire';
 import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import type { SentinelHostContext } from '../../../src/core/permissions/context';
+import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { build as buildCalendar, EVENTS_PATH } from '../calendar/harness';
+import { builtInToolIndex } from '../fixtures/toolIndex';
 import { plainDraft } from '../email/gmail/fixtures';
 import { build as buildGmail, json, route, type Route } from '../email/gmail/harness';
 
 const silentLogger = createLogger({ silent: true });
 
-/** Classifies a call_tool wrapper, approves it, and dispatches it through the real host path. */
-async function classifyApproveDispatch(input: {
-  deferred: DeferredTool;
-  sentinel: SentinelHostContext;
+/** Turns a call_tool wrapper into its direct call, classifies it, approves it, and dispatches it through the real host path. */
+async function directCallOf(input: {
+  toolSet: IToolSet;
   wrapper: { mcp_server: string; tool_name: string; input: Record<string, unknown> };
 }) {
-  const info = await input.deferred.toolCallInfo({ name: 'call_tool', arguments: input.wrapper });
-  expect(info.pre_dispatch_failure).toBeUndefined();
-  expect(info.tier).toBe(3);
-  expect(info.is_approval_required).toBe(true);
-  const message: InternalEnrichedAssistantMessage = {
+  const { index, converted } = await builtInToolIndex([input.toolSet]);
+  const deferred = new DeferredTool([], { tracing: NOOP_AGENT_TRACING, logger: silentLogger, index });
+  const { message } = await deferred.toDirectCalls({
     role: 'assistant',
     content: null,
     tool_calls: [
-      {
-        id: 'call-1',
-        type: 'function',
-        function: { name: 'call_tool', arguments: JSON.stringify(input.wrapper) },
-        tool_info: info,
-      },
+      { id: 'call-1', type: 'function', function: { name: 'call_tool', arguments: JSON.stringify(input.wrapper) } },
     ],
+  });
+  const call = message.tool_calls?.[0];
+  const mapped = call === undefined ? undefined : converted.toolMapping.get(call.function.name);
+  if (call === undefined || mapped === undefined) {
+    throw new Error('expected the wrapper to become a direct call of an indexed tool');
+  }
+  const info = await mapped.toolSet.toolCallInfo({ name: mapped.originalToolName, arguments: input.wrapper.input });
+  return { call, info, toolMapping: converted.toolMapping };
+}
+
+async function dispatchApproved(input: {
+  direct: Awaited<ReturnType<typeof directCallOf>>;
+  sentinel: SentinelHostContext;
+}) {
+  const { call, info, toolMapping } = input.direct;
+  const message: InternalEnrichedAssistantMessage = {
+    role: 'assistant',
+    content: null,
+    tool_calls: [{ ...call, tool_info: info }],
   };
   const result = await executeToolCalls({
     assistantMessage: message,
-    toolMapping: new Map([['call_tool', { toolSet: input.deferred, originalToolName: 'call_tool' }]]),
+    toolMapping,
     threadId: 'main',
     approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
     memoState: createToolCallMemoState(),
@@ -74,6 +84,19 @@ async function classifyApproveDispatch(input: {
   return outcome;
 }
 
+async function classifyApproveDispatch(input: {
+  toolSet: IToolSet;
+  sentinel: SentinelHostContext;
+  wrapper: { mcp_server: string; tool_name: string; input: Record<string, unknown> };
+}) {
+  const direct = await directCallOf({ toolSet: input.toolSet, wrapper: input.wrapper });
+  expect(direct.call.function.name).toBe(input.wrapper.tool_name);
+  expect(direct.info.pre_dispatch_failure).toBeUndefined();
+  expect(direct.info.tier).toBe(3);
+  expect(direct.info.is_approval_required).toBe(true);
+  return dispatchApproved({ direct, sentinel: input.sentinel });
+}
+
 const ORIGINAL = plainDraft({
   id: 'd-m1',
   threadId: 't9',
@@ -92,13 +115,8 @@ describe('an approved send_draft through call_tool', () => {
       features: ['gmail_read', 'gmail_compose'],
       routes: [draftRoute, sendRoute],
     });
-    const deferred = new DeferredTool([], {
-      tracing: NOOP_AGENT_TRACING,
-      logger: silentLogger,
-      hostToolSets: [tools],
-    });
     const outcome = await classifyApproveDispatch({
-      deferred,
+      toolSet: tools,
       sentinel,
       wrapper: { mcp_server: 'gmail', tool_name: 'send_draft', input: { draft_id: 'd1' } },
     });
@@ -115,14 +133,9 @@ describe('an approved send_draft through call_tool', () => {
       features: ['gmail_read', 'gmail_compose'],
       routes: [changingDraftRoute, sendRoute],
     });
-    const deferred = new DeferredTool([], {
-      tracing: NOOP_AGENT_TRACING,
-      logger: silentLogger,
-      hostToolSets: [tools],
-    });
     const wrapper = { mcp_server: 'gmail', tool_name: 'send_draft', input: { draft_id: 'd1' } };
-    const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: wrapper });
-    expect(info.tier).toBe(3);
+    const direct = await directCallOf({ toolSet: tools, wrapper });
+    expect(direct.info.tier).toBe(3);
     live = plainDraft({
       id: 'd-m1',
       threadId: 't9',
@@ -130,41 +143,7 @@ describe('an approved send_draft through call_tool', () => {
       subject: 'Lease',
       body: 'Send me the keys.',
     });
-    const message: InternalEnrichedAssistantMessage = {
-      role: 'assistant',
-      content: null,
-      tool_calls: [
-        {
-          id: 'call-1',
-          type: 'function',
-          function: { name: 'call_tool', arguments: JSON.stringify(wrapper) },
-          tool_info: info,
-        },
-      ],
-    };
-    const result = await executeToolCalls({
-      assistantMessage: message,
-      toolMapping: new Map([['call_tool', { toolSet: deferred, originalToolName: 'call_tool' }]]),
-      threadId: 'main',
-      approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
-      memoState: createToolCallMemoState(),
-      sentinel: {
-        services: sentinel.services,
-        web_search: sentinel.web_search,
-        identity: {
-          tenant_id: sentinel.tenant_id,
-          created_by: sentinel.created_by,
-          conversation_id: sentinel.conversation_id,
-          repository_id: null,
-          workspace_cwd: null,
-          agent_intent: null,
-        },
-      },
-    });
-    const outcome = result.toolCallResults[0];
-    if (outcome === undefined) {
-      throw new Error('expected one tool call result');
-    }
+    const outcome = await dispatchApproved({ direct, sentinel });
     expect(outcome.failure).toBe(true);
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
@@ -181,13 +160,8 @@ describe('an approved calendar write through call_tool', () => {
       features: ['gmail_read', 'calendar_read', 'calendar_write'],
       timeZone: 'America/New_York',
     });
-    const deferred = new DeferredTool([], {
-      tracing: NOOP_AGENT_TRACING,
-      logger: silentLogger,
-      hostToolSets: [built.tools],
-    });
     const outcome = await classifyApproveDispatch({
-      deferred,
+      toolSet: built.tools,
       sentinel: built.sentinel,
       wrapper: { mcp_server: 'google_calendar', tool_name: 'create_event', input: { ...DENTIST } },
     });

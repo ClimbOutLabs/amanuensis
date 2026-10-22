@@ -247,6 +247,10 @@ export class GmailToolSet extends LocalToolMCP {
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     // A scheduled run is refused by the classifier before anything is loaded to show.
     const prepared = this.#options.sentinel.services.unattended
       ? { draft: undefined, replaces: undefined, answered: undefined }

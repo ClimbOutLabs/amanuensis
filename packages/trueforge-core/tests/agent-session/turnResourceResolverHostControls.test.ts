@@ -12,6 +12,7 @@ import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import { toolResultResponse, type IToolSet } from '../../src/core/mcp/IMCPServer';
 import type { HostToolCallPolicy } from '../../src/core/runtime/HostToolCallPolicy';
+import { offeredTools } from '../core/fixtures/offeredTools';
 import { makeMockIMCPServer, OBJECT_INPUT_SCHEMA } from '../core/harnessMocks';
 import { emptyLlmStream, makeAgentSpec, makeSilentLogger, mintTestTurnId } from './testHelpers';
 
@@ -134,8 +135,8 @@ function webSearchingModel(requests: LLMCreateParamsStreaming[], options: { viaC
       if (requests.length > 1) {
         return emptyLlmStream();
       }
-      const name = request.tools
-        ?.flatMap(tool => (tool.type === 'function' ? [tool.function.name] : []))
+      const name = offeredTools(request)
+        .flatMap(tool => (tool.type === 'function' ? [tool.function.name] : []))
         .find(candidate => candidate.includes(target));
       if (name === undefined) {
         throw new Error(`${target} was not advertised to the model`);
