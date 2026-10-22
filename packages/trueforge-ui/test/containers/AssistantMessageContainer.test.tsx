@@ -16,6 +16,7 @@ import { setModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 import { NANO_COMPACTION_EVENT, NANO_SUMMARY_EVENT, SUPER_EVENT } from '../fixtures/modelUsageEvents.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
+import { AgentDetailsHarness, agentDetailsServer, settleAgentDetails } from './agentDetailsHarness.js';
 
 // The orb draws on a 2d canvas context, which jsdom does not implement; stub
 // it like the WaitQueueIndicator suite does. The queue's stations, microcopy,
@@ -32,10 +33,26 @@ vi.mock('@/components/MapCard.js', () => ({
   ),
 }));
 
-function assistantMessageTree(
-  messages: ThreadMessageLike[],
-  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
-) {
+type RenderOptions = {
+  isRunning?: boolean;
+  onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void;
+  /** The chat's stored "Show agent details" switch; omit for a chat with no session yet (off). */
+  agentDetails?: 'expanded' | 'collapsed';
+};
+
+function assistantMessageTree(messages: ThreadMessageLike[], options?: RenderOptions) {
+  if (options?.agentDetails !== undefined) {
+    return (
+      <AgentDetailsHarness
+        agentDetails={options.agentDetails}
+        messages={messages}
+        isRunning={options.isRunning}
+        onRespondToToolApproval={options.onRespondToToolApproval}
+      >
+        <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+      </AgentDetailsHarness>
+    );
+  }
   return (
     <RuntimeHarness
       messages={messages}
@@ -47,11 +64,15 @@ function assistantMessageTree(
   );
 }
 
-function renderAssistantMessage(
-  messages: ThreadMessageLike[],
-  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
-) {
+function renderAssistantMessage(messages: ThreadMessageLike[], options?: RenderOptions) {
   return render(assistantMessageTree(messages, options));
+}
+
+/** Renders with the chat's "Show agent details" switch on, once the stored switch has loaded. */
+async function renderWithDetailsOn(messages: ThreadMessageLike[], options?: Omit<RenderOptions, 'agentDetails'>) {
+  const result = renderAssistantMessage(messages, { ...options, agentDetails: 'expanded' });
+  await settleAgentDetails();
+  return result;
 }
 
 function getAgentInternals(): HTMLElement {
@@ -144,8 +165,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByText(/^\d+ \/ \d+$/)).not.toBeInTheDocument();
   });
 
-  it('labels a running turn as waiting for the model when no tool is running', () => {
-    renderAssistantMessage(
+  it('labels a running turn as waiting for the model when no tool is running', async () => {
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -159,8 +180,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.getByText(/Waiting for model/)).toBeInTheDocument();
   });
 
-  it('labels a running turn as executing tools when a tool part is running', () => {
-    renderAssistantMessage(
+  it('labels a running turn as executing tools when a tool part is running', async () => {
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -182,8 +203,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
   });
 
-  it('labels a real message-level tool approval pause as waiting for approval', () => {
-    renderAssistantMessage([
+  it('labels a real message-level tool approval pause as waiting for approval', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -214,8 +235,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the approval phase and controls inside the agent internals disclosure', () => {
-    renderAssistantMessage([
+  it('keeps the approval phase and controls inside the agent internals disclosure', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -244,8 +265,8 @@ describe('AssistantMessageContainer', () => {
     expect(within(internals).getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
   });
 
-  it('counts mixed-turn approval tools only inside the agent internals disclosure', () => {
-    renderAssistantMessage([
+  it('counts mixed-turn approval tools only inside the agent internals disclosure', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -284,9 +305,9 @@ describe('AssistantMessageContainer', () => {
     expect(cardContent.queryByText('The lookup is complete.')).not.toBeInTheDocument();
   });
 
-  it('forwards the approval decision from inside the agent internals disclosure', () => {
+  it('forwards the approval decision from inside the agent internals disclosure', async () => {
     const onRespondToToolApproval = vi.fn();
-    renderAssistantMessage(
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -362,8 +383,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
-  it('summarizes completed tool turns as one faint line, collapsed with no chat-level preference stored', () => {
-    renderAssistantMessage([
+  it('summarizes completed tool turns as one faint line when agent details are on', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -383,11 +404,11 @@ describe('AssistantMessageContainer', () => {
 
     const internals = getAgentInternals();
     expect(internals).toHaveTextContent(/2 steps · 1 tool/);
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
+    expect(within(internals).getByText('lookup_notes')).toBeVisible();
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
   });
 
-  describe('answer text written before a tool call', () => {
+  describe('answer text written before a tool call, agent details on', () => {
     const SUMMARY = 'The PDF covers three topics: pricing, onboarding, and the support model, with details for each.';
     const toolCall = {
       type: 'tool-call' as const,
@@ -398,8 +419,8 @@ describe('AssistantMessageContainer', () => {
       result: { ok: true },
     };
 
-    it('keeps substantive text outside the collapsed internals, in order', () => {
-      renderAssistantMessage([
+    it('keeps substantive text outside the internals, in order', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [{ type: 'text', text: SUMMARY }, toolCall, { type: 'text', text: 'Confirmed.' }],
@@ -409,15 +430,15 @@ describe('AssistantMessageContainer', () => {
       const summary = screen.getByText(SUMMARY);
       const internals = getAgentInternals();
       const confirmed = screen.getByText('Confirmed.');
-      expect(summary.closest('[hidden]')).toBeNull();
+      expect(summary).toBeVisible();
+      expect(internals).not.toContainElement(summary);
       expect(internals).toHaveTextContent(/1 step · 1 tool/);
-      expect(internals.querySelector('[hidden]')).not.toBeNull();
       expect(summary.compareDocumentPosition(internals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('keeps short text before a tool call visible', () => {
-      renderAssistantMessage([
+    it('keeps short text before a tool call visible', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [
@@ -428,13 +449,12 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      expect(screen.getByText('Let me search for that.').closest('[hidden]')).toBeNull();
-      expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
-      expect(getAgentInternals().querySelector('[hidden]')).not.toBeNull();
+      expect(screen.getByText('Let me search for that.')).toBeVisible();
+      expect(screen.getByText('Here you go.')).toBeVisible();
     });
 
-    it('shows the sentence before a run_code call and the result after it', () => {
-      renderAssistantMessage([
+    it('shows the sentence before a run_code call and the result after it', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [
@@ -445,12 +465,12 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
-      expect(screen.getByText('20').closest('[hidden]')).toBeNull();
+      expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
+      expect(screen.getByText('20')).toBeVisible();
     });
 
-    it('shows the sentence before an undecided approval while the turn waits', () => {
-      renderAssistantMessage([
+    it('shows the sentence before an undecided approval while the turn waits', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           status: { type: 'requires-action', reason: 'tool-calls' },
@@ -475,12 +495,12 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
+      expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
       expect(getAgentInternals()).toHaveTextContent(/Waiting for approval/);
     });
 
     it('shows the answer after a tool call while the message is still running', async () => {
-      renderAssistantMessage(
+      await renderWithDetailsOn(
         [
           {
             role: 'assistant',
@@ -491,11 +511,11 @@ describe('AssistantMessageContainer', () => {
         { isRunning: true },
       );
 
-      expect((await screen.findByText('The result is 2')).closest('[hidden]')).toBeNull();
+      expect(await screen.findByText('The result is 2')).toBeVisible();
     });
 
-    it('renders one disclosure per folded run with its own counts', () => {
-      renderAssistantMessage([
+    it('renders one disclosure per folded run with its own counts', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [
@@ -512,21 +532,22 @@ describe('AssistantMessageContainer', () => {
       expect(disclosures).toHaveLength(2);
       expect(disclosures[0]).toHaveTextContent(/1 step · 1 tool/);
       expect(disclosures[1]).toHaveTextContent(/2 steps · 2 tools/);
-      expect(screen.getByText(SUMMARY).closest('[hidden]')).toBeNull();
+      expect(screen.getByText(SUMMARY)).toBeVisible();
     });
   });
 
-  it('collapses the content but keeps the attention dot when a completed turn has a tool error', () => {
-    renderAssistantMessage([erroredToolCallMessage()]);
+  it("lets the person close one answer's details while agent details are on", async () => {
+    await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(internals).toHaveTextContent(/1 step · 1 tool/);
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
+    expect(within(internals).getByText('lookup_notes')).toBeVisible();
+    fireEvent.click(screen.getByTestId('assistant-message-agent-internals-toggle'));
+    expect(within(internals).getByText('lookup_notes')).not.toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 
-  it('auto-expands the internals of a running turn when a tool errored', () => {
-    renderAssistantMessage([{ ...erroredToolCallMessage(), status: { type: 'running' } }], { isRunning: true });
+  it('auto-expands the internals of a running turn when a tool errored', async () => {
+    await renderWithDetailsOn([{ ...erroredToolCallMessage(), status: { type: 'running' } }], { isRunning: true });
 
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();
@@ -534,37 +555,188 @@ describe('AssistantMessageContainer', () => {
   });
 
   it('reveals a completed errored turn when the stored agent-details preference is expanded', async () => {
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: 'expanded' },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
-
-    render(
-      <ServerProvider server={server}>
-        <AgentDetailsPreferenceProvider>
-          <RuntimeHarness messages={[erroredToolCallMessage()]} threadId="t1" remoteId="sess-1">
-            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-          </RuntimeHarness>
-        </AgentDetailsPreferenceProvider>
-      </ServerProvider>,
-    );
-    // Let the stored session preference resolve.
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(internals.querySelector('[hidden]')).toBeNull();
+    expect(within(internals).getByText('lookup_notes')).toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer with agent details off', () => {
+  const FIRST_LINE = 'Let me pull together your notes digest. First I will gather everything.';
+  const SECOND_LINE = 'Let me read the key notes in full before I sum up.';
+  const FINAL = 'Here is your digest: two notes need a reply today.';
+  const RAW_ERROR = 'Notes has no such entry.';
+
+  function noteCall(id: string, extra: Partial<{ result: unknown }> = {}) {
+    return {
+      type: 'tool-call' as const,
+      toolCallId: id,
+      toolName: 'read_note',
+      args: { id },
+      argsText: JSON.stringify({ id }),
+      ...extra,
+    };
+  }
+
+  const failedCall = noteCall('note-missing', {
+    result: {
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: { error: RAW_ERROR },
+    },
+  });
+
+  /** Several tool steps, two in-between lines and one failed call the reply recovered from. */
+  function workedReply(): Exclude<ThreadMessageLike['content'], string> {
+    return [
+      { type: 'text', text: FIRST_LINE },
+      { ...noteCall('list'), toolName: 'list_notes', result: { ok: true } },
+      { type: 'text', text: SECOND_LINE },
+      noteCall('note-1', { result: { ok: true } }),
+      failedCall,
+      noteCall('note-2', { result: { ok: true } }),
+      { type: 'text', text: FINAL },
+    ];
+  }
+
+  function expectNoWorkShown(): void {
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ steps?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(FIRST_LINE)).not.toBeInTheDocument();
+    expect(screen.queryByText(SECOND_LINE)).not.toBeInTheDocument();
+    for (const name of [/read_note/, /list_notes/, new RegExp(RAW_ERROR)]) {
+      for (const element of screen.queryAllByText(name)) expect(element).not.toBeVisible();
+    }
+  }
+
+  it('shows the final answer and one plain line for the failed step, and nothing else of the work', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: workedReply() }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expectNoWorkShown();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toHaveTextContent(
+      "One step didn't finish. Turn on agent details to see it.",
+    );
+  });
+
+  it('says a hidden step did not finish when it was blocked, even under an answer that claims success', async () => {
+    const blocked = noteCall('send', {
+      result: { schema_version: 'tool.response.v2', outcome: { disposition: 'policy_blocked' }, result: {} },
+    });
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: FIRST_LINE }, blocked, { type: 'text', text: 'Done, I sent it.' }],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+
+    expect(screen.getByText('Done, I sent it.')).toBeVisible();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toBeVisible();
+  });
+
+  it('adds no step line when every hidden step finished', async () => {
+    const content = workedReply().filter(part => part !== failedCall);
+    renderAssistantMessage([{ role: 'assistant', content }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('shows only the live progress line while the reply is still working', async () => {
+    const running = [...workedReply().slice(0, -1), noteCall('note-3')];
+    renderAssistantMessage([{ role: 'assistant', content: running, status: { type: 'running' } }], {
+      agentDetails: 'collapsed',
+      isRunning: true,
+    });
+    await settleAgentDetails();
+
+    expect(document.querySelector('[data-slot="aui_assistant-message-indicator"]')).not.toBeNull();
+    expectNoWorkShown();
+  });
+
+  it('shows the steps, the in-between lines and the failed call once agent details are on', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: workedReply() }]);
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.getByText(FIRST_LINE)).toBeVisible();
+    expect(screen.getByText(SECOND_LINE)).toBeVisible();
+    const disclosures = screen.getAllByTestId('assistant-message-agent-internals');
+    expect(disclosures[1]).toHaveTextContent(/3 steps · 3 tools/);
+    for (const element of screen.getAllByText(/read_note/)) expect(element).toBeVisible();
+    expect(screen.getByText(new RegExp(RAW_ERROR))).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('still shows the approval card, and nothing else of the work', async () => {
+    const onRespondToToolApproval = vi.fn();
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          status: { type: 'requires-action', reason: 'tool-calls' },
+          content: [
+            { type: 'text', text: FIRST_LINE },
+            noteCall('note-1', { result: { ok: true } }),
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-approval',
+              toolName: 'write_notes',
+              args: { path: 'notes.md' },
+              argsText: '{"path":"notes.md"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-1',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      { agentDetails: 'collapsed', onRespondToToolApproval },
+    );
+    await settleAgentDetails();
+
+    expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeVisible();
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    expect(onRespondToToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: 'approval-1', approved: true }),
+    );
+    expectNoWorkShown();
+  });
+
+  it('says in one plain line that a failed reply did not finish, never the raw tool error', () => {
+    renderAssistantMessage([erroredToolCallMessage()]);
+
+    expect(screen.getByTestId('assistant-message-not-finished')).toHaveTextContent(
+      'This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.',
+    );
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    for (const element of screen.queryAllByText(/lookup failed|lookup_notes/)) expect(element).not.toBeVisible();
+  });
+
+  it('keeps the last line as the answer when a finished reply wrote nothing after its last step', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: FINAL }, noteCall('note-1', { result: { ok: true } })],
+      },
+    ]);
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
   });
 });
 
@@ -630,17 +802,7 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     recallOutcome?: 'ok' | 'timeout' | 'error';
   }) {
     const { agentDetails, recallOutcome = 'ok' } = options;
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: agentDetails },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
+    const server = agentDetailsServer(agentDetails);
     const recall: TrueForgeApi.MemoryRecallPersistedEvent = {
       ...recallEvent,
       stats: { ...recallEvent.stats, outcome: recallOutcome },
@@ -683,28 +845,22 @@ describe('AssistantMessageContainer memory recall visibility', () => {
   });
 
   it('keeps the attention dot and the recall count in the summary when a completed recall errored', async () => {
-    await renderWithStoredPreference({ agentDetails: 'collapsed', recallOutcome: 'error' });
+    await renderWithStoredPreference({ agentDetails: 'expanded', recallOutcome: 'error' });
 
     const internals = getAgentInternals();
-    // The failed recall still surfaces in the summary row next to the amber dot…
     expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
-    // …while the disclosure content itself collapses on the completed turn.
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
   });
 
-  it('shows the attention dot with collapsed content when the memory context fetch failed', async () => {
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: 'collapsed' },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
+  it('shows nothing of a failed recall while agent details are off', async () => {
+    await renderWithStoredPreference({ agentDetails: 'collapsed', recallOutcome: 'error' });
+
+    expect(screen.getByText('here you go')).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('shows the attention dot when the memory context fetch failed and agent details are on', async () => {
+    const server = agentDetailsServer('expanded');
     const listMemoryTurnContext = vi.fn(async () => {
       throw new Error('memory fetch failed');
     });
@@ -729,9 +885,8 @@ describe('AssistantMessageContainer memory recall visibility', () => {
       await Promise.resolve();
     });
 
-    const internals = getAgentInternals();
+    expect(getAgentInternals()).toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
   });
 });
 
@@ -1115,17 +1270,7 @@ describe('AssistantMessageContainer model and cost line', () => {
     threadMessages?: ThreadMessageLike[];
   }) {
     const { usage, agentDetails = 'collapsed', isRunning = false, threadMessages = messages } = options;
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-10-15T00:00:00.000Z',
-      updatedAt: '2026-10-15T00:00:00.000Z',
-      metadata: { agent_details: agentDetails },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
+    const server = agentDetailsServer(agentDetails);
     const listModelUsage = vi.fn(async () => usage);
 
     const result = render(
@@ -1149,29 +1294,18 @@ describe('AssistantMessageContainer model and cost line', () => {
     return { ...result, listModelUsage };
   }
 
-  function openDetails(): void {
-    fireEvent.click(screen.getByTestId('assistant-message-agent-internals-toggle'));
-  }
-
-  it('keeps the usage hidden in the answer details until they are opened', async () => {
+  it('shows no usage line and no details row while agent details are off', async () => {
     await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }] });
 
-    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
-    expect(toggle).toHaveTextContent('Details');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByTestId('model-usage-overview')).not.toBeVisible();
-
-    openDetails();
-
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(within(getAgentInternals()).getByTestId('model-usage-overview')).toBeVisible();
-    expect(screen.getByTestId('model-usage-model')).toHaveTextContent('Model: Nemotron 3 Super (Token Factory)');
-    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 2,140 (1,800 in, 340 out)');
+    expect(screen.getByText('here you go')).toBeVisible();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
-  it('shows the usage line with the steps when a turn with tools opens its details', async () => {
+  it('shows the usage line with the steps when agent details are on', async () => {
     await renderWithUsage({
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      agentDetails: 'expanded',
       threadMessages: [
         {
           role: 'assistant',
@@ -1192,13 +1326,10 @@ describe('AssistantMessageContainer model and cost line', () => {
     });
 
     expect(screen.getAllByTestId('assistant-message-agent-internals')).toHaveLength(1);
-    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
-    expect(toggle).toHaveTextContent('1 step · 1 tool');
-    expect(screen.getByTestId('model-usage-overview')).not.toBeVisible();
-
-    openDetails();
-
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('1 step · 1 tool');
     expect(within(getAgentInternals()).getByTestId('model-usage-overview')).toBeVisible();
+    expect(screen.getByTestId('model-usage-model')).toHaveTextContent('Model: Nemotron 3 Super (Token Factory)');
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 2,140 (1,800 in, 340 out)');
   });
 
   it('shows the usage line when agent details are on for the chat', async () => {
@@ -1208,12 +1339,13 @@ describe('AssistantMessageContainer model and cost line', () => {
     expect(screen.getByTestId('model-usage-overview')).toBeVisible();
   });
 
-  it('starts every answer collapsed, whatever another answer was opened to', async () => {
+  it('closes only the answer whose details the person closed', async () => {
     await renderWithUsage({
       usage: [
         { turnId: 'trn_1', events: [SUPER_EVENT] },
         { turnId: 'trn_2', events: [SUPER_EVENT] },
       ],
+      agentDetails: 'expanded',
       threadMessages: [
         { role: 'assistant', content: 'first answer', metadata: { custom: { turnId: 'trn_1' } } },
         { role: 'user', content: 'and then?' },
@@ -1225,16 +1357,17 @@ describe('AssistantMessageContainer model and cost line', () => {
     if (first === undefined || second === undefined) throw new Error('Expected a toggle on both answers');
     fireEvent.click(first);
 
-    expect(first).toHaveAttribute('aria-expanded', 'true');
-    expect(second).toHaveAttribute('aria-expanded', 'false');
+    expect(first).toHaveAttribute('aria-expanded', 'false');
+    expect(second).toHaveAttribute('aria-expanded', 'true');
     const [firstUsage, secondUsage] = screen.getAllByTestId('model-usage-overview');
-    expect(firstUsage).toBeVisible();
-    expect(secondUsage).not.toBeVisible();
+    expect(firstUsage).not.toBeVisible();
+    expect(secondUsage).toBeVisible();
   });
 
   it('folds helper calls into the total and names the model they ran on', async () => {
     await renderWithUsage({
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+      agentDetails: 'expanded',
     });
 
     expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 6,990 (6,300 in, 690 out)');
@@ -1258,18 +1391,6 @@ describe('AssistantMessageContainer model and cost line', () => {
     expect(rows[2]).toHaveTextContent('4,300 tokens (4,000 in, 300 out) · $0.0003');
   });
 
-  it('keeps the helper rows out of the details while agent details are off, leaving the line', async () => {
-    await renderWithUsage({
-      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
-      agentDetails: 'collapsed',
-    });
-    openDetails();
-
-    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
-    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('Details');
-    expect(screen.getByTestId('model-usage-helpers')).toBeVisible();
-  });
-
   it('says usage was not reported when the provider reported none', async () => {
     await renderWithUsage({
       usage: [
@@ -1278,6 +1399,7 @@ describe('AssistantMessageContainer model and cost line', () => {
           events: [{ ...SUPER_EVENT, reportedCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: null }],
         },
       ],
+      agentDetails: 'expanded',
     });
 
     expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: not reported');
@@ -1329,5 +1451,37 @@ describe('AssistantMessageContainer model and cost line', () => {
     );
 
     expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer with agent details off and an answer before a later step', () => {
+  it('shows the whole answer and the short closing line', async () => {
+    const ANSWER =
+      'Here is your plan for Friday.\n\n- Lunch with Sam at 12:30\n- Dentist at 3pm, bring the insurance card';
+    const CLOSING = 'Saved to your notes.';
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: ANSWER },
+            {
+              type: 'tool-call',
+              toolCallId: 'save',
+              toolName: 'write_note',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            { type: 'text', text: CLOSING },
+          ],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+    expect(screen.getByText(CLOSING)).toBeVisible();
+    expect(screen.getByText('Here is your plan for Friday.')).toBeVisible();
+    expect(screen.getByText('Lunch with Sam at 12:30')).toBeVisible();
   });
 });
