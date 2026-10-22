@@ -28,6 +28,20 @@ const GOLD_DARK = {
   goldLine: 'oklch(0.544 0.091 81.9)',
 };
 
+/**
+ * The panda's frame glow, sampled from aman-avatar.png (the parchment and the wood for
+ * light, the wall for dark). Written as oklch() text for the same reason as gold.
+ */
+const PANDA_LIGHT = {
+  pandaGlowFrom: 'oklch(0.846 0.061 73.2)',
+  pandaGlowTo: 'oklch(0.75 0.088 64.6)',
+};
+
+const PANDA_DARK = {
+  pandaGlowFrom: 'oklch(0.469 0.091 53)',
+  pandaGlowTo: 'oklch(0.324 0.069 48.5)',
+};
+
 /** Shared type scale: rhythm tokens, identical across presets. */
 const TYPE_SCALE = {
   textXs: '0.75rem',
@@ -98,6 +112,7 @@ const paper: PresetTokens = {
     chart7: '#10b981',
     chart8: '#ef4444',
     ...GOLD_LIGHT,
+    ...PANDA_LIGHT,
     focusRing: 'oklch(0.503 0.095 84.8)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
@@ -158,6 +173,7 @@ const paper: PresetTokens = {
     chart7: '#34d399',
     chart8: '#f87171',
     ...GOLD_DARK,
+    ...PANDA_DARK,
     focusRing: 'oklch(0.809 0.138 85.2)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
@@ -222,6 +238,7 @@ const highContrast: PresetTokens = {
     chart7: '#10b981',
     chart8: '#ef4444',
     ...GOLD_LIGHT,
+    ...PANDA_LIGHT,
     goldInk: 'oklch(0.42 0.075 84.8)',
     focusRing: 'oklch(0.42 0.075 84.8)',
     radius: '1.5rem',
@@ -283,6 +300,7 @@ const highContrast: PresetTokens = {
     chart7: '#34d399',
     chart8: '#f87171',
     ...GOLD_DARK,
+    ...PANDA_DARK,
     goldSoft: 'oklch(0.315 0.04 91.4)',
     focusRing: 'oklch(0.809 0.138 85.2)',
     radius: '1.5rem',
@@ -348,6 +366,7 @@ const midnight: PresetTokens = {
     chart7: '#10b981',
     chart8: '#ef4444',
     ...GOLD_LIGHT,
+    ...PANDA_LIGHT,
     focusRing: 'oklch(0.503 0.095 84.8)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
@@ -408,6 +427,7 @@ const midnight: PresetTokens = {
     chart7: '#34d399',
     chart8: '#f87171',
     ...GOLD_DARK,
+    ...PANDA_DARK,
     focusRing: 'oklch(0.809 0.138 85.2)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
@@ -472,6 +492,7 @@ const forest: PresetTokens = {
     chart7: '#10b981',
     chart8: '#ef4444',
     ...GOLD_LIGHT,
+    ...PANDA_LIGHT,
     focusRing: 'oklch(0.503 0.095 84.8)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
@@ -532,6 +553,7 @@ const forest: PresetTokens = {
     chart7: '#34d399',
     chart8: '#f87171',
     ...GOLD_DARK,
+    ...PANDA_DARK,
     focusRing: 'oklch(0.809 0.138 85.2)',
     radius: '0.65rem',
     composerRadius: '1.25rem',
