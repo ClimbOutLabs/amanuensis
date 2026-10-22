@@ -51,6 +51,15 @@ type ChatFolderContextValue = {
 
 const ChatFolderContext = createContext<ChatFolderContextValue | null>(null);
 
+const CHAT_FOLDER_LOAD_ERROR = 'Could not load folder chats. Refresh the page to try again.';
+
+/**
+ * A folder load that has not finished within this bound counts as failed, so the
+ * folder area shows the plain error instead of staying blank while the rest of
+ * the page carries on. A load that finishes late still applies and clears it.
+ */
+export const CHAT_FOLDER_LOAD_TIMEOUT_MS = 30_000;
+
 function sortFolders(folders: readonly ChatFolder[]): ChatFolder[] {
   return [...folders].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -75,10 +84,15 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     }
 
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      if (cancelled) return;
+      setLoadError(CHAT_FOLDER_LOAD_ERROR);
+    }, CHAT_FOLDER_LOAD_TIMEOUT_MS);
     void store
       .load()
       .then(snapshot => {
         if (cancelled) return;
+        clearTimeout(timeout);
         setFolders(sortFolders(snapshot.folders));
         setAssignments(new Map(snapshot.assignments.map(row => [row.sessionId, row.folderId])));
         setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions])));
@@ -87,11 +101,13 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       })
       .catch(() => {
         if (cancelled) return;
+        clearTimeout(timeout);
         // Folder organization is optional. Keep chat history usable if it cannot load.
-        setLoadError('Could not load folder chats. Refresh the page to try again.');
+        setLoadError(CHAT_FOLDER_LOAD_ERROR);
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [store]);
 

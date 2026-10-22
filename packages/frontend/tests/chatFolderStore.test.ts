@@ -309,3 +309,35 @@ test('chat folder store surfaces a failed folder chat request', async () => {
 
   await assert.rejects(store.load(), /Folder chats unavailable/);
 });
+
+test('chat folder store stops paging when the server repeats a page token', async () => {
+  let sessionRequests = 0;
+  const store = createChatFolderStore(async input => {
+    const url = new URL(String(input), 'http://localhost');
+
+    if (url.pathname === '/api/v1/session-folders') {
+      return Response.json({ data: [FOLDER_A] });
+    }
+
+    if (url.pathname === '/api/v1/sessions') {
+      sessionRequests++;
+      return Response.json({
+        data: [
+          sessionWire({
+            id: 'session-a1',
+            folderId: 'folder-a',
+            title: 'Alpha one',
+            updatedAt: '2026-10-20T12:00:00.000Z',
+            agent: { type: 'inline', spec: { model: { name: 'test-model' } } },
+          }),
+        ],
+        pagination: { next_page_token: 'same-page' },
+      });
+    }
+
+    throw new Error(`Unexpected request to ${url.pathname}${url.search}`);
+  });
+
+  await assert.rejects(store.load(), /invalid session page/);
+  assert.equal(sessionRequests, 2);
+});

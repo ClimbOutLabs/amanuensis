@@ -5,14 +5,20 @@ import {
   type ExternalStoreThreadListAdapter,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { ThreadListRowProps } from '@/atoms/ThreadListRow.js';
 import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
 import { ThreadListContainer, type ThreadListContainerProps } from '@/containers/ThreadListContainer.js';
-import { ChatFolderProvider, type ChatFolderStore } from '@/server/ChatFolderContext.js';
+import {
+  CHAT_FOLDER_LOAD_TIMEOUT_MS,
+  ChatFolderProvider,
+  useOptionalChatFolders,
+  type ChatFolderSnapshot,
+  type ChatFolderStore,
+} from '@/server/ChatFolderContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
@@ -93,6 +99,51 @@ function RenamableThreadListHarness({
           >
             <ThreadListContainer />
           </ServerProvider>
+        </CompactLayoutProvider>
+      </SlotsProvider>
+    </AssistantRuntimeProvider>
+  );
+}
+
+/** Counts every commit that reaches a folder consumer, so a test can prove rendering settles. */
+function CommitProbe({ onCommit }: { onCommit: () => void }) {
+  useOptionalChatFolders();
+  useEffect(() => {
+    onCommit();
+  });
+  return null;
+}
+
+/**
+ * Renders the thread list on an adapter whose loaded chats can shrink, mirroring a chat
+ * deleted or archived somewhere else, with folder state wrapped around the same list.
+ */
+function ShrinkingThreadListHarness({ chatFolders, onCommit }: { chatFolders: ChatFolderStore; onCommit: () => void }) {
+  const [threads, setThreads] = useState<NonNullable<ExternalStoreThreadListAdapter['threads']>>([
+    { status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'First chat' },
+    { status: 'regular', id: 'thread-2', remoteId: 'session-2', title: 'Second chat' },
+  ]);
+  const runtime = useExternalStoreRuntime<ThreadMessageLike>({
+    messages: [],
+    convertMessage: message => message,
+    onNew: async () => {},
+    adapters: { threadList: { threadId: 'thread-1', threads } },
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
+        <CompactLayoutProvider>
+          <ChatFolderProvider store={chatFolders}>
+            <button
+              type="button"
+              onClick={() => setThreads(current => current.filter(thread => thread.id !== 'thread-1'))}
+            >
+              Drop first chat
+            </button>
+            <CommitProbe onCommit={onCommit} />
+            <ThreadListContainer />
+          </ChatFolderProvider>
         </CompactLayoutProvider>
       </SlotsProvider>
     </AssistantRuntimeProvider>
@@ -1054,5 +1105,161 @@ describe('ThreadListContainer', () => {
       'Could not load folder chats. Refresh the page to try again.',
     );
     expect(screen.getByTestId('thread-row-Recent chat')).toBeInTheDocument();
+  });
+
+  it('shows the plain error and keeps recent chats when a folder load never finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const chatFolders: ChatFolderStore = {
+        load: () => new Promise<ChatFolderSnapshot>(() => {}),
+        createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      };
+
+      renderThreadList({
+        adapter: {
+          threadId: 'thread-1',
+          threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Recent chat' }],
+        },
+        chatFolders,
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHAT_FOLDER_LOAD_TIMEOUT_MS);
+      });
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not load folder chats. Refresh the page to try again.',
+      );
+      expect(screen.getByTestId('thread-row-Recent chat')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies a folder load that finishes after the error and clears the error', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveLoad: (snapshot: ChatFolderSnapshot) => void = () => {};
+      const chatFolders: ChatFolderStore = {
+        load: () =>
+          new Promise<ChatFolderSnapshot>(resolve => {
+            resolveLoad = resolve;
+          }),
+        createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      };
+
+      renderThreadList({
+        adapter: {
+          threadId: 'thread-1',
+          threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Recent chat' }],
+        },
+        chatFolders,
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHAT_FOLDER_LOAD_TIMEOUT_MS);
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not load folder chats. Refresh the page to try again.',
+      );
+
+      await act(async () => {
+        resolveLoad({
+          folders: [{ id: 'folder-a', name: 'Folder A' }],
+          assignments: [{ sessionId: 'session-filed', folderId: 'folder-a' }],
+          folderSessions: [
+            {
+              folderId: 'folder-a',
+              sessions: [
+                {
+                  sessionId: 'session-filed',
+                  title: 'Filed chat',
+                  updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+                  agentName: null,
+                  isMutable: true,
+                },
+              ],
+            },
+          ],
+          unfiledSessions: [],
+        });
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const folder = screen.getByRole('region', { name: 'Folder A' });
+      expect(within(folder).getByTestId('thread-row-Filed chat')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles after a dropped loaded chat has its folder copy removed', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-a', name: 'Folder A' }],
+        assignments: [
+          { sessionId: 'session-1', folderId: 'folder-a' },
+          { sessionId: 'session-outside', folderId: 'folder-a' },
+        ],
+        folderSessions: [
+          {
+            folderId: 'folder-a',
+            sessions: [
+              {
+                sessionId: 'session-1',
+                title: 'First chat',
+                updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+                agentName: null,
+                isMutable: true,
+              },
+              {
+                sessionId: 'session-outside',
+                title: 'Outside chat',
+                updatedAt: new Date('2026-10-19T12:00:00.000Z'),
+                agentName: null,
+                isMutable: true,
+              },
+            ],
+          },
+        ],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+    };
+
+    let commits = 0;
+    render(
+      <ShrinkingThreadListHarness
+        chatFolders={chatFolders}
+        onCommit={() => {
+          commits++;
+        }}
+      />,
+    );
+
+    const folder = await screen.findByRole('region', { name: 'Folder A' });
+    expect(within(folder).getByTestId('thread-row-Outside chat')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drop first chat' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('thread-row-First chat')).not.toBeInTheDocument();
+    });
+    expect(within(folder).getByTestId('thread-row-Outside chat')).toBeInTheDocument();
+
+    const settledCommits = commits;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(commits).toBe(settledCommits);
+    expect(commits).toBeLessThan(50);
   });
 });

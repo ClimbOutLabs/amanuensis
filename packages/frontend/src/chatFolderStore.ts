@@ -113,6 +113,7 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
 
   async function listAllSessions(filter: { folder_id: string } | { no_folder: string }): Promise<SessionWire[]> {
     const sessions: SessionWire[] = [];
+    const seenPageTokens = new Set<string>();
     let pageToken: string | undefined;
     do {
       const query = new URLSearchParams({
@@ -126,6 +127,12 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
       const page = readSessionPage(await readJson(await fetcher(`/api/v1/sessions?${query.toString()}`)));
       sessions.push(...page.sessions);
       pageToken = page.nextPageToken;
+      if (pageToken !== undefined) {
+        if (seenPageTokens.has(pageToken)) {
+          throw new Error('Server returned an invalid session page');
+        }
+        seenPageTokens.add(pageToken);
+      }
     } while (pageToken !== undefined);
     return sessions;
   }
