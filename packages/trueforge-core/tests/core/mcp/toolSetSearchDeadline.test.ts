@@ -9,7 +9,7 @@ import {
 } from '../../../src/core/mcp/IMCPServer';
 import { SEARCH_TOO_SLOW_MESSAGE, ToolSet } from '../../../src/core/mcp/ToolSet';
 
-const SEARCH_DEADLINE_MS = 60_000;
+const SEARCH_DEADLINE_MS = 120_000;
 
 const searchTool: AgentToolSchema = {
   preload: true,

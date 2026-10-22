@@ -1151,7 +1151,7 @@ export interface SharedServerConfiguration {
   /**
    * Bound in milliseconds on one web search or page read, after which the
    * model gets a plain tool error and the reply goes on.
-   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 60000 (60 seconds).
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
    */
   SEARCH_CALL_TIMEOUT_MS: number;
   /**
@@ -2017,7 +2017,7 @@ const shared: SharedServerConfiguration = {
   SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
     envKey: 'SEARCH_CALL_TIMEOUT_MS',
     raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
-    defaultValue: 60_000,
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
