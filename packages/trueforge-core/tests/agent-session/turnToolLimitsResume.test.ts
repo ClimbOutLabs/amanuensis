@@ -220,7 +220,7 @@ async function approveOnce({ store, sentinelServices, resolver }: Fixture, pause
           }))
         : [],
     ),
-    previous_turn_id: paused?.id,
+    previous_turn_id: paused?.turn_id,
     signal: new AbortController().signal,
     resolver,
   });
