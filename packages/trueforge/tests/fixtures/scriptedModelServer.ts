@@ -39,6 +39,14 @@ export const SEARCH_DIRECTIVE_PREFIX = 'search:';
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
 /**
+ * Searches the web for `WEB_SEARCH_QUERY`; once the search has answered, the model accepts the next
+ * request, sends only an empty role heartbeat, and then never says anything.
+ */
+export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
+/** Searches the web like `STALL_AFTER_TOOL_DIRECTIVE`, then starts its answer and goes silent mid-sentence. */
+export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
+export const STALLED_ANSWER_START = 'Here is what I found so far';
+/**
  * A question carrying this marker makes the knowledge relevance judge keep no
  * passage, so a library lookup for it is a near-miss.
  */
@@ -408,6 +416,8 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
 
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
+  // Stalled streams stay open until the caller hangs up or the fixture closes.
+  const stalled = new Set<ServerResponse>();
   let callCounter = 0;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -447,6 +457,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
       ];
       requestedTool = steps[progress.toolResults];
+    } else if (
+      (progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE) &&
+      progress.toolResults === 0
+    ) {
+      requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
@@ -517,6 +532,22 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
+    const stalls =
+      progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE;
+    if (toolCalls.length === 0 && stalls && progress.toolResults > 0) {
+      const opening =
+        progress.directive === STALL_AFTER_TOOL_DIRECTIVE
+          ? chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null })
+          : chunkEnvelope({
+              index: 0,
+              delta: { role: 'assistant', content: STALLED_ANSWER_START },
+              finish_reason: null,
+            });
+      res.write(`data: ${JSON.stringify(opening)}\n\n`);
+      stalled.add(res);
+      res.on('close', () => stalled.delete(res));
+      return;
+    }
     const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -551,6 +582,9 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     requests: () => requests,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        for (const res of stalled) {
+          res.destroy();
+        }
         httpServer.closeAllConnections();
         httpServer.close(error => {
           if (error) {

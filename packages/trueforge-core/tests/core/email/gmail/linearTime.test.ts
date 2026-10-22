@@ -22,7 +22,7 @@ import {
   neutralizeInternalTags,
 } from '../../../../src/core/email/gmail/results';
 import { snippetOf } from '../../../../src/core/email/gmail/tokenBound';
-import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
+import { escapeDisplayText } from '../../../../src/core/permissions/displayText';
 import { message, plainDraft } from './fixtures';
 
 const MB = 1_000_000;

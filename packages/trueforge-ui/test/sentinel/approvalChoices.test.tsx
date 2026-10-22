@@ -30,9 +30,10 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Approve for this chat in Details, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Approve for this chat in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
+        approvalId="approval-1"
         othersWaiting={0}
         card={card}
         onApprove={vi.fn()}
@@ -41,6 +42,8 @@ describe('approval choices', () => {
       />,
     );
     expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
+    // A choice the server offers is never folded into the closed Details block.
+    expect(screen.getByRole('button', { name: 'Approve for this chat' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
       'title',

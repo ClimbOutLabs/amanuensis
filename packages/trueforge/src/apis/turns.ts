@@ -342,6 +342,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
+  /** The turn's input holds a new message from the person, not only approvals or tool responses. */
+  startsAnswer: boolean;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -396,6 +398,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
+    startsAnswer,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -728,7 +731,9 @@ function createTurnResolver(deps: {
       // run_code's own provisioning-sized deadline, derived from the sandbox
       // bounds — the 21-minute bound is scoped to sandbox/run_code alone.
       runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
+      searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+      modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -815,6 +820,7 @@ function createTurnResolver(deps: {
       schedules,
       personas,
       logger,
+      startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
@@ -1329,6 +1335,7 @@ export async function beginTurnExecution(params: {
     userRef,
     session,
     turnId,
+    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
     serverSandboxAvailable: await readServerSandboxAvailable({
       store: deps.sandboxProviderStore,
@@ -2163,6 +2170,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
+      startsAnswer: body.input?.some(isAgentInputUserMessage) ?? false,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,

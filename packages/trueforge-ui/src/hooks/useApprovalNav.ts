@@ -15,6 +15,8 @@ export type ApprovalNavState = {
   goNext: () => void;
   /** Scroll to the currently selected approval (e.g. after the user scrolled away). */
   focusCurrent: () => void;
+  /** Id of the selected approval, or null when none waits. */
+  currentId: string | null;
 };
 
 /**
@@ -76,5 +78,6 @@ export function useApprovalNav(): ApprovalNavState {
     goPrev,
     goNext,
     focusCurrent,
+    currentId: currentId ?? null,
   };
 }

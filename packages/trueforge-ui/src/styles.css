@@ -516,19 +516,6 @@
   line-height: 1.75rem;
 }
 
-/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
-.aman-runtime-rail__needs-you {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.75rem;
-}
-
-.aman-runtime-rail__needs-body {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-}
-
 .aman-runtime-rail__rules {
   display: grid;
   gap: 0.25rem;
@@ -1835,7 +1822,7 @@
 }
 
 /* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
-   instead of a white card. The hairline stays gold; the rail's one gold card stays Needs you. */
+   instead of a white card. The hairline stays gold. */
 .aui-panda {
   display: grid;
   justify-items: center;
