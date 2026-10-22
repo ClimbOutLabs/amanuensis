@@ -17,6 +17,7 @@ function email(overrides: Partial<SentinelApprovalEmail> = {}): SentinelApproval
     body: 'Thursday works.\n\nBest,\nAda',
     replaces: null,
     reply_in_thread: null,
+    reply_to: null,
     ...overrides,
   };
 }
@@ -136,6 +137,22 @@ describe('EmailApprovalCard fields', () => {
 
     renderEmail({ reply_in_thread: { subject: 'Lease', from: 'Grace' } });
     expect(screen.getByText('Reply in existing thread')).toBeInTheDocument();
+  });
+
+  it('shows an address replies go to, on its own line, before the person approves', () => {
+    renderEmail({ reply_to: 'mallory@example.com' });
+    expect(screen.getByText('Replies go to: mallory@example.com')).toBeInTheDocument();
+  });
+
+  it('shows no reply line when replies go to the sender', () => {
+    renderEmail({ reply_to: null });
+    expect(screen.queryByText(/Replies go to/)).not.toBeInTheDocument();
+  });
+
+  it('labels the metadata and the message body', () => {
+    renderEmail();
+    expect(screen.getByText('What will be sent')).toBeInTheDocument();
+    expect(screen.getByText('Message body')).toBeInTheDocument();
   });
 
   it('shows the full recipient list, not a count', () => {

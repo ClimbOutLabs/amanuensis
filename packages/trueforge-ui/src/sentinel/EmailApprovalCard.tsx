@@ -138,6 +138,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       </header>
 
       <div className="border-t border-border px-4 py-3">
+        <p className="mb-2 text-sm text-text-secondary">What will be sent</p>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
           <dt className="text-text-secondary">To</dt>
           <dd className="break-words text-text-primary">{mailboxListText(email.to)}</dd>
@@ -157,7 +158,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           <dd className="break-words text-text-primary">{email.subject === '' ? 'No subject' : email.subject}</dd>
         </dl>
         {email.reply_in_thread !== null && <p className="mt-2 text-text-secondary">Reply in existing thread</p>}
-        {/* A "Replies go to" row goes here once the card carries reply_to (fix/email-draft-headers). */}
+        {email.reply_to !== null && <p className="mt-2 text-text-primary">Replies go to: {email.reply_to}</p>}
         {email.replaces !== null && (
           <p className="mt-2 text-text-secondary">
             Replaces the saved draft “{email.replaces.subject}” to {mailboxListText(email.replaces.to)}
@@ -173,6 +174,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       </div>
 
       <div className="border-t border-border">
+        <p className="px-4 pt-3 text-sm text-text-secondary">Message body</p>
         <EmailBody body={email.body} />
       </div>
 

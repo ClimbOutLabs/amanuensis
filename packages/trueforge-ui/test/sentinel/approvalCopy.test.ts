@@ -41,6 +41,7 @@ const reply: SentinelApprovalCard['email'] = {
   body: 'Thursday works.',
   replaces: null,
   reply_in_thread: { subject: 'Lease renewal', from: 'rui@example.com' },
+  reply_to: null,
 };
 
 describe('approval copy', () => {

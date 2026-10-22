@@ -4,6 +4,10 @@ import type { SentinelApprovalCard } from './types.js';
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
   approveForChat: { label: 'Approve for this chat', hint: 'Allow this kind of call for the rest of this chat.' },
+  allowSearchesForChat: {
+    label: 'Allow searches in this chat',
+    hint: 'Later searches in this chat skip the private-read check. Every other check still runs.',
+  },
   alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
     label: 'Always allow this tool',

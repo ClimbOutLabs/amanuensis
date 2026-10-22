@@ -53,7 +53,7 @@ LOCAL=0
 ONLY=""
 ONLY_INSTANCE=""
 
-MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup checkout tls"
+MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup sandbox checkout tls"
 INSTANCE_IDS="config containers ports service login database disk clock run_code attachments demo model public_url public_login network"
 IN_IMAGE_IDS="service login database disk clock run_code attachments demo model"
 
@@ -572,6 +572,11 @@ backup_mode_is_recent() {
 
 check_backup() {
   local dir newest="" newest_time=0 entry mtime age_days=-1 now mode scheduled=0 days=""
+  # Backups are made of instances; before the first one exists there is nothing to be late.
+  if [ -z "$(list_instances)" ]; then
+    record machine backup ok "No instances yet; nothing to back up." ""
+    return
+  fi
   dir="${AMAN_HOME}/backups"
   for entry in "$dir"/*/; do
     [ -d "$entry" ] || continue
@@ -597,8 +602,10 @@ check_backup() {
         record machine backup warn "Daily backups are on, but the schedule that runs them is missing." "Run aman doctor backup --fix"
       elif [ "$age_days" -lt 0 ] && backup_mode_is_recent; then
         record machine backup ok "Daily backups are on; the first one runs within a day." ""
-      elif [ "$age_days" -lt 0 ] || [ "$age_days" -gt 2 ]; then
-        record machine backup warn "Daily backups are scheduled, but ${newest:+the last one is ${days} old}${newest:-none has been made yet}." "Run aman doctor backup --fix"
+      elif [ "$age_days" -lt 0 ]; then
+        record machine backup warn "Daily backups are scheduled, but none has been made yet." "Run aman doctor backup --fix"
+      elif [ "$age_days" -gt 2 ]; then
+        record machine backup warn "Daily backups are scheduled, but the last one is ${days} old. The newest backup is in $(ui_path "${newest%/}")." "Run aman doctor backup --fix"
       else
         record machine backup ok "Daily backups are on; the last one is ${days} old." ""
       fi
@@ -620,6 +627,63 @@ check_backup() {
       fi
       ;;
   esac
+}
+
+# The sandbox slots, whichever instance they serve: the slot setup starts them, not an instance, so they are
+# reported even before the first instance exists. A slot that is not running and healthy fails, and the failing
+# line of its own log says which of its checks failed. No slot containers, no row: the sandbox may be off, or
+# never installed. Read-only: this never starts or repairs a slot, that is `aman doctor sandbox --fix`.
+check_sandbox() {
+  [ "$DOCKER_OK" = 1 ] || return 0
+  local lines id cname state status service total=0 bad="" log failed_line="" shown_line="" failed_rest="" failed_check=""
+  lines=$(bounded "$PROBE_SECONDS" docker ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
+  while IFS='|' read -r id cname state status service; do
+    case "$service" in
+      sandbox-*) ;;
+      *)
+        case "$cname" in
+          *-slots-sandbox-*) ;;
+          *) continue ;;
+        esac
+        ;;
+    esac
+    total=$((total + 1))
+    [ -z "$bad" ] || continue
+    case "$state" in
+      running)
+        case "$status" in *"(unhealthy)"*) bad=$id ;; esac
+        ;;
+      *) bad=$id ;;
+    esac
+  done <<<"$lines"
+  [ "$total" -gt 0 ] || return 0
+  if [ -z "$bad" ]; then
+    record machine sandbox ok "All ${total} sandbox slots are running and healthy." ""
+    return
+  fi
+  log=$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$bad" 2>&1)
+  failed_line=$(printf '%s\n' "$log" | grep -o 'attestation FAILED.*' | head -n 1)
+  if [ -n "$failed_line" ]; then
+    # The slot's own line names the check in the slot agent's words; say it in plain words, and keep the
+    # line as it is when it does not read as a check and a reason.
+    shown_line=$failed_line
+    case "$failed_line" in
+      'attestation FAILED '*)
+        failed_rest=${failed_line#'attestation FAILED '}
+        case "$failed_rest" in
+          *': '*)
+            failed_check=${failed_rest%%: *}
+            if [ -n "$failed_check" ]; then
+              shown_line="Safety check ${failed_check} failed: ${failed_rest#*: }"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    record machine sandbox fail "A sandbox slot failed: ${shown_line}" "Run aman doctor sandbox --fix"
+  else
+    record machine sandbox fail "One of the sandbox slots is not running properly, and its log does not say which check failed." "Run aman doctor sandbox --fix"
+  fi
 }
 
 # Nothing is recorded until Aman has been installed from a folder.
@@ -1844,6 +1908,7 @@ check_disk
 check_docker_memory
 check_clock
 check_backup
+check_sandbox
 check_checkout
 check_tls
 for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
