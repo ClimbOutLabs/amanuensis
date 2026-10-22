@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 
 import { createHarnessChatServer } from '@/plugins/trueforge-agent-server-adapter/chatServer.js';
+import { LiveConnectionLostError } from '@/utils/liveConnection.js';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 /**
@@ -217,7 +218,10 @@ describe('createHarnessChatServer turn stream reconnect', () => {
 
     await assert.rejects(
       runPromise,
-      (error: unknown) => error instanceof Error && error.message === 'persistent network error',
+      (error: unknown) =>
+        error instanceof LiveConnectionLostError &&
+        error.cause instanceof Error &&
+        error.cause.message === 'persistent network error',
     );
     // Bounded: a persistently failing transport must stop retrying rather than loop forever.
     assert.ok(

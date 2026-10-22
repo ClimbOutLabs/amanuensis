@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 
 const runtimeSpy = vi.hoisted(() => vi.fn<(options: UseTrueFoundryAgentRuntimeOptions) => void>());
+const reloadSpy = vi.hoisted(() => vi.fn());
 const defaultAttachmentAdapter = vi.hoisted(() => ({
   accept: 'image/*,application/pdf',
   add: vi.fn(),
@@ -29,14 +30,34 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
       onNew: async () => {},
     });
   },
-  useTrueFoundryReload: () => vi.fn(),
+  useTrueFoundryReload: () => reloadSpy,
 }));
 
 import { TrueFoundryChatProvider } from '@/containers/TrueFoundryChatProvider.js';
+import { LiveConnectionLostError } from '@/utils/liveConnection.js';
 
 describe('TrueFoundryChatProvider', () => {
   beforeEach(() => {
     runtimeSpy.mockClear();
+    reloadSpy.mockClear();
+  });
+
+  it('resyncs a dropped reply stream instead of reporting it as an error', async () => {
+    const onError = vi.fn();
+    render(
+      <TrueFoundryChatProvider server={createMockAgentUIServer()} agentName="my-agent" onError={onError}>
+        <div>chat-child</div>
+      </TrueFoundryChatProvider>,
+    );
+    const forwardedOnError = runtimeSpy.mock.calls[0]?.[0]?.onError;
+
+    await act(async () => {
+      forwardedOnError?.(new LiveConnectionLostError({ cause: new TypeError('network error') }));
+      await Promise.resolve();
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 
   it('forwards legacy runtime options and supplies the default attachment adapter', () => {
@@ -73,6 +94,27 @@ describe('TrueFoundryChatProvider', () => {
       forwardedOnError?.(new Error('createSession failed'));
     });
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('turns a chat read that never reached the server into a lost connection, and leaves other errors alone', async () => {
+    const listEvents = vi.fn(async () => {
+      throw new TypeError('Load failed');
+    });
+    const getTurn = vi.fn(async () => {
+      throw Object.assign(new Error('Status code: 404'), { statusCode: 404 });
+    });
+    render(
+      <TrueFoundryChatProvider server={createMockAgentUIServer({ listEvents, getTurn })} agentName="my-agent">
+        <div>chat-child</div>
+      </TrueFoundryChatProvider>,
+    );
+    const runtimeServer = runtimeSpy.mock.calls[0]?.[0]?.server;
+    if (runtimeServer === undefined) throw new Error('Expected runtime server');
+
+    await expect(runtimeServer.listEvents({ sessionId: 'ses_1' })).rejects.toBeInstanceOf(LiveConnectionLostError);
+    await expect(runtimeServer.getTurn({ sessionId: 'ses_1', turnId: 'trn_1' })).rejects.toMatchObject({
+      statusCode: 404,
+    });
   });
 
   it('filters create-agent sessions from runtime history', async () => {

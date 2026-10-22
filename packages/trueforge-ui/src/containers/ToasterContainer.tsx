@@ -6,6 +6,7 @@ import { HelpStuckButton } from '../help/HelpStuckButton.js';
 import { rememberErrorText } from '../help/lastError.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+import { isNetworkFailureError } from '../utils/liveConnection.js';
 import { EXPIRED_REQUEST_DESCRIPTION, EXPIRED_REQUEST_TITLE, isStaleApprovalError } from '../utils/staleApproval.js';
 import {
   DAILY_BUDGET_DESCRIPTION,
@@ -60,30 +61,15 @@ function normalizeError(error: unknown): ToastContent {
     }
   }
 
-  // A dropped transport (sleeping phone, network change) is not a mystery:
-  // name it so the user knows the chat will re-sync on its own.
-  const message = getErrorMessage(error, '');
-  if (isNetworkFailureMessage(message)) {
-    return {
-      title: 'Connection lost',
-      description: 'Check your connection. The chat re-syncs automatically when it returns.',
-    };
+  // A dropped transport (sleeping phone, network change) is not a mystery: name it and the next step.
+  if (isNetworkFailureError(error)) {
+    return { title: 'Connection lost', description: 'Check your network, then try again.' };
   }
 
   return {
     title: 'Something went wrong',
     description: truncateDescription(getErrorMessage(error, 'An unexpected error occurred.')),
   };
-}
-
-/** Matches the DOMException/TypeError text browsers use for failed fetches. */
-function isNetworkFailureMessage(message: string): boolean {
-  return (
-    message === 'Failed to fetch' ||
-    message === 'NetworkError when attempting to fetch resource.' ||
-    message === 'Load failed' ||
-    /network request failed/i.test(message)
-  );
 }
 
 export function ToasterProvider({ children }: { children: ReactNode }) {
