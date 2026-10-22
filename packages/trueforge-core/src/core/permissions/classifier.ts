@@ -1917,7 +1917,7 @@ async function classifySearchProviderTool(input: {
   const privateReadHeld = ctx.services.private_reads.hasPrivateDataRead(ctx) || ctx.web_search.chatFingerprints.secret;
   // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
   const chatGranted =
-    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted && privateFingerprintsUsable(ctx.web_search);
+    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted() && privateFingerprintsUsable(ctx.web_search);
   // A chat that read a secret or key file asks before every search, whatever the grant says.
   const heldPrivate = (): Promise<TierDecision> =>
     ctx.web_search.chatFingerprints.secret
@@ -3174,12 +3174,12 @@ export async function classifyHostToolCall(input: {
   // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
   if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
     ctx.services.private_reads.markPrivateDataRead(ctx);
+    // Its text is never fingerprinted, so the chat's fingerprints miss it and a search grant cannot lift the hold.
+    ctx.web_search.fingerprintsLost = true;
   }
-  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life.
-  if (
-    decision.auto_deny === null &&
-    (decision.secret_path_read || (decision.sensitive_read && containsSecretPath(action.canonical_params)))
-  ) {
+  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life. Only a read
+  // that names one counts; an argument that merely looks like a path, such as a link, does not.
+  if (decision.auto_deny === null && decision.sensitive_read && containsSecretPath(action.canonical_params)) {
     ctx.web_search.chatFingerprints.secret = true;
   }
   await recordClassificationAudit({

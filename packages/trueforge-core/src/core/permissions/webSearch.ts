@@ -73,8 +73,11 @@ export interface WebSearchTurnState {
   sentText: string;
   /** True once the session read private data (mail, calendar or a secret), after which a search is checked or asks. */
   privateDataRead: boolean;
-  /** True when the chat's saved "Allow searches in this chat" grant is in force for this turn. */
-  searchChatGranted: boolean;
+  /**
+   * Whether the chat's "Allow searches in this chat" grant is in force. Read at each search, so a grant the owner
+   * gives during a turn covers the rest of that reply.
+   */
+  searchChatGranted: () => boolean;
   /**
    * The chat's kept fingerprints: loaded from the saved chat at the turn's start, then extended with this turn's
    * private texts. A grant's search check runs against these, since the texts of earlier turns are not held here.
@@ -103,7 +106,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     fetchesByHost: new Map(),
     sentText: '',
     privateDataRead: false,
-    searchChatGranted: false,
+    searchChatGranted: () => false,
     chatFingerprints: emptyChatPrivateFingerprints(),
     fingerprintsLost: false,
     savedFingerprintsLoaded: false,

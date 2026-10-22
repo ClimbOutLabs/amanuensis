@@ -33,6 +33,7 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
+import type { ChatPrivateFingerprints } from '../../../src/core/permissions/privateTextCheck';
 import { AbnormalHandoffSchema } from '../../../src/core/runtime/AbnormalHandoff';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
@@ -711,6 +712,53 @@ export function runStoreContractSuite<
       await new Promise(r => setTimeout(r, 5));
       const second = await store.getSessionByExternalId({ tenant_id: tenant, external_id: 'run-1' });
       expect(mustGet(second).last_activity_timestamp_ms).toBe(mustGet(first).last_activity_timestamp_ms);
+    });
+  });
+
+  describe('setPrivateFingerprints', () => {
+    const fingerprints: ChatPrivateFingerprints = {
+      complete: true,
+      has_text: true,
+      secret: false,
+      entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+    };
+
+    async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
+      return (await store.getSession({ tenant_id: tenant, session_id: sessionId }))?.private_fingerprints;
+    }
+
+    it('starts as null for a new session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      expect(await savedFingerprints(store)).toBeNull();
+    });
+
+    it('round-trips what was saved, and a later save replaces it', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+      expect(await savedFingerprints(store)).toEqual(fingerprints);
+
+      const replaced: ChatPrivateFingerprints = { complete: false, has_text: false, secret: true, entries: [] };
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints: replaced });
+      expect(await savedFingerprints(store)).toEqual(replaced);
+    });
+
+    it('is a no-op for a missing session', async () => {
+      const store = createStore();
+      await store.setPrivateFingerprints({ session_id: missingSessionId, fingerprints });
+      expect(await store.getSession({ tenant_id: tenant, session_id: missingSessionId })).toBeUndefined();
+    });
+
+    it('is removed with the session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+      expect(await store.getSession({ tenant_id: tenant, session_id: sessionId })).toBeUndefined();
+
+      await seedSession(store);
+      expect(await savedFingerprints(store)).toBeNull();
     });
   });
 

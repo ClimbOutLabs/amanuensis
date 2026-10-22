@@ -1,5 +1,15 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import { tmpdir } from 'node:os';
+import {
+  classifyHostToolCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
+import {
+  createSentinelHostContext,
+  defaultSentinelServices,
+  type SentinelServices,
+} from '../../../src/core/permissions/context';
 import { type ChatPrivateFingerprints } from '../../../src/core/permissions/privateTextCheck';
 import {
   chatFingerprintsAfterTurn,
@@ -26,7 +36,7 @@ const MAPS_HOSTS = {
 };
 
 function makeCtx(
-  input: { conversation_id?: string | undefined; services?: Partial<SentinelServices> } = {},
+  input: { conversation_id?: string | undefined; services?: Partial<SentinelServices> | undefined } = {},
 ): ClassifyContext {
   return {
     services: { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ...input.services },
@@ -81,8 +91,10 @@ function savedAfter(state: WebSearchTurnState): ChatPrivateFingerprints {
 function nextTurn(input: {
   saved: ChatPrivateFingerprints | null;
   conversation_id?: string | undefined;
+  /** The process's services, when the next turn runs in the same process as the last. */
+  services?: SentinelServices | undefined;
 }): ClassifyContext {
-  const ctx = makeCtx({ conversation_id: input.conversation_id });
+  const ctx = makeCtx({ conversation_id: input.conversation_id, services: input.services });
   ctx.web_search.chatFingerprints = input.saved ?? {
     complete: false,
     has_text: false,
@@ -96,8 +108,42 @@ function nextTurn(input: {
 
 /** The chat's saved grant, as the session hands it to a turn that starts after the owner allowed it. */
 function grantChat(ctx: ClassifyContext): void {
-  ctx.web_search.searchChatGranted = true;
+  ctx.web_search.searchChatGranted = () => true;
 }
+
+/** A host tool call classified at the dispatch choke point, which records what the call reads for the chat. */
+async function classifyAtHost(input: { ctx: ClassifyContext; action: SentinelAction }) {
+  const { ctx } = input;
+  return classifyHostToolCall({
+    sentinel: createSentinelHostContext({
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      conversation_id: ctx.conversation_id,
+      services: ctx.services,
+      web_search: ctx.web_search,
+    }),
+    repository_id: null,
+    workspace_cwd: tmpdir(),
+    action: input.action,
+  });
+}
+
+function connectorCall(input: { tool_name: string; params: Record<string, unknown> }): SentinelAction {
+  return {
+    tool_name: input.tool_name,
+    canonical_params: input.params,
+    tool_type: 'mcp',
+    mcp_server_name: 'outlook',
+    mcp_server_host: 'outlook.example',
+    mcp_hints: {},
+  };
+}
+
+/** A mail read through a connector: private, but its text is never fingerprinted. */
+const CONNECTOR_MAIL_READ = connectorCall({ tool_name: 'list_messages', params: { folder: 'INBOX' } });
+
+/** Words of a mail the connector read, which no fingerprint of the chat holds. */
+const CONNECTOR_MAIL_QUERY = 'Joana Pires invoice 99120 riverside dental';
 
 /** Turn one reads an email and ends. Turn two starts with the chat's saved state. */
 async function chatWithEmailReadInEarlierTurn(
@@ -209,6 +255,31 @@ describe('a chat grant from "Allow searches in this chat"', () => {
     expect(decision.reason).not.toMatch(/^mcp_maps.*silent/);
   });
 
+  it('still holds a search after a connector mail read, whose text left no fingerprint to check', async () => {
+    const ctx = makeCtx();
+    await classifyAtHost({ ctx, action: CONNECTOR_MAIL_READ });
+    grantChat(ctx);
+    expect(await classifyTier(searchFor(CONNECTOR_MAIL_QUERY), ctx)).toMatchObject({
+      tier: 3,
+      reason: 'mcp_search_after_private_read',
+    });
+  });
+
+  it('still holds a search in a later turn after a connector mail read, from the saved record', async () => {
+    const first = makeCtx();
+    await readMail(first);
+    await classifyAtHost({ ctx: first, action: CONNECTOR_MAIL_READ });
+    const saved = savedAfter(first.web_search);
+    expect(saved.complete).toBe(false);
+
+    const later = nextTurn({ saved, services: first.services });
+    grantChat(later);
+    expect(await classifyTier(searchFor(CONNECTOR_MAIL_QUERY), later)).toMatchObject({
+      tier: 3,
+      reason: 'mcp_search_after_private_read',
+    });
+  });
+
   it('does not reach another chat', async () => {
     const chatA = await chatWithEmailReadInEarlierTurn({ conversation_id: 'chat-a' });
     const chatB = await chatWithEmailReadInEarlierTurn({ conversation_id: 'chat-b' });
@@ -239,5 +310,37 @@ describe('the held search card folds the search service fields', () => {
     expect(decision.card?.outbound_plumbing_text).not.toContain('best coffee shops in Lisbon');
     expect(decision.card?.outbound_plumbing_text).toContain('sess-123');
     expect(decision.card?.outbound_plumbing_text).toContain('search-model-1');
+  });
+});
+
+describe('which calls make a chat ask before every search', () => {
+  it('does not count a connector call whose argument only looks like a path, such as a link', async () => {
+    const ctx = makeCtx();
+    await classifyAtHost({
+      ctx,
+      action: connectorCall({ tool_name: 'create_issue', params: { title: 'Bug', link: 'https://example.com/a' } }),
+    });
+    expect(ctx.web_search.chatFingerprints.secret).toBe(false);
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 1, reason: 'mcp_search_provider' });
+  });
+
+  it('counts a read of a secrets file, so a search asks even with the grant', async () => {
+    const ctx = makeCtx();
+    await classifyAtHost({
+      ctx,
+      action: {
+        tool_name: 'exec',
+        canonical_params: { command: 'cat .env' },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+    });
+    expect(ctx.web_search.chatFingerprints.secret).toBe(true);
+    grantChat(ctx);
+    const decision = await classifyTier(SEARCH, ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
+    expect(decision.card?.plain_what).toContain(
+      'This chat opened a file with passwords or keys, so Aman asks before every search.',
+    );
   });
 });

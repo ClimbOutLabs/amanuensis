@@ -416,8 +416,8 @@ export class SessionHandle<
       const chatApprovalGrants = new Set(
         this.session.approval_grants.filter(value => !isSerializedImplementationPlanGrant(value)),
       );
-      // Read from the saved session, so a grant from another chat never reaches this one.
-      input.resolver.webSearchTurn.searchChatGranted = chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
+      // This chat's own grants, read live: an approval during this send adds to the same set.
+      input.resolver.webSearchTurn.searchChatGranted = () => chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
       input.resolver.webSearchTurn.chatFingerprints =
         this.session.private_fingerprints ?? emptyChatPrivateFingerprints();
       input.resolver.webSearchTurn.savedFingerprintsLoaded = this.session.private_fingerprints !== null;

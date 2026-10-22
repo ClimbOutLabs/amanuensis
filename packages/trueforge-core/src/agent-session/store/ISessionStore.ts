@@ -38,16 +38,16 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
   custom: TSessionCustom | null;
 };
 
-/**
- * PATCH fields for an existing session; `undefined` fields are left unchanged.
- * `agent` may be set only on inline sessions, and only as an inline arm (`{ type: 'inline', spec }`).
- * `metadata` when set fully replaces the stored map (`{}` clears).
- */
 export interface SetPrivateFingerprintsInput {
   session_id: string;
   fingerprints: ChatPrivateFingerprints;
 }
 
+/**
+ * PATCH fields for an existing session; `undefined` fields are left unchanged.
+ * `agent` may be set only on inline sessions, and only as an inline arm (`{ type: 'inline', spec }`).
+ * `metadata` when set fully replaces the stored map (`{}` clears).
+ */
 export type UpdateSessionInput<TSessionCustom extends object = Record<string, never>> = Pick<
   SessionRecord<TSessionCustom>,
   'tenant_id' | 'session_id'
