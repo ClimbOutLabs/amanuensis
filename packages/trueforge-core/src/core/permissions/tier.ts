@@ -62,6 +62,7 @@ export const AUTO_DENY_REASONS = [
   'offline_mode',
   'outbound_guard',
   'private_text_check',
+  'tool_not_prepared',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];

@@ -324,6 +324,7 @@ export * from "./RawToolCall.js";
 export * from "./ReasoningEffort.js";
 export * from "./RegisteredCommandExecution.js";
 export * from "./RemoteMcpServerManifest.js";
+export * from "./ReplyResultsByKind.js";
 export * from "./Repository.js";
 export * from "./RequestErrorResponse.js";
 export * from "./RequestErrorResponseError.js";

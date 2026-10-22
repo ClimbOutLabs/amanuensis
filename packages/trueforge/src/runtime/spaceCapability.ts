@@ -39,6 +39,7 @@ import {
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import configuration from '../config';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
@@ -48,6 +49,7 @@ import {
   type SpaceMutationResult,
   type SpaceRecord,
 } from '../db/spaceStore';
+import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
@@ -1457,13 +1459,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
   async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
-    if (connections === undefined) {
+    const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
+    if (connections === undefined && evalFixtures === undefined) {
       return undefined;
     }
     try {
       return await googleCapability({
         fetchImpl: undefined,
         connections,
+        evalSources: evalFixtures,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,
