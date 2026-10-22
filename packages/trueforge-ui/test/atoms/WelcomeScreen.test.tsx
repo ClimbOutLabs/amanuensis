@@ -5,14 +5,15 @@ import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { ThemeProvider } from '@/theme/ThemeProvider.js';
 
 describe('WelcomeScreen', () => {
-  it('renders the default heading and brand icon outside a provider', () => {
+  it('renders the default heading with no icon outside a provider', () => {
     const { container } = render(<WelcomeScreen className="host-welcome" />);
 
     const heading = screen.getByRole('heading', { level: 1, name: 'How can I help you today?' });
     const root = container.querySelector('[data-preset="paper"]');
     expect(root).toHaveClass('aui-thread-welcome-root', 'host-welcome');
-    expect(root?.querySelector('svg[role="img"]')).toBeInTheDocument();
-    expect(heading).toHaveClass('font-semibold', 'delay-75');
+    expect(root?.querySelector('svg')).not.toBeInTheDocument();
+    expect(heading).toHaveClass('font-semibold');
+    expect(heading).not.toHaveClass('delay-75');
   });
 
   it('renders a custom heading and icon', () => {
@@ -31,7 +32,7 @@ describe('WelcomeScreen', () => {
   });
 
   // The provider's preset is initial state, so each preset gets its own mount.
-  it('uses preset-specific icon behavior', () => {
+  it('draws no icon on the high-contrast preset and bolds only paper', () => {
     const highContrast = render(
       <ThemeProvider theme={{ preset: 'high-contrast', mode: 'light' }}>
         <WelcomeScreen />
@@ -41,13 +42,13 @@ describe('WelcomeScreen', () => {
     expect(screen.getByRole('heading')).toHaveClass('font-normal');
     highContrast.unmount();
 
-    const paper = render(
-      <ThemeProvider theme={{ preset: 'paper', mode: 'light' }}>
+    const forest = render(
+      <ThemeProvider theme={{ preset: 'forest', mode: 'dark' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(paper.container.querySelector('.aui-thread-welcome-root svg[role="img"]')).toBeInTheDocument();
-    expect(screen.getByRole('heading')).toHaveClass('font-semibold');
-    paper.unmount();
+    expect(forest.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading')).toHaveClass('font-normal');
+    forest.unmount();
   });
 });

@@ -39,6 +39,8 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'AgentsLibraryButton',
   'AmanAvatarMotion',
   'AmanFirstRunGuide',
+  'AmanFirstRunSummary',
+  'AmanPandaSourceProvider',
   'AmanRuntimeRail',
   'AmanTour',
   'AmanSetupProvider',

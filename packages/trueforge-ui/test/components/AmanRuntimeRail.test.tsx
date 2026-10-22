@@ -50,7 +50,7 @@ describe('AmanRuntimeRail', () => {
     );
 
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Amanuensis' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     expect(screen.getByText('local-model')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveAttribute(
       'src',
@@ -337,7 +337,7 @@ describe('AmanRuntimeRail', () => {
               assistant_name: 'Mira',
               assistant_identity: null,
               voice_guidance: null,
-              user_name: 'Sidd',
+              user_name: 'Maya',
               address_as: null,
               user_profile: null,
               pinned_preferences: [],
@@ -353,7 +353,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(await screen.findByText("Sidd's Chief of Staff")).toHaveClass('aui-panda__role');
+    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aui-panda__role');
   });
 
   it('captions the panda "Your Chief of Staff" when no owner name is known', () => {

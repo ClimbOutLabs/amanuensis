@@ -59,6 +59,7 @@ import {
   GET_TOOL_OUTPUT_SCHEMA_NAME,
   LIST_TOOLS_NAME,
 } from '../runtime/DeferredTool';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { extractErrorLogFields } from '../util/errorLogFields';
@@ -2007,6 +2008,7 @@ function execResultOutputText(result: ExecResult): string {
 export class Sandbox extends LocalToolMCP {
   readonly name = SANDBOX_MCP_SERVER_ID;
   readonly displayName = 'Sandbox';
+  protected override readonly bundle: ToolBundleName = 'sandbox';
   override readonly description = 'Persistent sandbox environment for code execution';
 
   private readonly provider: SandboxProvider;
@@ -3099,22 +3101,25 @@ export class Sandbox extends LocalToolMCP {
         );
       }
     }
-    sandboxInstructions.addSection(
-      'repository-work',
-      dedent`
-        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
-        Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
-        Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
-        Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
-        Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
-        Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
-        Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
-        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
-        Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
-        Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
-        A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
-      `,
-    );
+    // Coding guidance is long and only applies once a repository is attached to the chat.
+    if (this.boundRepository !== undefined) {
+      sandboxInstructions.addSection(
+        'repository-work',
+        dedent`
+          For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
+          Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
+          Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
+          Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
+          Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
+          Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
+          Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
+          Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
+          Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
+          Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
+          A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
+        `,
+      );
+    }
 
     this.buildSchemaSection(sandboxInstructions);
     this.buildSkillsSection(sandboxInstructions);

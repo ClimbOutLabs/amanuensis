@@ -12,6 +12,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
 import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 
 export interface MCPAuthRequired {
   servers: MCPServerAuthInfo[];
@@ -178,6 +179,9 @@ export interface IToolSet {
    * to the call's own arguments. A rejection fails the check closed.
    */
   liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
+
+  /** The bundle a tool is sent with. Absent or undefined: the tool is sent on every request. */
+  bundleOf?(toolName: string): ToolBundleName | undefined;
 
   // Existing synchronous Code Mode allow-list. Optional implementations fall
   // back to the current unrestricted envelope; callTool still enforces policy.

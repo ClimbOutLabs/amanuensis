@@ -59,7 +59,7 @@ describe('ThreadViewportShell', () => {
     expect(viewport).toHaveAttribute('data-slot', 'aui_thread-viewport');
     // CSS smooth scroll fights assistant-ui autoScroll and causes bounce on large streams.
     expect(viewport.className).not.toMatch(/\bscroll-smooth\b/);
-    expect(viewport.firstElementChild).toHaveClass('min-h-full', 'justify-center', 'pb-4');
+    expect(viewport.firstElementChild).toHaveClass('min-h-full', 'justify-[safe_center]', 'pb-4');
     expect(viewport).toHaveTextContent('Welcome');
 
     rerender(
