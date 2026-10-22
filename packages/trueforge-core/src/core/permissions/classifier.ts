@@ -25,6 +25,9 @@ import {
   SEND_DRAFT_TOOL_NAME,
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
+import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
+import { isMailSend } from '../email/mailConnector/sendListApproval';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -88,7 +91,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
+import { fingerprintLeak, privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -149,7 +152,9 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
+  markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateFingerprintsUsable,
   privateTextForChecks,
   SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
@@ -160,6 +165,9 @@ import {
   type SearchAskReason,
   type WebSearchTurnState,
 } from './webSearch';
+
+import type { CaldavEventReview } from '../calendar/caldav/eventReview';
+import { classifyCaldavTool } from './caldavTier';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -178,6 +186,8 @@ export interface SentinelAction {
   mcp_server_host?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
+  /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
+  caldav_event?: CaldavEventReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
@@ -1700,8 +1710,9 @@ const HIDDEN_QUERY = '(hidden)';
 /** Most characters of query text an approval card shows. */
 const SEARCH_CARD_TEXT_MAX = 1000;
 
-function searchQueryText(strings: OutboundStrings): string {
-  return [...strings.values, ...strings.plumbing]
+/** The query texts joined for one line. Callers pass only what a person reads, never provider plumbing. */
+function searchQueryText(texts: readonly string[]): string {
+  return texts
     .map(value => value.trim())
     .filter(value => value !== '')
     .join(' | ');
@@ -1768,6 +1779,8 @@ async function holdSearchCall(input: {
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
   params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
+  /** True when the chat read a secret or key file, so no chat-wide allow is offered on this card. */
+  secret_path_read: boolean;
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
   const shown =
@@ -1807,6 +1820,7 @@ async function holdSearchCall(input: {
     reason: input.reason,
     reason_detail: input.say,
     sensitive_read: false,
+    secret_path_read: input.secret_path_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -1846,10 +1860,19 @@ async function classifySearchProviderTool(input: {
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
-  const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
+    holdSearchCall({
+      action,
+      ctx,
+      reason,
+      say,
+      summary,
+      params: action.canonical_params,
+      fields: extraction.fields,
+      secret_path_read: false,
+    });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1873,6 +1896,7 @@ async function classifySearchProviderTool(input: {
         outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
         outbound_truncated: outbound?.truncated ?? false,
       },
+      secret_path_read: false,
     });
   };
 
@@ -1887,30 +1911,60 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
   }
+  // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
   const readMode = hasReadPrivateData(ctx.web_search);
-  if (readMode) {
-    const texts = privateTextForChecks(ctx.web_search);
-    if (texts === undefined || strings === undefined) {
-      return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+  // A secret read's flag comes back with the chat's saved state, even after a restart clears the process-local mark.
+  const privateReadHeld = ctx.services.private_reads.hasPrivateDataRead(ctx) || ctx.web_search.chatFingerprints.secret;
+  // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
+  const chatGranted =
+    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted && privateFingerprintsUsable(ctx.web_search);
+  // A chat that read a secret or key file asks before every search, whatever the grant says.
+  const heldPrivate = (): Promise<TierDecision> =>
+    ctx.web_search.chatFingerprints.secret
+      ? holdSearchCall({
+          action,
+          ctx,
+          reason: SEARCH_AFTER_PRIVATE_READ_REASON,
+          say: HOLD_SAY.private_secret,
+          summary,
+          params: action.canonical_params,
+          fields: extraction.fields,
+          secret_path_read: true,
+        })
+      : held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
+  if (chatGranted) {
+    if (strings === undefined) {
+      return heldPrivate();
     }
-    const leak = privateTextLeak({
+    const leak = fingerprintLeak({
       mode: 'search',
       strings,
       earlier: ctx.web_search.sentText,
-      privateTexts: texts,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
     });
     if (leak !== null) {
-      return ctx.services.unattended
-        ? privateTextSkipped(leak)
-        : held('mcp_search_after_private_read', HOLD_SAY.private_read);
+      return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
     }
-  }
-  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
-  // A chat grant skips only this hold. The checks above ran already, and the checks below still hold.
-  const privateReadHeld = ctx.services.private_reads.hasPrivateDataRead(ctx);
-  const chatGranted = privateReadHeld && ctx.web_search.searchChatGranted;
-  if (privateReadHeld && !chatGranted) {
-    return held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
+  } else {
+    if (readMode) {
+      const texts = privateTextForChecks(ctx.web_search);
+      if (texts === undefined || strings === undefined) {
+        return heldPrivate();
+      }
+      const leak = privateTextLeak({
+        mode: 'search',
+        strings,
+        earlier: ctx.web_search.sentText,
+        privateTexts: texts,
+      });
+      if (leak !== null) {
+        return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
+      }
+    }
+    if (privateReadHeld) {
+      return heldPrivate();
+    }
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', HOLD_SAY.search_limit);
@@ -2150,6 +2204,24 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The reason a silent Email read is recorded with. */
+const MAIL_READ_REASON = 'mail_read';
+
+/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
+  const { action, ctx } = input;
+  if (
+    action.tool_type !== 'mcp' ||
+    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
+  ) {
+    return [];
+  }
+  return mailRecipientsNotListed({
+    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
+    params: action.canonical_params,
+  });
+}
+
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
@@ -2165,6 +2237,27 @@ function demoRefusesConnector(input: {
     input.action.tool_type === 'mcp' &&
     (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
+}
+
+/**
+ * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
+ * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
+ * connector that happens to be named Email.
+ */
+async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Email needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: MAIL_READ_REASON,
+    reason_detail: `Read your email with \`${action.tool_name}\`.`,
+    sensitive_read: true,
+  });
 }
 
 /**
@@ -2537,6 +2630,24 @@ function spaceWriteLine(action: SentinelAction): string {
   return 'Restored a space to an earlier version.';
 }
 
+/**
+ * The arguments a card shows: any server key the computer holds is masked, so no card carries it raw. The
+ * approval token still binds the call's own arguments, so only the display changes.
+ */
+async function cardArguments(action: SentinelAction, ctx: ClassifyContext): Promise<Record<string, unknown>> {
+  const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  if (secrets.length === 0) {
+    return action.canonical_params;
+  }
+  const masked = maskServerSecrets({
+    params: action.canonical_params,
+    secrets,
+    earlier: ctx.web_search.sentText,
+    plumbingFields: action.mcp_search_plumbing_fields,
+  });
+  return masked ?? { details: HIDDEN_QUERY };
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -2546,7 +2657,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
   const extraction = extractCardFields({
     tool_name: action.tool_name,
-    canonical_params: action.canonical_params,
+    canonical_params: await cardArguments(action, ctx),
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
@@ -2618,6 +2729,43 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   if (demoRefusesConnector({ action, ctx, extraction })) {
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+  }
+
+  // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  const newMailRecipients = await mailNewRecipients({ action, ctx });
+  if (newMailRecipients.length > 0) {
+    const { fields } = extraction;
+    const sentence = externalServiceWhat({
+      tool_name: action.tool_name,
+      destination: fields.destination,
+      recipient: fields.recipient,
+      amount: fields.amount,
+    });
+    return tier3Decision({
+      card: {
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
+      },
+      reason: 'mail_new_recipient',
+      reason_detail: 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
@@ -2792,7 +2940,9 @@ function connectorApprovalCard(input: {
   const { action, extraction } = input;
   const { fields } = extraction;
   return {
-    plain_what: extraction.connector_what ?? `Aman doesn't know this tool yet: ${escapeDisplayText(action.tool_name)}.`,
+    plain_what:
+      extraction.connector_what ??
+      `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone:
       extraction.connector_what === null
@@ -2842,6 +2992,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
+  }
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    action.mcp_first_party === true &&
+    isMailReadToolName(action.tool_name)
+  ) {
+    return classifyMailRead(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
@@ -2958,6 +3116,26 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     }
   }
 
+  if (action.tool_type === 'mcp') {
+    const caldav = await classifyCaldavTool({
+      action,
+      review: action.caldav_event ?? null,
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
+        }),
+    });
+    if (caldav !== undefined) {
+      if (caldav.tier === 1 && caldav.sensitive_read) {
+        markPrivateDataRead(ctx.web_search);
+      }
+      return caldav;
+    }
+  }
+
   return classifyGenericTool(action, ctx);
 }
 
@@ -2996,6 +3174,13 @@ export async function classifyHostToolCall(input: {
   // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
   if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
     ctx.services.private_reads.markPrivateDataRead(ctx);
+  }
+  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life.
+  if (
+    decision.auto_deny === null &&
+    (decision.secret_path_read || (decision.sensitive_read && containsSecretPath(action.canonical_params)))
+  ) {
+    ctx.web_search.chatFingerprints.secret = true;
   }
   await recordClassificationAudit({
     services: ctx.services,

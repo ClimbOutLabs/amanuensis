@@ -54,6 +54,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -110,6 +111,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  setPrivateFingerprints as setPrivateFingerprintsQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -255,6 +257,10 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {
     return setSessionFolderQuery(this.db, input);
+  }
+
+  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
+    return setPrivateFingerprintsQuery(this.db, input);
   }
 
   async listSessions(
@@ -496,6 +502,7 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
           // literal '{}', which then casts to jsonb as an empty OBJECT, not [].
           approval_grants: json([]),
           task_checklist: json(emptyTaskChecklist()),
+          private_fingerprints: null,
           custom: session.custom !== null ? json(session.custom) : null,
           metadata: json(metadata),
           external_id: null,

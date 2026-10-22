@@ -1344,3 +1344,61 @@ describe('connector reads can be always allowed', () => {
     expect([otherRead.tier, otherConnector.tier]).toEqual([3, 3]);
   });
 });
+
+describe('a silent search row names only what was searched', () => {
+  const SESSION_ID = '5f0c9a3e-2b7d-4c1a-9e8f-7a6b5c4d3e2f';
+  const MODEL = 'provider-model-x9';
+  const PLUMBED_SEARCH: SentinelAction = {
+    tool_name: 'web_search',
+    canonical_params: { query: 'Lisbon weather today', session_id: SESSION_ID, model: MODEL },
+    tool_type: 'mcp',
+    mcp_server_name: 'search',
+    mcp_search_provider: true,
+    mcp_search_tool: true,
+    mcp_search_plumbing_fields: ['session_id', 'model'],
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  };
+
+  it('keeps the session id and model name out of the reason and the silent query a person reads', async () => {
+    const decision = await classifyTier(PLUMBED_SEARCH, makeCtx());
+    expect(decision).toMatchObject({ tier: 1, silent_search_query: 'Lisbon weather today' });
+    expect(decision.reason_detail).toBe('Searched: Lisbon weather today');
+    for (const text of [decision.reason_detail, decision.silent_search_query]) {
+      expect(text).not.toContain(SESSION_ID);
+      expect(text).not.toContain(MODEL);
+    }
+  });
+});
+
+describe('a held server key is never shown raw on a card', () => {
+  // Invented key, shaped so no secret-name rule matches it.
+  const KEY = 'sk-live-Qz9xR7mLp2VbT8kHw4YcN1dF0e';
+  const keyCtx = (): ClassifyContext => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.outboundSecrets = () => Promise.resolve([KEY]);
+    return makeCtx({ services });
+  };
+  const searchWith = (tool_name: string, params: Record<string, unknown>): SentinelAction => ({
+    tool_name,
+    canonical_params: params,
+    tool_type: 'mcp',
+    mcp_server_name: 'search',
+    mcp_search_provider: true,
+    mcp_search_tool: true,
+    mcp_search_plumbing_fields: ['session_id'],
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  });
+
+  it('holds a search whose plumbing field carries the key, and masks it on the card', async () => {
+    const decision = await classifyTier(searchWith('web_search', { query: 'lisbon', session_id: KEY }), keyCtx());
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_guard' });
+    expect(decision.card?.outbound_text ?? '').not.toContain(KEY);
+  });
+
+  it('masks the key on a card whose search would be refused for other reasons', async () => {
+    const decision = await classifyTier(searchWith('delete_search', { query: 'lisbon', session_id: KEY }), keyCtx());
+    expect(decision.tier).toBe(3);
+    expect(JSON.stringify(decision.card)).not.toContain(KEY);
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+});

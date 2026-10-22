@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { isPrivateReadToolName } from './privateReadTools';
+import { addPrivateFingerprints, type ChatPrivateFingerprints, emptyChatPrivateFingerprints } from './privateTextCheck';
 
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
@@ -74,6 +75,15 @@ export interface WebSearchTurnState {
   privateDataRead: boolean;
   /** True when the chat's saved "Allow searches in this chat" grant is in force for this turn. */
   searchChatGranted: boolean;
+  /**
+   * The chat's kept fingerprints: loaded from the saved chat at the turn's start, then extended with this turn's
+   * private texts. A grant's search check runs against these, since the texts of earlier turns are not held here.
+   */
+  chatFingerprints: ChatPrivateFingerprints;
+  /** True once this turn had a private text it could not fingerprint, so the kept fingerprints miss a copy. */
+  fingerprintsLost: boolean;
+  /** True when the chat had a saved fingerprint record at the turn's start. A history mark without one is unchecked. */
+  savedFingerprintsLoaded: boolean;
   /** Text of the private reads' results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
   /** Private reads this turn that reached the model, by any thread. Each must have its result kept as text. */
@@ -94,6 +104,9 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     sentText: '',
     privateDataRead: false,
     searchChatGranted: false,
+    chatFingerprints: emptyChatPrivateFingerprints(),
+    fingerprintsLost: false,
+    savedFingerprintsLoaded: false,
     privateTexts: [],
     privateReadCalls: 0,
     privateTextsKept: 0,
@@ -264,6 +277,9 @@ export function markPrivateDataRead(state: WebSearchTurnState): void {
 export function markPrivateDataReadFromHistory(state: WebSearchTurnState): void {
   state.privateDataRead = true;
   state.privateTextLost = true;
+  if (!state.savedFingerprintsLoaded) {
+    state.fingerprintsLost = true;
+  }
 }
 
 export function hasReadPrivateData(state: WebSearchTurnState): boolean {
@@ -290,6 +306,10 @@ export function keepSubAgentAnswerText(input: { state: WebSearchTurnState; text:
 
 function keepText(input: { state: WebSearchTurnState; text: string }): void {
   const { state, text } = input;
+  // Fingerprints are kept even after the turn's own text was lost, since a later turn checks them.
+  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text })) {
+    state.fingerprintsLost = true;
+  }
   if (state.privateTextLost) {
     return;
   }
@@ -363,9 +383,33 @@ export function recordPrivateToolResult(input: {
   if (text === undefined) {
     state.privateTexts = [];
     state.privateTextLost = true;
+    state.fingerprintsLost = true;
     return;
   }
   keepText({ state, text });
+}
+
+/**
+ * Whether the chat's saved fingerprints can check this turn's searches: every private read the chat made has its
+ * text fingerprinted, and none was lost. A chat that cannot be checked asks before each search.
+ */
+export function privateFingerprintsUsable(state: WebSearchTurnState): boolean {
+  return (
+    state.chatFingerprints.complete &&
+    !state.fingerprintsLost &&
+    state.privateTextsKept >= state.privateReadCalls &&
+    !state.chatFingerprints.secret
+  );
+}
+
+/** The chat's fingerprints as the next turn of this chat loads them. */
+export function chatFingerprintsAfterTurn(state: WebSearchTurnState): ChatPrivateFingerprints {
+  return {
+    complete: privateFingerprintsUsable(state),
+    has_text: state.chatFingerprints.has_text,
+    secret: state.chatFingerprints.secret,
+    entries: state.chatFingerprints.entries,
+  };
 }
 
 /**

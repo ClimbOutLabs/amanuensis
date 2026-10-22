@@ -355,11 +355,14 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, args);
     expect(result.tier).toBe(1);
     expect(result.is_approval_required).toBe(false);
-    // The chip lists everything sent, plumbing included, so nothing leaves unseen.
-    expect(result.silent_search_query).toBe([objective, ...queries, uuid, 'invented-model-7'].join(' | '));
+    // The chip lists only the query text. The plumbing stays in the call's details and reaches the service.
+    expect(result.silent_search_query).toBe([objective, ...queries].join(' | '));
+    expect(result.silent_search_query).not.toContain(uuid);
+    expect(result.silent_search_query).not.toContain('invented-model-7');
 
     await h.toolSet.callTool({ name: 'lookup', arguments: args });
     expect(h.dispatched).toHaveLength(1);
+    expect(h.dispatched[0]?.args).toMatchObject({ session_id: uuid, model_name: 'invented-model-7' });
   });
 
   it('still holds a single query over the cap, and a card shows the exact text', async () => {
@@ -410,9 +413,10 @@ describe('provider plumbing fields on the designated provider', () => {
       const result = await info(h, args);
       expect(result.tier).toBe(1);
       expect(result.is_approval_required).toBe(false);
-      expect(result.silent_search_query).toContain(sessionId);
+      expect(result.silent_search_query).not.toContain(sessionId);
       await h.toolSet.callTool({ name: 'lookup', arguments: args });
       expect(h.dispatched).toHaveLength(1);
+      expect(h.dispatched[0]?.args).toMatchObject({ session_id: sessionId });
     }
   });
 
@@ -1012,9 +1016,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
-    expect(after.tier3_card?.plain_what).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(after.tier3_card?.plain_what).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
     expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(JSON.stringify(refused)).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
   });
 });

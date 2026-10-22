@@ -178,6 +178,11 @@ export const Tier3CardSchema = z
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
     persona: Tier3PersonaSchema.nullable().optional(),
+    mail_new_recipients: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe('For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.'),
   })
   .openapi('Tier3Card');
 

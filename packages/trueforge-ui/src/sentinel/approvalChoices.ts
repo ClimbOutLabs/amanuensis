@@ -18,6 +18,19 @@ export const APPROVAL_CHOICES = {
 } as const;
 
 /**
+ * The choices on a mail send to an address not on the Email list. Approving adds the shown addresses, so no
+ * chat-wide or always grant is offered on it.
+ */
+export const NEW_RECIPIENT_CHOICES = {
+  approve: { label: 'Add and send', hint: 'Add the addresses shown to your send list, then send.' },
+  cancel: { label: 'Cancel', hint: 'Do not send. Nothing is added to your send list.' },
+} as const;
+
+export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
+  return (card.mail_new_recipients ?? []).length > 0;
+}
+
+/**
  * The option id that asks the runtime for a standing grant: the patched runtime maps it to scope
  * "always" (patches/@truefoundry__assistant-ui-runtime). Keep the two in step.
  */

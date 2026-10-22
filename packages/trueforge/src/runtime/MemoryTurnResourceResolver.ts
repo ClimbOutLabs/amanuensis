@@ -1,10 +1,17 @@
 import {
   AgentSpecSchema,
+  narrowConnectorTools,
   type AgentSpec,
   type ResolvedAgentDefinition,
 } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
+import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
+import {
+  MAIL_CONNECTOR_NAME,
+  MAIL_CONNECTOR_TOOL_NAMES,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
@@ -89,6 +96,14 @@ function withMemoryProviderNarrowedToReads(spec: AgentSpec, providerServerName: 
   };
 }
 
+/** The Email connector's attachments go into the sandbox on every thread that mounts the connector. */
+function mailAttachmentCapabilities(spec: AgentSpec): AgentCapability[] {
+  if (!spec.mcp_servers?.some(entry => entry.name === MAIL_CONNECTOR_NAME)) {
+    return [];
+  }
+  return [{ toolResponseProcessors: [new MailAttachmentProcessor()] }];
+}
+
 /** The designated search provider is offered to every root thread, so a chat that never opened Add-ons still searches. */
 function withSearchProviderAttached(spec: AgentSpec, searchProviderServerName: string): AgentSpec {
   const servers = spec.mcp_servers ?? [];
@@ -131,12 +146,22 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       providerServerName === undefined || isSubAgent
         ? input.spec
         : withMemoryProviderNarrowedToReads(input.spec, providerServerName);
+    // The Email connector is offered only its eight tools on every thread, sub-agents included.
+    const mailNarrowedSpec = narrowConnectorTools(narrowedSpec, {
+      server_name: MAIL_CONNECTOR_NAME,
+      tools: MAIL_CONNECTOR_TOOL_NAMES,
+    });
+    // The Calendar connector is offered only its eight tools on every thread, sub-agents included.
+    const calendarNarrowedSpec = narrowConnectorTools(mailNarrowedSpec, {
+      server_name: CALDAV_SERVER_NAME,
+      tools: CALDAV_TOOL_NAMES,
+    });
     const resolved = await super.resolveAgentDefinition({
       ...input,
       spec:
         searchProviderServerName === undefined
-          ? narrowedSpec
-          : withSearchProviderAttached(narrowedSpec, searchProviderServerName),
+          ? calendarNarrowedSpec
+          : withSearchProviderAttached(calendarNarrowedSpec, searchProviderServerName),
     });
     // Derive recallEnabled from the spec (defaults to true per schema)
     const recallEnabled = input.spec.config.memory.recall_enabled;
@@ -146,7 +171,11 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       isSubAgent,
     });
     const outputScreen = toolOutputScreenCapability({ config: this.#toolOutputScreen });
-    const extraCapabilities = [...memoryCapabilities, ...(outputScreen === undefined ? [] : [outputScreen])];
+    const extraCapabilities = [
+      ...memoryCapabilities,
+      ...(outputScreen === undefined ? [] : [outputScreen]),
+      ...mailAttachmentCapabilities(input.spec),
+    ];
     if (extraCapabilities.length === 0) {
       return resolved;
     }

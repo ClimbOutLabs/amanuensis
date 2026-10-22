@@ -58,6 +58,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -294,6 +295,7 @@ export class InMemorySessionStore<
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
       approval_grants: [],
+      private_fingerprints: null,
       task_checklist: emptyTaskChecklist(),
       metrics: {
         total_duration_ms: 0,
@@ -326,6 +328,14 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
+  }
+
+  async setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored === undefined) {
+      return;
+    }
+    stored.record.private_fingerprints = input.fingerprints;
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {

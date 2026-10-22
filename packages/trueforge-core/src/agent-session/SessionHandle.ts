@@ -21,6 +21,7 @@ import {
   type SentinelServices,
 } from '../core/permissions';
 import { isChangeRequestReason } from '../core/permissions/changeRequest';
+import { emptyChatPrivateFingerprints } from '../core/permissions/privateTextCheck';
 import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
@@ -417,6 +418,9 @@ export class SessionHandle<
       );
       // Read from the saved session, so a grant from another chat never reaches this one.
       input.resolver.webSearchTurn.searchChatGranted = chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
+      input.resolver.webSearchTurn.chatFingerprints =
+        this.session.private_fingerprints ?? emptyChatPrivateFingerprints();
+      input.resolver.webSearchTurn.savedFingerprintsLoaded = this.session.private_fingerprints !== null;
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not

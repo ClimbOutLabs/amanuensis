@@ -11,6 +11,7 @@ import type {
 } from '../core/events/schema';
 import { EventType as HarnessEventType, newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
+import { chatFingerprintsAfterTurn, type WebSearchTurnState } from '../core/permissions/webSearch';
 import type { AbnormalHandoff, AbnormalHandoffCause } from '../core/runtime/AbnormalHandoff';
 import {
   InternalEventType,
@@ -528,11 +529,31 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
                 };
           }
         } finally {
+          await this.persistChatFingerprints(resolver.webSearchTurn);
           await resolver.close().catch((err: unknown) => {
             resolver.logger.warn('TurnResourceResolver.close() failed', { err });
           });
         }
       }
+    }
+  }
+
+  /**
+   * Saves the chat's private-text fingerprints when this turn read private data or lost one. A turn that read
+   * nothing leaves the saved fingerprints as they are.
+   */
+  private async persistChatFingerprints(state: WebSearchTurnState): Promise<void> {
+    if (state.privateReadCalls === 0 && !state.fingerprintsLost && !state.chatFingerprints.secret) {
+      return;
+    }
+    try {
+      await this.store.setPrivateFingerprints({
+        session_id: this.turn.session_id,
+        fingerprints: chatFingerprintsAfterTurn(state),
+      });
+    } catch (err: unknown) {
+      // The chat's saved fingerprints stay as they were, so a later search of this chat asks.
+      this.resolver?.logger.warn('Saving the chat fingerprints failed', { err });
     }
   }
 

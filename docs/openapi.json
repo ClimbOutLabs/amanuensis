@@ -9996,6 +9996,16 @@
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
           },
+          "mail_new_recipients": {
+            "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "outbound_plumbing_text": {
             "description": "Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.",
             "type": [

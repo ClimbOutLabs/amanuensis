@@ -16,6 +16,7 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
+import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
@@ -1782,6 +1783,8 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
+        // Mail to new addresses is checked before anything is recorded, like a held action below.
+        await this.prepareMailRecipientAdds({ approvals, pendingById, heldById });
         // Checked before anything is recorded, so a refused action leaves the chat untouched.
         const heldReplay = await this.prepareHeldReplay({
           approvals: approvals.filter(approval => heldById.has(approval.tool_call_id)),
@@ -1925,6 +1928,50 @@ export class AgentThread {
       },
       ...input,
     });
+  }
+
+  /**
+   * An approved mail send first makes the sidecar run the server's Email list. New addresses come only from the
+   * approved card, and the sidecar must load the list before the send, on the first try and on a retry. Any failure
+   * throws before the approval is recorded, so the draft stays pending.
+   */
+  private async prepareMailRecipientAdds(input: {
+    approvals: readonly UserToolApprovalMessage[];
+    pendingById: ReadonlyMap<string, InternalEnrichedToolCall>;
+    heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
+  }): Promise<void> {
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      return;
+    }
+    const ctx = { tenant_id: sentinel.tenant_id, created_by: sentinel.created_by };
+    for (const approval of input.approvals) {
+      if (approval.approval.status !== 'allow') {
+        continue;
+      }
+      const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
+      if (
+        call === undefined ||
+        !isMailSend({
+          mcp_server_name: call.tool_info.mcp_server_name,
+          tool_name: call.tool_info.original_tool_name,
+        })
+      ) {
+        continue;
+      }
+      const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (added.length > 0) {
+        const result = await sentinel.services.mail_add_recipients(ctx, added);
+        if (result === 'refused') {
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
+        }
+        if (result === 'not_loaded') {
+          throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+        }
+      } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+      }
+    }
   }
 
   /**

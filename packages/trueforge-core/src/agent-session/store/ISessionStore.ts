@@ -9,6 +9,7 @@ import type {
 import type { RegisteredCommandExecution } from '../../core/llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../../core/mcp/executeToolCalls';
 import type { ImplementationPlanGrant, ImplementationPlanGrantOwner } from '../../core/mcp/implementationPlanGrant';
+import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type {
   AgentThreadSnapshot,
   ContextMessage,
@@ -42,6 +43,11 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
  * `agent` may be set only on inline sessions, and only as an inline arm (`{ type: 'inline', spec }`).
  * `metadata` when set fully replaces the stored map (`{}` clears).
  */
+export interface SetPrivateFingerprintsInput {
+  session_id: string;
+  fingerprints: ChatPrivateFingerprints;
+}
+
 export type UpdateSessionInput<TSessionCustom extends object = Record<string, never>> = Pick<
   SessionRecord<TSessionCustom>,
   'tenant_id' | 'session_id'
@@ -522,6 +528,12 @@ export interface ISessionStore<
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
+
+  /**
+   * Replaces the chat's kept private-text fingerprints. Written once at the end of a turn that read private data,
+   * so a later turn of the chat can check its searches. Deleted with the session.
+   */
+  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void>;
 
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;
