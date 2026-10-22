@@ -202,6 +202,8 @@ export class TurnResourceResolver<
       toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
+      /** See ITurnResourceResolver.serverSandboxAvailable. */
+      serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
       /**
@@ -263,6 +265,10 @@ export class TurnResourceResolver<
 
   get boundRepository(): BoundRepository | undefined {
     return this.deps.boundRepository;
+  }
+
+  get serverSandboxAvailable(): boolean | undefined {
+    return this.deps.serverSandboxAvailable;
   }
 
   get clientTimezone(): string | undefined {
