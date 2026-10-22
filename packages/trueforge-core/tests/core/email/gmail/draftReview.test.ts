@@ -14,6 +14,7 @@ const DRAFT: ReviewableDraft = {
   references: '',
   fromName: '',
   nameLeftOff: false,
+  replyTo: null,
 };
 
 describe('hashDraft', () => {

@@ -67,6 +67,9 @@ services:
 @@IF_SANDBOX@@      SANDBOX_BACKEND: slots
 @@IF_SANDBOX@@      SANDBOX_SLOTS: '4'
 @@IF_SANDBOX@@      SANDBOX_SLOTS_DIR: /run/aman-slots
+@@IF_EMAIL@@      # The Email send list the server writes, and the connector's status file it reads (see mail-email).
+@@IF_EMAIL@@      MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
+@@IF_EMAIL@@      MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
     volumes:
       - data:/data
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
@@ -79,6 +82,9 @@ services:
 @@IF_SANDBOX@@      - slot_mirror_2:/run/aman-slots/2/mirror
 @@IF_SANDBOX@@      - slot_mirror_3:/run/aman-slots/3/mirror
 @@IF_SANDBOX@@      - slot_mirror_4:/run/aman-slots/4/mirror
+@@IF_EMAIL@@      # The Email send list. The server is its only writer; the connector mounts it read-only.
+@@IF_EMAIL@@      - mail-policy:/data/mail-policy
+@@IF_EMAIL@@      - mail-policy-status:/data/mail-policy-status:ro
     depends_on:
       loopback:
         condition: service_started
@@ -153,6 +159,38 @@ services:
 @@IF_CALENDAR@@      - no-new-privileges:true
 @@IF_CALENDAR@@    restart: unless-stopped
 
+# Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
+# private network. Nothing is published. Account credentials come only from .env.mail-email, which the installer writes.
+@@IF_EMAIL@@  mail-email:
+@@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
+@@IF_EMAIL@@    pull_policy: never
+@@IF_EMAIL@@    # The wrapper starts the connector on the send list the app writes, and restarts it when that list changes.
+@@IF_EMAIL@@    entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
+@@IF_EMAIL@@    command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
+@@IF_EMAIL@@    env_file:
+@@IF_EMAIL@@      - path: ./.env.mail-email
+@@IF_EMAIL@@        required: false
+@@IF_EMAIL@@    environment:
+@@IF_EMAIL@@      # Only requests addressed to this service name pass the DNS-rebinding check.
+@@IF_EMAIL@@      MCP_ALLOWED_HOSTS: mail-email
+@@IF_EMAIL@@      # Env-supplied accounts are read from the environment only, and no account is written to a config file.
+@@IF_EMAIL@@      MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
+@@IF_EMAIL@@      MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
+@@IF_EMAIL@@      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
+@@IF_EMAIL@@      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+@@IF_EMAIL@@    volumes:
+@@IF_EMAIL@@      - ./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
+@@IF_EMAIL@@      - mail-policy:/policy:ro
+@@IF_EMAIL@@      - mail-policy-status:/mail-status
+@@IF_EMAIL@@      - mail-email-data:/data
+@@IF_EMAIL@@    expose:
+@@IF_EMAIL@@      - '9557'
+@@IF_EMAIL@@    cap_drop:
+@@IF_EMAIL@@      - ALL
+@@IF_EMAIL@@    security_opt:
+@@IF_EMAIL@@      - no-new-privileges:true
+@@IF_EMAIL@@    restart: unless-stopped
+
   dex:
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
@@ -190,6 +228,21 @@ volumes:
     labels:
       com.amanuensis.instance: @@NAME@@
 
+@@IF_EMAIL@@  # The Email send list. Holds only addresses, never credentials.
+@@IF_EMAIL@@  mail-policy:
+@@IF_EMAIL@@    name: aman_@@NAME@@_mail_policy
+@@IF_EMAIL@@    labels:
+@@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_EMAIL@@  # Records which send list the Email connector loaded. Written by the connector, read by the app.
+@@IF_EMAIL@@  mail-policy-status:
+@@IF_EMAIL@@    name: aman_@@NAME@@_mail_policy_status
+@@IF_EMAIL@@    labels:
+@@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_EMAIL@@  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
+@@IF_EMAIL@@  mail-email-data:
+@@IF_EMAIL@@    name: aman_@@NAME@@_mail_email_data
+@@IF_EMAIL@@    labels:
+@@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1

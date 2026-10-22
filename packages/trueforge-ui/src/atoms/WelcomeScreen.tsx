@@ -4,7 +4,7 @@ import { useOptionalThemePreset } from '../theme/ThemeProvider.js';
 import { cn } from './lib/cn.js';
 
 export type WelcomeScreenProps = {
-  heading?: string;
+  heading?: ReactNode;
   icon?: ReactNode;
   className?: string;
 };
@@ -17,7 +17,6 @@ export function WelcomeScreen({ heading = 'How can I help you today?', icon = nu
       data-preset={preset}
       className={cn(
         'aui-thread-welcome-root relative isolate mb-6 flex flex-col items-center px-4 text-center text-text-primary',
-        preset === 'gemini' && 'py-8',
         className,
       )}
     >
@@ -29,9 +28,9 @@ export function WelcomeScreen({ heading = 'How can I help you today?', icon = nu
       <h1
         className={cn(
           'aui-thread-welcome-message-inner fill-mode-both text-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:animate-none',
-          preset === 'trueforge' ? 'font-semibold' : 'font-normal',
+          preset === 'paper' ? 'font-semibold' : 'font-normal',
           icon !== null && 'delay-75',
-          preset === 'gemini' ? 'text-[1.75rem] leading-tight duration-300' : 'duration-200',
+          'duration-200',
         )}
       >
         {heading}

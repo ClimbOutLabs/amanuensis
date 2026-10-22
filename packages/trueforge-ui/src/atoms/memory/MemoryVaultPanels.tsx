@@ -122,7 +122,7 @@ export function MemoryVaultFactsPanel({ state }: { state: MemoryVaultState }) {
   );
 }
 
-/** The sharing panel: which collections each persona may read. */
+/** The sharing panel: which memories each specialist may see. */
 export function MemoryVaultSharingPanel({ state }: { state: MemoryVaultState }) {
   if (state.sharingError !== null) {
     return (

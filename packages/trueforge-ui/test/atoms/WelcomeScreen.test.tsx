@@ -9,7 +9,7 @@ describe('WelcomeScreen', () => {
     const { container } = render(<WelcomeScreen className="host-welcome" />);
 
     const heading = screen.getByRole('heading', { level: 1, name: 'How can I help you today?' });
-    const root = container.querySelector('[data-preset="trueforge"]');
+    const root = container.querySelector('[data-preset="paper"]');
     expect(root).toHaveClass('aui-thread-welcome-root', 'host-welcome');
     expect(root?.querySelector('svg')).not.toBeInTheDocument();
     expect(heading).toHaveClass('font-semibold');
@@ -32,30 +32,23 @@ describe('WelcomeScreen', () => {
   });
 
   // The provider's preset is initial state, so each preset gets its own mount.
-  it('draws no sparkle or halo on any preset', () => {
-    const chatgpt = render(
-      <ThemeProvider theme={{ preset: 'chatgpt', mode: 'light' }}>
+  it('draws no icon on the high-contrast preset and bolds only paper', () => {
+    const highContrast = render(
+      <ThemeProvider theme={{ preset: 'high-contrast', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(chatgpt.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
+    expect(highContrast.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
     expect(screen.getByRole('heading')).toHaveClass('font-normal');
-    chatgpt.unmount();
+    highContrast.unmount();
 
-    const claude = render(
-      <ThemeProvider theme={{ preset: 'claude', mode: 'light' }}>
+    const forest = render(
+      <ThemeProvider theme={{ preset: 'forest', mode: 'dark' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
-    claude.unmount();
-
-    const gemini = render(
-      <ThemeProvider theme={{ preset: 'gemini', mode: 'light' }}>
-        <WelcomeScreen />
-      </ThemeProvider>,
-    );
-    expect(gemini.container.querySelector('.aui-thread-welcome-root')).toHaveClass('py-8');
-    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).not.toBeInTheDocument();
+    expect(forest.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading')).toHaveClass('font-normal');
+    forest.unmount();
   });
 });

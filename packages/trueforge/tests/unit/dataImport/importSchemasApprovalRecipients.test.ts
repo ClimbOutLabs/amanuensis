@@ -51,6 +51,7 @@ describe('importing approval cards written before recipients carried names', () 
               cc: [{ name: '', address: 'lin@example.com' }],
               bcc: [],
               replaces: { subject: 'Old lease', to: [{ name: '', address: 'sam@example.com' }] },
+              reply_to: null,
             },
           },
         },

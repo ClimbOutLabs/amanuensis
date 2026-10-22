@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
+import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useOptionalScheduleServer, useServerCapabilities } from '../server/ServerContext.js';
@@ -13,14 +14,15 @@ import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
 import { useOptionalAmanPandaSrc } from './AmanPanda.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
-import { AmanTour } from './AmanTour.js';
+import { AmanTour, greetingLine } from './AmanTour.js';
 import { useTourWaiting } from './AmanTourWaiting.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
+import { personDisplayName } from './personDisplayName.js';
 import type { TourCapabilities } from './tourPrompts.js';
 
-/** The plain greeting's heading, in the assistant's name (Aman until the person picks another). */
-export function amanWelcomeHeading(assistantName: string | null | undefined): string {
-  return `Hi, I'm ${assistantDisplayName(assistantName)}. What's on your mind?`;
+/** The plain greeting: the time of day, and the person's name when there is one. */
+export function amanWelcomeHeading({ name, now = new Date() }: { name: string | undefined; now?: Date }): string {
+  return greetingLine({ now, name });
 }
 
 /**
@@ -135,6 +137,11 @@ export function AmanWelcome(props: WelcomeScreenProps) {
   const waiting = useTourWaiting();
   const scheduleCount = useScheduleCount();
   const pandaSrc = useOptionalAmanPandaSrc();
+  const currentUser = useOptionalCurrentUser();
+  const personName = personDisplayName({
+    profile: personalization?.profile,
+    signInName: currentUser?.displayName,
+  });
   const ordinaryChat = props.heading === undefined;
 
   if (ordinaryChat && !hidden) {
@@ -148,7 +155,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
         capabilities={capabilities}
         helpAreas={profile.help_areas}
         onHelpAreasChange={saveHelpAreas}
-        userName={profile.user_name}
+        userName={personName}
         assistantName={profile.assistant_name}
         waiting={waiting}
         scheduleCount={scheduleCount}
@@ -161,7 +168,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
     );
   }
 
-  const heading = props.heading ?? amanWelcomeHeading(personalization?.profile?.assistant_name);
+  const heading = props.heading ?? <span className="aui-day-title">{amanWelcomeHeading({ name: personName })}</span>;
   return (
     <>
       <WelcomeScreen {...props} heading={heading} />

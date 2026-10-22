@@ -34,6 +34,7 @@ function results(overrides: Partial<HelpProbeResults> = {}): HelpProbeResults {
   return {
     model: HEALTHY_MODEL,
     connectors: [{ name: 'linear', ok: true }],
+    google: 'not_set_up',
     sandboxReady: true,
     scheduler: 'running',
     hostReport: { state: 'ok', report: REPORT },
@@ -62,7 +63,7 @@ describe('buildHelpHealthCheck', () => {
       name: 'Your model',
       status: 'fail',
       message: 'No model is connected.',
-      next_step: 'Add one in Settings, Models. Token Factory is one option.',
+      next_step: null,
     });
     expect(check.model_ready).toBe(false);
   });
@@ -135,11 +136,41 @@ describe('buildHelpHealthCheck', () => {
     expect(item(build({ scheduler: 'elsewhere' }), 'schedules')).toMatchObject({ status: 'not_set_up' });
   });
 
-  it('reports mail and calendar as not set up', () => {
+  it('reports mail and calendar as not set up only when no Google login or mail connector is configured', () => {
     expect(item(build(), 'mail_calendar')).toMatchObject({
       status: 'not_set_up',
-      message: 'Email and calendar services are not set up on this server.',
+      message: 'Email and calendar are not set up yet.',
     });
+  });
+
+  it('reports mail and calendar OK when a configured mail or calendar connector answers', () => {
+    const check = build({ connectors: [{ name: 'Email', ok: true }] });
+
+    expect(item(check, 'mail_calendar')).toMatchObject({ status: 'pass', message: 'Email and calendar answered.' });
+  });
+
+  it('reports mail and calendar OK when the built-in Google login answers, with no connector', () => {
+    expect(item(build({ google: 'answered' }), 'mail_calendar')).toMatchObject({ status: 'pass' });
+  });
+
+  it('reports mail and calendar as failed, not as not set up, when a configured connector does not answer', () => {
+    const check = build({ connectors: [{ name: 'Calendar', ok: false }] });
+
+    expect(item(check, 'mail_calendar')).toMatchObject({
+      status: 'fail',
+      message: 'Email and calendar did not answer.',
+    });
+  });
+
+  it('asks for a new sign-in when the Google login needs connecting again', () => {
+    expect(item(build({ google: 'needs_reconnect' }), 'mail_calendar')).toMatchObject({
+      status: 'fail',
+      message: 'Google needs to be connected again.',
+    });
+  });
+
+  it('shows the model test answering as OK in the first item', () => {
+    expect(build().items[0]).toMatchObject({ id: 'model', status: 'pass', message: 'The model answered.' });
   });
 
   it('maps failed and warned host report checks into the same list, and leaves passes out', () => {
@@ -151,42 +182,56 @@ describe('buildHelpHealthCheck', () => {
     expect(item(check, 'host_ports')).toMatchObject({ status: 'fail', name: 'Ports' });
   });
 
-  it('shows the last full check time and no message when the report is fresh', () => {
+  it('shows the saved full check date and its result, counting failed and warned checks', () => {
     expect(build().host_report).toEqual({
       state: 'ok',
       checked_at: '2026-10-20T08:30:00Z',
-      message: null,
+      message: '2 things need attention',
       next_step: null,
     });
   });
 
-  it('says no full check has been run yet when the report is missing', () => {
+  it('says all good when the saved report has no failed or warned checks', () => {
+    const passing = { ...REPORT, checks: REPORT.checks.slice(0, 1) };
+
+    expect(build({ hostReport: { state: 'ok', report: passing } }).host_report).toMatchObject({
+      state: 'ok',
+      message: 'all good',
+    });
+  });
+
+  it('never shows a command in the help panel, even when the installer report has one', () => {
+    const check = build();
+    const everyText = JSON.stringify(check);
+
+    expect(everyText).not.toMatch(/aman doctor|terminal/);
+  });
+
+  it('says nothing about a full check when there is no saved report', () => {
     const missing: HostReportRead = { state: 'missing' };
 
     expect(build({ hostReport: missing }).host_report).toEqual({
       state: 'missing',
       checked_at: null,
-      message: 'No full check has been run yet. Run aman doctor on your computer.',
+      message: null,
       next_step: null,
     });
   });
 
-  it('treats an unreadable report as missing and says so', () => {
+  it('says nothing about a full check when the saved report cannot be read', () => {
     const section = build({ hostReport: { state: 'invalid' } }).host_report;
 
-    expect(section.state).toBe('invalid');
-    expect(section.message).toBe(
-      'The last full check could not be read, so it is treated as missing. Run aman doctor on your computer.',
-    );
+    expect(section).toEqual({ state: 'invalid', checked_at: null, message: null, next_step: null });
   });
 
-  it('says a stale report is more than seven days old and suggests running aman doctor again', () => {
+  it('keeps the date and result of a stale report and says it is more than seven days old', () => {
     const section = build({ hostReport: { state: 'stale', report: REPORT } }).host_report;
 
-    expect(section.state).toBe('stale');
-    expect(section.checked_at).toBe('2026-10-20T08:30:00Z');
-    expect(section.message).toBe(
-      'The last full check is more than 7 days old. Run aman doctor on your computer again.',
-    );
+    expect(section).toEqual({
+      state: 'stale',
+      checked_at: '2026-10-20T08:30:00Z',
+      message: '2 things need attention',
+      next_step: 'It is more than 7 days old.',
+    });
   });
 });

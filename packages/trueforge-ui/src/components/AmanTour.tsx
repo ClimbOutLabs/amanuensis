@@ -31,6 +31,12 @@ export function greetingFor(now: Date): string {
   return 'Good evening';
 }
 
+/** "Good morning, Priya." by the local hour; just the greeting when there is no name. */
+export function greetingLine({ now, name }: { now: Date; name: string | null | undefined }): string {
+  const trimmed = name?.trim();
+  return `${greetingFor(now)}${trimmed ? `, ${trimmed}` : ''}.`;
+}
+
 const TICKET_BUTTON_CLASS =
   'flex h-full w-full cursor-pointer flex-col gap-1.5 rounded-[inherit] border-0 bg-transparent p-3 text-left text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
 
@@ -127,8 +133,7 @@ export function AmanTour({
   pandaSrc = null,
 }: AmanTourProps) {
   const highlighted = useHighlightedCard({ firstWaitingApprovalId: waiting.firstId, nextAppointmentId: null });
-  const name = userName?.trim();
-  const greeting = `${greetingFor(now)}${name ? `, ${name}` : ''}.`;
+  const greeting = greetingLine({ now, name: userName });
   const dayLabel = now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
   const assistant = assistantDisplayName(assistantName);
   const cards = firstFrameCardPrompts({ helpAreas, capabilities, assistantName: assistant });

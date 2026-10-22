@@ -101,7 +101,7 @@ export class CalendarToolSet extends LocalToolMCP {
     return [
       defineTool({
         name: LIST_EVENTS_TOOL_NAME,
-        description: `List events on the primary calendar in a time range, in start order, with repeating events unfolded into their dates. Dates (YYYY-MM-DD) are read in the user's time zone; a time_max date includes that whole day. Birthdays and other all-day events have all_day true and no clock time. Optional query searches title, description, place and guests.${canWrite ? '' : NO_WRITE_NOTE}`,
+        description: `List primary-calendar events in a time range, in start order, with repeats unfolded into their dates. Dates (YYYY-MM-DD) use the user's time zone; a time_max date includes that whole day. All-day events have all_day true and no clock time.${canWrite ? '' : NO_WRITE_NOTE}`,
         schema: ListEventsSchema,
         annotations: CALENDAR_READ_ANNOTATIONS,
         handler: input => this.#listEvents(input),

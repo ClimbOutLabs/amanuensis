@@ -18,6 +18,8 @@ export interface Tier3Email {
     replaces: TrueForge.Tier3EmailReplaces | null;
     /** The message a reply answers in its thread, or null when the message is not a reply. */
     replyInThread: TrueForge.Tier3EmailReplyInThread | null;
+    /** The address replies go to when it is not the sender, or null when replies go to the sender. */
+    replyTo?: string | null;
     /** Subject line. */
     subject: string;
     /** Recipients. */

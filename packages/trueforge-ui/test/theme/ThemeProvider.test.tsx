@@ -6,6 +6,7 @@ import { ShellActions } from '@/atoms/ShellActions.js';
 import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { BrandLogo } from '@/theme/brand.js';
 import { ThemeProvider, useBrand, useTheme } from '@/theme/ThemeProvider.js';
+import type { ThemePreset } from '@/theme/types.js';
 
 function ModeProbe() {
   const { mode, preference, setTheme } = useTheme();
@@ -214,17 +215,17 @@ describe('ThemeProvider', () => {
   it('applies every preset palette', () => {
     const cases: Array<{
       name: string;
-      preset: 'chatgpt' | 'claude' | 'gemini';
+      preset: ThemePreset;
       mode: 'light' | 'dark';
       dataPreset?: string;
       inlineFontFamily?: string;
       tokens: Record<string, string>;
     }> = [
       {
-        name: 'ChatGPT light',
-        preset: 'chatgpt',
+        name: 'High contrast light',
+        preset: 'high-contrast',
         mode: 'light',
-        dataPreset: 'chatgpt',
+        dataPreset: 'high-contrast',
         inlineFontFamily: '',
         tokens: {
           '--primary-button-bg': '#0d0d0d',
@@ -239,8 +240,8 @@ describe('ThemeProvider', () => {
         },
       },
       {
-        name: 'ChatGPT dark',
-        preset: 'chatgpt',
+        name: 'High contrast dark',
+        preset: 'high-contrast',
         mode: 'dark',
         tokens: {
           '--primary-bg': '#000000',
@@ -252,62 +253,44 @@ describe('ThemeProvider', () => {
         },
       },
       {
-        name: 'Claude light',
-        preset: 'claude',
+        name: 'Midnight light',
+        preset: 'midnight',
         mode: 'light',
-        dataPreset: 'claude',
+        dataPreset: 'midnight',
         tokens: {
-          '--primary-bg': '#f0ece0',
-          '--text-primary': '#1a1a18',
-          '--card-bg': '#ffffff',
-          '--primary-button-bg': '#c96442',
-          '--font-agent-ui': "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
-          '--font-display': "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
-          '--radius': '1rem',
-          '--composer-radius': '1rem',
-          '--user-message-bg': '#e5e0d6',
-          '--user-message-text': '#1a1a18',
+          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-text': '#1a2332',
+          '--focus-ring': 'oklch(0.503 0.095 84.8)',
         },
       },
       {
-        name: 'Claude dark',
-        preset: 'claude',
+        name: 'Midnight dark',
+        preset: 'midnight',
         mode: 'dark',
         tokens: {
-          '--primary-bg': '#2b2a27',
-          '--text-primary': '#eeeeee',
-          '--card-bg': '#1f1e1b',
-          '--primary-button-bg': '#c96442',
-          '--user-message-bg': '#3d3a35',
-          '--user-message-text': '#eeeeee',
-        },
-      },
-      {
-        name: 'Gemini light',
-        preset: 'gemini',
-        mode: 'light',
-        tokens: {
-          '--primary-bg': '#fdfcfc',
-          '--text-primary': '#1f1f1f',
-          '--primary-button-bg': '#1f3b9b',
-          '--font-agent-ui':
-            '"GeistSans", "GeistSans Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
-          '--radius': '1rem',
-          '--composer-radius': '2rem',
-          '--user-message-bg': '#f3f6fc',
-        },
-      },
-      {
-        name: 'Gemini dark',
-        preset: 'gemini',
-        mode: 'dark',
-        tokens: {
-          '--primary-bg': '#0c0c0c',
-          '--card-bg': '#1e1f20',
-          '--primary-button-bg': '#a8c7fa',
-          '--primary-button-text': '#062e6f',
+          '--primary-bg': '#111a29',
+          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-text': '#0d1420',
           '--focus-ring': 'oklch(0.809 0.138 85.2)',
-          '--user-message-bg': '#222327',
+        },
+      },
+      {
+        name: 'Forest light',
+        preset: 'forest',
+        mode: 'light',
+        dataPreset: 'forest',
+        tokens: {
+          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-text': '#1e2b1e',
+        },
+      },
+      {
+        name: 'Forest dark',
+        preset: 'forest',
+        mode: 'dark',
+        tokens: {
+          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-text': '#101a10',
         },
       },
     ];
@@ -481,7 +464,7 @@ describe('ThemeProvider', () => {
 
   it('applies every preset welcome treatment', () => {
     const trueforge = render(
-      <ThemeProvider theme={{ preset: 'trueforge', mode: 'light' }}>
+      <ThemeProvider theme={{ preset: 'paper', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
@@ -494,33 +477,16 @@ describe('ThemeProvider', () => {
     expect(screen.getByRole('heading', { name: 'How can I help you today?' })).toHaveClass('font-semibold');
     trueforge.unmount();
 
-    const chatgpt = render(
-      <ThemeProvider theme={{ preset: 'chatgpt', mode: 'light' }}>
+    const highContrast = render(
+      <ThemeProvider theme={{ preset: 'high-contrast', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
     expect(screen.getByRole('heading', { name: 'How can I help you today?' })).toHaveClass('font-normal');
-    expect(chatgpt.container.querySelector('.aui-thread-welcome-root')).toHaveAttribute('data-preset', 'chatgpt');
-    chatgpt.unmount();
-
-    const claude = render(
-      <ThemeProvider theme={{ preset: 'claude', mode: 'light' }}>
-        <WelcomeScreen />
-      </ThemeProvider>,
+    expect(highContrast.container.querySelector('.aui-thread-welcome-root')).toHaveAttribute(
+      'data-preset',
+      'high-contrast',
     );
-    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
-    claude.unmount();
-
-    const gemini = render(
-      <ThemeProvider theme={{ preset: 'gemini', mode: 'dark' }}>
-        <WelcomeScreen />
-      </ThemeProvider>,
-    );
-    expect(screen.getByRole('heading', { name: 'How can I help you today?' })).toHaveClass(
-      'font-normal',
-      'duration-300',
-    );
-    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).not.toBeInTheDocument();
-    gemini.unmount();
+    highContrast.unmount();
   });
 });
