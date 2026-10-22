@@ -18,8 +18,9 @@ import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissio
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
-import { MapCard } from '../components/MapCard.js';
+import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
+import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
@@ -304,6 +305,9 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
       </p>
     );
   }
+  if (mapsResult.state === 'refused') {
+    return <RefusedMapStep refused={mapsResult.refused ?? []} />;
+  }
   if (part.status?.type === 'running' && mapsResult.data === null) {
     return (
       <div className="maps-card" data-testid="map-card-loading">
@@ -314,6 +318,31 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
   return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
+}
+
+/**
+ * A pin call whose every place failed the page check. No map card: the step shows one quiet line,
+ * and its details hold the refusal the person can read.
+ */
+function RefusedMapStep({ refused }: { refused: MapRefusedPlace[] }) {
+  const ToolCallCard = useSlot('ToolCallCard');
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ToolCallCard
+      toolName="Checked places for a map"
+      status="muted"
+      expanded={expanded}
+      onToggle={() => setExpanded(prev => !prev)}
+      showResponseLine
+      responseSlot={
+        refused.length === 0 ? (
+          <p className="maps-place-note">No place in this answer could be checked against its page.</p>
+        ) : (
+          <RefusedPlaceList refused={refused} />
+        )
+      }
+    />
+  );
 }
 
 function RequestResponseSlots({

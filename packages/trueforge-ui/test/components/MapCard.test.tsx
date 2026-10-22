@@ -585,7 +585,7 @@ describe('MapCard with several found places', () => {
     expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything());
   });
 
-  it('adds one line saying how many places were left out and why', () => {
+  it('draws the passing places and keeps the left-out names behind Details, not on the card', async () => {
     renderCard({
       data: {
         ...placesData,
@@ -602,11 +602,13 @@ describe('MapCard with several found places', () => {
       },
       state: 'ready',
     });
-    expect(
-      screen.getByText(
-        '2 places left out: The address is not on that page. Copy it word for word from the page and try again.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('map-card')).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything()));
+    expect(screen.queryByText(/left out/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Details')).toBeInTheDocument();
+    expect(screen.getByText('Canal Practice')).toBeInTheDocument();
+    expect(screen.getByText('River Clinic')).toBeInTheDocument();
   });
 
   it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {

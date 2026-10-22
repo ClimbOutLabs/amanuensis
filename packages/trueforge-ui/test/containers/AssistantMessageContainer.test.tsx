@@ -1000,7 +1000,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.getAllByTestId('mock-map-card')).toHaveLength(1);
   });
 
-  it('keeps the full message of a failed pin call when no later map replaces it', () => {
+  it('shows a failed pin call as one quiet step with no map card, and its refusal behind Details', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -1024,7 +1024,13 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     ]);
 
     expect(screen.queryByTestId('map-card-replaced')).not.toBeInTheDocument();
-    expect(screen.getByTestId('mock-map-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Checked places for a map')).toBeInTheDocument();
+    expect(screen.queryByText(/The name is not on that page/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Checked places for a map'));
+    expect(screen.getByText(/The name is not on that page/)).toBeInTheDocument();
   });
 
   it('asks first for the pin call and shows no map until it is approved', () => {
