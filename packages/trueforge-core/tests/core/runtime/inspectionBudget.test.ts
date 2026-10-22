@@ -14,6 +14,10 @@ import type { SandboxProvider } from '../../../src/core/sandbox/provider/Provide
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
+// Guard tests run longer replies than the production step budget, and so would stop at it before the
+// guard under test can fire. The budget itself is covered by replyStepBudget.test.ts at production values.
+const RAISED_REPLY_STEP_BUDGET = { main: 1000, sub: 1000 };
+
 /**
  * A minimal `PreLLMAgentContextProcessor` standing in for `ContextCompaction`: on a chosen
  * invocation it overwrites the entire context with a summary, dropping every internal system
@@ -315,7 +319,14 @@ describe('repository inspection budget', () => {
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
-      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelClient,
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [],
+      },
       sandbox,
       context: [{ role: 'user', content: 'fix the repository' }],
     });
@@ -402,6 +413,7 @@ describe('repository inspection budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelId: undefined,
         configuredModels: undefined,
         modelClient: { create, createNonStream: jest.fn() },
@@ -472,6 +484,7 @@ describe('repository inspection budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelId: undefined,
         configuredModels: undefined,
         modelClient: { create, createNonStream: jest.fn() },
@@ -532,6 +545,7 @@ describe('empty-inspection nudge', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelId: undefined,
         configuredModels: undefined,
         modelClient: { create, createNonStream: jest.fn() },
@@ -582,6 +596,7 @@ describe('empty-inspection nudge', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelId: undefined,
         configuredModels: undefined,
         modelClient: { create, createNonStream: jest.fn() },
@@ -625,7 +640,14 @@ describe('empty-inspection nudge', () => {
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
-      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelClient,
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [],
+      },
       sandbox,
       context: [{ role: 'user', content: 'find the missing file' }],
       capabilities: [{ preLLMProcessors: [compaction] }],
@@ -688,7 +710,14 @@ describe('empty-inspection nudge', () => {
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
-      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelClient,
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [],
+      },
       sandbox,
       context: [{ role: 'user', content: 'find and edit the file' }],
     });
