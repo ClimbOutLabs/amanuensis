@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const threadRunning = vi.hoisted(() => ({ current: false }));
 
 vi.mock('@assistant-ui/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@assistant-ui/react')>();
   return {
     ...actual,
-    useAuiState: (selector: (state: unknown) => unknown) => selector({ threadListItem: { remoteId: 'ses_1' } }),
+    useAuiState: (selector: (state: unknown) => unknown) =>
+      selector({ threadListItem: { remoteId: 'ses_1' }, thread: { isRunning: threadRunning.current } }),
   };
 });
 
@@ -21,7 +24,13 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
   useToasterOptional: () => ({ showSuccess, showError }),
 }));
 
-import { ForegroundEventSync } from '@/hooks/useForegroundEventSync.js';
+import { ConnectionStatusContainer } from '@/containers/ConnectionStatusContainer.js';
+import {
+  createStreamDropChannel,
+  ForegroundEventSync,
+  RECONNECT_GIVE_UP_MS,
+  type StreamDropChannel,
+} from '@/hooks/useForegroundEventSync.js';
 import type { SessionTipInfo } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
@@ -32,6 +41,8 @@ Object.defineProperty(document, 'hidden', {
   configurable: true,
   get: () => hidden,
 });
+
+const FOREGROUND_DEBOUNCE_MS = 500;
 
 function tipWith(overrides: Partial<SessionTipInfo> = {}): SessionTipInfo {
   return { turnId: 'trn_1', status: 'done', pendingApprovals: [], ...overrides };
@@ -53,6 +64,7 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-25T12:00:00.000Z'));
     hidden = false;
+    threadRunning.current = false;
     peekSessionTip = vi.fn(async () => tipWith());
     dismissPendingApprovals = vi.fn(async () => ({ dismissed: 0, alreadyResolved: true }));
     reload.mockClear();
@@ -65,7 +77,10 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     vi.restoreAllMocks();
   });
 
+  let streamDrops: StreamDropChannel;
+
   function renderSync() {
+    streamDrops = createStreamDropChannel();
     render(
       <ServerProvider
         server={
@@ -76,7 +91,9 @@ describe('ForegroundEventSync lifecycle journeys', () => {
           } as never
         }
       >
-        <ForegroundEventSync />
+        <ForegroundEventSync streamDrops={streamDrops}>
+          <ConnectionStatusContainer />
+        </ForegroundEventSync>
       </ServerProvider>,
     );
   }
@@ -211,13 +228,174 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it('reports a failed probe once instead of crashing the sync', async () => {
-    peekSessionTip.mockRejectedValue(new Error('server unreachable'));
+  it('shows Reconnecting instead of an error when the probe fails, then resyncs once the server answers', async () => {
+    peekSessionTip
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(tipWith());
+    renderSync();
+    hidden = true;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    hidden = false;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_DEBOUNCE_MS);
+    });
+
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting…');
+    expect(showError).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(peekSessionTip).toHaveBeenCalledTimes(3);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(showError).not.toHaveBeenCalled();
+  });
+
+  it('resyncs a dropped reply stream without a page reload', async () => {
+    renderSync();
+    await act(async () => {
+      streamDrops.report();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(peekSessionTip).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('waits for the page to be visible again before reconnecting a stream dropped in the background', async () => {
+    renderSync();
+    hidden = true;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => {
+      streamDrops.report();
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(peekSessionTip).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+
+    // A short hide still resyncs: the drop is what is owed, not the hidden time.
+    hidden = false;
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOREGROUND_DEBOUNCE_MS);
+    });
+
+    expect(peekSessionTip).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('resyncs when the page comes back from the back-forward cache', async () => {
+    renderSync();
+    await act(async () => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads after a long hide when a reply is still running, so its stream is picked up again', async () => {
+    peekSessionTip.mockResolvedValue(tipWith({ status: 'running' }));
     renderSync();
     await backgroundThenForeground(60_000);
 
-    // 3 attempts, then one error toast.
-    expect(peekSessionTip).toHaveBeenCalledTimes(3);
-    expect(showError).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-checks a running reply after a short hide, since its stream can die while looking open', async () => {
+    threadRunning.current = true;
+    peekSessionTip.mockResolvedValue(tipWith({ status: 'running' }));
+    renderSync();
+    await backgroundThenForeground(6_000);
+
+    expect(peekSessionTip).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts from the Connection lost state of a failed reload and ends resynced without a page reload', async () => {
+    // The first read after a phone wakes can fail before the network is back; the chat reports it
+    // as a lost connection and must then resync by itself.
+    peekSessionTip.mockRejectedValueOnce(new TypeError('Load failed')).mockResolvedValue(tipWith());
+    renderSync();
+    await act(async () => {
+      streamDrops.report();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting…');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(showError).not.toHaveBeenCalled();
+  });
+
+  it('shows one plain next step and Retry after reconnecting fails for a while, and Retry resyncs', async () => {
+    peekSessionTip.mockRejectedValue(new TypeError('Failed to fetch'));
+    renderSync();
+    await act(async () => {
+      streamDrops.report();
+      await vi.advanceTimersByTimeAsync(RECONNECT_GIVE_UP_MS - 1_000);
+    });
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting…');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(screen.getByRole('alert').textContent).toContain('Connection lost. Check your network, then tap Retry.');
+    const attemptsBeforeGivingUp = peekSessionTip.mock.calls.length;
+    expect(attemptsBeforeGivingUp).toBeGreaterThan(2);
+
+    // Once it gave up, it stops trying on its own until the person or the network says so.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(peekSessionTip).toHaveBeenCalledTimes(attemptsBeforeGivingUp);
+    expect(reload).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+
+    peekSessionTip.mockResolvedValue(tipWith());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('reconnects as soon as the network comes back after giving up', async () => {
+    peekSessionTip.mockRejectedValue(new TypeError('Failed to fetch'));
+    renderSync();
+    await act(async () => {
+      streamDrops.report();
+      await vi.advanceTimersByTimeAsync(RECONNECT_GIVE_UP_MS);
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    peekSessionTip.mockResolvedValue(tipWith());
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
