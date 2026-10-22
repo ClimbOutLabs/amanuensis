@@ -615,8 +615,9 @@ describe('Data export route', () => {
         }),
       )
       .parse(zipEntryJson(entries, 'personas.json'));
-    expect(personas.map(entry => entry.persona.display_name)).toEqual(['Researcher']);
-    expect(personas[0]?.knowledge.documents[0]?.chunks[0]?.text).toContain('tide pools');
+    expect(personas.map(entry => entry.persona.display_name)).toEqual(['Iris', 'Researcher']);
+    const researcher = personas.find(entry => entry.persona.display_name === 'Researcher');
+    expect(researcher?.knowledge.documents[0]?.chunks[0]?.text).toContain('tide pools');
 
     const personalization = z
       .object({ assistant_name: z.string().nullable() })

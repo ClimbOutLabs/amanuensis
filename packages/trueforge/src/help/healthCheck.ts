@@ -1,4 +1,7 @@
-import type { HelpHealthCheck, HelpHealthItem, HelpHostReport } from '../schemas/help';
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+
+import type { HelpHealthCheck, HelpHealthItem, HelpHostReport, HostReportFile } from '../schemas/help';
 import type { HostReportRead } from './hostReport';
 
 /**
@@ -16,9 +19,13 @@ export interface ConnectorProbe {
 
 export type SchedulerProbe = 'running' | 'stopped' | 'elsewhere';
 
+/** The built-in Google login: answered, needs connecting again, did not answer, or no Gmail or Calendar grant. */
+export type GoogleLoginProbe = 'answered' | 'needs_reconnect' | 'no_answer' | 'not_set_up';
+
 export interface HelpProbeResults {
   model: ModelProbe;
   connectors: ConnectorProbe[];
+  google: GoogleLoginProbe;
   sandboxReady: boolean;
   scheduler: SchedulerProbe;
   hostReport: HostReportRead;
@@ -30,8 +37,10 @@ const SANDBOX_ITEM_ID = 'sandbox';
 const SCHEDULES_ITEM_ID = 'schedules';
 const MAIL_CALENDAR_ITEM_ID = 'mail_calendar';
 
-const HOST_REPORT_OLD_MESSAGE = 'The last full check is more than 7 days old.';
-const RUN_DOCTOR_NEXT_STEP = 'Run aman doctor on your computer.';
+/** The custom MCP connectors that serve email and calendar, by the names they are registered under. */
+const MAIL_CALENDAR_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME];
+
+const HOST_REPORT_STALE_DAYS = 7;
 
 function modelItem(model: ModelProbe): HelpHealthItem {
   const base = { id: MODEL_ITEM_ID, name: 'Your model' };
@@ -39,12 +48,8 @@ function modelItem(model: ModelProbe): HelpHealthItem {
     case 'answered':
       return { ...base, status: 'pass', message: 'The model answered.', next_step: null };
     case 'no_default':
-      return {
-        ...base,
-        status: 'fail',
-        message: 'No model is connected.',
-        next_step: 'Add one in Settings, Models. Token Factory is one option.',
-      };
+      // The help panel shows the next step itself, with a link to Settings.
+      return { ...base, status: 'fail', message: 'No model is connected.', next_step: null };
     case 'misconfigured':
       return {
         ...base,
@@ -104,7 +109,7 @@ function schedulesItem(scheduler: SchedulerProbe): HelpHealthItem {
         ...base,
         status: 'fail',
         message: 'Schedules have stopped.',
-        next_step: 'Restart Aman. If that does not help, run aman doctor on your computer.',
+        next_step: 'Restart Aman. If that does not help, ask Iris in this chat.',
       };
     case 'elsewhere':
       return {
@@ -116,51 +121,82 @@ function schedulesItem(scheduler: SchedulerProbe): HelpHealthItem {
   }
 }
 
-/** Mail and calendar have no service address in this build, so they are never checked, only reported as not set up. */
-function mailCalendarItem(): HelpHealthItem {
+/**
+ * Email and calendar work through the built-in Google login or the custom connectors. Either one answering
+ * is enough. "Not set up" only when neither is configured.
+ */
+function mailCalendarItem({
+  connectors,
+  google,
+}: {
+  connectors: ConnectorProbe[];
+  google: GoogleLoginProbe;
+}): HelpHealthItem {
+  const base = { id: MAIL_CALENDAR_ITEM_ID, name: 'Email and calendar' };
+  const configured = connectors.filter(connector => MAIL_CALENDAR_CONNECTOR_NAMES.includes(connector.name));
+  if (google === 'answered' || configured.some(connector => connector.ok)) {
+    return { ...base, status: 'pass', message: 'Email and calendar answered.', next_step: null };
+  }
+  if (google === 'needs_reconnect') {
+    return {
+      ...base,
+      status: 'fail',
+      message: 'Google needs to be connected again.',
+      next_step: 'Open Settings, Connectors, choose Google and sign in again.',
+    };
+  }
+  if (configured.length > 0 || google === 'no_answer') {
+    return {
+      ...base,
+      status: 'fail',
+      message: 'Email and calendar did not answer.',
+      next_step: 'Open Settings, Connectors and check Google, Email and Calendar.',
+    };
+  }
   return {
-    id: MAIL_CALENDAR_ITEM_ID,
-    name: 'Email and calendar',
+    ...base,
     status: 'not_set_up',
-    message: 'Email and calendar services are not set up on this server.',
-    next_step: null,
+    message: 'Email and calendar are not set up yet.',
+    next_step: 'Open Settings, Connectors and choose Google to connect them.',
   };
 }
 
+/** The saved report's result in plain words. Its failed and warned checks are listed as items. */
+function hostReportResult(report: HostReportFile): string {
+  const issues = report.checks.filter(check => check.status === 'fail' || check.status === 'warn').length;
+  if (issues === 0) {
+    return 'all good';
+  }
+  return issues === 1 ? '1 thing needs attention' : `${String(issues)} things need attention`;
+}
+
+/** Shows the saved full check's date and result. With no readable saved report it says nothing. */
 function hostReportSection(hostReport: HostReportRead): HelpHostReport {
   switch (hostReport.state) {
     case 'ok':
       return {
         state: 'ok',
         checked_at: hostReport.report.checked_at,
-        message: null,
+        message: hostReportResult(hostReport.report),
         next_step: null,
       };
     case 'stale':
       return {
         state: 'stale',
         checked_at: hostReport.report.checked_at,
-        message: `${HOST_REPORT_OLD_MESSAGE} Run aman doctor on your computer again.`,
-        next_step: null,
+        message: hostReportResult(hostReport.report),
+        next_step: `It is more than ${String(HOST_REPORT_STALE_DAYS)} days old.`,
       };
     case 'missing':
-      return {
-        state: 'missing',
-        checked_at: null,
-        message: `No full check has been run yet. ${RUN_DOCTOR_NEXT_STEP}`,
-        next_step: null,
-      };
     case 'invalid':
-      return {
-        state: 'invalid',
-        checked_at: null,
-        message: `The last full check could not be read, so it is treated as missing. ${RUN_DOCTOR_NEXT_STEP}`,
-        next_step: null,
-      };
+      return { state: hostReport.state, checked_at: null, message: null, next_step: null };
   }
 }
 
-/** Failed and warned lines from the installer's report, in the same list as the live checks. */
+/**
+ * Failed and warned lines from the installer's report, in the same list as the live checks. The
+ * installer's own fix steps are commands, so they are left out; the help panel shows no commands.
+ */
 function hostReportItems(hostReport: HostReportRead): HelpHealthItem[] {
   if (hostReport.state !== 'ok' && hostReport.state !== 'stale') {
     return [];
@@ -172,7 +208,7 @@ function hostReportItems(hostReport: HostReportRead): HelpHealthItem[] {
       name: check.name,
       status: check.status,
       message: check.message,
-      next_step: check.next_step,
+      next_step: null,
     }));
 }
 
@@ -186,7 +222,7 @@ export function buildHelpHealthCheck({ results, now }: { results: HelpProbeResul
       connectorsItem(results.connectors),
       sandboxItem(results.sandboxReady),
       schedulesItem(results.scheduler),
-      mailCalendarItem(),
+      mailCalendarItem({ connectors: results.connectors, google: results.google }),
       ...hostReportItems(results.hostReport),
     ],
     host_report: hostReportSection(results.hostReport),

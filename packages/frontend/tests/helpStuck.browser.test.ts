@@ -20,7 +20,9 @@ const CASES = [
     query: 'health=ready&iris=joined',
     line: null,
     // The results are on screen in the new chat; the words below prove the chat is the one the press opened.
-    results: ['Quick health check', 'You were on: Chat.'],
+    results: ['Quick health check'],
+    // The "You were on" line is for Iris, so it only shows inside the "What Iris was told" disclosure.
+    told: 'You were on: Chat.',
   },
   {
     name: 'health check fails',
@@ -31,13 +33,13 @@ const CASES = [
   {
     name: 'no model',
     query: 'health=no_model&iris=joined',
-    line: 'Add a model to get started. Token Factory is one option.',
+    line: 'Add a model in Settings to get started.',
     results: ['Quick health check'],
   },
   {
     name: 'Iris cannot join',
     query: 'health=ready&iris=missing',
-    line: 'Iris could not join this chat. Run aman doctor on your computer, then press Check again.',
+    line: 'Iris could not join this chat. Check your connection, then press Check again.',
     results: ['Quick health check'],
   },
 ] as const;
@@ -93,6 +95,12 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
         await results.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         for (const text of testCase.results) {
           await results.getByText(text, { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        }
+        if ('told' in testCase) {
+          await results.getByText('What Iris was told').click();
+          await results
+            .getByText(testCase.told, { exact: false })
+            .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         }
         if (testCase.line !== null) {
           await page.getByRole('status').filter({ hasText: testCase.line }).waitFor({ timeout: RENDER_TIMEOUT_MS });
