@@ -244,6 +244,7 @@ describe('TurnHandle.stream()', () => {
       status: 'done',
       metrics: {
         total_input_tokens: 12,
+        last_call_input_tokens: 12,
         total_output_tokens: 5,
         total_tokens: 17,
         total_cache_read_tokens: 4,
@@ -1348,7 +1349,7 @@ describe('TurnHandle.stream()', () => {
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'create a child while refresh is unavailable' }],
+      input: [{ type: EventType.USER_MESSAGE, content: 'delegate to a child while refresh is unavailable' }],
       previous_turn_id: 'none',
       signal: controller.signal,
       resolver: makeTestResolver({ modelClient, sandbox }),

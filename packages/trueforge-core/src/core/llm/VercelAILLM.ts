@@ -47,7 +47,9 @@ import {
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
-import { BROKEN_TOOL_MARKUP_MESSAGE, ToolMarkupGuard, type ToolMarkupOutcome } from './toolMarkup';
+import { RepeatedUnitGuard } from './repeatedUnitGuard';
+import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
+import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -173,24 +175,6 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
   return client(model.id);
-}
-
-/**
- * The text that ends a reply whose markup could not be rebuilt: the garbled-reply line, set off
- * from whatever answer text came before it. Nothing else of the broken markup is shown.
- */
-function garbledTail({
-  markupOutcome,
-  accumulatedText,
-}: {
-  markupOutcome: ToolMarkupOutcome;
-  accumulatedText: string;
-}): string {
-  if (markupOutcome.status !== 'broken') {
-    return '';
-  }
-  const separator = accumulatedText === '' || accumulatedText.endsWith('\n') ? '' : '\n\n';
-  return `${separator}${BROKEN_TOOL_MARKUP_MESSAGE}`;
 }
 
 /**
@@ -1258,13 +1242,15 @@ export class ModelStreamFault extends Error {
   }
 }
 
-/** Raised when one provider stream stops making textual progress. A kind of ModelStreamFault: the model is still responding, just unusably, and the same compact-and-retry recovery applies. */
+/**
+ * Raised when streamed reasoning stops making progress. A kind of ModelStreamFault: the model is still
+ * responding, just unusably, and the same compact-and-retry recovery applies. Answer text does not
+ * raise it; a repeating answer is cut and noted instead (see REPEAT_STOP_NOTE).
+ */
 export class ModelOutputRepetitionError extends ModelStreamFault {
-  constructor(channel: 'reasoning' | 'answer') {
+  constructor() {
     super(
-      channel === 'reasoning'
-        ? "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once."
-        : "The model's answer started repeating itself, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
+      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
     );
     this.name = 'ModelOutputRepetitionError';
   }
@@ -1476,11 +1462,13 @@ export async function* mapStreamToChunks({
   const toolCallStates = new Map<string, ToolCallState>();
   let nextToolIndex = 0;
   let accumulatedText = '';
-  // Leaked tool-call markup in the answer text is held back and never streamed; at the end of the
-  // reply it is either rebuilt into real tool calls or replaced by the garbled-reply line.
+  // Leaked tool-call markup in the answer text is held back and never streamed or run; the caller is
+  // told it did not run.
   const markupGuard = new ToolMarkupGuard();
-  const textRepetition = new StreamingRepetitionGuard();
+  // A reply that repeats one sentence or line three times is stopped before the last copy.
+  const answerUnits = new RepeatedUnitGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
+  let repetitionStopped = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1518,31 +1506,35 @@ export async function* mapStreamToChunks({
   // from a stream that never finished at all.
   let sawFinishStep = false;
 
-  for await (const part of stream) {
+  streamLoop: for await (const part of stream) {
     switch (part.type) {
       case 'text-delta': {
         const released = markupGuard.push(part.text);
         if (released === '') {
           break;
         }
-        if (textRepetition.push(released)) {
-          throw new ModelOutputRepetitionError('answer');
+        const answer = answerUnits.push(released);
+        if (answer.text !== '') {
+          // Answer text is real output: the reasoning guard must not mistake
+          // long methodical work for a stuck loop while the turn is producing.
+          reasoningRepetition.markProgress();
+          accumulatedText += answer.text;
+          yield {
+            ...makeBase(),
+            choices: [
+              {
+                index: 0,
+                delta: { content: answer.text, role: 'assistant' },
+                finish_reason: null,
+                logprobs: null,
+              },
+            ],
+          };
         }
-        // Answer text is real output: the reasoning guard must not mistake
-        // long methodical work for a stuck loop while the turn is producing.
-        reasoningRepetition.markProgress();
-        accumulatedText += released;
-        yield {
-          ...makeBase(),
-          choices: [
-            {
-              index: 0,
-              delta: { content: released, role: 'assistant' },
-              finish_reason: null,
-              logprobs: null,
-            },
-          ],
-        };
+        if (answer.stopped) {
+          repetitionStopped = true;
+          break streamLoop;
+        }
         break;
       }
 
@@ -1555,7 +1547,7 @@ export async function* mapStreamToChunks({
         // A delta with no preceding `reasoning-start` would otherwise drop the block and its
         // signature, breaking replay while the text still streams out.
         if (reasoningRepetition.push(part.text)) {
-          throw new ModelOutputRepetitionError('reasoning');
+          throw new ModelOutputRepetitionError();
         }
         currentThinkingBlock ??= openThinkingBlock(part.providerMetadata);
         currentThinkingBlock.thinking += part.text;
@@ -1739,16 +1731,29 @@ export async function* mapStreamToChunks({
   // connection mid-response, rather than terminating it cleanly, can end an async iterable this
   // way with no explicit error at all. Treated the same as the explicit-error cases above: a
   // model/provider stream fault, not a host fault.
-  if (!sawFinishStep && accumulatedText === '' && toolCallStates.size === 0 && !markupGuard.inMarkup) {
+  if (
+    !repetitionStopped &&
+    !sawFinishStep &&
+    accumulatedText === '' &&
+    toolCallStates.size === 0 &&
+    !markupGuard.inMarkup
+  ) {
     throw new ModelStreamFault('The model stream ended without any text, tool call, or finish signal.');
   }
 
-  // Settle the markup guard: a clean reply releases its held tail so the final text matches what
-  // was streamed; recovered markup joins the reply's tool calls; broken markup is never run or
-  // shown, and the garbled line stands in for it, so nothing in it is saved as calls either.
+  // Settle the markup guard. A clean reply releases its held tail, which passes the repetition guard
+  // like the rest of the answer; a reply that carried markup releases nothing of it.
   const markupOutcome = markupGuard.finish();
-  const tail =
-    markupOutcome.status === 'clean' ? markupGuard.heldText : garbledTail({ markupOutcome, accumulatedText });
+  let tail = '';
+  if (!repetitionStopped) {
+    const flushed = answerUnits.push(markupOutcome === 'clean' ? markupGuard.heldText : '');
+    const rest = flushed.stopped ? { text: '', stopped: false } : answerUnits.finish();
+    repetitionStopped = flushed.stopped || rest.stopped;
+    tail = flushed.text + rest.text;
+  }
+  if (repetitionStopped) {
+    tail += noticeAfter({ text: accumulatedText + tail, notice: REPEAT_STOP_NOTE });
+  }
   if (tail !== '') {
     accumulatedText += tail;
     yield {
@@ -1774,15 +1779,6 @@ export async function* mapStreamToChunks({
         ? { provider_specific_fields: { thought_signature: tc.thoughtSignature } }
         : {}),
     }));
-  if (markupOutcome.status === 'recovered') {
-    markupOutcome.calls.forEach((call, position) => {
-      toolCalls.push({
-        id: `markup-recovered-${String(position)}`,
-        type: 'function' as const,
-        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-      });
-    });
-  }
 
   const output: RawAssistantMessage = {
     role: 'assistant',
@@ -1795,7 +1791,8 @@ export async function* mapStreamToChunks({
     usage: finalUsage,
     output,
     finish_reason: finalFinishReason,
-    ...(markupOutcome.status === 'recovered' ? { tool_markup: markupOutcome.status } : {}),
+    ...(markupOutcome === 'leaked' ? { tool_markup: markupOutcome } : {}),
+    ...(repetitionStopped ? { repetition_stopped: true } : {}),
   };
 }
 

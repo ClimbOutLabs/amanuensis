@@ -125,7 +125,7 @@ describe('ensureAmanGuide', () => {
       created_by: USER,
       id: amanGuidePersonaId(USER),
     });
-    expect(persona?.model_name).toBe('tokenfactory/other-model');
+    expect(persona?.model_name).toBe(MODEL);
     const repoAfter = openPersonaKnowledgeRepository({
       dbPath: personaKnowledgeLocation({ knowledgeDir, tenantId: TENANT, personaId: amanGuidePersonaId(USER) }).dbPath,
       dimensions: EMBEDDING_DIMENSIONS,
@@ -145,6 +145,32 @@ describe('ensureAmanGuide', () => {
 
     expect(await personaStore.listPersonas({ tenant_id: TENANT, created_by: 'person-a' })).toHaveLength(1);
     expect(await personaStore.listPersonas({ tenant_id: TENANT, created_by: 'person-b' })).toHaveLength(1);
+  });
+
+  it('on upgrade refreshes her instructions but keeps the name, model and aliases the person set', async () => {
+    const { personaStore, install } = await setup();
+    await install();
+    await personaStore.updatePersona({
+      tenant_id: TENANT,
+      created_by: USER,
+      updated_by: USER,
+      id: amanGuidePersonaId(USER),
+      display_name: 'Guide for me',
+      aliases: ['helper'],
+      instructions: 'Old instructions.',
+      model_name: 'tokenfactory/my-own-model',
+    });
+
+    await install({ modelName: MODEL });
+
+    expect(
+      await personaStore.getPersona({ tenant_id: TENANT, created_by: USER, id: amanGuidePersonaId(USER) }),
+    ).toMatchObject({
+      display_name: 'Guide for me',
+      aliases: ['helper'],
+      instructions: AMAN_GUIDE_INSTRUCTIONS,
+      model_name: 'tokenfactory/my-own-model',
+    });
   });
 
   it('leaves a persona the person already named "Iris" alone and says so', async () => {

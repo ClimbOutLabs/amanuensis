@@ -93,6 +93,7 @@ Your provider (type a number)=>1
 Email address of the calendar account=>owner@example.invalid
 Login name=>
 App password for the calendar=>$CAL_SECRET
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD

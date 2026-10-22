@@ -227,6 +227,7 @@ function makeHarness(
         ],
         capabilityState: undefined,
         toolCallMemo: undefined,
+        turnToolCallLedger: undefined,
         taskState: undefined,
         isRequestContinuation: input.context !== undefined,
         sentinel,

@@ -30,9 +30,9 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
-import type { SentinelDispatchContext } from '../permissions/context';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText } from '../permissions/audit';
+import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
@@ -191,8 +191,11 @@ export interface ToolCallMemoSnapshot {
    * upload that errors, then an exec that never runs) cannot reset the count.
    */
   consecutive_failed_batches: number;
-  /** How many times each distinct call (tool plus arguments) was made this turn. */
-  call_signatures: { key: string; count: number }[];
+  /**
+   * How many times each distinct call (tool plus arguments) ran this turn, and the write count at its last
+   * run. A snapshot written before the re-run rule omits the latter.
+   */
+  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[];
   denied_approval_identities: string[];
   repeated_denied_approval: boolean;
   inspection_calls_before_edit: number;
@@ -222,6 +225,15 @@ export interface ToolCallMemoSnapshot {
   no_progress_nudge_generation: number;
   /** Policy-denied calls in the current turn; the per-turn guard budget. */
   policy_blocked_calls_this_turn: number;
+  /** Write calls admitted to dispatch in the current turn; the per-turn write cap. */
+  write_calls_this_turn: number;
+  /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
+  successful_writes_this_turn: number;
+  /** Signature of the call made last in the turn, across threads; the consecutive-repeat stop. */
+  last_call_signature: string | undefined;
+  /** Tool calls written as text in the turn, and the retries sent for them. */
+  tool_markup_leaks_this_turn: number;
+  tool_markup_retries_this_turn: number;
 }
 
 /** The guard kinds that can defer a host-authored note before stopping the turn. */
@@ -269,6 +281,11 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'empty_inspection_nudge_generation'
   | 'no_progress_nudge_generation'
   | 'policy_blocked_calls_this_turn'
+  | 'write_calls_this_turn'
+  | 'successful_writes_this_turn'
+  | 'last_call_signature'
+  | 'tool_markup_leaks_this_turn'
+  | 'tool_markup_retries_this_turn'
 > & {
   read_results: { key: string; response: CallToolResponse; failure: boolean; count: number }[];
   // Explicit `| undefined` (the repo's dominant optional-property convention under
@@ -276,7 +293,9 @@ type LegacyToolCallMemoSnapshot = Omit<
   workspace_mutation_epoch?: number | undefined;
   consecutive_no_progress_batches?: number | undefined;
   consecutive_failed_batches: number | undefined;
-  call_signatures: { key: string; count: number }[] | undefined;
+  // `writes_at_last_run` is absent in snapshots written before the re-run rule; hydration treats the
+  // call as not re-runnable until a write runs, the same as a call recorded in this turn.
+  call_signatures: { key: string; count: number; writes_at_last_run?: number | undefined }[] | undefined;
   pending_identical_call_nudges?: (string | SnapshotPendingHostNote)[] | undefined;
   failed_batch_nudge_generation?: number | undefined;
   empty_inspection_nudge_generation?: number | undefined;
@@ -284,7 +303,77 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Optional like the counters above: a snapshot written before this guard existed
   // omits the key, and hydration defaults it to 0.
   policy_blocked_calls_this_turn?: number | undefined;
+  // Same as the policy counter: a snapshot written before the write cap omits the key.
+  write_calls_this_turn?: number | undefined;
+  successful_writes_this_turn?: number | undefined;
+  last_call_signature?: string | undefined;
+  tool_markup_leaks_this_turn?: number | undefined;
+  tool_markup_retries_this_turn?: number | undefined;
 };
+
+/**
+ * Tool-call counts for one user turn. The main thread and every sub-agent it starts share one
+ * instance by reference, so the repeat and write limits hold across the whole turn.
+ */
+export interface CallSignatureRecord {
+  /** How many times the call ran this turn. */
+  count: number;
+  /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
+  writesAtLastRun: number;
+}
+
+export interface TurnToolCallLedger {
+  /** Exact-call signatures that ran this turn, with the count and the write count at their last run. */
+  callSignatures: Map<string, CallSignatureRecord>;
+  /** Signature of the call made last, across every thread; undefined before the first call. */
+  lastCallSignature: string | undefined;
+  /** Write calls (tier 3) admitted to dispatch this turn. Enforces the per-turn write cap. */
+  writeCallsThisTurn: number;
+  /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
+  successfulWritesThisTurn: number;
+  /** Tool calls written as text this turn. None of them ran. */
+  toolMarkupLeaksThisTurn: number;
+  /** Retries sent to the model for tool calls written as text this turn. */
+  toolMarkupRetriesThisTurn: number;
+  /** Set when the write cap stopped the turn; the turn ends whichever thread hit it. */
+  stoppedForWriteCap: boolean;
+}
+
+export function createTurnToolCallLedger(): TurnToolCallLedger {
+  return {
+    callSignatures: new Map(),
+    lastCallSignature: undefined,
+    writeCallsThisTurn: 0,
+    successfulWritesThisTurn: 0,
+    toolMarkupLeaksThisTurn: 0,
+    toolMarkupRetriesThisTurn: 0,
+    stoppedForWriteCap: false,
+  };
+}
+
+/**
+ * One turn's ledger from the ledgers its in-flight threads were snapshotted with. Every counter only
+ * rises within a turn, so the largest value any snapshot holds is the latest one. `ledgers[0]` is the
+ * root thread, whose last call is the one that counts as consecutive.
+ */
+export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[]): TurnToolCallLedger {
+  const merged = createTurnToolCallLedger();
+  merged.lastCallSignature = ledgers[0]?.lastCallSignature;
+  for (const ledger of ledgers) {
+    for (const [signature, record] of ledger.callSignatures) {
+      const existing = merged.callSignatures.get(signature);
+      merged.callSignatures.set(signature, {
+        count: Math.max(existing?.count ?? 0, record.count),
+        writesAtLastRun: Math.max(existing?.writesAtLastRun ?? 0, record.writesAtLastRun),
+      });
+    }
+    merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
+    merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
+    merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
+  }
+  return merged;
+}
 
 export interface ToolCallMemoState {
   entries: Map<string, MemoEntry>;
@@ -294,7 +383,6 @@ export interface ToolCallMemoState {
   consecutiveEmptyInspectionBatches: number;
   consecutiveNoProgressBatches: number;
   consecutiveFailedBatches: number;
-  callSignatures: Map<string, number>;
   deniedApprovalIdentities: Set<string>;
   repeatedDeniedApproval: boolean;
   inspectionCallsBeforeEdit: number;
@@ -326,6 +414,11 @@ export interface ToolCallMemoState {
    * codes and recovery paths, and must not be misdiagnosed as "not allowed here".
    */
   policyBlockedCallsThisTurn: number;
+  /**
+   * Turn-wide counts (repeats, write cap, tool-markup). Shared by reference across the turn's threads;
+   * the snapshot keeps them, so an approval continuation keeps the count.
+   */
+  turn: TurnToolCallLedger;
 }
 
 export function createToolCallMemoState(
@@ -339,7 +432,7 @@ export function createToolCallMemoState(
     consecutiveEmptyInspectionBatches: 0,
     consecutiveNoProgressBatches: 0,
     consecutiveFailedBatches: 0,
-    callSignatures: new Map(),
+    turn: createTurnToolCallLedger(),
     deniedApprovalIdentities: new Set(),
     repeatedDeniedApproval: false,
     inspectionCallsBeforeEdit: 0,
@@ -396,7 +489,10 @@ export function createToolCallMemoState(
   state.consecutiveNoProgressBatches = snapshot.consecutive_no_progress_batches ?? 0;
   state.consecutiveFailedBatches = snapshot.consecutive_failed_batches ?? 0;
   for (const entry of snapshot.call_signatures ?? []) {
-    state.callSignatures.set(entry.key, entry.count);
+    state.turn.callSignatures.set(entry.key, {
+      count: entry.count,
+      writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+    });
   }
   // Legacy snapshots stored a bare tool name, or a {signature, tool_name} pair with no `kind` or
   // `message` — both predate this generalization, when every entry was necessarily an
@@ -419,11 +515,18 @@ export function createToolCallMemoState(
   state.emptyInspectionNudgeGeneration = snapshot.empty_inspection_nudge_generation ?? 0;
   state.noProgressNudgeGeneration = snapshot.no_progress_nudge_generation ?? 0;
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
+  state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
+  state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.lastCallSignature = snapshot.last_call_signature;
+  state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
+  state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
   return state;
 }
 
 export function cloneToolCallMemoState(source: ToolCallMemoState): ToolCallMemoState {
   const state = createToolCallMemoState();
+  // Shared, not copied: every clone of this turn's memo counts into the same totals.
+  state.turn = source.turn;
   for (const [key, entry] of source.entries) {
     state.entries.set(key, { ...entry });
   }
@@ -434,9 +537,6 @@ export function cloneToolCallMemoState(source: ToolCallMemoState): ToolCallMemoS
   state.consecutiveEmptyInspectionBatches = source.consecutiveEmptyInspectionBatches;
   state.consecutiveNoProgressBatches = source.consecutiveNoProgressBatches;
   state.consecutiveFailedBatches = source.consecutiveFailedBatches;
-  for (const [key, count] of source.callSignatures) {
-    state.callSignatures.set(key, count);
-  }
   state.deniedApprovalIdentities = new Set(source.deniedApprovalIdentities);
   state.repeatedDeniedApproval = source.repeatedDeniedApproval;
   state.inspectionCallsBeforeEdit = source.inspectionCallsBeforeEdit;
@@ -472,9 +572,9 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     consecutive_empty_inspection_batches: state.consecutiveEmptyInspectionBatches,
     consecutive_no_progress_batches: state.consecutiveNoProgressBatches,
     consecutive_failed_batches: state.consecutiveFailedBatches,
-    call_signatures: [...state.callSignatures.entries()]
+    call_signatures: [...state.turn.callSignatures.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, count]) => ({ key, count })),
+      .map(([key, record]) => ({ key, count: record.count, writes_at_last_run: record.writesAtLastRun })),
     denied_approval_identities: [...state.deniedApprovalIdentities].sort(),
     repeated_denied_approval: state.repeatedDeniedApproval,
     inspection_calls_before_edit: state.inspectionCallsBeforeEdit,
@@ -487,6 +587,11 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     empty_inspection_nudge_generation: state.emptyInspectionNudgeGeneration,
     no_progress_nudge_generation: state.noProgressNudgeGeneration,
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
+    write_calls_this_turn: state.turn.writeCallsThisTurn,
+    successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    last_call_signature: state.turn.lastCallSignature,
+    tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
+    tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,
   };
 }
 
@@ -660,6 +765,13 @@ export const IDENTICAL_CALL_STOP_AT = 4;
  * helpers). The turn is not stopped until IDENTICAL_CALL_STOP_AT.
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
+/**
+ * Write calls (tier 3) a turn may run before the host stops it. The call past the cap never
+ * runs; the turn ends once the batch that reached the cap has resolved.
+ */
+export const MAX_WRITE_CALLS_PER_TURN = 5;
+/** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
+export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
 
 /**
  * What makes two calls "the same" for the per-turn repeat budget: the tool and its arguments.
@@ -1179,7 +1291,9 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
+              message:
+                preparationFailure.owner_message ??
+                'Use a tool that is allowed in this conversation or change strategy.',
               suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {
