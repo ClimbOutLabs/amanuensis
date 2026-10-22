@@ -11,8 +11,13 @@ import type { ToolResultDisposition } from '../events/schema';
 export const ToolResultKindSchema = z.enum(['ok', 'refused', 'unavailable', 'error_retryable', 'error_final']);
 export type ToolResultKind = z.infer<typeof ToolResultKindSchema>;
 
-export const MAIN_THREAD_STEP_BUDGET = 8;
-export const SUB_AGENT_STEP_BUDGET = 4;
+/** Model calls one reply may make: the main thread, and each sub-agent. */
+export interface ReplyStepBudget {
+  main: number;
+  sub: number;
+}
+
+export const DEFAULT_REPLY_STEP_BUDGET: ReplyStepBudget = { main: 8, sub: 4 };
 
 /** Calls to removed tools in a row before the reply's answer is forced. */
 export const REMOVED_TOOL_STREAK_STOP_AT = 2;
@@ -26,8 +31,8 @@ export const REMOVED_TOOL_STREAK_MESSAGE =
 export const REMOVED_TOOL_RESULT =
   'This tool was removed from this reply because it was declined or is not available here. Do not call it again.';
 
-export function stepBudgetFor({ isSubAgent }: { isSubAgent: boolean }): number {
-  return isSubAgent ? SUB_AGENT_STEP_BUDGET : MAIN_THREAD_STEP_BUDGET;
+export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; budget: ReplyStepBudget }): number {
+  return isSubAgent ? budget.sub : budget.main;
 }
 
 /** Tool names are snake_case; the person and the model read them as plain words. */

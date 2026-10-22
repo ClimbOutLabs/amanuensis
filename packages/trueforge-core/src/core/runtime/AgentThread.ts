@@ -229,6 +229,7 @@ import {
   WRITE_CAP_STOP_MESSAGE,
 } from './replyActionChecks';
 import {
+  DEFAULT_REPLY_STEP_BUDGET,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   REMOVED_TOOL_STREAK_STOP_AT,
@@ -4906,7 +4907,12 @@ export class AgentThread {
             // no tools, and the model is told why first.
             const replyLedger = this.toolCallMemo.turn;
             const stepsSoFar = replyLedger.stepsByThread.get(this.threadId) ?? 0;
-            const budgetSpent = stepsSoFar >= stepBudgetFor({ isSubAgent: this.parent !== undefined });
+            const budgetSpent =
+              stepsSoFar >=
+              stepBudgetFor({
+                isSubAgent: this.parent !== undefined,
+                budget: this.definition.stepBudget ?? DEFAULT_REPLY_STEP_BUDGET,
+              });
             const forcedAnswer = budgetSpent || replyLedger.removedToolRejectionStreak >= REMOVED_TOOL_STREAK_STOP_AT;
             replyLedger.stepsByThread.set(this.threadId, stepsSoFar + 1);
             if (forcedAnswer) {

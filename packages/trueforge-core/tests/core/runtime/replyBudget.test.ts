@@ -1,8 +1,7 @@
 import { createTurnToolCallLedger, mergeTurnToolCallLedgers } from '../../../src/core/mcp/executeToolCalls';
 import {
-  MAIN_THREAD_STEP_BUDGET,
+  DEFAULT_REPLY_STEP_BUDGET,
   REMOVED_TOOL_RESULT,
-  SUB_AGENT_STEP_BUDGET,
   ToolResultKindSchema,
   removedToolMessage,
   retryIsDue,
@@ -81,10 +80,14 @@ describe('retry', () => {
 });
 
 describe('step budget', () => {
-  it('gives the main thread 8 steps and each sub-agent 4', () => {
-    expect(stepBudgetFor({ isSubAgent: false })).toBe(MAIN_THREAD_STEP_BUDGET);
-    expect(stepBudgetFor({ isSubAgent: true })).toBe(SUB_AGENT_STEP_BUDGET);
-    expect([MAIN_THREAD_STEP_BUDGET, SUB_AGENT_STEP_BUDGET]).toEqual([8, 4]);
+  it('gives the main thread 8 steps and each sub-agent 4 by default', () => {
+    expect(stepBudgetFor({ isSubAgent: false, budget: DEFAULT_REPLY_STEP_BUDGET })).toBe(8);
+    expect(stepBudgetFor({ isSubAgent: true, budget: DEFAULT_REPLY_STEP_BUDGET })).toBe(4);
+  });
+
+  it('takes its numbers from the budget it is given', () => {
+    expect(stepBudgetFor({ isSubAgent: false, budget: { main: 3, sub: 2 } })).toBe(3);
+    expect(stepBudgetFor({ isSubAgent: true, budget: { main: 3, sub: 2 } })).toBe(2);
   });
 });
 
