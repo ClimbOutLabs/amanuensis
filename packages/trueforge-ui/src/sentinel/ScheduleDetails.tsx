@@ -2,12 +2,7 @@
 
 import type { FC } from 'react';
 
-import type { SentinelApprovalSchedule, SentinelApprovalScheduleAction } from './types.js';
-
-export const SCHEDULE_BADGES: Record<SentinelApprovalScheduleAction, string> = {
-  create: 'New schedule',
-  delete: 'Delete schedule',
-};
+import type { SentinelApprovalSchedule } from './types.js';
 
 /** Scheduled runs hold anything that would ask, so nobody approves it by accident while away. */
 const SCHEDULE_AWAY_NOTE =
