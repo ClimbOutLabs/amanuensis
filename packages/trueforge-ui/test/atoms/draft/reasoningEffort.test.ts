@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   hasReasoningEfforts,
+  modelPatchForComposerEffort,
   modelPatchWithReasoningEffort,
+  readThinkingMode,
   resolveReasoningEffort,
 } from '@/atoms/draft/reasoningEffort.js';
 
@@ -82,5 +84,35 @@ describe('modelPatchWithReasoningEffort', () => {
       name: 'm',
       params: { reasoningEffort: undefined },
     });
+  });
+});
+
+const composerEfforts = ['none', 'low', 'medium', 'high'];
+
+describe('modelPatchForComposerEffort', () => {
+  it('sets the picked effort and a fixed mode, so an automatic persona still uses the pick for this chat', () => {
+    const patch = modelPatchForComposerEffort('model-a', { reasoningEffortMode: 'automatic' }, 'high', composerEfforts);
+
+    expect(patch.params?.reasoningEffort).toBe('high');
+    expect(readThinkingMode(patch.params)).toBe('fixed');
+  });
+
+  it('keeps the other params of the chat as they were', () => {
+    const patch = modelPatchForComposerEffort(
+      'model-a',
+      { temperature: 0.2, reasoningEffortMode: 'automatic' },
+      'low',
+      composerEfforts,
+    );
+
+    expect(patch.params).toMatchObject({ temperature: 0.2, reasoningEffort: 'low', reasoningEffortMode: 'fixed' });
+  });
+
+  it('does not change the params it was given, so the persona stays on its own mode', () => {
+    const existing = { reasoningEffortMode: 'automatic' as const, reasoningEffort: 'medium' };
+
+    modelPatchForComposerEffort('model-a', existing, 'high', composerEfforts);
+
+    expect(existing).toEqual({ reasoningEffortMode: 'automatic', reasoningEffort: 'medium' });
   });
 });

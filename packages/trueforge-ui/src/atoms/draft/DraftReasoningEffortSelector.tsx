@@ -10,7 +10,12 @@ import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
-import { hasReasoningEfforts, modelPatchWithReasoningEffort, resolveReasoningEffort } from './reasoningEffort.js';
+import {
+  hasReasoningEfforts,
+  modelPatchForComposerEffort,
+  modelPatchWithReasoningEffort,
+  resolveReasoningEffort,
+} from './reasoningEffort.js';
 
 export type DraftReasoningEffortSelectorProps = {
   disabled?: boolean;
@@ -100,11 +105,7 @@ export function DraftReasoningEffortSelector({ disabled, isRunning }: DraftReaso
               onClick={() => {
                 if (!selected || !updateAgentSpec) return;
                 updateAgentSpec({
-                  model: modelPatchWithReasoningEffort(
-                    selected.name,
-                    { ...agentSpec?.model?.params, reasoningEffort: effort },
-                    efforts,
-                  ),
+                  model: modelPatchForComposerEffort(selected.name, agentSpec?.model?.params, effort, efforts),
                 });
                 setOpen(false);
               }}
