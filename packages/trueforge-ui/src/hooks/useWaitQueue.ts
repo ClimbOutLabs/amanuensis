@@ -1,7 +1,7 @@
 'use client';
 
 import { useThreadIsRunning, type PartState } from '@assistant-ui/core/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useAuiState } from '../assistant-ui.js';
 import { usePrefersReducedMotion } from '../atoms/lib/usePrefersReducedMotion.js';
@@ -114,24 +114,26 @@ export function useWaitQueue(): WaitQueueView {
   // re-render cost is negligible.
   const messageId = useAuiState(s => s.message.id);
   const clockKey = turnId ?? messageId;
-  const startRef = useRef<number | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [startMs, setStartMs] = useState<number | null>(null);
+  const [, setTick] = useState(0);
   useEffect(() => {
     if (!isRunning) {
       // The turn settled: drop its clock so a later turn reusing this message
       // slot starts fresh instead of resuming a dead turn's time.
       turnStartMs.delete(clockKey);
-      startRef.current = null;
+      setStartMs(null);
       return;
     }
     // A remount mid-turn (e.g. the indicator part cycling across phases)
     // resumes the turn's clock instead of starting a new one.
-    startRef.current = resumeTurnStart(clockKey, Date.now());
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    setStartMs(resumeTurnStart(clockKey, Date.now()));
+    const id = setInterval(() => setTick(tick => tick + 1), 1000);
     return () => clearInterval(id);
   }, [isRunning, clockKey]);
 
-  const elapsedMs = startRef.current === null ? 0 : Math.max(0, nowMs - startRef.current);
+  // Read the clock at render, not from the last tick: a render that is not a tick (or a tick that
+  // a busy or hidden tab delivered late) still shows the real time waited, and a settled turn none.
+  const elapsedMs = !isRunning || startMs === null ? 0 : Math.max(0, Date.now() - startMs);
 
   const snapshot = useMemo(
     () => deriveWaitQueue({ isRunning, parts: queueParts, memory }),

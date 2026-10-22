@@ -1,11 +1,10 @@
 'use client';
 
-import { useId, type ReactNode } from 'react';
+import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 
 import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 import { assistantDisplayName } from '../utils/assistantName.js';
-import { toggleHelpArea } from './HelpAreaChoices.js';
 import { TourIllustration } from './tourIllustrations.js';
 import { HELP_AREAS, firstFrameCardPrompts, type TourCapabilities, type TourPrompt } from './tourPrompts.js';
 
@@ -27,10 +26,25 @@ export function greetingLine({ now, name }: { now: Date; name: string | null | u
 }
 
 const CHIP_CLASS =
-  'cursor-pointer rounded-full border border-border bg-card-bg px-2.5 py-1.5 text-sm text-text-primary hover:border-gold-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring aria-pressed:border-gold-ink aria-pressed:bg-gold-ink aria-pressed:text-card-bg';
+  'cursor-pointer rounded-full border border-border bg-card-bg px-2.5 py-1.5 text-sm text-text-primary hover:border-gold-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring aria-checked:border-gold-ink aria-checked:bg-gold-ink aria-checked:text-card-bg';
 
 const TICKET_BUTTON_CLASS =
   'flex h-full w-full cursor-pointer flex-col gap-1.5 rounded-[inherit] border-0 bg-transparent p-3 text-left text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
+
+/**
+ * The Tour's "What would help you most?" pick is one area at a time. A new pick replaces the
+ * others, and picking the chosen area again clears it.
+ */
+export function pickHelpArea({ current, id }: { current: readonly HelpAreaId[]; id: HelpAreaId }): HelpAreaId[] {
+  return current[0] === id ? [] : [id];
+}
+
+const ARROW_STEPS: Partial<Record<string, number>> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+};
 
 /**
  * A ticket that is a button: the label is visible, and the full prompt is the button's accessible
@@ -98,29 +112,14 @@ export function AmanTour({
   return (
     <div data-testid="aman-tour" className="flex w-full flex-col gap-4">
       <section aria-labelledby="aman-tour-help-heading" className="flex flex-col gap-2">
-        <h2
-          id="aman-tour-help-heading"
-          className="m-0 font-mono text-[0.68rem] uppercase tracking-[0.1em] text-text-secondary"
-        >
+        <h2 id="aman-tour-help-heading" className="aui-tour-label m-0">
           What would help you most?
         </h2>
-        <div role="group" aria-labelledby="aman-tour-help-heading" className="flex flex-wrap gap-1.5">
-          {HELP_AREA_IDS.map(id => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={helpAreas.includes(id)}
-              onClick={() => onHelpAreasChange(toggleHelpArea(helpAreas, id))}
-              className={CHIP_CLASS}
-            >
-              {HELP_AREAS[id].label}
-            </button>
-          ))}
-        </div>
+        <HelpAreaPills labelId="aman-tour-help-heading" helpAreas={helpAreas} onChange={onHelpAreasChange} />
       </section>
 
       <section aria-labelledby="aman-tour-can-heading" className="flex flex-col gap-2">
-        <h2 id="aman-tour-can-heading" className="aui-ticket__title m-0">
+        <h2 id="aman-tour-can-heading" className="aui-tour-title m-0">
           What {assistant} can do
         </h2>
         <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-4">
@@ -139,6 +138,57 @@ export function AmanTour({
           Hide the tour
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A radio group of area pills: one is chosen at a time. Tab lands on the chosen pill, and the
+ * arrow keys move to the next or previous pill and choose it.
+ */
+function HelpAreaPills({
+  labelId,
+  helpAreas,
+  onChange,
+}: {
+  labelId: string;
+  helpAreas: readonly HelpAreaId[];
+  onChange: (next: HelpAreaId[]) => void;
+}) {
+  const selected = helpAreas[0] ?? null;
+  const pills = useRef<(HTMLButtonElement | null)[]>([]);
+  const tabStop = selected === null ? 0 : HELP_AREA_IDS.indexOf(selected);
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const step = ARROW_STEPS[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    const next = (index + step + HELP_AREA_IDS.length) % HELP_AREA_IDS.length;
+    const id = HELP_AREA_IDS[next];
+    if (id === undefined) return;
+    pills.current[next]?.focus();
+    onChange([id]);
+  }
+
+  return (
+    <div role="radiogroup" aria-labelledby={labelId} className="flex flex-wrap gap-1.5">
+      {HELP_AREA_IDS.map((id, index) => (
+        <button
+          key={id}
+          ref={element => {
+            pills.current[index] = element;
+          }}
+          type="button"
+          role="radio"
+          aria-checked={id === selected}
+          tabIndex={index === tabStop ? 0 : -1}
+          onClick={() => onChange(pickHelpArea({ current: helpAreas, id }))}
+          onKeyDown={event => onKeyDown(event, index)}
+          className={CHIP_CLASS}
+        >
+          {HELP_AREAS[id].label}
+        </button>
+      ))}
     </div>
   );
 }

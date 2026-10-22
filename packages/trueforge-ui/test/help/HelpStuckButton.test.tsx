@@ -62,7 +62,7 @@ describe('HelpStuckButton', () => {
 
   it('starts a help chat with the screen and the last error the person saw', () => {
     const seen: (HelpSession | null)[] = [];
-    rememberErrorText('Connection lost: Check your connection. The chat re-syncs automatically when it returns.');
+    rememberErrorText('Connection lost: Check your network, then try again.');
     render(
       <HelpProvider api={API}>
         <HelpStuckButton />
@@ -74,9 +74,7 @@ describe('HelpStuckButton', () => {
 
     const latest = seen.at(-1);
     expect(latest?.screen).toBe('Chat');
-    expect(latest?.lastError).toBe(
-      'Connection lost: Check your connection. The chat re-syncs automatically when it returns.',
-    );
+    expect(latest?.lastError).toBe('Connection lost: Check your network, then try again.');
     expect(latest?.phase).toBe('pending');
   });
 

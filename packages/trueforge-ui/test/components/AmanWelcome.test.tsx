@@ -220,7 +220,7 @@ describe('the starters and the tour below the composer', () => {
     renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
 
     const tour = await screen.findByTestId('aman-tour');
-    expect(within(tour).getByRole('group', { name: 'What would help you most?' })).toBeInTheDocument();
+    expect(within(tour).getByRole('radiogroup', { name: 'What would help you most?' })).toBeInTheDocument();
     expect(within(tour).getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
   });
