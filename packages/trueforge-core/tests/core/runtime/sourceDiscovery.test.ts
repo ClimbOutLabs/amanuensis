@@ -23,7 +23,7 @@ describe('source discovery contract at the model request boundary', () => {
         instruction: 'test',
         toolSets: [],
       },
-      context: [{ role: 'user', content: 'hi' }],
+      context: [{ role: 'user', content: 'Look up the release notes.' }],
     });
 
     const execution = thread.execute({ signal: new AbortController().signal });
@@ -34,11 +34,17 @@ describe('source discovery contract at the model request boundary', () => {
     const request = create.mock.calls[0]?.[0];
     const systemMessage = request?.messages.find(message => message.role === 'system');
     expect(systemMessage?.content).toContain('<source-discovery>');
-    // No sandbox in this chat: the contract must not name an exec tool, and the no-sandbox line says so.
+    // No sandbox in this chat or on the server: the contract must not name an exec tool, and the server-level
+    // no-sandbox line says the server has no place to run commands.
     expect(systemMessage?.content).toContain(createSourceDiscoveryContract({ shellCanFetch: false }).trim());
     expect(systemMessage?.content).not.toContain('sandbox exec tool');
     expect(systemMessage?.content).toContain('<no-sandbox>');
-    expect(systemMessage?.content).toContain('open Add-ons in the composer, go to Connectors, and turn on Sandbox');
+    expect(systemMessage?.content).toContain(
+      'This Aman has no place to run commands, so I cannot clone or run code here. You can run the command yourself:',
+    );
+    expect(systemMessage?.content).not.toContain('<sandbox-off>');
+    expect(systemMessage?.content).not.toContain('Add-ons');
+    expect(systemMessage?.content).not.toContain('turn on the Sandbox switch');
     expect(systemMessage?.content).not.toContain('Work on a repo');
     expect(systemMessage?.content).not.toContain('Settings');
     expect(systemMessage?.content).toContain('URLs');

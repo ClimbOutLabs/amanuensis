@@ -54,11 +54,19 @@ The Agent has only the tools listed in this prompt. It cannot generate, edit, or
 `;
 
 /**
- * Only for a chat with no sandbox: without this line the model guesses that a shell exists and searches
- * for one. The control names are the ones the person sees in the app.
+ * Only for a chat with no sandbox object, on a server whose sandbox is off: the server has nowhere to run
+ * commands, so the model must not point the person at a control. Without this line it guesses a shell exists.
  */
 export const NO_SANDBOX_PROMPT = dedent`
-This chat has no sandbox, so it cannot run commands, edit files, or clone repositories. If the person asks for any of these, say so plainly and tell them how to get one: open Add-ons in the composer, go to Connectors, and turn on Sandbox. Do not search the web or list servers to look for a command tool.
+This Aman has no place to run commands, so you cannot clone or run code here. When the person asks for that, say exactly: "This Aman has no place to run commands, so I cannot clone or run code here. You can run the command yourself:" Then give the exact command for their request, such as git clone with the repository URL they gave. Do not name any Sandbox switch or setting. Do not look for a command tool; there is none here.
+`;
+
+/**
+ * Only for a chat with no sandbox object while the server's sandbox is on: the person turns it on per chat or
+ * persona. The control names are the ones the person sees in the app.
+ */
+export const SANDBOX_OFF_PROMPT = dedent`
+The sandbox is available on this Aman but is turned off for this chat or persona, so you cannot run commands, edit files, or clone repositories here yet. Do not say the sandbox is missing. When the person asks for any of these, tell them how to turn it on: open Add-ons in the composer, go to Connectors, and turn on the Sandbox switch. Do not point them to Settings for this.
 `;
 
 /**

@@ -134,6 +134,7 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+import { readServerSandboxAvailable } from './capabilities';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -343,6 +344,8 @@ function createTurnResolver(deps: {
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
+  /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
+  serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
@@ -394,6 +397,7 @@ function createTurnResolver(deps: {
     switchNotice,
     internalSourceState,
     boundRepository,
+    serverSandboxAvailable,
     repositoryStore,
     sessionStore,
     memoryClient,
@@ -709,6 +713,7 @@ function createTurnResolver(deps: {
       },
       logger,
       boundRepository,
+      serverSandboxAvailable,
       clientTimezone,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
@@ -1266,6 +1271,11 @@ export async function beginTurnExecution(params: {
     session,
     turnId,
     boundRepository: deps.boundRepository,
+    serverSandboxAvailable: await readServerSandboxAvailable({
+      store: deps.sandboxProviderStore,
+      tenant_id: session.tenant_id,
+      logger: deps.logger,
+    }),
     personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
     personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -2089,6 +2099,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchNotice: persona?.switchNotice,
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
+      serverSandboxAvailable: await readServerSandboxAvailable({
+        store: sandboxProviderStore,
+        tenant_id: requestContext.tenant_id,
+        logger: deps.logger,
+      }),
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,

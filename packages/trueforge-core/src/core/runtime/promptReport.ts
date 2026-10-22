@@ -28,6 +28,10 @@ export interface PromptReportInput {
   definition: Omit<AgentDefinition, 'modelClient'>;
   capabilities?: readonly AgentCapability[] | undefined;
   sandbox?: Sandbox | undefined;
+  /** Whether the server has a sandbox at all. See ITurnResourceResolver.serverSandboxAvailable. */
+  serverSandboxAvailable?: boolean | undefined;
+  /** The person's message the turn answers; it decides which tool bundles the request carries. */
+  message: string;
 }
 
 // The instruction builder puts each tag on its own line, and escaped content opens with `<tag><![CDATA[`
@@ -122,8 +126,9 @@ export async function measurePromptRequest(input: PromptReportInput): Promise<Pr
     threadId: 'prompt-report',
     title: 'Prompt report',
     sandbox: input.sandbox,
+    serverSandboxAvailable: input.serverSandboxAvailable,
     capabilities: input.capabilities ?? [],
-    context: [{ role: 'user', content: 'Report.' }],
+    context: [{ role: 'user', content: input.message }],
     toolCallMemo: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,

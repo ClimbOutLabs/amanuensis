@@ -12,6 +12,7 @@ import { stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { extractErrorLogFields } from '../util/errorLogFields';
@@ -79,6 +80,7 @@ interface CalendarToolSetOptions {
 export class CalendarToolSet extends LocalToolMCP {
   readonly name = CALENDAR_SERVER_ID;
   readonly displayName = 'Google Calendar';
+  protected override readonly bundle: ToolBundleName = 'google';
   readonly #options: CalendarToolSetOptions;
   readonly #tools: ToolDefinition[];
 
@@ -101,7 +103,7 @@ export class CalendarToolSet extends LocalToolMCP {
     return [
       defineTool({
         name: LIST_EVENTS_TOOL_NAME,
-        description: `List events on the primary calendar in a time range, in start order, with repeating events unfolded into their dates. Dates (YYYY-MM-DD) are read in the user's time zone; a time_max date includes that whole day. Birthdays and other all-day events have all_day true and no clock time. Optional query searches title, description, place and guests.${canWrite ? '' : NO_WRITE_NOTE}`,
+        description: `List primary-calendar events in a time range, in start order, with repeats unfolded into their dates. Dates (YYYY-MM-DD) use the user's time zone; a time_max date includes that whole day. All-day events have all_day true and no clock time.${canWrite ? '' : NO_WRITE_NOTE}`,
         schema: ListEventsSchema,
         annotations: CALENDAR_READ_ANNOTATIONS,
         handler: input => this.#listEvents(input),
@@ -147,6 +149,10 @@ export class CalendarToolSet extends LocalToolMCP {
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     const prepared = isCalendarWriteToolName(params.name) ? await this.#prepareWrite(params) : undefined;
     if (prepared !== undefined && 'failure' in prepared) {
       return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: prepared.failure } };

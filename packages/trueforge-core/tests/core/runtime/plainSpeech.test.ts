@@ -4,7 +4,11 @@ import { PLAIN_SPEECH_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
 
-async function systemPrompt(input: { instruction: string; network?: 'none' | undefined }): Promise<string> {
+async function systemPrompt(input: {
+  instruction: string;
+  network?: 'none' | undefined;
+  message?: string | undefined;
+}): Promise<string> {
   const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
@@ -22,7 +26,7 @@ async function systemPrompt(input: { instruction: string; network?: 'none' | und
       instruction: input.instruction,
       toolSets: [],
     },
-    context: [{ role: 'user', content: 'Fetch https://example.com for me.' }],
+    context: [{ role: 'user', content: input.message ?? 'Fetch https://example.com for me.' }],
     sandbox: makeStubPublicSandbox({ network: input.network }),
   });
 
@@ -52,8 +56,12 @@ describe('host-owned plain speech rule', () => {
     expect(offline).not.toContain('curl');
     expect(offline).toContain('Retrieval capabilities include search, browsing, lookup, and fetch tools.');
 
-    const online = await systemPrompt({ instruction: 'test' });
+    // The exec tool is named only once the sandbox bundle is loaded: a message that routes to it loads it first.
+    const online = await systemPrompt({ instruction: 'test', message: 'Run a script to fetch https://example.com.' });
     expect(online).toContain('the sandbox exec tool when it retrieves an already identified source');
     expect(online).toContain('curl');
+
+    const unrouted = await systemPrompt({ instruction: 'test' });
+    expect(unrouted).not.toContain('the sandbox exec tool when it retrieves');
   });
 });

@@ -64,14 +64,14 @@ describe('buildIrisHelpMessage', () => {
     expect(message).not.toMatch(/subject|inbox|from:|attachment|invite|meeting|file/i);
   });
 
-  it('keeps the host report line when the report needs attention', () => {
+  it('gives Iris the saved full check date and result', () => {
     const message = buildIrisHelpMessage({
       check: {
         ...CHECK,
         host_report: {
-          state: 'missing',
-          checked_at: null,
-          message: 'No full check has been run yet. Run aman doctor on your computer.',
+          state: 'ok',
+          checked_at: '2026-10-20T08:30:00Z',
+          message: '2 things need attention',
           next_step: null,
         },
       },
@@ -79,7 +79,20 @@ describe('buildIrisHelpMessage', () => {
       lastError: null,
     });
 
-    expect(message).toContain('- Last full check: No full check has been run yet. Run aman doctor on your computer.');
+    expect(message).toContain('- Last full check at 2026-10-20T08:30:00Z: 2 things need attention.');
+  });
+
+  it('leaves the full check line out when there is no saved report', () => {
+    const message = buildIrisHelpMessage({
+      check: {
+        ...CHECK,
+        host_report: { state: 'missing', checked_at: null, message: null, next_step: null },
+      },
+      screen: 'Chat',
+      lastError: null,
+    });
+
+    expect(message).not.toContain('Last full check');
   });
 });
 

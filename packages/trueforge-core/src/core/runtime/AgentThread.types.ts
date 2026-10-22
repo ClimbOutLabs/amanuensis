@@ -232,6 +232,8 @@ export interface AgentThreadConstructorInput {
   currentContextUsage?: CurrentContextUsage | undefined;
   preComputedCompletion?: SubAgentCompletionMarker | undefined;
   sandbox?: Sandbox | undefined;
+  /** Whether this server has a sandbox at all, from the host's status. Decides which no-sandbox line the chat gets. */
+  serverSandboxAvailable?: boolean | undefined;
   capabilities?: readonly AgentCapability[] | undefined;
   /**
    * Previous turn's capability_state for hydration. Optional — omit on first
