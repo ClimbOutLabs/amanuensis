@@ -113,7 +113,9 @@ async function drainTurn(input: {
   jest
     .spyOn(client, 'getOperation')
     .mockResolvedValue(
-      input.retainFails ? { ok: false, reason: 'provider unreachable' } : { ok: true, status: 'completed' },
+      input.retainFails
+        ? { ok: false, code: 'request_failed', reason: 'provider unreachable' }
+        : { ok: true, status: 'completed' },
     );
   if (input.abilityNotesOnly === true) {
     mockSummarize.mockResolvedValue({ status: 'summarized', summary: abilityNoteSummary });
