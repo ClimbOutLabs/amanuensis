@@ -1,12 +1,9 @@
 'use client';
 
-import { useAui } from '@assistant-ui/react';
-import { useCallback } from 'react';
-
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
-import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
+import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useServerCapabilities } from '../server/ServerContext.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import {
@@ -16,8 +13,9 @@ import {
   isFirstRunSetupComplete,
 } from './AmanFirstRunGuide.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
-import { AmanTour, type TourCapabilities } from './AmanTour.js';
+import { AmanTour } from './AmanTour.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
+import type { TourCapabilities } from './tourPrompts.js';
 
 const DEFAULT_HEADING = 'How can I help you today?';
 
@@ -43,25 +41,10 @@ function useTourCapabilities(): TourCapabilities {
     email: granted?.includes('gmail_read') === true,
     calendar: granted?.includes('calendar_read') === true,
     sandbox: capabilities?.sandbox.enabled === true,
+    // Maps ships built in with public upstreams and has no off switch, so it is on wherever the
+    // Tour runs. It stays a capability so that a future off switch hides its card without a change here.
+    maps: true,
   };
-}
-
-/** Puts a prompt in the composer and sends it, through the same busy-state wrapper the send button uses. */
-function useSendPrompt(): (prompt: string) => void {
-  const aui = useAui();
-  const busy = useOptionalComposerBusyState();
-  return useCallback(
-    (prompt: string) => {
-      aui.composer().setText(prompt);
-      const send = () => aui.composer().send();
-      if (busy === null) {
-        send();
-      } else {
-        busy.send(send);
-      }
-    },
-    [aui, busy],
-  );
 }
 
 /**
@@ -124,6 +107,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
     return (
       <AmanTour
         capabilities={capabilities}
+        helpAreas={personalization?.profile?.help_areas ?? []}
         canSend={setup === null || setup.modelName !== null}
         onSend={sendPrompt}
         onHide={() => setHidden(true)}

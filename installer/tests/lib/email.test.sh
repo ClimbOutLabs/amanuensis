@@ -21,6 +21,8 @@ proton 127.0.0.1 1143 false 127.0.0.1 1025 false false'
 
 env_mail() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env.mail-email" | head -n 1; }
 
+mail_link_lines() { grep -c '^MAIL_EMAIL_MCP_URL=' "$AMAN_HOME/instances/main/.env" || true; }
+
 opposite() { if [ "$1" = true ]; then echo false; else echo true; fi; }
 
 # The sign-in check runs python3 with -c. This stand-in records what it was given and answers with the text in
@@ -101,9 +103,9 @@ test_outlook_families_are_skipped() {
   install_machine
   local address
   for address in person@outlook.com person@hotmail.co.uk person@live.com; do
-    mail_run --email-provider gmail --email-address "$address" --email-password-stdin
-    assert_rc 2
-    assert_flat_contains "$ERR" "Outlook, Hotmail and Live addresses need a Microsoft sign-in" "$address"
+    run_install instance email main --email-provider gmail --email-address "$address"
+    assert_rc 0
+    assert_flat_contains "$OUT$ERR" "Outlook, Hotmail and Live addresses need a Microsoft sign-in" "$address"
     assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
   done
   sandbox_drop
@@ -136,7 +138,6 @@ test_yes_without_email_flags_skips_the_step() {
   assert_rc 0
   assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
   assert_not_contains "$OUT" "Connect an email account"
-  assert_not_contains "$OUT" "Email"
   sandbox_drop
 }
 
@@ -146,14 +147,16 @@ test_question_at_a_terminal_with_other_servers() {
   install_python_stub
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
-Connect an email account=>y
-Type the number of your provider=>10
-Email address=>mail@example.org
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account? (optional)=>y
+Your provider (type a number)=>10
+Email address to connect=>mail@example.org
 Incoming mail server=>imap.example.org
 Incoming mail port=>993
 Outgoing mail server=>smtp.example.org
 Outgoing mail port=>587
-App password for mail@example.org=>$EMAIL_PW
+App password for the email account=>$EMAIL_PW
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -176,16 +179,20 @@ test_instance_command_adds_changes_and_removes() {
   mail_run --email-provider gmail --email-address a@gmail.com --email-password-stdin
   assert_rc 0
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_EMAIL_ADDRESS)" a@gmail.com "added"
+  assert_eq "$(mail_link_lines)" 1 "connector line added to the instance settings"
   assert_log_has "--force-recreate"
   mail_run --email-provider fastmail --email-address b@fastmail.com --email-password-stdin
   assert_rc 0
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_EMAIL_ADDRESS)" b@fastmail.com "changed"
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_IMAP_HOST)" imap.fastmail.com "changed server"
+  assert_eq "$(mail_link_lines)" 1 "still one connector line after a change"
+  assert_log_has "mail-email"
   assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
   run_install instance email main --remove
   assert_rc 0
   assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
-  assert_not_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "mail_address" "the record forgets the account"
+  assert_eq "$(mail_link_lines)" 0 "connector line gone after remove"
+  assert_flat_contains "$OUT$ERR" "The Email connector is removed. Any saved app password has been deleted from this computer."
   sandbox_drop
 }
 
@@ -240,18 +247,35 @@ test_email_options_follow_their_commands() {
   install_machine
   run_install instance email main --yes
   assert_rc 2
-  assert_flat_contains "$ERR" "instance email needs --email-provider"
+  assert_flat_contains "$ERR" "With --yes the email account needs --email-provider"
   run_install instance email main --remove --email-provider gmail
   assert_rc 2
+  assert_flat_contains "$ERR" "--remove cannot be used with the email options"
   run_install --yes --password-stdin --email owner@example.invalid --email-provider gmail --email-address a@gmail.com
   assert_rc 2
-  assert_flat_contains "$ERR" "install.sh instance email NAME"
+  assert_flat_contains "$ERR" "--email-password-stdin"
   run_install instance list --email-provider gmail
   assert_rc 2
   sandbox_drop
 }
 
+test_compose_runs_the_connector() {
+  t_begin "the instance compose file runs the connector on the send list, with its wrapper script beside it"
+  sandbox_new
+  install_python_stub
+  install_machine
+  local compose=$AMAN_HOME/instances/main/compose.yaml
+  assert_file "$AMAN_HOME/instances/main/mail-email-entrypoint.sh"
+  assert_contains "$(cat "$compose")" "  mail-email:"
+  assert_contains "$(cat "$compose")" "./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro"
+  assert_contains "$(cat "$compose")" "      - mail-policy:/data/mail-policy"
+  assert_contains "$(cat "$compose")" "MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml"
+  assert_not_contains "$(cat "$compose")" "@@"
+  sandbox_drop
+}
+
 test_presets_write_their_servers
+test_compose_runs_the_connector
 test_outlook_families_are_skipped
 test_scripted_flags_with_piped_input
 test_yes_without_email_flags_skips_the_step

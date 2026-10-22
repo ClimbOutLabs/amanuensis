@@ -22,6 +22,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     email: null,
     calendar_event: null,
     schedule: null,
+    persona: null,
     ...overrides,
   };
 }
@@ -73,12 +74,37 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
   });
 
-  it('offers Always allow only when the server said it may', () => {
+  it('offers Always allow this tool only when the server said it may', () => {
+    renderCard({ alwaysAllowOffered: false });
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+  });
+
+  it('asks the owner to confirm Always allow this tool before it records anything', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('calls nothing when the owner cancels the Always allow confirm step', () => {
+    const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('calls the Always allow handler once when the owner confirms', () => {
+    const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
   });
 
@@ -153,5 +179,21 @@ describe('HeldActionCard', () => {
     expect(screen.getByText('Monday, October 19, 2026, 9:00 am to 10:00 am')).toBeInTheDocument();
     expect(screen.getByText('America/New_York')).toBeInTheDocument();
     expect(screen.getByText('Google will not email the guests about this.')).toBeInTheDocument();
+  });
+});
+
+describe('HeldActionCard "Change it"', () => {
+  it('shows Change it only with a handler, and sends the text as the change request', () => {
+    const onChangeRequest = vi.fn();
+    renderCard({ onChangeRequest });
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'shorter please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onChangeRequest).toHaveBeenCalledWith('shorter please');
+  });
+
+  it('shows no Change it without a handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
   });
 });

@@ -71,6 +71,23 @@ export function clearComposerDraft(key: ComposerDraftKey): void {
   }
 }
 
+let pendingComposerPrefill: string | null = null;
+
+/**
+ * Text for the next composer that mounts, set by a page outside the chat (Spaces) right before it
+ * opens a new chat. It only fills the box: nothing is sent until the person types and sends.
+ */
+export function setComposerPrefill(text: string): void {
+  pendingComposerPrefill = text;
+}
+
+/** Hands the pending prefill to the composer that is taking it, once. */
+export function takeComposerPrefill(): string | null {
+  const text = pendingComposerPrefill;
+  pendingComposerPrefill = null;
+  return text;
+}
+
 /**
  * Moves a draft to a conversation's new key. Text already under the new key is newer than the
  * old copy and wins; the old key goes only once the new key holds a copy, so a full store can

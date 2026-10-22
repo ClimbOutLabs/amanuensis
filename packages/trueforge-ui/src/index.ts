@@ -71,6 +71,8 @@ export type {
   TableRowProps,
   TableTokenPaginationProps,
 } from './atoms/primitives/Table.js';
+export { AllClear, GoldTick, HandNote, Highlight, StubTear } from './atoms/Reward.js';
+export type { AllClearProps, HandNoteProps, RewardPlayProps, StubTearProps } from './atoms/Reward.js';
 export { ScheduleFormDrawer } from './atoms/schedules/ScheduleFormDrawer.js';
 export type { ScheduleFormDrawerProps } from './atoms/schedules/ScheduleFormDrawer.js';
 export { ScheduleFormFields } from './atoms/schedules/ScheduleFormFields.js';
@@ -84,6 +86,8 @@ export { TestScheduleScreen } from './atoms/schedules/TestScheduleScreen.js';
 export type { ScheduleMcpMount, TestScheduleScreenProps } from './atoms/schedules/TestScheduleScreen.js';
 export { SchedulesButton } from './atoms/SchedulesButton.js';
 export type { SchedulesButtonProps } from './atoms/SchedulesButton.js';
+export { useHighlightedCard, useRewardLedger } from './hooks/useRewardLedger.js';
+export type { HighlightCandidates, RewardContext, RewardRequest } from './hooks/useRewardLedger.js';
 export { Icon } from './icons/Icon.js';
 export type { IconProps } from './icons/Icon.js';
 
@@ -219,8 +223,8 @@ export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './componen
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
-export type { AmanSetupState, FirstRunGuideState, MemoryBankStatus } from './components/AmanSetupContext.js';
-export { AmanTour, type AmanTourProps, type TourCapabilities } from './components/AmanTour.js';
+export type { AmanSetupState, FirstRunGuideState } from './components/AmanSetupContext.js';
+export { AmanTour, type AmanTourProps } from './components/AmanTour.js';
 export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
@@ -277,8 +281,23 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export {
+  RepositoryWorkProvider,
+  useOptionalRepositoryWork,
+  useRepositoryWork,
+} from './components/RepositoryWorkContext.js';
+export type {
+  GithubRepositoryDetails,
+  GithubRepositoryOption,
+  RepositoryCommandProposal,
+  RepositorySummary,
+  RepositoryWorkApi,
+  SessionRepositoryBinding,
+  StartRepositoryWorkResult,
+} from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
@@ -333,6 +352,19 @@ export { TrueFoundryChatProvider } from './containers/TrueFoundryChatProvider.js
 export type { TrueFoundryChatProviderProps } from './containers/TrueFoundryChatProvider.js';
 export { UserEditComposerContainer } from './containers/UserEditComposerContainer.js';
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
+export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkOnRepoControls.js';
+export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
+export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
+export type {
+  HelpHealthCheck,
+  HelpHealthItem,
+  HelpHealthStatus,
+  HelpHostReport,
+  HelpHostReportState,
+} from './help/helpModel.js';
+export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
+export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
+export { HelpStuckButton } from './help/HelpStuckButton.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
 export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';

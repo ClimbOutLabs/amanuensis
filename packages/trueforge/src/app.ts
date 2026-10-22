@@ -21,6 +21,7 @@ import { createChatImagesRouter } from './apis/chatImages';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createGoogleRouter } from './apis/google';
+import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -38,6 +39,7 @@ import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
+import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
@@ -87,20 +89,25 @@ import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
+import type { SchedulerProbe } from './help/healthCheck';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { getPersonaKnowledgeIndexer } from './personaKnowledge/knowledgeIndexer';
+import { ensureAmanGuide } from './personas/amanGuide/install';
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
-import type { resolveSandboxProvider } from './runtime/sessionResources';
+import { resolveSandboxProvider } from './runtime/sessionResources';
+import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
-import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
+import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
+import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
 
 const BEARER_AUTH_SCHEME = 'BearerAuth';
@@ -274,6 +281,8 @@ export interface ServerDeps<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Whether the in-process schedule loop is running; the help check reads it. */
+  schedulerStatus: () => SchedulerProbe;
   /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
@@ -423,6 +432,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/help',
+    withAuth(
+      createHelpRouter({
+        resolveRequestContext,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+        tokenStore: deps.tokenStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        hostReportPath: configuration.HOST_REPORT_PATH,
+        schedulerStatus: deps.schedulerStatus,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
@@ -718,6 +744,49 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Space pictures, browser session only: the owner\'s own spaces link them, and no agent or API token may fetch on the person\'s behalf.
+  app.route(
+    '/api/space-pictures',
+    withAuth(
+      createSpacePicturesRouter({
+        tenantId: TENANT_ID,
+        pictures: createSpacePictureService({
+          spaceStore: deps.spaceStore,
+          fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+          now: () => Date.now(),
+        }),
+        resolveRequestContext,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Installs the Aman guide for a person on first sight and refreshes it on upgrade. It waits for a
+  // default model, since the guide answers with one.
+  const ensureAmanGuideFor = async ({ userId }: { userId: string }): Promise<void> => {
+    const modelName = await readDefaultChatModel({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    if (modelName === undefined) {
+      return;
+    }
+    const indexer = getPersonaKnowledgeIndexer({
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      logger: deps.logger,
+    });
+    await ensureAmanGuide({
+      personaStore: deps.personaStore,
+      tenantId: TENANT_ID,
+      userId,
+      modelName,
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      enqueue: input => {
+        indexer.enqueue(input);
+      },
+      logger: deps.logger,
+    });
+  };
   app.route(
     '/api/v1/personas',
     withAuth(
@@ -726,6 +795,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
         knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        ensureAmanGuide: ensureAmanGuideFor,
       }),
       authMiddleware,
     ),
@@ -860,6 +930,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
         resolveRequestContext,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveWorkspaceDir: async ({ c, session_id }) => {
+          const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+          const provider = await resolver({
+            tenant_id: TENANT_ID,
+            store: deps.resolveSandboxProviderStore(c),
+            logger: deps.logger,
+            sessionId: session_id,
+          });
+          return provider?.getWorkspaceDir();
+        },
       }),
       authMiddleware,
     ),

@@ -1,6 +1,6 @@
 # A hosted judges' instance on Nebius
 
-One small Ubuntu VM, one shared judge account, an invented demo world, and the model served by Nebius Token Factory. Every flag below is checked against `installer/install.sh --help` on main.
+One small Ubuntu VM, one shared judge account, an invented demo world, and the model served by Nebius Token Factory. Check the flags below against `installer/install.sh --help` for the release you install.
 
 ## 1. The VM
 
@@ -16,7 +16,7 @@ One small Ubuntu VM, one shared judge account, an invented demo world, and the m
 - app: `203-0-113-10.sslip.io`
 - sign-in: `login.203-0-113-10.sslip.io`
 
-`nip.io` is built the same way. The installer's name check accepts both forms. Not verified from here: whether Let's Encrypt's per-domain limits are used up on a shared service like sslip.io. Run the install a day early so there is time to switch.
+`nip.io` is built the same way. The installer's name check accepts both forms. Shared name services can hit Let's Encrypt's per-domain limits, so run the install a day early to leave time to switch to a domain of your own.
 
 Fallback: a cheap domain with two A records to the VM, or no public site: `--local-only` and an SSH tunnel for the judges.
 
@@ -28,7 +28,7 @@ git clone https://github.com/ClimbOutLabs/amanuensis.git && cd amanuensis
 git checkout <release-tag>
 ```
 
-`v0.1.0` is too old: it has no Token Factory, demo or Caddy support. Cut a new tag from a verified main (see `RELEASING.md`) and use that. Until then, check out the exact main commit you tested.
+`v0.1.0` is too old: it has no Token Factory, demo or Caddy support. Use a newer release tag (see `RELEASING.md`), or the exact commit you tested.
 
 Docker is installed by the installer if you pass `--install-docker`. Put the Token Factory key in a file readable only by you, then pipe it in (never as an argument):
 
@@ -55,19 +55,18 @@ shred -u ~/tf.key
 
 `--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner (or `--demo-user ADDRESS`). Dates are relative to today (Europe/Madrid).
 
-- On main the seeded user is called Mara, not Maya. A separate change renames her; check `world.ts` before judging.
 - The seed needs a configured model. The Token Factory model is added to the app when it starts, so this works right after the install.
-- On main, `DEMO_MODE` only enables the seeder. The Gmail work (PR #153) adds a demo-mode refusal of Google, and a follow-up is meant to allow Google in demo mode with sends limited to a fixed list of invented addresses. Until both land on the commit you deploy, do not connect Maya's Gmail.
+- `DEMO_MODE` only enables the seeder. Do not connect a real Google account to a demo instance.
 
-### Maya's mailbox (depends on unmerged work)
+### Maya's mailbox
 
-The plan is Maya's real test Gmail account, filled with the invented emails from `demo/fixtures/mailbox` in English, Portuguese and Spanish, plus two PDFs and a Word file, loaded by a `demo:import-mailbox` script. That script, the Portuguese emails and the `.docx` are being built elsewhere and are not on main yet. The Arabic, Hindi, Japanese, Sinhala, Chinese and Russian fixtures are left out. Check that the script exists on your commit before relying on this.
+The mailbox is Maya's test Gmail account, filled with the invented emails from `demo/fixtures/mailbox` in English, Portuguese and Spanish, plus two PDFs and a Word file. Load them with `pnpm demo:import-mailbox`. The Arabic, Hindi, Japanese, Sinhala, Chinese and Russian fixtures are not loaded.
 
 ## 5. Order on the day
 
 1. Install (sections 3 and 4), a day early.
 2. Import the invented emails into Maya's Gmail with `demo:import-mailbox`.
-3. Add the birthday to her Google Calendar by hand: an all-day event a few days after the judging date, with an invented name, and not on the dentist date (Oct 22).
+3. Add the birthday to her Google Calendar by hand: an all-day event a few days after the judging date, with an invented name, and not on the GP appointment date (22 October).
 4. On the morning of judging, run `./installer/install.sh instance demo-seed` (section 7 first if you need a reset), so the dates are relative to that day.
 5. Run `aman doctor` and send one test message.
 

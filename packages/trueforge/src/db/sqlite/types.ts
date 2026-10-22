@@ -31,6 +31,7 @@ import type {
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
 import type { ModelProviderManifest } from '../../schemas/modelProvider';
@@ -197,6 +198,8 @@ export interface SentinelUserSettingsTable {
   search_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   maps_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  sandbox_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -249,14 +252,6 @@ export interface ChatImageTable {
   created_at: string;
 }
 
-/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
-export interface ChatImageTurnAllowanceTable {
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  silent_attempts: number;
-}
-
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
 /** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
@@ -264,6 +259,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Connector host the grant was given for; null for a connector with no URL. */
+  mcp_server_host: string | null;
   created_at: string;
 }
 
@@ -556,6 +553,7 @@ export interface PersonalizationProfileTable {
   address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JsonbColumn<string[]>;
+  help_areas: JsonbColumn<HelpAreaId[]>;
   /** Host-maintained learned document; null until the learning pass writes one. */
   learned_profile: string | null;
   /** User switch for the learning pass, stored as SQLite's 0/1 integer boolean. */
@@ -781,7 +779,6 @@ export interface Database {
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
-  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

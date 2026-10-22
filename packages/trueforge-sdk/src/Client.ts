@@ -5,6 +5,7 @@ import { AuthClient } from "./api/resources/auth/client/Client.js";
 import { BugReportsClient } from "./api/resources/bugReports/client/Client.js";
 import { CatalogsClient } from "./api/resources/catalogs/client/Client.js";
 import { DataClient } from "./api/resources/data/client/Client.js";
+import { HelpClient } from "./api/resources/help/client/Client.js";
 import { InternalClient } from "./api/resources/internal/client/Client.js";
 import { McpServersClient } from "./api/resources/mcpServers/client/Client.js";
 import { MemoryClient } from "./api/resources/memory/client/Client.js";
@@ -43,6 +44,7 @@ export class TrueForge {
     protected _bugReports: BugReportsClient | undefined;
     protected _server: ServerClient | undefined;
     protected _data: DataClient | undefined;
+    protected _help: HelpClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
     protected _models: ModelsClient | undefined;
     protected _personalization: PersonalizationClient | undefined;
@@ -89,6 +91,10 @@ export class TrueForge {
 
     public get data(): DataClient {
         return (this._data ??= new DataClient(this._options));
+    }
+
+    public get help(): HelpClient {
+        return (this._help ??= new HelpClient(this._options));
     }
 
     public get mcpServers(): McpServersClient {

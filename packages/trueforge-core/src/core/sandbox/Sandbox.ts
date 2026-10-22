@@ -45,7 +45,7 @@ import {
   canonicalWriteTarget,
   classifyContextFor,
   classifyHostToolCall,
-  observeShellCreatedFiles,
+  isNewWriteTarget,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -104,10 +104,12 @@ import {
 } from './hostAuthenticatedGit';
 import {
   commandDownloadsPackages,
+  commandInstallsPypiOrNpmPackages,
   findCommandLineGitDependency,
   findGitDependency,
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   PACKAGE_MANIFEST_FILES,
+  PACKAGE_UNAVAILABLE_RULE,
   packageDownloadCardWhat,
 } from './packageMirrors';
 import {
@@ -502,7 +504,7 @@ function sandboxImplementationPlanScope(input: {
   return parsed.success ? parsed.data : undefined;
 }
 
-export type RepositoryCommandSourceKind = 'agents_md' | 'package_json';
+export type RepositoryCommandSourceKind = 'agents_md' | 'makefile' | 'package_json' | 'pyproject_toml';
 
 export interface RepositoryCommandSource {
   source_kind: RepositoryCommandSourceKind;
@@ -883,6 +885,8 @@ const REPOSITORY_COMMAND_SOURCE_FILES: readonly {
 }[] = [
   { source_kind: 'agents_md', source_path: 'AGENTS.md' },
   { source_kind: 'package_json', source_path: 'package.json' },
+  { source_kind: 'pyproject_toml', source_path: 'pyproject.toml' },
+  { source_kind: 'makefile', source_path: 'Makefile' },
 ];
 
 function repositorySourceAbsolutePath(workspaceCwd: string, sourcePath: string): string {
@@ -1362,23 +1366,35 @@ function execNetworkSentences({ offline }: { offline: boolean }): string {
 }
 
 export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Execute shell commands in a persistent sandbox environment.
-Use the cwd argument for the checked-out repository. Setting HOME does not change the working directory.
-IMPORTANT: Never list, print, or expose environment variables.
-Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
-For large output, pass output.head_lines, output.tail_lines, and/or output.grep to bound the model-visible result.
+  return `Execute shell commands in a persistent sandbox environment. Use cwd for the checked-out repository; setting HOME does not change the working directory. Never list, print, or expose environment variables.
+Use write_file to create a file, apply_patch for source edits, and replace_text for one exact replacement. Do not bypass them with sed, Perl, Python, heredocs, or temporary patch files.
+For large output, pass output.head_lines, output.tail_lines, and/or output.grep.
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
-exec MUST NOT be used to run python/node code — use run_code. Interpreter invocations in exec are rejected by a harness guard; use the run_code tool instead.
-Result status is "ok" (success), "exited" (command ran, non-zero exit — check exit_code), or "failed" (host could not run it).
+exec MUST NOT run python or node code: use run_code. Interpreter invocations are rejected by a harness guard.
+Result status is "ok" (success), "exited" (non-zero exit; check exit_code), or "failed" (the host could not run it).
 ${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
 `;
 }
 
 /** What the run_code description says is installed; the slot guest ships a smaller set than the Docker image. */
-function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string {
-  return offline
-    ? 'Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. No installs at runtime: if a package is missing, say so instead of installing it.'
-    : 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
+function runCodeEnvironmentSentences({
+  offline,
+  packageDownloads,
+}: {
+  offline: boolean;
+  packageDownloads: boolean;
+}): string {
+  if (offline) {
+    // The package gateway is separate from the sandbox network, so an offline sandbox can still download.
+    const packages = packageDownloads
+      ? 'Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again.'
+      : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
+  }
+  if (packageDownloads) {
+    return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again. Never use the network to fetch web content.';
+  }
+  return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
 }
 
 /**
@@ -1387,11 +1403,18 @@ function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string 
  * attachments staged by the harness are advertised without the model ever
  * base64-encoding them.
  */
-export function createSandboxRunCodeDescription({ offline }: { offline: boolean }): string {
-  return `Run Python or Node.js code in an isolated, offline sandbox.
-language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
-${runCodeEnvironmentSentences({ offline })}
-files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
+export function createSandboxRunCodeDescription({
+  offline,
+  packageDownloads,
+  workspaceDir,
+}: {
+  offline: boolean;
+  packageDownloads: boolean;
+  workspaceDir: string;
+}): string {
+  return `Run Python or Node.js code in an isolated, offline sandbox. language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). Code runs with cwd=/scratch; read inputs from /ingress/<name> and write result files under /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's own result, not an infra failure.
+${runCodeEnvironmentSentences({ offline, packageDownloads })}
+files_in is for content you compose yourself. Never re-upload an /ingress file via files_in.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
@@ -1727,6 +1750,9 @@ function execInterpreterGuardFailure(input: {
 const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
+const PACKAGE_INSTALL_UNAVAILABLE_REFUSAL =
+  'Packages cannot be downloaded in this chat, so this install was not run. Use the standard library or the packages that are already installed, or open this work on a repository that allows downloads. Do not retry it and do not try another tool for the same job.';
+
 function sandboxExecPreflightFailure(input: {
   command: string;
   purpose: SandboxInvocationPurpose | undefined;
@@ -1736,6 +1762,7 @@ function sandboxExecPreflightFailure(input: {
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
   hasNetwork: boolean;
+  packageGatewayAvailable: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1753,6 +1780,9 @@ function sandboxExecPreflightFailure(input: {
   // An impossible action must not reach an approval card.
   if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
+  }
+  if (!input.packageGatewayAvailable && commandInstallsPypiOrNpmPackages(input.command)) {
+    return PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
   }
   if (input.purpose === undefined) {
     return 'A terminal invocation must declare its purpose explicitly.';
@@ -1779,7 +1809,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run a checked-in script. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -1789,12 +1819,12 @@ function sandboxExecPreflightFailure(input: {
   }
   // A "verify" label must not cover opaque code: inline evaluators, heredocs,
   // and tee would let arbitrary code execution ride on a verification
-  // approval. Run a checked-in script so the verification step stays reviewable.
+  // approval. A named shell script keeps the verification step reviewable.
   if (
     input.purpose === 'verify' &&
     (sandboxCommandUsesUnstructuredOperation(input.command) || sandboxVerifyCommandUsesInlineEval(input.command))
   ) {
-    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a script and run the script so the verification step stays reviewable.';
+    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a shell script and run it by name so the verification step stays reviewable. Python and Node code cannot run through exec at all.';
   }
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
@@ -2035,6 +2065,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly execGuardResolveCache = new Map<string, string | undefined>();
   /** Code-execution backend behind `run_code`; undefined when no isolation driver is configured. */
   private readonly runCodeService: RunCodeBackend | undefined;
+  /** The person's download setting for the bound repository, read before each tool-list read and call. */
+  private packageDownloadsAllowedForChat = false;
   /** host sink for harvested run_code file bytes; undefined when the host wires no persistence. */
   private readonly runCodeHarvestSink: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   /**
@@ -2196,6 +2228,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
+        packageGatewayAvailable: this.packageGatewayAvailable(),
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2430,10 +2463,13 @@ export class Sandbox extends LocalToolMCP {
         ? {}
         : {
             ...sentinelStamp,
-            tier3_card: withPackageDownloadCard({
-              card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
-              packageCard,
-            }),
+            // A call the exec preflight refuses shows no card: the command it names cannot run.
+            tier3_card: invalidExecPreflight
+              ? undefined
+              : withPackageDownloadCard({
+                  card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
+                  packageCard,
+                }),
           }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
@@ -2827,6 +2863,11 @@ export class Sandbox extends LocalToolMCP {
     return out;
   }
 
+  override async listTools() {
+    await this.refreshPackageDownloadsAllowed();
+    return super.listTools();
+  }
+
   protected getTools() {
     const base =
       this.boundRepository === undefined
@@ -3073,16 +3114,15 @@ export class Sandbox extends LocalToolMCP {
     sandboxInstructions.addSection(
       'repository-work',
       dedent`
-        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor.
-        If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
-        Create the task branch immediately after cloning, before broad inspection. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
+        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
+        Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
         Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
         Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
         Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
         Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
-        Resolve repository facts from the local checkout before asking the user. Do not ask whether an API, schema, backend capability, file, or existing implementation exists when local inspection can answer it. Ask only for genuinely missing external information or a product decision whose alternatives would materially change the result.
-        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that local checkout and sandbox tools, not GitHub connectors, for source inspection, editing, commands, and verification.
-        Once the evidence identifies a narrow integration gap, make the smallest plausible change and let the typechecker or focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions that the repository already provides. If the requested concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
+        Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
+        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
+        Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
         Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
         A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
       `,
@@ -3794,6 +3834,45 @@ export class Sandbox extends LocalToolMCP {
     };
     const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
+  }
+
+  /**
+   * Whether a package download can ever succeed in this chat: a bound repository, a token loader and
+   * a driver that can reach the package gateway. The install refusal reads this, not the person's
+   * allowance, so the first install still reaches the approval card that asks for it.
+   */
+  private packageGatewayAvailable(): boolean {
+    return (
+      this.loadPackageMirrorToken !== undefined &&
+      this.boundRepository !== undefined &&
+      this.runCodeService?.packageGatewayCapable === true
+    );
+  }
+
+  /**
+   * Whether a package download can succeed right now: the gateway is available and the person has
+   * allowed downloads for the bound repository. The run_code description reads this. The token
+   * check at dispatch still decides each command.
+   */
+  private packageDownloadsPossible(): boolean {
+    return this.packageGatewayAvailable() && this.packageDownloadsAllowedForChat;
+  }
+
+  /** Reads the download setting into the cache. A failed read keeps downloads off, never on. */
+  private async refreshPackageDownloadsAllowed(): Promise<void> {
+    const load = this.loadPackageDownloadsAllowed;
+    if (load === undefined || this.boundRepository === undefined) {
+      this.packageDownloadsAllowedForChat = false;
+      return;
+    }
+    try {
+      this.packageDownloadsAllowedForChat = await load();
+    } catch (error) {
+      this.packageDownloadsAllowedForChat = false;
+      this.logger.warn('Could not read the package download setting; downloads stay off', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -4695,7 +4774,11 @@ export class Sandbox extends LocalToolMCP {
    * reads them directly instead of re-uploading bytes through `files_in`.
    */
   private renderRunCodeDescription(): string {
-    const runCodeDescription = createSandboxRunCodeDescription({ offline: !this.hasNetwork() });
+    const runCodeDescription = createSandboxRunCodeDescription({
+      offline: !this.hasNetwork(),
+      packageDownloads: this.packageDownloadsPossible(),
+      workspaceDir: this.runCodeWorkspaceDir(),
+    });
     const staged = [...this.runCodeIngressStaging.values()];
     if (staged.length === 0) {
       return runCodeDescription;
@@ -4706,6 +4789,69 @@ export class Sandbox extends LocalToolMCP {
       `Available in /ingress (read directly by filename, do NOT re-upload via files_in):\n` +
       `${lines.join('\n')}\n`
     );
+  }
+
+  /** The sandbox directory the file tools write to; script_path is resolved against it. */
+  private runCodeWorkspaceDir(): string {
+    return this.provider.getWorkspaceDir() ?? '/workspace';
+  }
+
+  /**
+   * Reads a file the model wrote under the workspace, for `run_code` script_path. Only that one file
+   * is read. The path is canonicalized in the sandbox first, so a symlink cannot lead outside the
+   * workspace, and only a regular file is read, so a device, fifo or directory is never opened. The
+   * error text is shown to the model, so it never carries provider details.
+   */
+  private async readRunCodeScript(scriptPath: string): Promise<Buffer> {
+    const workspaceDir = this.runCodeWorkspaceDir();
+    const resolved = posix.normalize(posix.isAbsolute(scriptPath) ? scriptPath : posix.join(workspaceDir, scriptPath));
+    const outsideWorkspace = new Error(
+      `script_path must be a file under ${workspaceDir}. Pass a path like ${workspaceDir}/size.py.`,
+    );
+    if (!resolved.startsWith(`${workspaceDir}/`)) {
+      throw outsideWorkspace;
+    }
+    const unreadable = (cause: unknown): Error =>
+      new Error(
+        `script_path "${scriptPath}" could not be read. Check that the file exists under ${workspaceDir}, or write it with write_file first.`,
+        { cause },
+      );
+    let sandboxId: string;
+    let canonicalWorkspace: string;
+    let canonicalScript: string;
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
+      [canonicalWorkspace, canonicalScript] = await Promise.all([
+        this.canonicalSandboxPath({ sandboxId, path: workspaceDir }),
+        this.canonicalSandboxPath({ sandboxId, path: resolved }),
+      ]);
+    } catch (error) {
+      throw unreadable(error);
+    }
+    if (!canonicalScript.startsWith(`${canonicalWorkspace}/`)) {
+      throw outsideWorkspace;
+    }
+    try {
+      const regular = await this.hostExec({ sandboxId, command: `test -f ${shellEscape(canonicalScript)}` });
+      if (!successfulExec(regular) || regular.response.exitCode !== 0) {
+        throw new Error('script_path is not a regular file');
+      }
+      return await this.provider.downloadFile({ sandboxId, path: canonicalScript });
+    } catch (error) {
+      throw unreadable(error);
+    }
+  }
+
+  /** Resolves every symlink and requires each path component to exist, or throws. */
+  private async canonicalSandboxPath({ sandboxId, path }: { sandboxId: string; path: string }): Promise<string> {
+    const canonical = canonicalPathFromExec(
+      await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` }),
+    );
+    if (canonical === undefined) {
+      throw new Error(`realpath did not resolve ${path}`);
+    }
+    return canonical;
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
@@ -4727,6 +4873,7 @@ export class Sandbox extends LocalToolMCP {
         signal: context?.signal,
         packageMirrorToken: await this.resolvePackageMirrorToken(),
         attachments: [...this.runCodeIngressStaging.values()],
+        readScript: scriptPath => this.readRunCodeScript(scriptPath),
         onProgress: (message: string) => {
           provisioningMessages.push(message);
           this.logger.info('run_code provisioning progress', { message });
@@ -4770,6 +4917,15 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * The paths a write is about to create, checked before it runs. Tracking records only these, so an edit to
+   * a file that already existed (a repo file) never makes it a file Aman wrote.
+   */
+  private createdWriteTargets(input: { paths: readonly string[]; cwd: string }): string[] {
+    const resolution = this.provider.filesystem;
+    return input.paths.filter(p => isNewWriteTarget({ p, cwd: input.cwd, resolution }));
+  }
+
+  /**
    * Sentinel: record agent-created or agent-modified files as tracked
    * executables, so a later attempt to execute them escalates for approval.
    * Best effort and host-side: paths that do not resolve on the host (for
@@ -4786,6 +4942,7 @@ export class Sandbox extends LocalToolMCP {
     const scope = {
       tenant_id: ctx.tenant_id,
       created_by: ctx.created_by,
+      conversation_id: ctx.conversation_id,
       repository_id: ctx.repository_id,
       workspace_cwd: ctx.workspace_cwd,
     };
@@ -4991,6 +5148,7 @@ export class Sandbox extends LocalToolMCP {
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
+      packageGatewayAvailable: this.packageGatewayAvailable(),
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
@@ -5073,12 +5231,6 @@ export class Sandbox extends LocalToolMCP {
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
-      }
-      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
-        this.observeSentinelWrites({
-          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
-          cwd: resolvedInput.cwd,
-        });
       }
 
       return {
@@ -5299,6 +5451,7 @@ export class Sandbox extends LocalToolMCP {
     // failed even though the file was written. Only request the lock when a repository
     // is actually bound; a scratch write has no concurrent-checkout to guard against.
     const workspaceLockRoot = this.boundRepository === undefined ? undefined : workspaceRoot;
+    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
     const observedWrite = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: canonicalScope.cwd,
@@ -5326,7 +5479,7 @@ export class Sandbox extends LocalToolMCP {
     const write = observedWrite.value;
     const succeeded = write.success && write.response.exitCode === 0;
     if (succeeded) {
-      this.observeSentinelWrites({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: scopeResolution.scope.cwd });
     }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed write
@@ -5606,6 +5759,8 @@ export class Sandbox extends LocalToolMCP {
     // again since resolveWorkspaceRoot may have run since then) so precondition observation joins the
     // same root the paths are relative to, rather than the (possibly different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
+    const createdPaths =
+      workspaceRoot === undefined ? [] : this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
     const observedMutation = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -5698,7 +5853,7 @@ export class Sandbox extends LocalToolMCP {
     }
     const succeeded = apply.success && apply.response.exitCode === 0;
     if (succeeded && workspaceRoot !== undefined) {
-      this.observeSentinelWrites({ paths: finalPaths, cwd: workspaceRoot });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: workspaceRoot });
     }
     return {
       result: {
@@ -5791,6 +5946,7 @@ export class Sandbox extends LocalToolMCP {
     // observation joins the same root the paths are relative to, rather than the (possibly
     // different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
+    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
     const observedReplace = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -5890,7 +6046,7 @@ export class Sandbox extends LocalToolMCP {
     const { exec: replace, payloadDigest } = outcome;
     const succeeded = replace.success && replace.response.exitCode === 0;
     if (succeeded) {
-      this.observeSentinelWrites({ paths: [normalizedPath], cwd: input.cwd });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: input.cwd });
     }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed replace

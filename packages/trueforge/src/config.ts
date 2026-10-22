@@ -209,6 +209,85 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
+ * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
+ * the one in `.env`.
+ */
+export function withMailSidecarOrigin({
+  origins,
+  mailUrl,
+}: {
+  origins: string[];
+  mailUrl: string | undefined;
+}): string[] {
+  if (mailUrl === undefined) {
+    return origins;
+  }
+  const mailOrigin = normalizedOrigin(mailUrl);
+  if (mailOrigin === undefined || origins.includes(mailOrigin)) {
+    return origins;
+  }
+  return [...origins, mailOrigin];
+}
+
+/** A path from the environment; unset or blank means none. */
+function parseOptionalPath(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim() ?? '';
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
+ * Parses `MAIL_EMAIL_MCP_URL`: the Email connector's MCP endpoint, such as the compose sidecar's
+ * `http://mail-email:9557/mcp`. Unset or blank means no mail sidecar, so no Email connector is
+ * registered. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseMailEmailMcpUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`MAIL_EMAIL_MCP_URL must be an http(s) URL such as http://mail-email:9557/mcp, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `CALENDAR_CONNECTOR_URL`: the Calendar connector's MCP endpoint. Unset or blank means no calendar
+ * sidecar. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseCalendarConnectorUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(
+      `CALENDAR_CONNECTOR_URL must be an http(s) URL such as http://calendar-caldav:9558/mcp, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
+ */
+export function firstPartyOriginsFor({
+  raw,
+  calendarUrl,
+}: {
+  raw: string | undefined;
+  calendarUrl: string | undefined;
+}): string[] {
+  const origins = parseFirstPartyMcpOrigins(raw);
+  const calendarOrigin = calendarUrl === undefined ? undefined : normalizedOrigin(calendarUrl);
+  if (calendarOrigin !== undefined && !origins.includes(calendarOrigin)) {
+    origins.push(calendarOrigin);
+  }
+  return origins;
+}
+
+/**
  * Source reference the running build came from. A Docker `ARG` that the build was
  * never given still reaches the process as an empty string, so blank counts as unset.
  */
@@ -997,6 +1076,27 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
+   * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
+   * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
+   */
+  MAIL_EMAIL_MCP_URL: string | undefined;
+  /**
+   * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
+   * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
+   * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
+   */
+  CALENDAR_CONNECTOR_URL: string | undefined;
+  /**
+   * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
+   * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
+   */
+  MAIL_POLICY_FILE: string | undefined;
+  /**
+   * Where the sidecar's wrapper records the hash of the send list it loaded. The server waits on it after a
+   * change. Env: `MAIL_POLICY_STATUS_FILE`. Default unset.
+   */
+  MAIL_POLICY_STATUS_FILE: string | undefined;
+  /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
    */
@@ -1089,6 +1189,11 @@ export interface SharedServerConfiguration {
    * operation uses a fresh subdirectory and removes it. Derived: `{app data dir}/git-bridge`.
    */
   SANDBOX_GIT_BRIDGE_DIR: string;
+  /**
+   * The latest full check written by the installer on the computer (`aman doctor`, install, upgrade,
+   * refresh). Read only; the app never runs host commands. Derived: `{app data dir}/host-report.json`.
+   */
+  HOST_REPORT_PATH: string;
   /**
    * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
    * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
@@ -1560,6 +1665,11 @@ export interface SharedServerConfiguration {
    */
   DEMO_GOOGLE_ACCOUNT: string;
   /**
+   * What the installer was told to call the owner. Seeds the Personalization name once, only where it is empty.
+   * Env: `OWNER_NAME`. Default empty, which seeds nothing.
+   */
+  OWNER_NAME: string;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -1814,7 +1924,17 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
-  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+  FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
+    origins: firstPartyOriginsFor({
+      raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
+      calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+    }),
+    mailUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  }),
+  MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
+  MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
+  CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -1880,6 +2000,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
+  HOST_REPORT_PATH: path.join(appDataDir, 'host-report.json'),
   SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
     Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
   ),
@@ -2203,6 +2324,7 @@ const shared: SharedServerConfiguration = {
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
   DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
+  OWNER_NAME: (getEnv('OWNER_NAME') ?? '').trim(),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),

@@ -1,12 +1,18 @@
 'use client';
 
-import type { FC, ReactNode } from 'react';
+import { useState, type FC, type ReactNode } from 'react';
 
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode, type SettingsSection } from '../server/ShellModeContext.js';
 import { useOptionalAmanSetup, type AmanSetupState } from './AmanSetupContext.js';
-import { useOptionalPersonalization } from './PersonalizationContext.js';
+import { HelpAreaChoices } from './HelpAreaChoices.js';
+import {
+  EMPTY_PERSONALIZATION_PROFILE,
+  useOptionalPersonalization,
+  type PersonalizationProfile,
+} from './PersonalizationContext.js';
 
 /** Where a checklist line sends the user: a Settings section, or back to the chat. */
 export type FirstRunTarget = { kind: 'settings'; section: SettingsSection } | { kind: 'chat' };
@@ -117,6 +123,44 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
 };
 
 /**
+ * "What would help you most?" under the checklist. Each change is saved to the profile at once, so
+ * the Tour's cards follow it without a Save step.
+ */
+const TourHelpQuestion: FC<{
+  profile: PersonalizationProfile | null;
+  save: (profile: PersonalizationProfile) => Promise<PersonalizationProfile>;
+}> = ({ profile, save }) => {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const change = async (next: HelpAreaId[]) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await save({ ...(profile ?? EMPTY_PERSONALIZATION_PROFILE), help_areas: next });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save your choices. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="mt-3 border-t border-border/70 pt-3">
+      <HelpAreaChoices
+        idPrefix="aman-first-run-help"
+        value={profile?.help_areas ?? []}
+        onChange={change}
+        disabled={saving}
+      />
+      {error ? (
+        <p className="mt-2 text-sm text-failure-bg" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
+/**
  * The first-run card: what to set up and where, ticking itself off from real state. It renders
  * only inside an `AmanSetupProvider`, hides once the owner dismisses it, and never nags again:
  * the dismissal lives on the server, not in this browser. `hideWhenComplete` drops it once every
@@ -207,6 +251,9 @@ export const AmanFirstRunGuide: FC<{
           </li>
         ))}
       </ol>
+      {placement === 'chat' && personalization !== null ? (
+        <TourHelpQuestion profile={personalization.profile} save={personalization.updateProfile} />
+      ) : null}
     </section>
   );
 };

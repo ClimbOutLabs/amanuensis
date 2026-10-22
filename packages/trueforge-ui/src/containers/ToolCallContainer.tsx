@@ -12,11 +12,18 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
-import { useCallback, useState } from 'react';
+import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
+import { useCallback, useEffect, useState } from 'react';
 
-import { MapCard } from '../components/MapCard.js';
+import { useIsMobile } from '../atoms/lib/useIsMobile.js';
+import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
+import { useOptionalPersonas } from '../components/PersonaContext.js';
+import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
+import { useHighlightedCard } from '../hooks/useRewardLedger.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -114,6 +121,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
+  const isMobile = useIsMobile();
+  // The rail's Needs you ticket carries the one highlight on desktop; the approval ticket carries it only where the rail is hidden.
+  const highlightedApprovalId = useHighlightedCard({
+    firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
+    nextAppointmentId: null,
+  });
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -154,6 +167,16 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       approved,
       ...(normalizedResponse.optionId != null ? { optionId: normalizedResponse.optionId } : {}),
       ...(normalizedResponse.reason != null ? { reason: normalizedResponse.reason } : {}),
+    });
+  };
+
+  // A standing grant rides the runtime's option path; the runtime maps this option id to scope "always".
+  const respondAlwaysAllow = () => {
+    if (part.approval == null) return;
+    respondToNestedApproval({
+      approvalId: part.approval.id,
+      approved: true,
+      optionId: ALWAYS_ALLOW_TOOL_OPTION_ID,
     });
   };
 
@@ -214,12 +237,19 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         : undefined;
     return (
       <PermissionApprovalCard
-        toolName={part.toolName}
         card={approvalInfo.card}
-        tier={approvalInfo.tier}
+        highlighted={highlightedApprovalId === approvalInfo.toolCallId}
+        othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== approvalInfo.toolCallId).length}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
+        onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+        onChangeRequest={
+          offersChangeIt(approvalInfo.card)
+            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+            : undefined
+        }
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
@@ -283,6 +313,9 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
       </p>
     );
   }
+  if (mapsResult.state === 'refused') {
+    return <RefusedMapStep refused={mapsResult.refused ?? []} />;
+  }
   if (part.status?.type === 'running' && mapsResult.data === null) {
     return (
       <div className="maps-card" data-testid="map-card-loading">
@@ -293,6 +326,31 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
   return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
+}
+
+/**
+ * A pin call whose every place failed the page check. No map card: the step shows one quiet line,
+ * and its details hold the refusal the person can read.
+ */
+function RefusedMapStep({ refused }: { refused: MapRefusedPlace[] }) {
+  const ToolCallCard = useSlot('ToolCallCard');
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ToolCallCard
+      toolName="Checked places for a map"
+      status="muted"
+      expanded={expanded}
+      onToggle={() => setExpanded(prev => !prev)}
+      showResponseLine
+      responseSlot={
+        refused.length === 0 ? (
+          <p className="maps-place-note">No place in this answer could be checked against its page.</p>
+        ) : (
+          <RefusedPlaceList refused={refused} />
+        )
+      }
+    />
+  );
 }
 
 function RequestResponseSlots({
@@ -319,11 +377,34 @@ function RequestResponseSlots({
   };
 }
 
+/**
+ * A "Change it" answer shows the person's words as their own message right after the call, so the
+ * history reads in order. The call itself stays declined.
+ */
 export const ToolCallContainer: ToolCallMessagePartComponent = part => {
+  const UserMessageBubble = useSlot('UserMessageBubble');
+  const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
+  const approval = stateApproval ?? part.approval;
+  const changeText = approval?.approved === false ? changeRequestText(approval.reason) : undefined;
+  return (
+    <>
+      <ToolCallPart {...part} />
+      {changeText === undefined ? null : <UserMessageBubble text={changeText} />}
+    </>
+  );
+};
+
+function ToolCallPart(part: ToolCallMessagePartProps) {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
+  // A specialist added in this chat shows in the persona list without a page reload.
+  const reloadPersonas = useOptionalPersonas()?.reload;
+  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  useEffect(() => {
+    if (specialistAdded) void reloadPersonas?.();
+  }, [specialistAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -546,4 +627,4 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-};
+}

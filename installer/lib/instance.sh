@@ -136,6 +136,7 @@ machine_running() {
 instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
   dir=$(instance_dir "$name")
+  owner_name_backfill "$name"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -173,9 +174,19 @@ instance_render() {
     edge_on=1
     login_host=$(edge_host "$login_url")
   fi
+  # The calendar connector is part of the compose file only once its image is known.
+  local calendar_on=0
+  [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
+  # compose file, because the compose file mounts it from this folder.
+  local email_on=0
+  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
   ensure_private_dir "$dir"
+  if [ "$email_on" = 1 ]; then
+    write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
+  fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -184,7 +195,33 @@ instance_render() {
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
-    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" | write_if_changed "$dir/dex.yaml" 644 || true
+    "OWNER_EMAIL=$email" "OWNER_NAME=$(reg_get "$name" owner_name)" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" |
+    write_if_changed "$dir/dex.yaml" 644 || true
+}
+
+# What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.
+owner_name_default() { # email
+  local start=${1%%@*}
+  printf '%s' "${start:0:80}"
+}
+
+# An instance from before the question has no recorded name. It keeps the name its sign-in service already shows,
+# unless that is the old fixed 'owner', and then gets the start of its email. Nothing is asked, so refresh and upgrade
+# stay unattended. The app reads the name from .env too, to fill Personalization once.
+owner_name_backfill() { # name
+  local name=$1 current env
+  env="$(instance_dir "$name")/.env"
+  current=$(reg_get "$name" owner_name)
+  if [ -z "$current" ]; then
+    current=$(sed -n "s/^ *username: '\(.*\)'\$/\1/p" "$(instance_dir "$name")/dex.yaml" 2>/dev/null | head -n 1)
+    if [ "$current" = owner ] || [ -n "$(display_name_problem "$current")" ]; then
+      current=$(owner_name_default "$(reg_get "$name" owner_email)")
+    fi
+    reg_set "$name" owner_name "$current"
+  fi
+  if [ -f "$env" ] && grep -q '^# >>> managed by the installer' "$env" && ! grep -q '^OWNER_NAME=' "$env"; then
+    env_managed_set "$env" OWNER_NAME "$current"
+  fi
 }
 
 # running, partial or stopped, from the containers Compose labelled for the project.
@@ -273,7 +310,7 @@ record_source_checkout() {
 
 # The files the aman command is made of: the shim and the helper files it finds at ../lib next to its folder, here and
 # in a checkout alike.
-AMAN_COMMAND_LIBS="ui shared diagnose network schedule"
+AMAN_COMMAND_LIBS="ui shared diagnose network schedule host-report"
 
 aman_command_current() {
   local lib
@@ -366,9 +403,16 @@ instance_collect() {
   if [ -z "$I_NAME" ] && [ ! -t 0 ]; then I_NAME=$name_default; fi
   ask_valid I_NAME "Name for this instance:" "$name_default" "Each person gets a new instance." name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
-    I_EMAIL="owner@example.invalid"
+    I_EMAIL="you@example.invalid"
   fi
   ask_valid I_EMAIL "Your email, used to sign in" "" "Example: you@example.com" email_problem
+  I_OWNER_NAME=${OPT_YOUR_NAME:-}
+  # Without a terminal nobody can answer, so the start of the email is kept and the name can be changed later.
+  if [ -z "$I_OWNER_NAME" ] && [ ! -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+    I_OWNER_NAME=$(owner_name_default "$I_EMAIL")
+    say "Aman will call you $I_OWNER_NAME. You can change that later in Personalization."
+  fi
+  ask_valid I_OWNER_NAME "What should Aman call you?" "$(owner_name_default "$I_EMAIL")" "" display_name_problem
   if [ -n "$I_PUBLIC_URL" ]; then
     valid_origin "$I_PUBLIC_URL" || usage_die "The public address must look like https://aman.example.com, with nothing after the name."
     case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "The public address must start with https://." ;; esac
@@ -382,8 +426,7 @@ instance_collect() {
   instance_collect_addresses
   instance_collect_tls
   instance_collect_token_factory
-  email_collect
-  ui_ok "Instance $I_NAME for $I_EMAIL"
+  ui_ok "Instance $I_NAME for $I_OWNER_NAME ($I_EMAIL)"
 }
 
 # --address adds a name or address Aman should also answer at; each is checked as it is read, like every other flag.
@@ -546,18 +589,16 @@ instance_create() {
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "IF_GATEWAY=$(gateway_flag "$I_ORIGINS" "$I_PUBLIC_URL")" "LOGIN_PORT=$I_LOGIN_PORT" \
-    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
+    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "OWNER_NAME=$I_OWNER_NAME" "API_KEY=$api_key" \
     "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
     write_if_changed "$dir/.env" 600 || true
   AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
-    "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
+    "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "owner_name=$I_OWNER_NAME" "cookie_suffix=$cookie" "client_id=$client_id" \
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
-  if [ "$E_ON" = 1 ]; then email_save "$I_NAME"; fi
-  AMAN_EMAIL_PASSWORD=
   INSTANCE_PENDING=
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -588,7 +629,6 @@ read_password_first() {
   if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     read_token_factory_key_stdin
   fi
-  email_read_password_stdin
 }
 
 # How an address of the Open row is told apart, so the ones other devices use come first.
@@ -629,9 +669,6 @@ print_instance_summary() {
     esac
   done < <(origins_display_order "${origins:-$url}")
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
-  if [ -n "$(reg_get "$name" mail_address)" ]; then
-    ui_check_row ok "Email" "$(reg_get "$name" mail_address), $(reg_get "$name" mail_provider)"
-  fi
   print_model_row "$name"
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
@@ -720,14 +757,16 @@ print_instance_block() {
 
 # Everything an installed machine already has: the recorded release and the shared network owner.
 require_installed() {
-  [ -f "$RELEASE_DIR/release.json" ] && [ -d "$MACHINE_DIR" ] ||
+  if [ ! -f "$RELEASE_DIR/release.json" ] || [ ! -d "$MACHINE_DIR" ]; then
     die "Aman is not set up on this computer yet. Run install.sh first."
+  fi
 }
 
 load_installed_release() {
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   REL_APP_TAG=$CUR_APP_TAG
   REL_STT_TAG=$CUR_STT_TAG
+  REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
@@ -735,7 +774,7 @@ load_installed_release() {
 # The instance commands never build, so they say when this checkout holds newer code than what they run.
 warn_if_installed_older() {
   [ "$CUR_APP_TAG" = "$(checkout_app_tag)" ] ||
-    warn "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
+    warn "The installed Aman is not the same version as this copy of its code. To use this code, run: installer/install.sh upgrade"
 }
 
 # 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.
@@ -749,6 +788,8 @@ gateway_flag() { # origins public_url
 instance_env_repair() {
   local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
   env="$(instance_dir "$name")/.env"
+  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
+  owner_name_backfill "$name"
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
@@ -773,7 +814,7 @@ instance_env_repair() {
     "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
     "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
-    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "API_KEY=$(rand_hex 32)" \
+    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
     "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
@@ -900,7 +941,14 @@ cmd_instance_refresh() {
   instance_enforce_single_owner "$name" || true
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate
+  refresh_report "$name"
   print_instance_block "$name"
+}
+
+# Runs the doctor so the app's saved report is current after a refresh; its own result is not used here.
+refresh_report() { # name
+  [ -x "$(doctor_shim)" ] || return 0
+  AMAN_REPORT_COMMAND=refresh DOCTOR_TIMEOUT=180 run_doctor --json --instance "$1" >/dev/null 2>&1 || true
 }
 
 # A name typed for a new instance must also be free; naming an existing one is only for re-running instance add on it.
@@ -917,7 +965,9 @@ new_instance_name_problem() {
 cmd_instance_add() {
   if [ -z "${OPT_NAME:-}" ]; then
     # Only a person at a terminal can answer; anything else still needs the name on the command line.
-    [ -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] || usage_die "usage: install.sh instance add <name> [--email ...]"
+    if [ ! -t 0 ] || [ "$ASSUME_YES" = 1 ] || [ "$DRY_RUN" = 1 ]; then
+      usage_die "usage: install.sh instance add <name> [--email ...]"
+    fi
     require_installed
     ask_valid OPT_NAME "Name for this instance:" "" "" new_instance_name_problem
   fi
@@ -929,7 +979,6 @@ cmd_instance_add() {
   warn_if_installed_older
   I_NAME=$OPT_NAME
   if reg_exists "$I_NAME"; then
-    email_refuse_on_existing
     tf_rotation_collect
     instance_create
     tf_rotation_apply
@@ -978,7 +1027,7 @@ align_columns() {
 }
 
 cmd_instance_list() {
-  local name state
+  local name state person
   if [ -z "$(reg_names)" ]; then
     say "No instances yet. Run install.sh or install.sh instance add <name>."
     return 0
@@ -989,12 +1038,14 @@ cmd_instance_list() {
     *) warn "Docker is not running or not reachable, so the STATE column is unknown" ;;
   esac
   {
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR OWNER ADDRESS
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR PERSON ADDRESS
     for name in $(reg_names); do
       state=unknown
       case "$DOCKER_ACCESS" in direct | sg) state=$(instance_state "$name") ;; esac
+      person=$(reg_get "$name" owner_name)
+      [ -n "$person" ] || person=$(reg_get "$name" owner_email)
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_port)" \
-        "$state" "$(doctor_status "$name")" "$(reg_get "$name" owner_email)" "$(reg_get "$name" public_url)"
+        "$state" "$(doctor_status "$name")" "$person" "$(reg_get "$name" public_url)"
     done
   } | align_columns
 }

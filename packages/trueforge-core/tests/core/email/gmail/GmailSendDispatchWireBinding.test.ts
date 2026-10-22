@@ -2,6 +2,7 @@ import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import type { ApprovalDecision } from '../../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
+import { createWebSearchTurnState } from '../../../../src/core/permissions/webSearch';
 import { plainDraft } from './fixtures';
 import { build, json } from './harness';
 
@@ -41,6 +42,7 @@ describe('an approved send whose wire arguments changed after the card', () => {
       memoState: createToolCallMemoState(),
       sentinel: {
         services: sentinel.services,
+        web_search: createWebSearchTurnState(),
         identity: {
           tenant_id: sentinel.tenant_id,
           created_by: sentinel.created_by,

@@ -310,7 +310,7 @@ describe('MapCard', () => {
       ...placeData,
       kind: 'route',
       pins: [],
-      from_name: 'Rua da Emenda 45',
+      from_name: 'Travessa das Gaivotas 4',
       to_name: 'R. de Sao Bernardo 92',
       from_lat: 38.7106,
       from_lng: -9.1426,
@@ -585,7 +585,7 @@ describe('MapCard with several found places', () => {
     expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything());
   });
 
-  it('adds one line saying how many places were left out and why', () => {
+  it('draws the passing places and keeps the left-out names behind Details, not on the card', async () => {
     renderCard({
       data: {
         ...placesData,
@@ -602,11 +602,16 @@ describe('MapCard with several found places', () => {
       },
       state: 'ready',
     });
-    expect(
-      screen.getByText(
-        '2 places left out: The address is not on that page. Copy it word for word from the page and try again.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('map-card')).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything()));
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    const details = screen.getByText('Details').closest('details');
+    if (details === null) {
+      throw new Error('the left-out list sits behind a Details disclosure');
+    }
+    expect(within(details).getByText('Left out')).toBeInTheDocument();
+    expect(within(details).getByText('Canal Practice')).toBeInTheDocument();
+    expect(within(details).getByText('River Clinic')).toBeInTheDocument();
   });
 
   it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {

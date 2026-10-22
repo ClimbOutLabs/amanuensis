@@ -40,6 +40,7 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
+import { seedOwnerName } from '../../../src/runtime/ownerName';
 import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
 import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import {
@@ -129,6 +130,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
     memoryTarget: memoryTarget ?? { kind: 'markdown', markdownDir: instance.memoryDir },
+    ownerName: '',
     personaKnowledgeDir: instance.knowledgeDir,
     knowledgeEmbedder: instance.embedder,
     logger: instance.logger,
@@ -1085,6 +1087,7 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         address_as: null,
         user_profile: null,
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         updated_by: 'bob',
@@ -1112,11 +1115,78 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         address_as: null,
         user_profile: null,
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         updated_by: 'bob',
       });
       const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('a personalization profile');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it("accepts a profile that holds only the installer's name, and keeps that name where the export has none", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-owner-name');
+    try {
+      await seedOwnerName({
+        globalSettingsStore: target.stores.globalSettingsStore,
+        personalizationStore: target.stores.personalizationStore,
+        tenant_id: TENANT,
+        owner_subject_id: 'bob',
+        owner_name: 'Sam',
+      });
+      await runDataImport({ ...importDeps(target), ownerName: 'Sam' }, importRequest(archive));
+      const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(profile).toMatchObject({ assistant_name: 'Aman', user_name: 'Sam', address_as: 'Sam' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it("lets the export's own name replace the installer's", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-owner-name-replaced');
+    try {
+      await seedOwnerName({
+        globalSettingsStore: target.stores.globalSettingsStore,
+        personalizationStore: target.stores.personalizationStore,
+        tenant_id: TENANT,
+        owner_subject_id: 'bob',
+        owner_name: 'Sam',
+      });
+      const named = await repack(archive, entries => {
+        const profile = recordAt(parseJson(entries.get('personalization.json'), 'personalization.json'), 'profile');
+        profile['user_name'] = 'Samantha Rivera';
+        profile['address_as'] = 'Sammy';
+        entries.set('personalization.json', Buffer.from(JSON.stringify(profile)));
+      });
+      await runDataImport({ ...importDeps(target), ownerName: 'Sam' }, importRequest(named));
+      const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(profile).toMatchObject({ user_name: 'Samantha Rivera', address_as: 'Sammy' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it("refuses a profile whose name is not the installer's", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-other-name');
+    try {
+      await seedOwnerName({
+        globalSettingsStore: target.stores.globalSettingsStore,
+        personalizationStore: target.stores.personalizationStore,
+        tenant_id: TENANT,
+        owner_subject_id: 'bob',
+        owner_name: 'Sam',
+      });
+      const error = await importError(target, archive, { ...importDeps(target), ownerName: 'Someone else' });
       expect(error).toMatchObject({ status: 409 });
       expect(error instanceof Error && error.message).toContain('a personalization profile');
     } finally {
@@ -2420,6 +2490,27 @@ describe('runDataImport checks persona and personalization text like the app doe
     }
   });
 
+  it('imports a personalization export from before the Tour question, reading no help areas', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-personalization-older');
+    try {
+      // Written before help_areas existed: the key is absent, not empty.
+      const older = await repack(archive, entries => {
+        const profile = recordAt(parseJson(entries.get('personalization.json'), 'personalization.json'), 'profile');
+        delete profile['help_areas'];
+        entries.set('personalization.json', Buffer.from(JSON.stringify(profile)));
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const stored = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(stored?.help_areas).toEqual([]);
+      expect(stored?.user_profile).not.toBeNull();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses personalization text over the combined limit and writes nothing', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-personalization-text');
@@ -3497,6 +3588,24 @@ describe('runDataImport when Aman internals have changed', () => {
       const older = await repack(archive, entries => {
         const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
         delete recordAt(settings['permission_settings'], 'permission settings')['maps_without_asking'];
+        entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+      });
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).not.toContain('permission setting');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('reads permission settings from before the sandbox switch as running without asking, without noting them', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-sandbox');
+    try {
+      const older = await repack(archive, entries => {
+        const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+        delete recordAt(settings['permission_settings'], 'permission settings')['sandbox_without_asking'];
         entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
       });
 

@@ -5,14 +5,18 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
 export const SentinelUserSettings: core.serialization.ObjectSchema<serializers.SentinelUserSettings.Raw, TrueForge.SentinelUserSettings> = core.serialization.object({
+        "mapsWithoutAsking": core.serialization.property("maps_without_asking", core.serialization.boolean()),
         "offlineMode": core.serialization.property("offline_mode", core.serialization.boolean()),
+        "sandboxWithoutAsking": core.serialization.property("sandbox_without_asking", core.serialization.boolean()),
         "searchWithoutAsking": core.serialization.property("search_without_asking", core.serialization.boolean()),
         "tier2AutoAllow": core.serialization.property("tier2_auto_allow", core.serialization.list(core.serialization.stringLiteral("file_write")))
     });
 
 export declare namespace SentinelUserSettings {
     export interface Raw {
+        maps_without_asking: boolean;
         offline_mode: boolean;
+        sandbox_without_asking: boolean;
         search_without_asking: boolean;
         tier2_auto_allow: "file_write"[];
     }

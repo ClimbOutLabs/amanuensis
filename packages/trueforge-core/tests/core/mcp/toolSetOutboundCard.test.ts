@@ -9,6 +9,7 @@ import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
@@ -155,7 +156,7 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+      expect(info.tier3_card?.plain_what).toBe("This is a new tool from misc. Check what it will do before you allow it.");
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }
@@ -207,7 +208,7 @@ describe('approval is bound to the connector it was granted for', () => {
       threadId: 'main',
       approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
       memoState: createToolCallMemoState(),
-      sentinel: { services, identity },
+      sentinel: { services, identity, web_search: createWebSearchTurnState() },
     });
     const outcome = result.toolCallResults[0];
     if (outcome === undefined) {

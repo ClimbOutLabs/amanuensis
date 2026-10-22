@@ -14,6 +14,7 @@ const INITIAL: SentinelUserSettings = {
   tier2_auto_allow: [],
   search_without_asking: true,
   maps_without_asking: false,
+  sandbox_without_asking: true,
 };
 
 function Capture({ into }: { into: { current: SentinelApiState | null } }) {
@@ -107,6 +108,7 @@ describe('SentinelApiProvider.updateSettings', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     await waitFor(() => {
       expect(sentinel().settings).toEqual({
@@ -114,6 +116,7 @@ describe('SentinelApiProvider.updateSettings', () => {
         tier2_auto_allow: ['file_write'],
         search_without_asking: true,
         maps_without_asking: false,
+        sandbox_without_asking: true,
       });
     });
     expect(api.updateUserSettings).toHaveBeenCalledTimes(2);
@@ -127,6 +130,7 @@ describe('SentinelApiProvider.updateSettings', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 });

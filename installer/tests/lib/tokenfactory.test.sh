@@ -114,6 +114,8 @@ test_no_model_prompts_on_a_terminal() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
 Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y

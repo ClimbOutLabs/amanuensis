@@ -176,7 +176,9 @@ test_install_offer_declined() {
   sandbox_new
   os_release_ubuntu
   rm -f "$SB_BIN/docker"
-  with_input "
+  with_input "n
+
+
 
 
 
@@ -262,7 +264,9 @@ test_group_decline_stops_without_sudo() {
   sandbox_new
   STUB_DOCKER_DENIED=1
   : >"$SB_STATE/group_members"
-  with_input "
+  with_input "n
+
+
 
 
 

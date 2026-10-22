@@ -11,7 +11,7 @@ import {
   type ToolInvocationContext,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallText, toolEffectHints } from './ToolSet';
+import { deniedToolCallResponse, toolEffectHints } from './ToolSet';
 
 function withValidatedInput<T extends z.ZodType>(
   schema: T,
@@ -134,10 +134,7 @@ export abstract class LocalToolMCP implements IToolSet {
       },
       async span => {
         if (approvalDecision?.status === 'deny') {
-          return toolResultResponse({
-            text: deniedToolCallText(approvalDecision.reason),
-            isError: true,
-          });
+          return deniedToolCallResponse(approvalDecision.reason);
         }
         const response = await this.executeTool(params, approvalDecision, context);
         span.setOutput(JSON.stringify(response));

@@ -3,7 +3,7 @@
   "title": "Amanuensis installer release manifest",
   "description": "installer/release.json carries the pinned third-party images and the pinned Node.js runtime. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
   "type": "object",
-  "required": ["schema", "dex_image"],
+  "required": ["schema", "dex_image", "mail_email_image"],
   "additionalProperties": false,
   "properties": {
     "schema": {
@@ -11,6 +11,11 @@
     },
     "dex_image": {
       "description": "Login service image, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
+    "mail_email_image": {
+      "description": "Email connector image, pinned by multi-arch index digest.",
       "type": "string",
       "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
     },
@@ -24,6 +29,10 @@
     },
     "stt_image": {
       "description": "Local tag of the speech-to-text image built from ops/aman-stt, aman-stt:<source id>.",
+      "type": "string"
+    },
+    "calendar_image": {
+      "description": "Local tag of the calendar sidecar image built from ops/calendar-sidecar, aman-calendar-caldav:<source id>.",
       "type": "string"
     },
     "broker_image": {

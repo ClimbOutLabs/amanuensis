@@ -3,8 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { measureFrameContentHeight, SpacesView } from '@/containers/SpacesView.js';
+import { formatRelativeUpdated, measureFrameContentHeight, spaceKind, SpacesView } from '@/containers/SpacesView.js';
 import { SPACE_PAGE_BASE_STYLE } from '@/containers/spacePageBase.js';
+import { takeComposerPrefill } from '@/hooks/useComposerDraft.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import { SpaceProvider, type Space, type SpaceStore } from '@/server/SpaceContext.js';
 
@@ -136,6 +137,33 @@ function CaptureShell() {
   return null;
 }
 
+/** Same as Harness, but with a composer, so a new chat can open from the page. */
+function ComposerHarness({ store, initialSpaceId }: { store: SpaceStore; initialSpaceId?: string }) {
+  return (
+    <ShellModeProvider
+      agentConfig={{ mode: 'AgentComposer', defaultAgentSpec: { model: { name: 'openai-main/gpt-4.1' } } }}
+    >
+      <SpaceProvider store={store}>
+        <CaptureShell />
+        <OpenOnMount spaceId={initialSpaceId} />
+        <SpacesView />
+      </SpaceProvider>
+    </ShellModeProvider>
+  );
+}
+
+/** A library-only host: no composer can open, so the page must not offer to start a chat. */
+function LibraryOnlyHarness({ store, initialSpaceId }: { store: SpaceStore; initialSpaceId?: string }) {
+  return (
+    <ShellModeProvider agentConfig={{ mode: 'AgentLibrary' }}>
+      <SpaceProvider store={store}>
+        <OpenOnMount spaceId={initialSpaceId} />
+        <SpacesView />
+      </SpaceProvider>
+    </ShellModeProvider>
+  );
+}
+
 /** Leaves the view closed on mount so a test can open it later via `shell.openSpaces`. */
 function ManualHarness({ store }: { store: SpaceStore }) {
   return (
@@ -149,22 +177,43 @@ function ManualHarness({ store }: { store: SpaceStore }) {
 }
 
 describe('SpacesView list page', () => {
-  it('renders each space with a status pill, updated time, and a one-line preview', async () => {
+  it('renders each space as a card with its purpose, a type cue, and a relative updated time', async () => {
     render(<Harness store={mockStore([SPAIN_HOUSES, ARCHIVED_TRIP])} />);
 
     expect(await screen.findByRole('heading', { name: 'Spaces' })).toBeInTheDocument();
     expect(screen.getByText('Spain houses')).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Table')).toBeInTheDocument();
     expect(screen.getByText('Archived')).toBeInTheDocument();
-    expect(screen.getByText(/Shortlist of candidate houses/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Updated/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+    expect(screen.getByText(/Track candidate houses in Spain/)).toBeInTheDocument();
+    expect(screen.getAllByText(/just now|ago/).length).toBeGreaterThan(0);
   });
 
-  it('shows an empty state telling the user to ask the assistant for a space', async () => {
-    render(<Harness store={mockStore([])} />);
+  it('lists the newest space first', async () => {
+    const older = { ...SPAIN_HOUSES, id: 's-old', name: 'Older', updated_at: '2026-01-01T00:00:00.000Z' };
+    const newer = { ...SPAIN_HOUSES, id: 's-new', name: 'Newer', updated_at: '2026-10-01T00:00:00.000Z' };
+    render(<Harness store={mockStore([older, newer])} />);
+
+    const names = (await screen.findAllByRole('button', { name: /Newer|Older/ })).map(card => card.textContent);
+    expect(names[0]).toContain('Newer');
+    expect(names[1]).toContain('Older');
+  });
+
+  it('shows an empty state with one example prompt that starts a chat', async () => {
+    render(<ComposerHarness store={mockStore([])} />);
 
     expect(await screen.findByText(/No spaces yet/)).toBeInTheDocument();
-    expect(screen.getByText(/Ask the assistant to build one/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Make a space called Dog breeds that compares family dogs' }));
+    await waitFor(() => expect(shell.spacesOpen).toBe(false));
+    expect(shell.mode).toMatchObject({ status: 'active', isMutable: true });
+    expect(takeComposerPrefill()).toBe('Make a space called Dog breeds that compares family dogs');
+  });
+
+  it('leaves the example prompt out when no composer can open', async () => {
+    render(<LibraryOnlyHarness store={mockStore([])} />);
+
+    expect(await screen.findByText(/No spaces yet/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Dog breeds/ })).not.toBeInTheDocument();
   });
 
   it('opens a space page on click', async () => {
@@ -191,14 +240,44 @@ describe('SpacesView space page', () => {
     expect(screen.getByRole('heading', { name: 'Day 1' })).toBeInTheDocument();
   });
 
-  it('shows the purpose as a subtitle, a status pill, and an updated time, without a revision number', async () => {
+  it('shows the purpose as a subtitle and an updated line by Aman, without a revision number or status pill', async () => {
     render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
 
     await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
     expect(screen.getByText(/Track candidate houses in Spain/)).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(screen.getByText(/Updated/)).toBeInTheDocument();
+    expect(screen.getByText(/Kept up to date by Aman/)).toBeInTheDocument();
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
     expect(screen.queryByText(/revision/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the Archived label only on an archived space', async () => {
+    render(<Harness store={mockStore([ARCHIVED_TRIP])} initialSpaceId={ARCHIVED_TRIP.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Iceland trip' })).toBeInTheDocument());
+    expect(screen.getByText('Archived')).toBeInTheDocument();
+  });
+
+  it('puts the updated time in the accessible name with the exact time', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    const updated = await screen.findByLabelText(/^updated /);
+    expect(updated.tagName).toBe('TIME');
+    expect(updated).toHaveAttribute('title', expect.stringMatching(/\d/));
+  });
+
+  it('offers Ask Aman to change this, which opens a chat with the space named and nothing sent', async () => {
+    render(<ComposerHarness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Aman to change this' }));
+    await waitFor(() => expect(shell.spacesOpen).toBe(false));
+    expect(takeComposerPrefill()).toBe('In the space “Spain houses”, ');
+  });
+
+  it('hides Ask Aman to change this when no composer can open', async () => {
+    render(<LibraryOnlyHarness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Ask Aman to change this' })).not.toBeInTheDocument();
   });
 
   it('renders a markdown table in the body as a table element', async () => {
@@ -222,7 +301,7 @@ describe('SpacesView space page', () => {
     expect(screen.queryAllByRole('heading', { name: 'Launch tracker' })).toHaveLength(1);
   });
 
-  it('opens the srcdoc head with a strict CSP so nothing in a space can reach the network', async () => {
+  it('opens the srcdoc head with a strict CSP: only pictures may load from the network', async () => {
     render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
 
     await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
@@ -232,9 +311,10 @@ describe('SpacesView space page', () => {
     expect(first?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
     const policy = first?.getAttribute('content') ?? '';
     expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain('img-src data:;');
+    expect(policy).toContain('img-src data: https:;');
     expect(policy).toContain("form-action 'none'");
-    expect(policy).not.toMatch(/https?:|\*|'self'|blob:/);
+    expect(policy).not.toMatch(/\*|'self'|blob:/);
+    expect(policy).not.toMatch(/https?:\/\/|http:/);
   });
 
   it('gives the iframe no scrollbar of its own, so the outer page owns scrolling', async () => {
@@ -369,12 +449,13 @@ describe('SpacesView refresh on open', () => {
   });
 });
 
-describe('SpacesView list page html preview', () => {
-  it('strips tags from an html body for the one-line preview', async () => {
+describe('SpacesView list page html cards', () => {
+  it('shows an html space as a board, with its purpose and no markup from its body', async () => {
     render(<Harness store={mockStore([DESIGNED_TRACKER])} />);
 
     expect(await screen.findByText('Launch tracker')).toBeInTheDocument();
-    expect(screen.getByText(/Ready to ship\./)).toBeInTheDocument();
+    expect(screen.getByText('Board')).toBeInTheDocument();
+    expect(screen.getByText('Track the launch checklist.')).toBeInTheDocument();
     expect(screen.queryByText(/<h1>/)).not.toBeInTheDocument();
   });
 });
@@ -423,5 +504,37 @@ describe('SpacesView delete', () => {
 
     expect(store.delete).not.toHaveBeenCalled();
     expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument();
+  });
+});
+
+describe('formatRelativeUpdated', () => {
+  const now = Date.parse('2026-10-21T12:00:00.000Z');
+
+  it('says how long ago, in plain words', () => {
+    expect(formatRelativeUpdated('2026-10-21T11:55:00.000Z', now)).toBe('5 minutes ago');
+    expect(formatRelativeUpdated('2026-10-21T09:00:00.000Z', now)).toBe('3 hours ago');
+    expect(formatRelativeUpdated('2026-10-19T12:00:00.000Z', now)).toBe('2 days ago');
+  });
+
+  it('says just now under a minute', () => {
+    expect(formatRelativeUpdated('2026-10-21T11:59:30.000Z', now)).toBe('just now');
+  });
+
+  it('falls back to the raw value for a timestamp it cannot read', () => {
+    expect(formatRelativeUpdated('not a date', now)).toBe('not a date');
+  });
+});
+
+describe('spaceKind', () => {
+  it('calls an html page a board', () => {
+    expect(spaceKind({ format: 'html', body: '<table></table>' })).toBe('board');
+  });
+
+  it('calls a markdown body with a table a table', () => {
+    expect(spaceKind({ format: 'markdown', body: '| A | B |\n| --- | --- |\n| 1 | 2 |' })).toBe('table');
+  });
+
+  it('calls any other markdown body a list', () => {
+    expect(spaceKind({ format: 'markdown', body: '- milk\n- eggs' })).toBe('list');
   });
 });

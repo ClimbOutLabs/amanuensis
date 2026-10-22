@@ -55,7 +55,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "help_areas" : [ "focus" , "family" ] , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
         
         server
             .mockEndpoint()
@@ -74,6 +74,7 @@ describe("PersonalizationClient", () => {
         createdAt: new Date("2024-01-15T09:30:00.000Z"),
         createdBy: "created_by",
         digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        helpAreas: ["focus", "family"],
         learnedProfile: "learned_profile",
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
@@ -110,8 +111,8 @@ describe("PersonalizationClient", () => {
     test("create_or_update_profile (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "profile" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
-        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawRequestBody = { "profile" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "help_areas" : [ "focus" ] , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "help_areas" : [ "focus" , "family" ] , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
         
         server
             .mockEndpoint()
@@ -127,6 +128,7 @@ describe("PersonalizationClient", () => {
         addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
+        helpAreas: ["focus"],
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
         userName: "Sam Rivera",
@@ -142,6 +144,7 @@ describe("PersonalizationClient", () => {
         createdAt: new Date("2024-01-15T09:30:00.000Z"),
         createdBy: "created_by",
         digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        helpAreas: ["focus", "family"],
         learnedProfile: "learned_profile",
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
@@ -253,7 +256,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "offline_mode" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "sandbox_without_asking" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
         
         server
             .mockEndpoint()
@@ -266,7 +269,9 @@ describe("PersonalizationClient", () => {
                                 const response = await client.personalization.getSentinelSettings();
                                 expect(response).toEqual({
     data: {
+        mapsWithoutAsking: true,
         offlineMode: true,
+        sandboxWithoutAsking: true,
         searchWithoutAsking: true,
         tier2AutoAllow: ["file_write"]
     }
@@ -297,7 +302,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { };
-        const rawResponseBody = { "data" : { "offline_mode" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        const rawResponseBody = { "data" : { "maps_without_asking" : true , "offline_mode" : true , "sandbox_without_asking" : true , "search_without_asking" : true , "tier2_auto_allow" : [ "file_write" ] } };
         
         server
             .mockEndpoint()
@@ -311,7 +316,9 @@ describe("PersonalizationClient", () => {
                                 const response = await client.personalization.updateSentinelSettings();
                                 expect(response).toEqual({
     data: {
+        mapsWithoutAsking: true,
         offlineMode: true,
+        sandboxWithoutAsking: true,
         searchWithoutAsking: true,
         tier2AutoAllow: ["file_write"]
     }

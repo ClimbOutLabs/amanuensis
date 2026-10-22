@@ -1,9 +1,7 @@
-import type { PersistedTurnEvent, TurnRecord } from '@truefoundry/trueforge-core/agent-session';
+import type { PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
-import { PRIVATE_DATA_READ_STATE_KEY } from '@truefoundry/trueforge-core/core/capabilities/builtins/PrivateDataRead';
 import { Response as UndiciResponse } from 'undici';
 
-import type { TurnCustom } from '../../../../src/db/sessionCustom';
 import { ChatImageNotFoundError, createChatImageService } from '../../../../src/runtime/chatImages/chatImageService';
 import type { ReencodeOutcome } from '../../../../src/runtime/chatImages/reencodeInSandbox';
 import { EXAMPLE_COM_ADDRESS } from '../../../fixtures/exampleComAddress';
@@ -81,44 +79,9 @@ function toolResponse(input: { id: string; tool_call_id: string; result: unknown
 const EMAIL_HTML =
   '<p>Sale!</p><img src="https://example.com/pixel.gif"><img src="https://example.org/banner.png"><img src="cid:logo">';
 
-/** A stored turn whose main thread carries the flag the search classifier saves after a mail read. */
-function turnWithPrivateRead(): TurnRecord<TurnCustom> {
-  return {
-    turn_id: 't1',
-    session_id: 's1',
-    first_turn_id: 't0',
-    ancestor_ids: ['t0'],
-    previous_turn_id: 't0',
-    state: { status: 'running' },
-    input: [],
-    snapshot: {
-      threads: {
-        main: {
-          thread_id: 'main',
-          context: [],
-          current_context_usage: { prompt_tokens: 0, completion_tokens: 0 },
-          parent: null,
-          agent_info: null,
-          completion: null,
-          capability_state: { [PRIVATE_DATA_READ_STATE_KEY]: true },
-          tool_call_memo: undefined,
-          task_state: undefined,
-        },
-      },
-      mcp_servers: null,
-      sandbox_info: null,
-    },
-    created_at: new Date(CREATED),
-    updated_at: new Date(CREATED),
-    custom: null,
-  };
-}
-
 function setup(options: {
   events?: PersistedTurnEvent[];
-  storedTurn?: TurnRecord<TurnCustom>;
   offline?: boolean;
-  searchWithoutAsking?: boolean;
   reencode?: ReencodeOutcome;
   fetchStatus?: number;
 }) {
@@ -132,7 +95,6 @@ function setup(options: {
     store,
     sessionStore: {
       listTurnEvents: () => Promise.resolve({ data: events, pagination: { limit: 200 } }),
-      getTurn: () => Promise.resolve(options.storedTurn),
     },
     turnArtifactStore: artifacts,
     reencode: () => {
@@ -142,7 +104,6 @@ function setup(options: {
     sentinel: {
       audit: { record: input => Promise.resolve(void audits.push(input)) },
       isOffline: () => Promise.resolve(options.offline ?? false),
-      searchWithoutAsking: () => Promise.resolve(options.searchWithoutAsking ?? true),
       outboundSecrets: () => Promise.resolve([SERVER_HELD_VALUE]),
     },
     fetchDeps: {
@@ -215,6 +176,15 @@ describe('local images', () => {
       tenant_id: 'default',
       session_id: 's1',
       turn_id: 't1',
+      path: 'tool_images/call-1/image-1.png',
+      name: 'image-1.png',
+      data: PNG,
+      mime: 'application/octet-stream',
+    });
+    await env.artifacts.recordStoredArtifact({
+      tenant_id: 'default',
+      session_id: 's1',
+      turn_id: 't1',
       path: 'run_code/data.csv',
       name: 'data.csv',
       data: Buffer.from('a,b'),
@@ -222,6 +192,7 @@ describe('local images', () => {
     });
     await expect(env.service.listTurnImages(ref)).resolves.toEqual({
       artifacts: [{ path: 'run_code/chart.png', name: 'chart.png' }],
+      tool_images: [{ path: 'tool_images/call-1/image-1.png', name: 'image-1.png' }],
       emails: [{ tool_call_id: 'mail-1', count: 2 }],
     });
     await expect(
@@ -239,7 +210,7 @@ describe('email images', () => {
     toolResponse({ id: 'e2', tool_call_id: 'mail-1', result: { messageId: 'm1', bodyHtml: EMAIL_HTML } }),
   ];
 
-  it('always asks first, even when searches run without asking', async () => {
+  it('always asks first', async () => {
     const env = setup({ events });
     await expect(
       env.service.showTurnImages({
@@ -319,72 +290,52 @@ describe('reply images', () => {
     toolResponse({ id: 'e2', tool_call_id: 'search-1', result: { results: [{ url: returned }] } }),
     modelMessage({ id: 'e3', content: reply }),
   ];
+  const asking = (url: string) => ({ ...ref, request: { source: { kind: 'reply' as const, url }, approved: false } });
 
-  it('loads silently where a search would be silent, and records it', async () => {
+  it('never loads a web image a search returned until the person asks', async () => {
     const env = setup({ events: searchEvents(`Here: ![harbor](${returned})`) });
-    const result = await env.service.showTurnImages({
-      ...ref,
-      request: { source: { kind: 'reply', url: returned }, approved: false },
+    await expect(env.service.showTurnImages(asking(returned))).resolves.toEqual({
+      status: 'ask',
+      count: 1,
+      host: 'example.com',
     });
-    expect(result).toMatchObject({ status: 'done', images: [{ status: 'shown' }] });
+    expect(env.fetched).toEqual([]);
+    expect(env.audits).toEqual([]);
+    expect(env.store.images.size).toBe(0);
+  });
+
+  it('loads a web image once the person asks, and records it as approved', async () => {
+    const env = setup({ events: searchEvents(`Here: ![harbor](${returned})`) });
+    await expect(
+      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: true } }),
+    ).resolves.toMatchObject({ status: 'done', images: [{ status: 'shown' }] });
     expect(env.fetched).toEqual([returned]);
-    expect(env.audits).toMatchObject([{ outcome: 'ran', tier: 1 }]);
-    expect([...env.store.images.values()][0]?.origin).toBe('remote_silent');
+    expect(env.audits).toMatchObject([{ outcome: 'approved', tier: 3 }]);
+    expect([...env.store.images.values()][0]?.origin).toBe('remote_approved');
   });
 
-  it('asks once this turn read mail, as a search would', async () => {
-    const events = [
-      modelMessage({ id: 'e0', content: '', calls: [{ id: 'mail-0', name: 'read_email' }] }),
-      ...searchEvents(`![harbor](${returned})`),
-    ];
-    const env = setup({ events });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
+  it('asks for every image a reply links, however many it links', async () => {
+    const links = Array.from({ length: 30 }, (_, i) => `https://example.com/p/${String(i)}.png`);
+    const env = setup({
+      events: [
+        modelMessage({
+          id: 'e1',
+          content: '',
+          calls: [{ id: 'search-1', name: 'web_search', silent_search_query: 'p' }],
+        }),
+        toolResponse({ id: 'e2', tool_call_id: 'search-1', result: { results: links.map(url => ({ url })) } }),
+        modelMessage({ id: 'e3', content: links.map(url => `![p](${url})`).join('\n') }),
+      ],
+    });
+    const results = await Promise.all(links.map(url => env.service.showTurnImages(asking(url))));
+    expect(results.every(result => result.status === 'ask')).toBe(true);
     expect(env.fetched).toEqual([]);
   });
 
-  it('asks once this turn read the calendar, as a search would', async () => {
-    const events = [
-      modelMessage({ id: 'e0', content: '', calls: [{ id: 'calendar-0', name: 'list_events' }] }),
-      ...searchEvents(`![harbor](${returned})`),
-    ];
-    const env = setup({ events });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
-    expect(env.fetched).toEqual([]);
-  });
-
-  it('asks once an earlier turn of the chat read mail', async () => {
-    const env = setup({ events: searchEvents(`![harbor](${returned})`), storedTurn: turnWithPrivateRead() });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
-  });
-
-  it('asks for a link no search returned', async () => {
-    const other = 'https://example.org/elsewhere.png';
-    const env = setup({ events: searchEvents(`![x](${other})`) });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: other }, approved: false } }),
-    ).resolves.toEqual({ status: 'ask', count: 1, host: 'example.org' });
-    expect(env.fetched).toEqual([]);
-  });
-
-  it('asks when searches are set to ask', async () => {
-    const env = setup({ events: searchEvents(`![x](${returned})`), searchWithoutAsking: false });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
-  });
-
-  it('asks when the outbound guard trips, and blocks a server secret even after approval', async () => {
+  it('blocks a link that carries a server secret, even after approval', async () => {
     const leaky = `https://example.com/p.png?k=${SERVER_HELD_VALUE}`;
     const env = setup({ events: [modelMessage({ id: 'e1', content: `![x](${leaky})` })] });
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: leaky }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
+    await expect(env.service.showTurnImages(asking(leaky))).resolves.toMatchObject({ status: 'ask' });
     await expect(
       env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: leaky }, approved: true } }),
     ).resolves.toEqual({ status: 'done', images: [{ status: 'refused', reason: 'blocked' }] });
@@ -401,52 +352,6 @@ describe('reply images', () => {
       env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: tracked }, approved: true } }),
     ).resolves.toMatchObject({ status: 'done', images: [{ status: 'shown' }] });
     expect(env.audits).toMatchObject([{ outcome: 'approved', tier: 3 }]);
-  });
-
-  describe('silent allowance', () => {
-    const links = Array.from({ length: 30 }, (_, i) => `https://example.com/p/${String(i)}.png`);
-    const manyEvents = [
-      modelMessage({
-        id: 'e1',
-        content: '',
-        calls: [{ id: 'search-1', name: 'web_search', silent_search_query: 'p' }],
-      }),
-      toolResponse({ id: 'e2', tool_call_id: 'search-1', result: { results: links.map(url => ({ url })) } }),
-      modelMessage({ id: 'e3', content: links.map(url => `![p](${url})`).join('\n') }),
-    ];
-    const silently = (url: string) => ({
-      ...ref,
-      request: { source: { kind: 'reply' as const, url }, approved: false },
-    });
-
-    it('fetches at most 20 of 30 links requested in parallel and asks for the rest', async () => {
-      const env = setup({ events: manyEvents });
-      const results = await Promise.all(links.map(url => env.service.showTurnImages(silently(url))));
-      expect(env.fetched).toHaveLength(20);
-      expect(results.filter(result => result.status === 'ask')).toHaveLength(10);
-      expect(env.audits).toHaveLength(20);
-    });
-
-    it('counts failed fetches, and asks for every link after a reload', async () => {
-      const env = setup({ events: manyEvents, fetchStatus: 404 });
-      for (const url of links) {
-        await env.service.showTurnImages(silently(url));
-      }
-      expect(env.fetched).toHaveLength(20);
-      const reloaded = await Promise.all(links.map(url => env.service.showTurnImages(silently(url))));
-      expect(env.fetched).toHaveLength(20);
-      expect(reloaded.every(result => result.status === 'ask')).toBe(true);
-    });
-
-    it('serves a link already shown from the cache without taking another attempt', async () => {
-      const env = setup({ events: manyEvents });
-      const first = 'https://example.com/p/0.png';
-      for (let i = 0; i < 25; i += 1) {
-        await expect(env.service.showTurnImages(silently(first))).resolves.toMatchObject({ status: 'done' });
-      }
-      expect(env.fetched).toEqual([first]);
-      expect(await env.store.countSilentAttempts({ tenant_id: 'default', session_id: 's1', turn_id: 't1' })).toBe(1);
-    });
   });
 
   it('rejects a link the turn never showed as an image', async () => {

@@ -197,6 +197,8 @@ test_answering_yes_on_a_terminal() {
   dns_ready
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
 Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
@@ -215,6 +217,8 @@ test_declining_on_a_terminal() {
   dns_ready
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
 Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y

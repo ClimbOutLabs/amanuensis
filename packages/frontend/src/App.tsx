@@ -6,11 +6,13 @@ import {
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   getErrorMessage,
+  HelpProvider,
   ImplementationPlanGrantProvider,
   MemoryRecallProvider,
   ModelUsageProvider,
   PersonalizationProvider,
   PersonaProvider,
+  RepositoryWorkProvider,
   RunCodeStatusProvider,
   SentinelApiProvider,
   SentinelAuditFeed,
@@ -23,7 +25,6 @@ import {
   type AmanAvatarMotionSources,
   type CurrentUser,
   type FirstRunGuideState,
-  type MemoryBankStatus,
   type RoutesConfig,
   type SlotOverrides,
   type ThemeConfig,
@@ -32,7 +33,6 @@ import {
 import {
   createTrueForgeClient,
   getCapabilities,
-  getMemoryBankStatus,
   listModels,
   type BuildIdentity,
   type HarnessAgentSpec,
@@ -47,6 +47,7 @@ import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
+import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
 import { LogoutButton } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
@@ -54,6 +55,7 @@ import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
+import { createRepositoryWorkApi } from './repositoryWorkApi';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
@@ -99,15 +101,10 @@ const AMAN_THEME: ThemeConfig = {
   },
 };
 
-/** Host brand: primary CTA fill is a gradient (see `index.css`); keep solid token for accents. */
+/** Host look: the kit's warm paper and gold. No host colour overrides. */
 const appTheme: ThemeConfig = {
-  className: 'harness-primary-gradient',
   // The shell CSP keeps stylesheets and fonts on the app origin.
   webFonts: false,
-  tokens: {
-    primaryButtonBg: '#6366F1',
-    primaryButtonHover: '#3d2dd4',
-  },
 };
 
 function Loader() {
@@ -136,8 +133,6 @@ type BootState =
       openSettings: boolean;
       /** Undefined against a server that predates the build identity in its capabilities. */
       build: BuildIdentity | undefined;
-      /** Memory bank, null when off, undefined when the boot read failed. */
-      memoryBank: MemoryBankStatus | null | undefined;
       /** Whether a chat exists yet; undefined when the boot read failed. */
       hasChatted: boolean | undefined;
       /** Whether the owner has put the first-run checklist away; a failed read shows it. */
@@ -155,6 +150,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides,
   onAgentActivity,
   onActiveSessionChange,
+  onPendingApprovalsChange,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
@@ -162,6 +158,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
   onActiveSessionChange: (sessionId: string | undefined) => void;
+  onPendingApprovalsChange: (approvalIds: readonly string[]) => void;
 }) {
   const agentConfig = useMemo(
     (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
@@ -183,6 +180,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
+        onPendingApprovalsChange={onPendingApprovalsChange}
         overrides={overrides}
         className="app-assistant"
       />
@@ -201,7 +199,6 @@ function AmanShell({
   displayName,
   overrides,
   modelName,
-  memoryBank,
   version,
   buildRef,
 }: {
@@ -210,7 +207,6 @@ function AmanShell({
   displayName: string;
   overrides: SlotOverrides;
   modelName: string;
-  memoryBank: MemoryBankStatus | null | undefined;
   version: string | undefined;
   buildRef: string | undefined;
 }) {
@@ -221,6 +217,8 @@ function AmanShell({
   // Active session id, lifted out of the chat runtime so the right-rail permissions
   // feed can follow the session the user is looking at.
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
+  // Approvals waiting in the active chat, for the rail's Needs you ticket.
+  const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -230,17 +228,17 @@ function AmanShell({
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
         onActiveSessionChange={setActiveSessionId}
+        onPendingApprovalsChange={setPendingApprovalIds}
       />
       <AmanRuntimeRail
         modelName={modelName}
-        userName={displayName}
         avatarSrc={apiPath('/aman-avatar.png')}
         avatarMotion={AMAN_AVATAR_MOTION_SOURCES}
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
-        memoryBank={memoryBank}
         settingsHref="/settings"
+        pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
     </div>
@@ -296,11 +294,9 @@ export function App() {
     const state = { cancelled: false };
     void (async () => {
       try {
-        const [models, capabilities, memoryBank, hasChatted, firstRunGuideDismissed] = await Promise.all([
+        const [models, capabilities, hasChatted, firstRunGuideDismissed] = await Promise.all([
           listModels(bootClient),
           getCapabilities(bootClient),
-          // Informational only: a failed read leaves memory unknown rather than failing boot.
-          getMemoryBankStatus(bootClient).catch((): undefined => undefined),
           hasAnyChat().catch((): undefined => undefined),
           // A failed read shows the checklist: one extra look at it is the harmless side.
           firstRunGuideApi.getDismissed().catch((): boolean => false),
@@ -316,7 +312,6 @@ export function App() {
             status: 'ready',
             openSettings: true,
             build,
-            memoryBank,
             hasChatted,
             firstRunGuideDismissed,
             defaultAgentSpec: {
@@ -334,7 +329,6 @@ export function App() {
           status: 'ready',
           openSettings: false,
           build,
-          memoryBank,
           hasChatted,
           firstRunGuideDismissed,
           defaultAgentSpec: {
@@ -376,7 +370,6 @@ export function App() {
     (boot.status === 'ready'
       ? {
           modelName: boot.defaultAgentSpec.model.name || null,
-          memoryBank: boot.memoryBank,
           hasChatted: boot.hasChatted,
         }
       : null);
@@ -388,14 +381,12 @@ export function App() {
     // Before the first re-read lands, the boot snapshot is what the screen shows; merge over it.
     const bootSnapshot: SetupSnapshot = {
       modelName: boot.defaultAgentSpec.model.name || null,
-      memoryBank: boot.memoryBank,
       hasChatted: boot.hasChatted,
     };
     const state = { cancelled: false };
     const refresh = async () => {
-      const [models, memoryBank, hasChatted] = await Promise.all([
+      const [models, hasChatted] = await Promise.all([
         listModels(bootClient).catch((): undefined => undefined),
-        getMemoryBankStatus(bootClient).catch((): undefined => undefined),
         hasAnyChat().catch((): undefined => undefined),
       ]);
       if (state.cancelled) {
@@ -404,7 +395,6 @@ export function App() {
       setSetupRead(previous =>
         mergeSetupRead(previous ?? bootSnapshot, {
           modelName: models === undefined ? undefined : (models[0]?.name ?? null),
-          memoryBank,
           hasChatted,
         }),
       );
@@ -443,7 +433,12 @@ export function App() {
   );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
+  const helpApi = useMemo(
+    () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
+    [personaApi],
+  );
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
+  const repositoryWorkApi = useMemo(() => createRepositoryWorkApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
   const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
@@ -514,39 +509,44 @@ export function App() {
         <SentinelApiProvider api={sentinelApi}>
           <PersonalizationProvider api={personalizationApi}>
             <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-              <BugReportProvider api={bugReportApi}>
-                <VoiceInputProvider api={voiceInputApi}>
-                  <RunCodeStatusProvider api={runCodeStatusApi}>
-                    <MemoryRecallProvider api={memoryRecallApi}>
-                      <ModelUsageProvider api={modelUsageApi}>
-                        <PersonaProvider api={personaApi}>
-                          <AmanSetupProvider
-                            value={{
-                              modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                              hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                              firstRunGuide,
-                              settingsHref: '/settings',
-                            }}
-                          >
-                            <ComposerDraftScopeProvider scope={draftScope}>
-                              <AmanShell
-                                defaultAgentSpec={boot.defaultAgentSpec}
-                                openSettings={boot.openSettings}
-                                displayName={session.displayName}
-                                overrides={overrides}
-                                modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                                memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                                version={boot.build?.version}
-                                buildRef={boot.build?.ref}
-                              />
-                            </ComposerDraftScopeProvider>
-                          </AmanSetupProvider>
-                        </PersonaProvider>
-                      </ModelUsageProvider>
-                    </MemoryRecallProvider>
-                  </RunCodeStatusProvider>
-                </VoiceInputProvider>
-              </BugReportProvider>
+              <RepositoryWorkProvider api={repositoryWorkApi}>
+                <BugReportProvider api={bugReportApi}>
+                  <VoiceInputProvider api={voiceInputApi}>
+                    <RunCodeStatusProvider api={runCodeStatusApi}>
+                      <MemoryRecallProvider api={memoryRecallApi}>
+                        <ModelUsageProvider api={modelUsageApi}>
+                          <PersonaProvider api={personaApi}>
+                            <HelpProvider api={helpApi}>
+                              <AmanSetupProvider
+                                value={{
+                                  modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                  hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                  firstRunGuide,
+                                  settingsHref: '/settings',
+                                }}
+                              >
+                                <ComposerDraftScopeProvider scope={draftScope}>
+                                  <AmanShell
+                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                    openSettings={boot.openSettings}
+                                    displayName={session.displayName}
+                                    overrides={overrides}
+                                    modelName={
+                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                    }
+                                    version={boot.build?.version}
+                                    buildRef={boot.build?.ref}
+                                  />
+                                </ComposerDraftScopeProvider>
+                              </AmanSetupProvider>
+                            </HelpProvider>
+                          </PersonaProvider>
+                        </ModelUsageProvider>
+                      </MemoryRecallProvider>
+                    </RunCodeStatusProvider>
+                  </VoiceInputProvider>
+                </BugReportProvider>
+              </RepositoryWorkProvider>
             </ImplementationPlanGrantProvider>
           </PersonalizationProvider>
         </SentinelApiProvider>

@@ -1000,7 +1000,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.getAllByTestId('mock-map-card')).toHaveLength(1);
   });
 
-  it('keeps the full message of a failed pin call when no later map replaces it', () => {
+  it('shows a failed pin call as one quiet step with no map card, and its refusal behind Details', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -1024,7 +1024,14 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     ]);
 
     expect(screen.queryByTestId('map-card-replaced')).not.toBeInTheDocument();
-    expect(screen.getByTestId('mock-map-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Checked places for a map')).toBeInTheDocument();
+    expect(screen.queryByText(/The name is not on that page/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Checked places for a map'));
+    expect(screen.getByText('Left out')).toBeInTheDocument();
+    expect(screen.getByText(/The name is not on that page/)).toBeInTheDocument();
   });
 
   it('asks first for the pin call and shows no map until it is approved', () => {
@@ -1142,12 +1149,87 @@ describe('AssistantMessageContainer model and cost line', () => {
     return { ...result, listModelUsage };
   }
 
-  it('shows the model, provider, tokens and cost of the turn under the answer', async () => {
+  function openDetails(): void {
+    fireEvent.click(screen.getByTestId('assistant-message-agent-internals-toggle'));
+  }
+
+  it('keeps the usage hidden in the answer details until they are opened', async () => {
     await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }] });
 
-    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
-      'Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0008',
-    );
+    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
+    expect(toggle).toHaveTextContent('Details');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('model-usage-overview')).not.toBeVisible();
+
+    openDetails();
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(getAgentInternals()).getByTestId('model-usage-overview')).toBeVisible();
+    expect(screen.getByTestId('model-usage-model')).toHaveTextContent('Model: Nemotron 3 Super (Token Factory)');
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 2,140 (1,800 in, 340 out)');
+  });
+
+  it('shows the usage line with the steps when a turn with tools opens its details', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      threadMessages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-done',
+              toolName: 'lookup_notes',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            { type: 'text', text: 'here you go' },
+          ],
+          metadata: { custom: { turnId: 'trn_1' } },
+        },
+      ],
+    });
+
+    expect(screen.getAllByTestId('assistant-message-agent-internals')).toHaveLength(1);
+    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
+    expect(toggle).toHaveTextContent('1 step · 1 tool');
+    expect(screen.getByTestId('model-usage-overview')).not.toBeVisible();
+
+    openDetails();
+
+    expect(within(getAgentInternals()).getByTestId('model-usage-overview')).toBeVisible();
+  });
+
+  it('shows the usage line when agent details are on for the chat', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }], agentDetails: 'expanded' });
+
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('model-usage-overview')).toBeVisible();
+  });
+
+  it('starts every answer collapsed, whatever another answer was opened to', async () => {
+    await renderWithUsage({
+      usage: [
+        { turnId: 'trn_1', events: [SUPER_EVENT] },
+        { turnId: 'trn_2', events: [SUPER_EVENT] },
+      ],
+      threadMessages: [
+        { role: 'assistant', content: 'first answer', metadata: { custom: { turnId: 'trn_1' } } },
+        { role: 'user', content: 'and then?' },
+        { role: 'assistant', content: 'second answer', metadata: { custom: { turnId: 'trn_2' } } },
+      ],
+    });
+
+    const [first, second] = screen.getAllByTestId('assistant-message-agent-internals-toggle');
+    if (first === undefined || second === undefined) throw new Error('Expected a toggle on both answers');
+    fireEvent.click(first);
+
+    expect(first).toHaveAttribute('aria-expanded', 'true');
+    expect(second).toHaveAttribute('aria-expanded', 'false');
+    const [firstUsage, secondUsage] = screen.getAllByTestId('model-usage-overview');
+    expect(firstUsage).toBeVisible();
+    expect(secondUsage).not.toBeVisible();
   });
 
   it('folds helper calls into the total and names the model they ran on', async () => {
@@ -1155,8 +1237,8 @@ describe('AssistantMessageContainer model and cost line', () => {
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
     });
 
-    expect(screen.getByTestId('model-usage-line')).toHaveTextContent('6,990 tokens');
-    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 6,990 (6,300 in, 690 out)');
+    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('Helper calls: 2, on Nemotron 3 Nano');
   });
 
   it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
@@ -1166,7 +1248,7 @@ describe('AssistantMessageContainer model and cost line', () => {
     });
 
     const internals = getAgentInternals();
-    expect(within(internals).getByText(/2 helper calls/)).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('2 helper calls');
     const rows = within(internals).getAllByTestId('model-usage-row');
     expect(rows.map(row => row.textContent)).toEqual([
       expect.stringContaining('Answer·Nemotron 3 Super'),
@@ -1181,16 +1263,11 @@ describe('AssistantMessageContainer model and cost line', () => {
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
       agentDetails: 'collapsed',
     });
+    openDetails();
 
     expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
-    expect(screen.getByTestId('model-usage-helpers')).toBeInTheDocument();
-  });
-
-  it('adds no details row for a turn that had only its answer', async () => {
-    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }], agentDetails: 'expanded' });
-
-    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('Details');
+    expect(screen.getByTestId('model-usage-helpers')).toBeVisible();
   });
 
   it('says usage was not reported when the provider reported none', async () => {
@@ -1203,15 +1280,14 @@ describe('AssistantMessageContainer model and cost line', () => {
       ],
     });
 
-    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
-      'Nemotron 3 Super · Token Factory · usage not reported',
-    );
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: not reported');
   });
 
   it('shows nothing for a turn with no recorded usage', async () => {
     await renderWithUsage({ usage: [{ turnId: 'trn_other', events: [SUPER_EVENT] }] });
 
-    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
   it('hides the line and the helper rows when the display switch is off', async () => {
@@ -1221,8 +1297,9 @@ describe('AssistantMessageContainer model and cost line', () => {
       agentDetails: 'expanded',
     });
 
-    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
     expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
   it('does not draw the line while the turn is still running', async () => {
@@ -1239,7 +1316,7 @@ describe('AssistantMessageContainer model and cost line', () => {
       ],
     });
 
-    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
   });
 
   it('draws no line without a host usage provider', async () => {
@@ -1251,6 +1328,6 @@ describe('AssistantMessageContainer model and cost line', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
   });
 });

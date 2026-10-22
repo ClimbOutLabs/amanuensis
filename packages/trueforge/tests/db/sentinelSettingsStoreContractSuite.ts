@@ -12,6 +12,7 @@ const keepAll = {
   tier2_auto_allow: undefined,
   search_without_asking: undefined,
   maps_without_asking: undefined,
+  sandbox_without_asking: undefined,
 };
 
 export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelSettingsStore): void {
@@ -21,6 +22,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 
@@ -32,12 +34,14 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
     expect(saved).toEqual({
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
     expect(await store.get(alice)).toEqual(saved);
   });
@@ -50,6 +54,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
 
     expect(await store.patch({ ...alice, ...keepAll, tier2_auto_allow: [] })).toEqual({
@@ -57,6 +62,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: [],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
     await store.patch({ ...alice, ...keepAll, tier2_auto_allow: ['file_write'] });
     expect(await store.patch({ ...alice, ...keepAll, offline_mode: false })).toEqual({
@@ -64,18 +70,28 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, search_without_asking: true })).toEqual({
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, maps_without_asking: false })).toEqual({
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: false,
+    });
+    expect(await store.patch({ ...alice, ...keepAll, sandbox_without_asking: true })).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 
@@ -86,10 +102,17 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     expect(
       await store.patch({ tenant_id: 't1', created_by: 'carol', ...keepAll, search_without_asking: false }),
-    ).toEqual({ offline_mode: false, tier2_auto_allow: [], search_without_asking: false, maps_without_asking: false });
+    ).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: false,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
   });
 
   it('an empty set clears the relaxed kinds', async () => {
@@ -100,6 +123,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 
@@ -117,6 +141,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
 
     const untouched = {
@@ -124,6 +149,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     };
     expect(await store.get({ tenant_id: 't1', created_by: 'bob' })).toEqual(untouched);
     expect(await store.get({ tenant_id: 't2', created_by: 'alice' })).toEqual(untouched);

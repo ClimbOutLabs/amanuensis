@@ -16,6 +16,7 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
+import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
@@ -49,7 +50,7 @@ import {
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
-import { InstructionBuilder, ROOT_AGENT_IDENTITY } from '../InstructionBuilder';
+import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
   type CompletionUsage,
@@ -67,7 +68,6 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -115,6 +115,7 @@ import {
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit } from '../permissions/audit';
+import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -125,6 +126,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import { keepSubAgentAnswerText } from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -158,6 +160,7 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -190,6 +193,7 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
@@ -198,6 +202,7 @@ import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThread
 import {
   collectKnownEventIds,
   guardModelReply,
+  LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
@@ -625,6 +630,12 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
+}
+
+function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
+  const rest = { ...message };
+  delete rest.tool_calls;
+  return rest;
 }
 
 /**
@@ -1239,13 +1250,21 @@ export async function classifyUnstampedToolCall(input: {
   ) {
     return info;
   }
+  // A deferred call_tool call is judged on the tool it names, not the wrapper:
+  // when the tool set resolved the underlying tool, the arguments classified
+  // (and the approval token minted over) are the wrapper's inner input, the
+  // same value dispatch verifies against.
+  const effectiveParams =
+    info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(canonical_params) ?? canonical_params)
+      : canonical_params;
   const decision = await classifyHostToolCall({
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
     action: {
       tool_name: info.original_tool_name,
-      canonical_params,
+      canonical_params: effectiveParams,
       tool_type: info.type,
       ...(connector === undefined
         ? {}
@@ -1528,7 +1547,8 @@ export class AgentThread {
     this.currentContextUsage = input.currentContextUsage ?? getEmptyCurrentContextUsage();
     this.agentInfo = input.agentInfo;
     this.preComputedCompletion = input.preComputedCompletion;
-    this.sandbox = input.sandbox;
+    // A read-only definition gets no sandbox at all, so no sandbox tool, staged upload, or repository refresh can run.
+    this.sandbox = this.definition.readOnly ? undefined : input.sandbox;
     this.chatApprovalGrants = input.chatApprovalGrants ?? new Set<string>();
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
@@ -1560,7 +1580,8 @@ export class AgentThread {
       : new Map<string, number>();
 
     const capabilities = input.capabilities ?? [];
-    this.systemToolSets = capabilities.flatMap(c => c.systemToolSets ?? []);
+    // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
+    this.systemToolSets = this.definition.readOnly ? [] : capabilities.flatMap(c => c.systemToolSets ?? []);
     this.preLLMContextProcessors = capabilities.flatMap(c => c.preLLMProcessors ?? []);
     this.preEphemeralLLMContextProcessors = capabilities.flatMap(c => c.preLLMEphemeralProcessors ?? []);
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
@@ -1587,8 +1608,9 @@ export class AgentThread {
       }
     }
 
-    if (this.definition.toolSets?.length) {
-      this.deferredTool = new DeferredTool(this.definition.toolSets, {
+    const connectorToolSets = this.definition.readOnly ? [] : (this.definition.toolSets ?? []);
+    if (connectorToolSets.length) {
+      this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
         // Lets call_tool route a mis-addressed host (built-in) tool name to the real
@@ -1601,7 +1623,7 @@ export class AgentThread {
   }
 
   private buildInstruction(userInstruction?: string): string {
-    const identity = this.parent ? SUB_AGENT_IDENTITY : ROOT_AGENT_IDENTITY;
+    const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
     // Ambient, not a tool: a model that must remember to ask for the date will
     // instead assume one from training and reason years into the past, which a
@@ -1659,7 +1681,9 @@ export class AgentThread {
       createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
+    capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
+    capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
     if (this.sandbox) {
@@ -1756,6 +1780,8 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
+        // Mail to new addresses is checked before anything is recorded, like a held action below.
+        await this.prepareMailRecipientAdds({ approvals, pendingById, heldById });
         // Checked before anything is recorded, so a refused action leaves the chat untouched.
         const heldReplay = await this.prepareHeldReplay({
           approvals: approvals.filter(approval => heldById.has(approval.tool_call_id)),
@@ -1787,6 +1813,7 @@ export class AgentThread {
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
               tool_name: pending.tool_info.original_tool_name,
+              mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }
         }
@@ -1899,6 +1926,50 @@ export class AgentThread {
   }
 
   /**
+   * An approved mail send first makes the sidecar run the server's Email list. New addresses come only from the
+   * approved card, and the sidecar must load the list before the send, on the first try and on a retry. Any failure
+   * throws before the approval is recorded, so the draft stays pending.
+   */
+  private async prepareMailRecipientAdds(input: {
+    approvals: readonly UserToolApprovalMessage[];
+    pendingById: ReadonlyMap<string, InternalEnrichedToolCall>;
+    heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
+  }): Promise<void> {
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      return;
+    }
+    const ctx = { tenant_id: sentinel.tenant_id, created_by: sentinel.created_by };
+    for (const approval of input.approvals) {
+      if (approval.approval.status !== 'allow') {
+        continue;
+      }
+      const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
+      if (
+        call === undefined ||
+        !isMailSend({
+          mcp_server_name: call.tool_info.mcp_server_name,
+          tool_name: call.tool_info.original_tool_name,
+        })
+      ) {
+        continue;
+      }
+      const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (added.length > 0) {
+        const result = await sentinel.services.mail_add_recipients(ctx, added);
+        if (result === 'refused') {
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
+        }
+        if (result === 'not_loaded') {
+          throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+        }
+      } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+      }
+    }
+  }
+
+  /**
    * Turns the owner's answers on held actions into context. An allowed action becomes a fresh call
    * with the exact stored arguments, classified again and re-stamped with its hold-time token, so
    * it runs through the ordinary dispatch checks. A refusal throws and leaves the chat untouched.
@@ -1920,6 +1991,18 @@ export class AgentThread {
       if (denied !== undefined) {
         await this.auditHeld({ info: denied.tool_info, outcome: 'denied', note: 'Turned down by the owner' });
       }
+    }
+    const changeRequests = input.approvals.flatMap(approval =>
+      approval.approval.status === 'deny' &&
+      approval.approval.reason !== undefined &&
+      isChangeRequestReason(approval.approval.reason)
+        ? [approval.approval.reason]
+        : [],
+    );
+    if (allowedCalls.length === 0 && changeRequests.length > 0) {
+      // The model continues from the person's words, so it proposes a revised call instead of stopping here.
+      const request: LLMUserMessage = { role: 'user', content: changeRequests.join('\n') };
+      return { context: [request], events: [] };
     }
     if (allowedCalls.length === 0) {
       const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };
@@ -2587,7 +2670,7 @@ export class AgentThread {
     if (this.deferredTool) {
       tfyManagedServers.push(this.deferredTool);
     }
-    const userServers = [...(this.definition.toolSets ?? [])];
+    const userServers = this.definition.readOnly ? [] : [...(this.definition.toolSets ?? [])];
 
     const { convertedTools, initializationInfo, authRequirementInfo } = await convertMCPServersToTools({
       tfyManagedServers,
@@ -3143,13 +3226,6 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
-    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
-    if (result.value.tool_markup === 'broken') {
-      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
-      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-    }
-
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
     // per-reply call cap stops the turn before anything in it is classified or run. An
@@ -3247,6 +3323,11 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
+    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
+    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    if (finishReason === 'length') {
+      assistantMessage = withoutToolCalls(assistantMessage);
+    }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
     // model is still silent.
@@ -3359,6 +3440,9 @@ export class AgentThread {
         };
       } else if (!hasToolCalls(assistantMessage)) {
         const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
+        if (this.sentinel !== undefined) {
+          keepSubAgentAnswerText({ state: this.sentinel.web_search, text: content });
+        }
         completion = {
           type: 'done',
           output: agentAssistantMessage,
@@ -3379,7 +3463,7 @@ export class AgentThread {
     });
 
     if (finishReason === 'length') {
-      const errorContent = completion?.error_message ?? 'max_tokens breached';
+      const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -4345,6 +4429,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };
       yield event;

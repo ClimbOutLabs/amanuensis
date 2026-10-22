@@ -333,6 +333,7 @@ describe('Data export route', () => {
       address_as: null,
       user_profile: 'Alice likes concise answers.',
       pinned_preferences: ['concise'],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: false,
     });
@@ -431,6 +432,7 @@ describe('Data export route', () => {
       tier2_auto_allow: undefined,
       search_without_asking: undefined,
       maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
     });
 
     // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.

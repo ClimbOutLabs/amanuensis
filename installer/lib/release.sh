@@ -17,6 +17,8 @@ pins_validate() {
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
+  mail=$(json_get "$PINS_FILE" mail_email_image)
+  valid_digest_ref "$mail" || die "mail_email_image in $PINS_FILE must be pinned by sha256 digest"
   valid_digest_ref "$(json_get "$PINS_FILE" caddy_image)" || die "caddy_image in $PINS_FILE must be pinned by sha256 digest"
   node_pins_validate
 }
@@ -67,7 +69,9 @@ release_resolve() {
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
   REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
+  REL_CALENDAR_TAG=aman-calendar-caldav:$(source_id ops/calendar-sidecar)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
+  REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
 }
 
 # The resolved manifest recorded under release/; the previous one is kept for rollback.
@@ -81,7 +85,9 @@ release_write() {
     printf '  "source_ref": "%s",\n' "$REL_REF"
     printf '  "app_image": "%s",\n' "$REL_APP_TAG"
     printf '  "stt_image": "%s",\n' "$REL_STT_TAG"
-    printf '  "dex_image": "%s"\n' "$REL_DEX_IMAGE"
+    printf '  "calendar_image": "%s",\n' "$REL_CALENDAR_TAG"
+    printf '  "dex_image": "%s",\n' "$REL_DEX_IMAGE"
+    printf '  "mail_email_image": "%s"\n' "$REL_MAIL_EMAIL_IMAGE"
     printf '}\n'
   } >"$tmp"
   if [ -f "$file" ] && cmp -s "$tmp" "$file"; then
@@ -101,7 +107,9 @@ release_load() {
   [ -f "$file" ] || return 1
   CUR_APP_TAG=$(json_get "$file" app_image)
   CUR_STT_TAG=$(json_get "$file" stt_image)
+  CUR_CALENDAR_TAG=$(json_get "$file" calendar_image)
   CUR_DEX_IMAGE=$(json_get "$file" dex_image)
+  CUR_MAIL_EMAIL_IMAGE=$(json_get "$file" mail_email_image)
   [ -n "$CUR_APP_TAG" ] && [ -n "$CUR_STT_TAG" ] && [ -n "$CUR_DEX_IMAGE" ]
 }
 
@@ -118,6 +126,13 @@ build_app_image() {
     step_fail "Building the Aman app failed" "Fix what the log says, then run install.sh again. Anything already running was not touched."
   fi
   step_ok "Built the Aman app"
+}
+
+build_calendar_image() {
+  [ -f "$REPO_ROOT/ops/calendar-sidecar/Dockerfile" ] || die "The file ops/calendar-sidecar/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
+  step_begin build-calendar "Building the calendar connector"
+  D build -t "$REL_CALENDAR_TAG" "$REPO_ROOT/ops/calendar-sidecar" >"$STEP_LOG" 2>&1 || step_fail "Building the calendar connector failed" "Fix what the log says, then run install.sh again."
+  step_ok "Built the calendar connector"
 }
 
 build_stt_image() {
@@ -139,12 +154,24 @@ images_ensure() {
   else
     build_stt_image
   fi
+  if docker_image_exists "$REL_CALENDAR_TAG"; then
+    ui_skip "The calendar connector is already built"
+  else
+    build_calendar_image
+  fi
   if docker_image_exists "$REL_DEX_IMAGE"; then
     ui_skip "The sign-in service is already downloaded"
   else
     step_begin pull-login "Downloading the sign-in service"
     D pull "$REL_DEX_IMAGE" >"$STEP_LOG" 2>&1 || step_fail "The sign-in service could not be downloaded" "Check that this computer can reach ghcr.io, then run install.sh again."
     step_ok "Downloaded the sign-in service"
+  fi
+  if docker_image_exists "$REL_MAIL_EMAIL_IMAGE"; then
+    ui_skip "The email connector is already downloaded"
+  else
+    step_begin pull-mail "Downloading the email connector"
+    D pull "$REL_MAIL_EMAIL_IMAGE" >"$STEP_LOG" 2>&1 || step_fail "The email connector could not be downloaded" "Check that this computer can reach ghcr.io, then run install.sh again."
+    step_ok "Downloaded the email connector"
   fi
   sandbox_images_ensure
 }

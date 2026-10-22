@@ -1,4 +1,6 @@
-import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -9,15 +11,19 @@ import {
   type TierDecision,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import { caldavResultNote } from '../permissions/caldavTier';
+import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
+import { isMapsToolName } from '../permissions/mapsToolNames';
 import {
   countSilentFetches,
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
+  resultTexts,
+  isSilentSearchReason,
   runOneAtATime,
-  SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
 import {
@@ -33,6 +39,7 @@ import {
   toolResultResponse,
   type AgentToolSchema,
   type AuthRequiredResponse,
+  type CallToolResolvedResponse,
   type CallToolResponse,
   type IToolSet,
   type ListToolsResponse,
@@ -53,10 +60,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * The tool result a denied call produces. Shared with OpenToolCallCloser, which writes it
  * for a call that was denied and then never dispatched, so the model reads one wording
- * either way.
+ * either way. A "Change it" answer is not an error, so it reaches the model as the request itself.
  */
 export function deniedToolCallText(reason: string | undefined): string {
+  if (reason !== undefined && isChangeRequestReason(reason)) {
+    return reason;
+  }
   return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+}
+
+/**
+ * The response a denied call produces. A "Change it" answer is plain text, not an error payload,
+ * so the model reads the request exactly as written.
+ */
+export function deniedToolCallResponse(reason: string | undefined): CallToolResolvedResponse {
+  return toolResultResponse({ text: deniedToolCallText(reason), isError: !isChangeRequestReason(reason) });
 }
 
 /**
@@ -80,6 +98,9 @@ export function stampSentinelDecision(input: {
   | 'pre_dispatch_failure'
   | 'silent_search_query'
   | 'audit_description'
+  | 'effect'
+  | 'grant_host'
+  | 'secret_path_read'
 > {
   const decision = input.decision;
   return {
@@ -90,6 +111,10 @@ export function stampSentinelDecision(input: {
     approval_token_id: decision.approval_token_id,
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
+    // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
+    ...(decision.inspection ? { effect: 'inspect' as const } : {}),
+    ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -113,25 +138,6 @@ function searchNotRunText(input: { detail: string; unattended: boolean }): strin
   return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
 }
 
-/** Text a search result carries: its text blocks and its structured content. */
-function resultTexts(result: CallToolResult): string[] {
-  if (result.isError === true) {
-    return [];
-  }
-  const texts: string[] = [];
-  if (Array.isArray(result.content)) {
-    for (const block of result.content) {
-      if (block.type === 'text') {
-        texts.push(block.text);
-      }
-    }
-  }
-  if (result.structuredContent !== undefined) {
-    texts.push(JSON.stringify(result.structuredContent));
-  }
-  return texts;
-}
-
 function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
@@ -142,6 +148,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
+    case 'private_text_check':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something from your mail or calendar.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
@@ -306,10 +314,13 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    const response = normalizeGithubFileContentsResponse({
-      serverName: this.name,
+    const response = this.withCaldavResultNote({
       params,
-      response: await this.source.callTool(params, decision, context),
+      response: normalizeGithubFileContentsResponse({
+        serverName: this.name,
+        params,
+        response: await this.source.callTool(params, decision, context),
+      }),
     });
     if (
       this.pages !== undefined &&
@@ -396,19 +407,24 @@ export class ToolSet implements IToolSet {
     }
 
     if (decision?.status === 'deny') {
-      return toolResultResponse({
-        text: deniedToolCallText(decision.reason),
-        isError: true,
-      });
+      return deniedToolCallResponse(decision.reason);
     }
 
-    if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
+    if (this.sentinel !== undefined && (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))) {
+      // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
+      // against it. A silent map was recorded when it was classified, so only approved maps are added here.
+      const turn = this.sentinel.web_search;
+      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
+      if (sent !== undefined) {
+        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+      }
+    }
+    if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
-        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
         countSilentFetches({ values: sent.values, state: turn });
       }
     }
@@ -458,6 +474,55 @@ export class ToolSet implements IToolSet {
     }
   }
 
+  /**
+   * The event a CalDAV change names, read once before it is classified so the card can say what it
+   * changes. Null when that read fails, and the card then says the title could not be read.
+   */
+  private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
+    if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {
+      return undefined;
+    }
+    const args = isRecord(params.arguments) ? params.arguments : {};
+    const id = typeof args['id'] === 'string' ? args['id'] : undefined;
+    const needsReview =
+      params.name === 'update_event' ||
+      params.name === 'delete_event' ||
+      (params.name === 'respond_to_event' && typeof args['confirm_token'] === 'string');
+    if (id === undefined || !needsReview) {
+      return undefined;
+    }
+    try {
+      const response = await this.source.callTool({ name: 'get_event', arguments: { id } });
+      if (!isCallToolResponseResult(response) || response.result.isError === true) {
+        return null;
+      }
+      return caldavEventReviewFrom({ id, result: response.result.structuredContent });
+    } catch {
+      return null;
+    }
+  }
+
+  /** Adds the plain-words note the CalDAV reply result needs when the calendar sent no reply itself. */
+  private withCaldavResultNote({
+    params,
+    response,
+  }: {
+    params: CallToolRequest['params'];
+    response: CallToolResponse;
+  }): CallToolResponse {
+    if (!this.firstParty || this.name !== CALDAV_SERVER_NAME || !isCallToolResponseResult(response)) {
+      return response;
+    }
+    const note = caldavResultNote({ tool_name: params.name, structured: response.result.structuredContent });
+    if (note === undefined) {
+      return response;
+    }
+    return {
+      ...response,
+      result: { ...response.result, content: [...response.result.content, { type: 'text', text: note }] },
+    };
+  }
+
   private async buildToolCallInfo(
     params: CallToolRequest['params'],
     tool: AgentToolSchema | undefined,
@@ -486,6 +551,7 @@ export class ToolSet implements IToolSet {
       };
     }
     const info = { ...toolEffectHints(tool), ...sourceInfo };
+    const caldavEvent = await this.caldavEventFor(params);
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -501,6 +567,7 @@ export class ToolSet implements IToolSet {
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),
         mcp_search_plumbing_fields: this.searchPlumbingFields,
+        caldav_event: caldavEvent,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,
@@ -521,7 +588,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: decision.reason === SEARCH_SILENT_REASON,
+              waiveUnclassified: isSilentSearchReason(decision.reason),
             })),
       },
       classification: decision,

@@ -334,7 +334,7 @@ plan_build() {
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ]; then
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
       PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
@@ -346,7 +346,9 @@ plan_build() {
 
   plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
+  plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
+  plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
 
   plan_sandbox
@@ -403,6 +405,8 @@ plan_build() {
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."
   fi
+  calendar_plan_row
+  email_plan_row
   plan_backups
   plan_edge
 }
@@ -536,9 +540,10 @@ cmd_install() {
   else
     ui_phase "Your instance" 2 6
     ui_skip "Instance $(reg_names | tr '\n' ' ')is already set up; nothing to ask"
-    email_refuse_on_existing
     tf_rotation_collect
   fi
+  calendar_collect install
+  email_collect install
   backups_collect
   plan_build
   print_plan
@@ -631,6 +636,8 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"
@@ -657,7 +664,7 @@ check_result() {
   local name
   [ -x "$(doctor_shim)" ] || return 0
   # Includes the model and the public https checks, which wait on the network.
-  DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
+  AMAN_REPORT_COMMAND=install DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
   done

@@ -19,6 +19,8 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
+import { isChangeRequestReason } from '../core/permissions/changeRequest';
+import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
@@ -171,11 +173,33 @@ function threadsRecordFromMap(threads: Map<string, AgentThread>): Record<string,
 
 // Current-turn thread ids. Main (`MAIN_THREAD_ID`) is always present — first turn
 // synthesizes it; later turns always carry it in the previous snapshot.
-function threadIdsForCurrentTurn<T extends object>(previous: TurnRecord<T> | undefined): string[] {
+export function threadIdsForCurrentTurn(previous: ThreadSelectionTurn | undefined): string[] {
+  if (previous?.state.status === 'running') {
+    return Object.keys(previous.snapshot.threads);
+  }
+  if (previous?.state.status === 'done') {
+    // A turn paused for approval ends as `done` with its pending actions. A sub-agent
+    // that still owes one must be rebuilt, or its answer has no thread to reach. A child
+    // in a terminal snapshot without a pending action never resumes (see below).
+    const waiting = new Set(previous.state.required_actions.flatMap(action => action.thread_id ?? []));
+    return [
+      MAIN_THREAD_ID,
+      ...Object.keys(previous.snapshot.threads).filter(id => id !== MAIN_THREAD_ID && waiting.has(id)),
+    ];
+  }
   // A child that still appears in a terminal snapshot never received a durable
   // THREAD_DONE/removal (for example another replica fenced its cleanup). A
   // later process may retain its snapshot for history, but must not resume it.
-  return previous?.state.status === 'running' ? Object.keys(previous.snapshot.threads) : [MAIN_THREAD_ID];
+  return [MAIN_THREAD_ID];
+}
+
+/** The fields thread selection reads from a stored turn. */
+export interface ThreadSelectionTurn {
+  state:
+    | { status: 'running' }
+    | { status: 'done'; required_actions: readonly { thread_id: string | null }[] }
+    | { status: 'cancelled' | 'error' };
+  snapshot: { threads: Readonly<Record<string, unknown>> };
 }
 
 /**
@@ -239,13 +263,14 @@ export class SessionHandle<
    * come from the authoritative session record. Services are the session's
    * shared instance so grants and tokens are visible across threads.
    */
-  private createSentinelContext(services: SentinelServices): SentinelHostContext {
+  private createSentinelContext(services: SentinelServices, webSearch: WebSearchTurnState): SentinelHostContext {
     return createSentinelHostContext({
       services,
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
       workspace_cwd: this.session.workspace_cwd ?? null,
+      web_search: webSearch,
     });
   }
 
@@ -349,7 +374,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
-        sentinel: this.createSentinelContext(sentinelServices),
+        sentinel: this.createSentinelContext(sentinelServices, input.resolver.webSearchTurn),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -657,7 +682,8 @@ export class SessionHandle<
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
       return false;
     }
-    if (!items.every(item => item.approval.status === 'deny')) {
+    // A "Change it" denial hands the model the person's words, so the turn continues to a model call.
+    if (!items.every(item => item.approval.status === 'deny' && !isChangeRequestReason(item.approval.reason))) {
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
@@ -847,13 +873,14 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
+    const sandbox = definition.readOnly ? undefined : input.sandbox;
     const capabilities = threadCapabilities({
       spec: input.spec,
       definition,
       compactionModel,
       isChild,
-      sandbox: input.sandbox,
-      sandboxAvailable: Boolean(input.sandbox),
+      sandbox,
+      sandboxAvailable: Boolean(sandbox),
       tracing: input.tracing,
       logger: input.resolver.logger,
       compactionContext: input.resolver.compactionContext,
@@ -865,7 +892,7 @@ export class SessionHandle<
       definition,
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
-      sandbox: input.sandbox,
+      sandbox,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
@@ -889,7 +916,7 @@ export class SessionHandle<
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
-      sentinel: this.createSentinelContext(input.sentinelServices),
+      sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
 
@@ -907,7 +934,9 @@ export class SessionHandle<
       throwIfSignalAborted(params.signal);
       // The checkout may have changed since the parent thread was built. The
       // shared sandbox is already configured by createTurn at this point.
-      const refresh = input.sandbox?.refreshBoundRepositoryState({ signal: params.signal });
+      const refresh = params.parentDefinition.readOnly
+        ? undefined
+        : input.sandbox?.refreshBoundRepositoryState({ signal: params.signal });
       if (refresh !== undefined) {
         await awaitWithAbort({ operation: refresh, signal: params.signal });
       }
@@ -931,6 +960,8 @@ export class SessionHandle<
       const childDefinition: AgentDefinition = {
         ...definition,
         toolSets: params.parentDefinition.toolSets ?? definition.toolSets,
+        // A sub-agent of a read-only agent stays read-only, whatever definition it was resolved with.
+        readOnly: params.parentDefinition.readOnly === true || definition.readOnly === true,
         // The delegated task goes in as the initial user message; the sub-agent
         // system prompt is SUB_AGENT_IDENTITY (added by AgentThread.buildInstruction).
         instruction: undefined,
@@ -945,13 +976,14 @@ export class SessionHandle<
         // Sub-agents should return free-form summaries to the parent, not the user-facing structured response.
         responseFormat: undefined,
       };
+      const sandbox = childDefinition.readOnly ? undefined : input.sandbox;
       const capabilities = threadCapabilities({
         spec: input.spec,
         definition: childDefinition,
         compactionModel,
         isChild: true,
-        sandbox: input.sandbox,
-        sandboxAvailable: Boolean(input.sandbox),
+        sandbox,
+        sandboxAvailable: Boolean(sandbox),
         tracing: input.tracing,
         logger: input.resolver.logger,
         compactionContext: input.resolver.compactionContext,
@@ -964,7 +996,7 @@ export class SessionHandle<
         definition: childDefinition,
         threadId: params.threadId,
         title: params.request.name,
-        sandbox: input.sandbox,
+        sandbox,
         parent: params.parent,
         agentInfo: params.request,
         capabilities,
@@ -980,7 +1012,7 @@ export class SessionHandle<
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
-        sentinel: this.createSentinelContext(input.sentinelServices),
+        sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });
     };
   }

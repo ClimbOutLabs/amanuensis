@@ -1,5 +1,6 @@
 'use client';
 
+import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -408,6 +409,47 @@ function StatusPill({ tone, text }: { tone: 'on' | 'neutral'; text: string }) {
   );
 }
 
+/** The recall switch: off stops saved memories from shaping replies; the memories themselves stay. */
+function MemoryRecallToggle() {
+  const { agentSpec } = useTrueFoundryAgentSpec();
+  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+
+  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
+
+  const setRecallEnabled = (next: boolean) => {
+    if (!updateAgentSpec) return;
+    updateAgentSpec({
+      config: {
+        ...(agentSpec?.config ?? {}),
+        memory: {
+          ...(agentSpec?.config?.memory ?? {}),
+          recallEnabled: next,
+        },
+      },
+    });
+  };
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor="memory-recall-toggle" className="text-sm font-medium text-text-primary">
+          Use memories in replies
+        </label>
+        <p className="mt-0.5 text-xs text-text-secondary">
+          When this is off, Aman does not bring saved memories into its replies. Saved memories are kept.
+        </p>
+      </div>
+      <Switch
+        id="memory-recall-toggle"
+        checked={recallEnabled}
+        disabled={!updateAgentSpec}
+        onCheckedChange={setRecallEnabled}
+        aria-label="Use memories in replies"
+      />
+    </div>
+  );
+}
+
 /** Names the memory backend only after capabilities settle: checking while loading,
  * unavailable on a missing or malformed backend — never a guess. */
 function MemoryStatusCard() {
@@ -449,6 +491,12 @@ function MemoryStatusCard() {
       </div>
 
       {settled && backend === 'markdown' ? <MemoryStorageLine /> : null}
+
+      {settled && backend !== undefined ? (
+        <div className="mt-4 border-t border-border pt-4">
+          <MemoryRecallToggle />
+        </div>
+      ) : null}
     </section>
   );
 }

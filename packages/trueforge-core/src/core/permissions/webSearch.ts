@@ -1,3 +1,7 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
+import { isPrivateReadToolName } from './privateReadTools';
+
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
  * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
@@ -15,6 +19,14 @@ const MAX_RESULT_URLS = 500;
 
 /** Reason code for a search the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
+
+/** Reason code for a search that ran without asking after a private read, because its text was checked. */
+export const SEARCH_AFTER_READ_SILENT_REASON = 'mcp_search_after_read_checked';
+
+/** Whether a decision reason is a search that ran without asking, after a private read or not. */
+export function isSilentSearchReason(reason: string): boolean {
+  return reason === SEARCH_SILENT_REASON || reason === SEARCH_AFTER_READ_SILENT_REASON;
+}
 
 /** Reason codes for a designated-provider call that stops for approval, and why. */
 export const SEARCH_ASK_REASONS = [
@@ -48,8 +60,16 @@ export interface WebSearchTurnState {
   fetchesByHost: Map<string, number>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
-  /** True once the session read private data (mail), after which a search asks instead of running silently. */
+  /** True once the session read private data (mail, calendar or a secret), after which a search is checked or asks. */
   privateDataRead: boolean;
+  /** Text of the private reads' results this turn received, so a later search can be checked against it. */
+  privateTexts: string[];
+  /** Private reads this turn that reached the model, by any thread. Each must have its result kept as text. */
+  privateReadCalls: number;
+  /** Private read results kept as text this turn, by any thread. */
+  privateTextsKept: number;
+  /** True when the private mark came from saved state or old context, whose text this turn never saw. */
+  privateTextLost: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -61,6 +81,10 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     fetchesByHost: new Map(),
     sentText: '',
     privateDataRead: false,
+    privateTexts: [],
+    privateReadCalls: 0,
+    privateTextsKept: 0,
+    privateTextLost: false,
     admission: Promise.resolve(),
   };
 }
@@ -215,45 +239,129 @@ export function countSilentFetches(input: { values: readonly string[]; state: We
 }
 
 /**
- * The one place that records and answers "has this session read private data". A tool that returns the user's
- * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
+ * The one place that records and answers "has this session read private data". Called for each private read before
+ * its result reaches the model, so the search provider's classifier sees every read first.
  */
 export function markPrivateDataRead(state: WebSearchTurnState): void {
   state.privateDataRead = true;
+  state.privateReadCalls += 1;
+}
+
+/** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
+export function markPrivateDataReadFromHistory(state: WebSearchTurnState): void {
+  state.privateDataRead = true;
+  state.privateTextLost = true;
 }
 
 export function hasReadPrivateData(state: WebSearchTurnState): boolean {
   return state.privateDataRead;
 }
 
+/** Above this, the text is not kept whole, so a check could miss a copy; the turn then asks. */
+const MAX_PRIVATE_TEXT_CHARS = 2_000_000;
+
+/** Keeps the text a private read's result returned, for the checks on later searches and maps. */
+export function recordPrivateReadText(input: { state: WebSearchTurnState; text: string }): void {
+  input.state.privateTextsKept += 1;
+  keepText(input);
+}
+
 /**
- * Whether a remote image a reply links may load without asking, by the same rules as a silent fetch
- * through the designated search provider: searches run without asking, the outbound guard passes, the
- * chat has not read private data, the turn has not used its silent allowance, and the link is exactly
- * one this turn's searches returned. Returns the reason it asks, or null when it may load silently.
+ * Keeps a sub-agent's final answer for the checks. The answer reaches the parent's model and can carry what the
+ * sub-agent read from mail, so it is checked like a private read's text. It is not counted as a read, so it cannot
+ * stand in for one that failed.
  */
-export function remoteImageAskReason(input: {
-  url: string;
-  searchWithoutAsking: boolean;
-  guardPassed: boolean;
-  privateDataRead: boolean;
-  silentShown: number;
+export function keepSubAgentAnswerText(input: { state: WebSearchTurnState; text: string }): void {
+  keepText(input);
+}
+
+function keepText(input: { state: WebSearchTurnState; text: string }): void {
+  const { state, text } = input;
+  if (state.privateTextLost) {
+    return;
+  }
+  const kept = state.privateTexts.reduce((total, held) => total + held.length, 0);
+  if (kept + text.length > MAX_PRIVATE_TEXT_CHARS) {
+    state.privateTexts = [];
+    state.privateTextLost = true;
+    return;
+  }
+  state.privateTexts.push(text);
+}
+
+/** Text a result carries: its text blocks and its structured content. An error result carries none. */
+export function resultTexts(result: CallToolResult): string[] {
+  if (result.isError === true) {
+    return [];
+  }
+  const texts: string[] = [];
+  if (Array.isArray(result.content)) {
+    for (const block of result.content) {
+      if (block.type === 'text') {
+        texts.push(block.text);
+      }
+    }
+  }
+  if (result.structuredContent !== undefined) {
+    texts.push(JSON.stringify(result.structuredContent));
+  }
+  return texts;
+}
+
+/**
+ * The text of a private read's result, or undefined when it cannot be read whole: an error, or a block that is
+ * not text (an image or a file this check cannot scan).
+ */
+function scannableResultText(result: CallToolResult): string | undefined {
+  if (result.isError === true || !Array.isArray(result.content)) {
+    return undefined;
+  }
+  if (result.content.some(block => block.type !== 'text')) {
+    return undefined;
+  }
+  return resultTexts(result).join('\n');
+}
+
+/**
+ * Records one tool result that is about to reach the model. The dispatch loop calls this for every result, so no
+ * tool has to remember to. A private read is always marked, and its text is kept when it can be scanned; one that
+ * cannot be scanned keeps no text, so the turn's later searches and maps ask. Once the turn has read private data,
+ * any other result is kept too, since a command can print a file a mail read downloaded. An error from a tool that
+ * does not read private data carries no file text, so it is not kept.
+ */
+export function recordPrivateToolResult(input: {
   state: WebSearchTurnState;
-}): SearchAskReason | null {
-  if (!input.searchWithoutAsking) {
-    return 'mcp_search_setting_ask';
+  tool_name: string;
+  result: CallToolResult;
+}): void {
+  const { state, result } = input;
+  if (isPrivateReadToolName(input.tool_name)) {
+    markPrivateDataRead(state);
+    const text = scannableResultText(result);
+    if (text !== undefined && text !== '') {
+      recordPrivateReadText({ state, text });
+    }
+    return;
   }
-  if (!input.guardPassed) {
-    return 'mcp_search_guard';
+  if (!hasReadPrivateData(state) || result.isError === true) {
+    return;
   }
-  if (input.privateDataRead) {
-    return 'mcp_search_after_private_read';
+  const text = scannableResultText(result);
+  if (text === undefined) {
+    state.privateTexts = [];
+    state.privateTextLost = true;
+    return;
   }
-  if (input.silentShown >= SILENT_SEARCH_LIMIT) {
-    return 'mcp_search_limit';
+  keepText({ state, text });
+}
+
+/**
+ * The text a search or map is checked against, or undefined when it is not all there: the mark came
+ * from earlier history, or some private read has no result kept to compare with.
+ */
+export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
+  if (state.privateTextLost || state.privateTextsKept < state.privateReadCalls) {
+    return undefined;
   }
-  if (unreturnedUrls({ values: [input.url], state: input.state }).length > 0) {
-    return 'mcp_search_unreturned_url';
-  }
-  return null;
+  return state.privateTexts;
 }

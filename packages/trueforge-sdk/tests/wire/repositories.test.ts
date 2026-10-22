@@ -10,7 +10,7 @@ describe("RepositoriesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : [ { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } ] };
+        const rawResponseBody = { "data" : [ { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "package_downloads_allowed" : true , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } ] };
         
         server
             .mockEndpoint()
@@ -28,6 +28,7 @@ describe("RepositoriesClient", () => {
             defaultBranch: "default_branch",
             id: "id",
             name: "name",
+            packageDownloadsAllowed: true,
             revision: 1,
             updatedAt: new Date("2024-01-15T09:30:00.000Z")
         }]
@@ -58,7 +59,7 @@ describe("RepositoriesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { "repository" : { "clone_url" : "clone_url" , "name" : "name" } };
-        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
+        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "package_downloads_allowed" : true , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
         
         server
             .mockEndpoint()
@@ -82,6 +83,7 @@ describe("RepositoriesClient", () => {
         defaultBranch: "default_branch",
         id: "id",
         name: "name",
+        packageDownloadsAllowed: true,
         revision: 1,
         updatedAt: new Date("2024-01-15T09:30:00.000Z")
     }
@@ -162,11 +164,131 @@ describe("RepositoriesClient", () => {
             }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
           
+    test("get_github_metadata (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "branches" : [ "branches" ] , "clone_url" : "clone_url" , "default_branch" : "default_branch" , "full_name" : "full_name" , "name" : "name" , "private" : true , "size_kb" : 1 } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.repositories.getGithubMetadata();
+                                expect(response).toEqual({
+    data: {
+        branches: ["branches"],
+        cloneUrl: "clone_url",
+        defaultBranch: "default_branch",
+        fullName: "full_name",
+        name: "name",
+        "private": true,
+        sizeKb: 1
+    }
+});
+                              
+                    
+    });
+          
+    test("get_github_metadata (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.getGithubMetadata()
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+          
+    test("get_github_metadata (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.getGithubMetadata()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("get_github_metadata (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.getGithubMetadata()
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("get_github_metadata (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.getGithubMetadata()
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+          
+    test("get_github_metadata (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/repositories/github/metadata").respondWith()
+            .statusCode(502).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.getGithubMetadata()
+            }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+          
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
+        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "package_downloads_allowed" : true , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
         
         server
             .mockEndpoint()
@@ -184,6 +306,7 @@ describe("RepositoriesClient", () => {
         defaultBranch: "default_branch",
         id: "id",
         name: "name",
+        packageDownloadsAllowed: true,
         revision: 1,
         updatedAt: new Date("2024-01-15T09:30:00.000Z")
     }
@@ -226,6 +349,103 @@ describe("RepositoriesClient", () => {
             await expect(async () => {
                 return await client.repositories.get("repository_id")
             }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("set_package_downloads (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "allowed" : true };
+        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "package_downloads_allowed" : true , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/repositories/repository_id/package-downloads").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.repositories.setPackageDownloads("repository_id", {
+    allowed: true
+});
+                                expect(response).toEqual({
+    data: {
+        cloneUrl: "clone_url",
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        defaultBranch: "default_branch",
+        id: "id",
+        name: "name",
+        packageDownloadsAllowed: true,
+        revision: 1,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z")
+    }
+});
+                              
+                    
+    });
+          
+    test("set_package_downloads (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "allowed" : true };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/repositories/repository_id/package-downloads").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.setPackageDownloads("repository_id", {
+    allowed: true
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("set_package_downloads (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "allowed" : true };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/repositories/repository_id/package-downloads").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.setPackageDownloads("repository_id", {
+    allowed: true
+})
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("set_package_downloads (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "allowed" : true };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/repositories/repository_id/package-downloads").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.repositories.setPackageDownloads("repository_id", {
+    allowed: true
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
           
 });

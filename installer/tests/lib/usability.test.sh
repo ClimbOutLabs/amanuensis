@@ -93,7 +93,8 @@ test_password_stdin_is_read_before_any_prompt() {
   with_input "$SENTINEL_PASSWORD
 main
 owner@example.invalid
-
+n
+n
 
 y
 "
@@ -125,6 +126,8 @@ test_end_of_input_at_the_password_prompt_aborts() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
 Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
@@ -142,6 +145,8 @@ test_prompts_and_summary_use_plain_words() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
 Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y

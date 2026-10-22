@@ -141,6 +141,9 @@ export function makeTestResolver<TTurnCustom extends object = Record<string, nev
     get logger() {
       return base.logger;
     },
+    get webSearchTurn() {
+      return base.webSearchTurn;
+    },
     createTracing: () => base.createTracing(),
     resolveAgentSpec: input => base.resolveAgentSpec(input),
     resolveSandbox: input => base.resolveSandbox(input),
