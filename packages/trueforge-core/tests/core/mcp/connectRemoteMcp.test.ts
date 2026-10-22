@@ -192,9 +192,7 @@ describe('connectRemoteMcp transport selection', () => {
     const planted = 'plantedUpstreamToken0000';
     mockConnectImpl = type => {
       throw Object.assign(
-        new Error(
-          `Streamable HTTP error: Error POSTing to endpoint: {"detail":"rejected Authorization: Bearer ${planted}"}`,
-        ),
+        new Error(`Streamable HTTP error: Error POSTing to endpoint: {"detail":"rejected Authorization: Bearer ${planted}"}`),
         { code: 500, transport: type },
       );
     };

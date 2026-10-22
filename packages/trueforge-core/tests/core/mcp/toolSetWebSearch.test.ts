@@ -1,12 +1,12 @@
 import { tmpdir } from 'node:os';
 import { createLogger } from 'winston';
 import {
+  RemoteMCP,
+  ToolSet,
   classifyHostToolCall,
   createSentinelHostContext,
   createWebSearchTurnState,
   defaultSentinelServices,
-  RemoteMCP,
-  ToolSet,
   type SentinelHostContext,
 } from '../../../src/core';
 import {
@@ -254,7 +254,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
     const card = info.tier3_card;
     expect(card?.plain_what).toBe(
-      'Web search: debug sy••••••11 now. This search contains something that looks like a password or key.',
+      "Web search: debug sy••••••11 now. This search contains something that looks like a password or key.",
     );
     expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
     expect(card?.why_asked_again).toBeNull();
@@ -288,11 +288,7 @@ describe('the outbound guard on the designated provider', () => {
   });
 
   it.each([
-    [
-      'a signed token',
-      ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.'),
-      'password or key',
-    ],
+    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.'), 'password or key'],
     ['a card number', 'refund to 4111 1111 1111 1111', 'payment card number'],
     ['a password label', 'password: hunter2hunter2', 'password or key'],
   ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query, looksLike) => {
@@ -388,9 +384,7 @@ describe('provider plumbing fields on the designated provider', () => {
       model_name: 'invented-model-7',
     });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe(
-      `Web search: ${objective}. Searches are set to ask, so Aman is checking with you first.`,
-    );
+    expect(result.tier3_card?.plain_what).toBe(`Web search: ${objective}. Searches are set to ask, so Aman is checking with you first.`);
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -450,12 +444,12 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
     expect(result.tier3_card?.plain_what).toBe(
-      'Web search: loom. This search contains something that looks like a password or key.',
+      "Web search: loom. This search contains something that looks like a password or key.",
     );
     expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
     expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
-      'Search the web through the search provider. This search contains something that looks like a password or key.',
+      "Search the web through the search provider. This search contains something that looks like a password or key.",
     );
     expect(JSON.stringify(result)).not.toContain(key);
   });
@@ -491,7 +485,9 @@ describe('the loop breaker', () => {
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
     expect(next.tier).toBe(3);
     expect(next.is_approval_required).toBe(true);
-    expect(next.tier3_card?.plain_what).toContain('Aman has already searched a lot in this reply.');
+    expect(next.tier3_card?.plain_what).toContain(
+      'Aman has already searched a lot in this reply.',
+    );
     expect(next.tier3_card?.why_asked_again).toBeNull();
   });
 
@@ -533,9 +529,9 @@ describe('a map the user approved, and the text the next silent search is checke
     await h.toolSet.callTool({ name: 'render_map', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
     expect(h.dispatched.map(call => call.name)).toEqual(['render_map']);
-    expect(
-      isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true),
-    ).toBe(true);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
   });
 });
 
@@ -546,9 +542,9 @@ describe('a search the user approved, and the text the next silent search is che
     await h.toolSet.callTool({ name: 'lookup', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
     expect(h.dispatched.map(call => call.args)).toEqual([{ query: secret.slice(0, 16) }]);
-    expect(
-      isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true),
-    ).toBe(true);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
   });
 });
 
@@ -560,15 +556,12 @@ describe('a search the user approved, and a phrase copied from mail split across
     const h = harness({ searchProvider: true });
     markPrivateDataRead(h.host.web_search);
     recordPrivateReadText({ state: h.host.web_search, text: MAIL });
-    await h.toolSet.callTool(
-      { name: 'lookup', arguments: { query: 'please bring your booking' } },
-      { status: 'allow' },
-    );
+    await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'please bring your booking' } }, { status: 'allow' });
     const second = await runSearch(h, 'reference today');
     expect(h.dispatched.map(call => call.args)).toEqual([{ query: 'please bring your booking' }]);
-    expect(
-      isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true),
-    ).toBe(true);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
   });
 });
 
@@ -710,9 +703,7 @@ describe('links', () => {
     }
     const third = await fetchTier(h, pages[2] ?? '');
     expect(third.tier).toBe(3);
-    expect(third.tier3_card?.plain_what).toContain(
-      'Aman has already opened a lot of pages on this site in this reply.',
-    );
+    expect(third.tier3_card?.plain_what).toContain('Aman has already opened a lot of pages on this site in this reply.');
     expect(third.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'read_page', arguments: { url: pages[2] } });
     expect(JSON.stringify(refused)).toContain('Aman has already opened a lot of pages on this site in this reply.');
@@ -1025,13 +1016,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
-    expect(after.tier3_card?.plain_what).toContain(
-      'This chat opened a file with passwords or keys, so Aman asks before every search.',
-    );
+    expect(after.tier3_card?.plain_what).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
     expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain(
-      'This chat opened a file with passwords or keys, so Aman asks before every search.',
-    );
+    expect(JSON.stringify(refused)).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
   });
 });

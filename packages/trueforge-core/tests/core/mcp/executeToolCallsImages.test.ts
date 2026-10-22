@@ -45,9 +45,7 @@ function returning(content: ResultContent): IToolSet {
 async function run(content: ResultContent) {
   const result = await executeToolCalls({
     assistantMessage: call('download_attachment'),
-    toolMapping: new Map([
-      ['download_attachment', { toolSet: returning(content), originalToolName: 'download_attachment' }],
-    ]),
+    toolMapping: new Map([['download_attachment', { toolSet: returning(content), originalToolName: 'download_attachment' }]]),
     threadId: 'main',
     approvalDecisions: new Map(),
     memoState: createToolCallMemoState(),

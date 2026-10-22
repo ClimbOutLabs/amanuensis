@@ -14,9 +14,9 @@ import {
   defaultSentinelServices,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const handler = jest.fn(() => Promise.resolve(toolResultResponse({ text: '{"ok":true}' })));
 

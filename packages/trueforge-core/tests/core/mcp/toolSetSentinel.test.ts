@@ -7,8 +7,8 @@ import {
   type ToolSource,
 } from '../../../src/core';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
-import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
@@ -161,12 +161,7 @@ describe('ToolSet Sentinel classification of connector tools', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          {
-            id: 'c1',
-            type: 'function',
-            function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' },
-            tool_info: info,
-          },
+          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' }, tool_info: info },
         ],
       },
       toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),

@@ -7,9 +7,9 @@ import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolic
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { SentinelServices } from '../../../src/core/permissions/context';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
@@ -156,9 +156,7 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe(
-        'This is a new tool from misc. Check what it will do before you allow it.',
-      );
+      expect(info.tier3_card?.plain_what).toBe("This is a new tool from misc. Check what it will do before you allow it.");
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }

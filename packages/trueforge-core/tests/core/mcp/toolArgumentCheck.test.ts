@@ -103,9 +103,14 @@ describe('checkToolArguments', () => {
       },
     });
     // zone_typo dropped, optional coerced; the second attendee has no email: one problem.
-    expect(outcome.problems).toEqual([{ path: 'attendees[1].email', expected: 'text (this one is required)' }]);
+    expect(outcome.problems).toEqual([
+      { path: 'attendees[1].email', expected: 'text (this one is required)' },
+    ]);
     expect(outcome.args['start']).toEqual({ date_time: '2026-10-27T14:30:00' });
-    expect(outcome.args['attendees']).toEqual([{ email: 'sam@example.com', optional: false }, { optional: true }]);
+    expect(outcome.args['attendees']).toEqual([
+      { email: 'sam@example.com', optional: false },
+      { optional: true },
+    ]);
   });
 
   it('leaves a free-form object schema untouched', () => {
