@@ -1008,7 +1008,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..d1ea3a07e542ce7c1f8f6936981584d8
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb52c311d6 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..f8d5a0c7c41d4df5feab463e1867b0baf4422db1 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1077,7 +1077,15 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  /** Full streaming event union (includes deltas + turn lifecycle). */
  type TurnStreamingEvent = TurnEvent | ModelMessageDeltaEvent | TurnCreatedEvent | TurnDoneEvent;
  type ActionRequiredEvent = ToolApprovalRequiredEvent | ToolResponseRequiredEvent | McpAuthRequiredEvent;
-@@ -327,6 +352,9 @@ interface AgentContextManagementConfig {
+@@ -301,6 +326,7 @@ type McpServerMount = object;
+ interface ModelParams {
+     maxTokens?: number;
+     reasoningEffort?: string;
++    reasoningEffortMode?: 'automatic' | 'fixed';
+     temperature?: number;
+     topP?: number;
+     topK?: number;
+@@ -327,6 +353,9 @@ interface AgentContextManagementConfig {
      compaction?: AgentCompactionConfig;
      largeToolResponse?: AgentCapabilityConfig;
  }
@@ -1087,7 +1095,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  interface AgentRuntimeConfig {
      iterationLimit?: number;
      sandbox?: AgentSandboxConfig;
-@@ -334,6 +362,7 @@ interface AgentRuntimeConfig {
+@@ -334,6 +363,7 @@ interface AgentRuntimeConfig {
      generativeUi?: AgentCapabilityConfig;
      dynamicSubAgents?: AgentCapabilityConfig;
      askUserQuestions?: AgentCapabilityConfig;
@@ -1095,7 +1103,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  }
  /**
   * SDK-owned agent definition — fields the FE reads/writes.
-@@ -345,6 +374,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
+@@ -345,6 +375,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
      skills?: TSkill[];
      mcpServers?: TMcp[];
      config?: TConfig;
@@ -1107,7 +1115,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
      instructions?: string;
      variables?: Record<string, string>;
  }
-@@ -406,6 +440,7 @@ interface UserMessage {
+@@ -406,6 +441,7 @@ interface UserMessage {
  }
  type ApprovalDecision = {
      status: "allow";
@@ -1115,7 +1123,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  } | {
      status: "deny";
      reason?: string;
-@@ -525,12 +560,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
+@@ -525,12 +561,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
      /**
       * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
       * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
@@ -1131,7 +1139,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
          path: string;
      }): Promise<Blob>;
  }
-@@ -671,7 +707,7 @@ interface ToolBase {
+@@ -671,7 +708,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1140,7 +1148,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +720,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +721,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1155,7 +1163,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +738,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +739,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -1169,7 +1177,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
-@@ -994,6 +1041,8 @@ interface Schedule {
+@@ -994,6 +1042,8 @@ interface Schedule {
      agentId: string;
      /** Display name; omit when the host only has `agentId`. */
      agentName?: string;
