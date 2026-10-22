@@ -56,7 +56,7 @@ createRoot(rootElement).render(
     <TrueForgeUI
       layout="dock"
       server={{ type: 'trueforge', baseUrl: 'http://127.0.0.1/', fetch: fakeFetch }}
-      theme={{ mode, preset: 'trueforge' }}
+      theme={{ mode, preset: 'paper' }}
     />
   </PersonaProvider>,
 );
