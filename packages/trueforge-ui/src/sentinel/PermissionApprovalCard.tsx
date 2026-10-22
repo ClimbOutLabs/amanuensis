@@ -18,6 +18,7 @@ import {
   approvalTime,
   approveVerb,
   declineVerb,
+  SENT_CONTENT_LABELS,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -118,7 +119,9 @@ function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail
 function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        {SENT_CONTENT_LABELS.whatWillBeSent}
+      </p>
       {email.reply_in_thread !== null && (
         <dl className="mb-1">
           <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
@@ -137,11 +140,11 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
-        Message, exactly as sent
+        {SENT_CONTENT_LABELS.messageBody}
       </p>
       <div
         role="region"
-        aria-label="Message, exactly as sent"
+        aria-label={SENT_CONTENT_LABELS.messageBody}
         tabIndex={0}
         className="max-h-80 overflow-auto border-l-2 border-gold-ink bg-card-bg px-3 py-2"
       >
@@ -171,7 +174,7 @@ function PlumbingDetails({ text }: { text: string }) {
 }
 
 /**
- * The main block of "Exactly what will be sent": every line except the search service's own, which the
+ * The main block of "What will be sent": every line except the search service's own, which the
  * Details disclosure lists. Lines are matched exactly, so nothing is dropped from the full list.
  */
 function visibleOutboundText(text: string, plumbing: string | null): string {
@@ -186,7 +189,9 @@ function visibleOutboundText(text: string, plumbing: string | null): string {
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        {SENT_CONTENT_LABELS.whatWillBeSent}
+      </p>
       {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
       <FoldedText
         text={text}
@@ -261,151 +266,157 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     </>
   );
 
+  // The frame is the container the stub's stacking query measures, so the ticket's own width decides.
   return (
-    <article
-      data-role="approval-ticket"
-      className={cn('aui-ticket aui-ticket--stub aui-ticket--punch aui-settle', highlighted && 'aui-ticket--selected')}
-    >
-      <div className="min-w-0 space-y-3 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
-          {sentAt === null ? (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              {WAITING_FOR_YOU_LABEL}
-            </span>
-          ) : (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              {approvalSentLine(card, sentAt)}
-            </span>
+    <div className="aui-ticket-frame">
+      <article
+        data-role="approval-ticket"
+        className={cn(
+          'aui-ticket aui-ticket--stub aui-ticket--punch aui-settle',
+          highlighted && 'aui-ticket--selected',
+        )}
+      >
+        <div className="min-w-0 space-y-3 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
+            {sentAt === null ? (
+              <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+                {WAITING_FOR_YOU_LABEL}
+              </span>
+            ) : (
+              <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+                {approvalSentLine(card, sentAt)}
+              </span>
+            )}
+          </div>
+          {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
+
+          {card.cannot_be_undone !== null && (
+            <p className="flex items-start gap-2 text-sm text-text-secondary">
+              <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span>{card.cannot_be_undone}</span>
+            </p>
           )}
-        </div>
-        {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
 
-        {card.cannot_be_undone !== null && (
-          <p className="flex items-start gap-2 text-sm text-text-secondary">
-            <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{card.cannot_be_undone}</span>
-          </p>
-        )}
-
-        {card.why_asked_again !== null && (
-          <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
-        )}
-
-        {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
-
-        {hasDetails && (
-          <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
-            {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
-            {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
-            {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
-            {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
-            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
-          </dl>
-        )}
-
-        {email !== null && <EmailMessage email={email} />}
-
-        {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
-
-        {schedule !== null && <ScheduleDetails schedule={schedule} />}
-
-        {persona !== null && <PersonaDetails persona={persona} />}
-
-        <div
-          className={cn(
-            'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
-            sentAt !== null && 'pointer-events-none opacity-0',
+          {card.why_asked_again !== null && (
+            <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
           )}
-          aria-hidden={sentAt !== null}
-        >
-          <Button
-            variant="primary"
-            size="small"
-            title={APPROVAL_CHOICES.approve.hint}
-            onClick={markSent(onApprove)}
-            disabled={disabled || sentAt !== null}
-            className="flex-1"
+
+          {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
+
+          {hasDetails && (
+            <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
+              {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
+              {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
+              {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
+              {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
+              {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
+            </dl>
+          )}
+
+          {email !== null && <EmailMessage email={email} />}
+
+          {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
+
+          {schedule !== null && <ScheduleDetails schedule={schedule} />}
+
+          {persona !== null && <PersonaDetails persona={persona} />}
+
+          <div
+            className={cn(
+              'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
+              sentAt !== null && 'pointer-events-none opacity-0',
+            )}
+            aria-hidden={sentAt !== null}
           >
-            {approveVerb(card)}
-          </Button>
-          {onChangeRequest !== undefined && (
             <Button
-              ref={changeButtonRef}
-              variant="secondary"
+              variant="primary"
               size="small"
-              title={APPROVAL_CHOICES.changeIt.hint}
-              aria-expanded={changing}
-              onClick={() => {
-                setChanging(true);
-              }}
+              title={APPROVAL_CHOICES.approve.hint}
+              onClick={markSent(onApprove)}
               disabled={disabled || sentAt !== null}
               className="flex-1"
             >
-              {APPROVAL_CHOICES.changeIt.label}
+              {approveVerb(card)}
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="small"
-            title={APPROVAL_CHOICES.deny.hint}
-            onClick={onDeny}
-            disabled={disabled || sentAt !== null}
-            className="flex-1 text-gold-ink"
-          >
-            {declineVerb(card)}
-          </Button>
-        </div>
-        {changing && onChangeRequest !== undefined && (
-          <ChangeRequestBox
-            disabled={disabled}
-            onSend={text => {
-              setChanging(false);
-              onChangeRequest(text);
-            }}
-            onCancel={() => {
-              setChanging(false);
-              changeButtonRef.current?.focus();
-            }}
-          />
-        )}
-        {onApproveAll !== undefined && (
-          <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
-            {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
-          </Button>
-        )}
-
-        <details className="text-sm">
-          <summary className="cursor-pointer text-text-secondary underline">Details</summary>
-          <div className="mt-2 space-y-3">
-            {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
-            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
-            {onApproveForChat !== undefined && !newRecipients && (
+            {onChangeRequest !== undefined && (
               <Button
+                ref={changeButtonRef}
                 variant="secondary"
                 size="small"
-                title={chatChoice.hint}
-                onClick={markSent(onApproveForChat)}
+                title={APPROVAL_CHOICES.changeIt.hint}
+                aria-expanded={changing}
+                onClick={() => {
+                  setChanging(true);
+                }}
                 disabled={disabled || sentAt !== null}
+                className="flex-1"
               >
-                {chatChoice.label}
+                {APPROVAL_CHOICES.changeIt.label}
               </Button>
             )}
-            {onApproveAlways !== undefined && !newRecipients && (
-              <AlwaysAllowToolControl
-                size="small"
-                disabled={disabled || sentAt !== null}
-                description="The agent will run this kind of action on this connector without asking, in every chat."
-                onConfirm={markSent(onApproveAlways)}
-              />
-            )}
+            <Button
+              variant="ghost"
+              size="small"
+              title={APPROVAL_CHOICES.deny.hint}
+              onClick={onDeny}
+              disabled={disabled || sentAt !== null}
+              className="flex-1 text-gold-ink"
+            >
+              {declineVerb(card)}
+            </Button>
           </div>
-        </details>
-      </div>
-      {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
-      <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">
-        {stubContent}
-      </StubTear>
-    </article>
+          {changing && onChangeRequest !== undefined && (
+            <ChangeRequestBox
+              disabled={disabled}
+              onSend={text => {
+                setChanging(false);
+                onChangeRequest(text);
+              }}
+              onCancel={() => {
+                setChanging(false);
+                changeButtonRef.current?.focus();
+              }}
+            />
+          )}
+          {onApproveAll !== undefined && (
+            <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
+              {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
+            </Button>
+          )}
+
+          <details className="text-sm">
+            <summary className="cursor-pointer text-text-secondary underline">Details</summary>
+            <div className="mt-2 space-y-3">
+              {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
+              {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
+              {onApproveForChat !== undefined && !newRecipients && (
+                <Button
+                  variant="secondary"
+                  size="small"
+                  title={chatChoice.hint}
+                  onClick={markSent(onApproveForChat)}
+                  disabled={disabled || sentAt !== null}
+                >
+                  {chatChoice.label}
+                </Button>
+              )}
+              {onApproveAlways !== undefined && !newRecipients && (
+                <AlwaysAllowToolControl
+                  size="small"
+                  disabled={disabled || sentAt !== null}
+                  description="The agent will run this kind of action on this connector without asking, in every chat."
+                  onConfirm={markSent(onApproveAlways)}
+                />
+              )}
+            </div>
+          </details>
+        </div>
+        {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
+        <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">
+          {stubContent}
+        </StubTear>
+      </article>
+    </div>
   );
 };

@@ -22,7 +22,7 @@ export function UserMessageBubble({ text, attachments, editAction, className }: 
         <div
           data-slot="aui_user-message-content"
           style={{ borderRadius: 'var(--composer-radius, 1.5rem)' }}
-          className="aman-chat-text max-w-[min(80%,100%)] min-w-0 bg-user-message-bg px-3 py-2 text-user-message-text whitespace-pre-wrap break-words sm:px-4 sm:py-2.5"
+          className="aman-chat-text max-w-[min(80%,var(--prose-max-width))] min-w-0 bg-user-message-bg px-3 py-2 text-user-message-text whitespace-pre-wrap break-words sm:px-4 sm:py-2.5"
         >
           {text}
         </div>

@@ -270,6 +270,8 @@
  * ──────────────────────────────────────────────────────────────────── */
 .aui-root {
   color: var(--text-primary);
+  /* Plain chat text stops at ~48rem, the line length that stays comfortable to read. Cards and tables use the whole column. */
+  --prose-max-width: 48rem;
 }
 
 /* Keep the send action in the narrow composer footer instead of allowing the
@@ -608,6 +610,11 @@
 .aman-chat-text {
   font-size: var(--text-base);
   line-height: 1.65;
+}
+
+/* Prose stops at the reading measure; tables and code keep the full column that cards use. */
+.aui-thread-root .aui-markdown > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
+  max-width: var(--prose-max-width);
 }
 
 .aui-theme-root,
@@ -1549,7 +1556,12 @@
   box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
 }
 
-/* The right-hand stub, split from the body by a dashed line. Stacks under the face on a phone. */
+/* The right-hand stub, split from the body by a dashed line. Stacks under the face when the ticket
+   is narrow, so a long message never gets squeezed beside it. */
+.aui-ticket-frame {
+  container-type: inline-size;
+}
+
 .aui-ticket--stub {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 9rem;
@@ -1561,6 +1573,17 @@
   gap: 0.25rem;
   padding: 0.75rem;
   border-left: 0.125rem dashed var(--border);
+}
+
+@container (max-width: 40rem) {
+  .aui-ticket--stub {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aui-ticket__stub {
+    border-left: 0;
+    border-top: 0.125rem dashed var(--border);
+  }
 }
 
 .aui-ticket--punch::before {
@@ -1823,15 +1846,6 @@
   .aui-row--2.aui-row--stack {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 0.4rem;
-  }
-
-  .aui-ticket--stub {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .aui-ticket__stub {
-    border-left: 0;
-    border-top: 0.125rem dashed var(--border);
   }
 }
 

@@ -6,6 +6,7 @@ import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
+import { SENT_CONTENT_LABELS } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -145,7 +146,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         {card.outbound_text !== null && (
           <div className="rounded border border-border bg-secondary-bg px-3 py-2">
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
-              Exactly what will be sent
+              {SENT_CONTENT_LABELS.whatWillBeSent}
             </p>
             {card.outbound_truncated && (
               <p className="mb-1 text-sm font-medium text-text-primary" data-role="held-action-truncated">

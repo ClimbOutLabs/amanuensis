@@ -2,12 +2,7 @@ import { forwardRef, type ComponentPropsWithRef, type CSSProperties } from 'reac
 
 import { cn } from './lib/cn.js';
 
-const THREAD_CSS_VARS: CSSProperties & { '--thread-max-width': string; '--composer-padding': string } = {
-  // Readable column width for both the message list and the composer (both consume this
-  // same variable in ThreadViewportShell and ThreadComposerAreaShell below, so they can
-  // never drift apart). Capped at ~48rem with 1rem side margins: chat-prose rhythm,
-  // not a full-viewport spread.
-  '--thread-max-width': 'min(48rem, 100% - 2rem)',
+const THREAD_CSS_VARS: CSSProperties & { '--composer-padding': string } = {
   '--composer-padding': '0.75rem',
 };
 
@@ -45,7 +40,7 @@ export const ThreadViewportShell = forwardRef<HTMLDivElement, ThreadViewportShel
     >
       <div
         className={cn(
-          'mx-auto flex w-full min-w-0 max-w-(--thread-max-width) flex-col px-3 pt-3',
+          'mx-auto flex w-full min-w-0 flex-col px-3 pt-3',
           isEmpty ? 'min-h-full justify-center pb-4' : 'pb-24',
         )}
       >
@@ -69,7 +64,7 @@ export const ThreadComposerAreaShell = forwardRef<HTMLDivElement, ThreadComposer
         // Desktop: square top edge and a short fade above the composer, so messages scroll
         // into the fade instead of ending at a hard edge. The fade sits in the viewport's
         // pb-24 gap, so the last message stays clear of it when scrolled to the bottom.
-        'aui-thread-composer bg-primary-bg relative mx-auto flex w-full min-w-0 max-w-(--thread-max-width) shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] md:before:pointer-events-none md:before:absolute md:before:inset-x-0 md:before:bottom-full md:before:h-6 md:before:content-[""] md:before:bg-linear-to-t md:before:from-primary-bg md:before:to-transparent',
+        'aui-thread-composer bg-primary-bg relative mx-auto flex w-full min-w-0 shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] md:before:pointer-events-none md:before:absolute md:before:inset-x-0 md:before:bottom-full md:before:h-6 md:before:content-[""] md:before:bg-linear-to-t md:before:from-primary-bg md:before:to-transparent',
         !isEmpty && 'rounded-t-(--composer-radius) md:rounded-t-none',
         className,
       )}
