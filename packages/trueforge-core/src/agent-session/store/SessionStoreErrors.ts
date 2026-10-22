@@ -85,6 +85,16 @@ export class TurnAlreadyExistsError extends SessionStoreConflictError {
   }
 }
 
+/**
+ * An approval for a request that already ended. Its tool call is never run; the person can ask again.
+ */
+export class ApprovalRequestEndedError extends SessionStoreConflictError {
+  constructor() {
+    super('This request ended. Ask again if you still need it.');
+    this.name = 'ApprovalRequestEndedError';
+  }
+}
+
 export class StaleApprovalContinuationError extends SessionStoreConflictError {
   constructor(previous_turn_id: string | null, current_tip: string | null) {
     super(
