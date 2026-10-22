@@ -13,7 +13,7 @@ import type {
   TurnImagesResult,
 } from '../plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 import { useChatImageScope, type ChatImageScopeValue } from './chatImageScope.js';
-import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, EMAIL_IMAGES_ERROR_TEXT } from './refusalText.js';
+import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, emailImagesFailedText } from './refusalText.js';
 
 type ShowState =
   | { kind: 'loading' }
@@ -62,6 +62,16 @@ function showOnce(input: {
     });
   }
   return request;
+}
+
+/**
+ * Drops a finished request so the next one asks the server again. The server does not keep failed
+ * downloads, so a fresh request tries them again and returns the ones already shown.
+ */
+function forgetShown(input: { scope: Pick<ChatImageScopeValue, 'sessionId' | 'turnId'>; source: ChatImageSource }) {
+  for (const approved of [true, false]) {
+    pending.delete(requestKey({ ...input, approved }));
+  }
 }
 
 function toState(result: TurnImagesResult): ShowState {
@@ -289,11 +299,14 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
 type EmailImagesState =
   { kind: 'held' } | { kind: 'loading' } | { kind: 'done'; images: ChatImageOutcome[] } | { kind: 'error' };
 
-/** The most common refusal among outcomes, so many failed images still read as one sentence pair. */
+/**
+ * The most common refusal among outcomes other than a failed download, so many refused images still
+ * read as one sentence pair. Failed downloads get their own line with Try again.
+ */
 function mainRefusal(outcomes: readonly ChatImageOutcome[]): ChatImageRefusal | undefined {
   const counts = new Map<ChatImageRefusal, number>();
   for (const outcome of outcomes) {
-    if (outcome.status === 'refused') {
+    if (outcome.status === 'refused' && outcome.reason !== 'fetch_failed') {
       counts.set(outcome.reason, (counts.get(outcome.reason) ?? 0) + 1);
     }
   }
@@ -321,21 +334,29 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
   const [state, setState] = useState<EmailImagesState>({ kind: 'held' });
   const total = emails.reduce((sum, email) => sum + email.count, 0);
 
-  const load = useCallback(() => {
-    if (scope === null) {
-      return;
-    }
-    setState({ kind: 'loading' });
-    Promise.all(
-      emails.map(email =>
-        showOnce({ scope, source: { kind: 'email', tool_call_id: email.tool_call_id }, approved: true }),
-      ),
-    ).then(
-      results =>
-        setState({ kind: 'done', images: results.flatMap(result => (result.status === 'done' ? result.images : [])) }),
-      () => setState({ kind: 'error' }),
-    );
-  }, [scope, emails]);
+  const load = useCallback(
+    ({ retry }: { retry: boolean }) => {
+      if (scope === null) {
+        return;
+      }
+      setState({ kind: 'loading' });
+      const sources = emails.map((email): ChatImageSource => ({ kind: 'email', tool_call_id: email.tool_call_id }));
+      if (retry) {
+        for (const source of sources) {
+          forgetShown({ scope, source });
+        }
+      }
+      Promise.all(sources.map(source => showOnce({ scope, source, approved: true }))).then(
+        results =>
+          setState({
+            kind: 'done',
+            images: results.flatMap(result => (result.status === 'done' ? result.images : [])),
+          }),
+        () => setState({ kind: 'error' }),
+      );
+    },
+    [scope, emails],
+  );
 
   if (scope === null || total === 0) {
     return null;
@@ -347,7 +368,7 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
           label={heldEmailImagesLabel({ images: total, emails: emails.length })}
           action="Load images"
           testId="aui-email-images-hidden"
-          onShow={load}
+          onShow={() => load({ retry: false })}
         />
       );
     case 'loading':
@@ -355,14 +376,17 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
     case 'error':
       return (
         <HiddenImages
-          label={EMAIL_IMAGES_ERROR_TEXT}
+          label={emailImagesFailedText({ failed: total, total })}
           action="Try again"
           testId="aui-email-images-error"
-          onShow={load}
+          onShow={() => load({ retry: true })}
         />
       );
     case 'done': {
       const refusal = mainRefusal(state.images);
+      const failed = state.images.filter(
+        outcome => outcome.status === 'refused' && outcome.reason === 'fetch_failed',
+      ).length;
       return (
         <span className="flex flex-col gap-1" data-testid="aui-email-images">
           <span className="flex flex-wrap gap-2 empty:hidden">
@@ -377,6 +401,14 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
               ) : null,
             )}
           </span>
+          {failed > 0 && (
+            <HiddenImages
+              label={emailImagesFailedText({ failed, total: state.images.length })}
+              action="Try again"
+              testId="aui-email-images-failed"
+              onShow={() => load({ retry: true })}
+            />
+          )}
           {refusal !== undefined && <Notice testId="aui-chat-image-refused">{CHAT_IMAGE_REFUSAL_TEXT[refusal]}</Notice>}
         </span>
       );

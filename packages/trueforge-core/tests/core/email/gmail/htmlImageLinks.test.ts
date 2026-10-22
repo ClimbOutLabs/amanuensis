@@ -33,6 +33,24 @@ describe('htmlImageLinks', () => {
     expect(htmlImageLinks({ source: html, max: 20 })).toEqual(['https://example.com/art.png']);
   });
 
+  it('reads the size from the width attribute itself, not from inside another attribute', () => {
+    const html = [
+      '<img src="https://example.com/hero.png?width=1" width="600">',
+      '<img alt="width=1 banner" src="https://example.com/banner.png">',
+      '<img data-width="1" src="https://example.com/wide.png">',
+      '<img style="width: 600px" src="https://example.com/styled.png" width = "1">',
+      '<img src="https://example.com/spaced.gif" height = 1>',
+      '<img src="https://example.com/percent.png" width="1%">',
+      '<img src="https://example.com/important.gif" style="height: 1px !important">',
+    ].join('');
+    expect(htmlImageLinks({ source: html, max: 20 })).toEqual([
+      'https://example.com/hero.png?width=1',
+      'https://example.com/banner.png',
+      'https://example.com/wide.png',
+      'https://example.com/percent.png',
+    ]);
+  });
+
   it('stops at the cap', () => {
     const html = Array.from({ length: 30 }, (_, i) => `<img src="https://example.com/${String(i)}.png">`).join('');
     expect(htmlImageLinks({ source: html, max: 20 })).toHaveLength(20);

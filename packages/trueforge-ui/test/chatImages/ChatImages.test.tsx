@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Markdown } from '@/atoms/Markdown.js';
 import { TurnImages } from '@/chatImages/ChatImages.js';
 import { ChatImageScope } from '@/chatImages/chatImageScope.js';
-import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, EMAIL_IMAGES_ERROR_TEXT } from '@/chatImages/refusalText.js';
+import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, emailImagesFailedText } from '@/chatImages/refusalText.js';
 import type {
   ChatImagesCatalog,
   TurnImageList,
@@ -242,11 +242,62 @@ describe('turn images', () => {
     };
     renderInScope({ port, turnImages: true });
     fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
-    expect(await screen.findByText(EMAIL_IMAGES_ERROR_TEXT)).toBeInTheDocument();
+    expect(
+      await screen.findByText("The 4 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
     expect(screen.getAllByTestId('aui-email-images-error')).toHaveLength(1);
     expect(screen.queryByText(CHAT_IMAGE_ERROR_TEXT)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(showTurnImages).toHaveBeenCalledTimes(2));
+  });
+
+  it('offers one Try again line when every image fails to download, and asks the server again on click', async () => {
+    let attempt = 0;
+    const failedDownload = { status: 'refused' as const, reason: 'fetch_failed' as const };
+    const { port, showTurnImages } = fakePort({
+      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 3 }] },
+      show: () => {
+        attempt += 1;
+        return attempt === 1
+          ? { status: 'done', images: [failedDownload, failedDownload, failedDownload] }
+          : { status: 'done', images: [shownImage, shownImage, shownImage] };
+      },
+    });
+    renderInScope({ port, turnImages: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
+    expect(
+      await screen.findByText("The 3 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId('aui-email-images-failed')).toHaveLength(1);
+    expect(screen.queryByText(CHAT_IMAGE_REFUSAL_TEXT.fetch_failed)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(3));
+    expect(showTurnImages).toHaveBeenCalledTimes(2);
+    expect(showTurnImages).toHaveBeenLastCalledWith(expect.objectContaining({ approved: true }));
+    expect(screen.queryByTestId('aui-email-images-failed')).not.toBeInTheDocument();
+  });
+
+  it('says how many of the images failed when only some could not be downloaded', async () => {
+    const { port } = fakePort({
+      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 3 }] },
+      show: () => ({
+        status: 'done',
+        images: [shownImage, { status: 'refused', reason: 'fetch_failed' }, shownImage],
+      }),
+    });
+    renderInScope({ port, turnImages: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
+    expect(
+      await screen.findByText("1 of 3 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('img')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('names a single failed image in the singular', () => {
+    expect(emailImagesFailedText({ failed: 1, total: 1 })).toBe(
+      "The image couldn't be downloaded. Check your connection, then choose Try again.",
+    );
   });
 
   it('shows sandbox images such as charts without asking', async () => {
