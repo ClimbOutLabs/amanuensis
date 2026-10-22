@@ -1635,6 +1635,29 @@
   white-space: nowrap;
 }
 
+/* Toggle chip: a pressed chip takes the gold-ink edge and a check mark, never a gold fill. */
+.aui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding-inline: 0.625rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  background-color: var(--card-bg);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.aui-chip:hover {
+  color: var(--text-primary);
+}
+
+.aui-chip[aria-pressed='true'] {
+  border-color: var(--gold-ink);
+  color: var(--text-primary);
+}
+
 /* Receipt: a mono list on a card face. */
 .aui-receipt {
   padding: 0.5rem 0.75rem;
@@ -1660,6 +1683,12 @@
 
   .aui-row {
     grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
+  }
+
+  /* Two-column rows that stack: the right-hand choices drop under the left-hand label. */
+  .aui-row--2.aui-row--stack {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.4rem;
   }
 
   .aui-ticket--stub {

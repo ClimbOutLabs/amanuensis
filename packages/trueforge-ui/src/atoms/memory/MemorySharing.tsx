@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
-import { Switch } from '@/atoms/primitives/Switch.js';
+import { Icon } from '@/icons/Icon.js';
 import {
   personaVaultNamespace,
   type MemoryVaultSharing,
@@ -11,28 +11,37 @@ import {
 
 export type MemorySharingPersona = { id: string; displayName: string };
 
-type SharingVault = { value: string; name: string };
+/** One chip on a specialist's row. `subject` completes "X can see …" for the accessible name. */
+type SharingChoice = { value: string; label: string; subject: string };
 
-/** Every vault except the persona's own, derived from the persona list rather than from vaults on disk. */
-function readableVaults(options: {
+/** Every choice a specialist can be given: the other specialists, then the topics. */
+function sharingChoices(options: {
   persona: MemorySharingPersona;
   personas: MemorySharingPersona[];
   topics: Array<{ value: string; label: string }>;
-}): SharingVault[] {
-  const otherPersonas = options.personas
+}): SharingChoice[] {
+  const otherSpecialists = options.personas
     .filter(other => other.id !== options.persona.id)
-    .map(other => ({ value: personaVaultNamespace(other.displayName), name: `${other.displayName}'s collection` }));
-  const topics = options.topics.map(topic => ({ value: topic.value, name: `the ${topic.label} collection` }));
-  return [...otherPersonas, ...topics];
+    .map(other => ({
+      value: personaVaultNamespace(other.displayName),
+      label: other.displayName,
+      subject: `${other.displayName}'s memories`,
+    }));
+  const topics = options.topics.map(topic => ({
+    value: topic.value,
+    label: topic.label,
+    subject: `the ${topic.label} memories`,
+  }));
+  return [...otherSpecialists, ...topics];
 }
 
 /**
- * Cross-persona sharing: which vault namespaces each persona may read.
- * Positive descriptions only: every toggle says what the persona gains.
+ * Cross-specialist sharing: which memory namespaces each specialist may read.
+ * Each row is one specialist; its chips are the memories it can also see.
  */
 export function MemorySharing(props: {
   personas: MemorySharingPersona[];
-  /** Topic vaults, offered to every persona alongside the other personas' vaults. */
+  /** Topic memories, offered to every specialist alongside the other specialists. */
   namespaces: Array<{ value: string; label: string }>;
   sharing: MemoryVaultSharing;
   onSave: (sharing: MemoryVaultSharing) => Promise<void>;
@@ -72,45 +81,52 @@ export function MemorySharing(props: {
   }
 
   if (props.personas.length === 0) {
-    return (
-      <p className="text-sm text-text-secondary">No personas are configured yet, so there is nothing to share with.</p>
-    );
+    return <p className="text-sm text-text-secondary">No specialists are set up yet, so there is nothing to share.</p>;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-text-secondary">
-        Choose which collections each persona can read. A persona always reads the shared collection; these toggles
-        grant access to additional collections.
+        Every specialist sees the shared memories. Choose whose own memories each one can also see.
       </p>
-      {props.personas.map(persona => {
-        const vaults = readableVaults({ persona, personas: props.personas, topics: props.namespaces });
-        return (
-          <fieldset key={persona.id} className="rounded-xl border border-border bg-card-bg p-4">
-            <legend className="px-1 text-sm font-medium text-text-primary">{persona.displayName}</legend>
-            {vaults.length === 0 ? (
-              <p className="text-sm text-text-secondary">No other collections to read yet.</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {vaults.map(vault => {
-                  const enabled = (draft[persona.id] ?? []).includes(vault.value);
-                  return (
-                    <label key={vault.value} className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-text-primary">Can read {vault.name}</span>
-                      <Switch
-                        checked={enabled}
-                        onCheckedChange={checked => toggle(persona.id, vault.value, checked)}
-                        disabled={saving}
-                        aria-label={`${persona.displayName} can read ${vault.name}`}
-                      />
-                    </label>
-                  );
-                })}
+      <ul aria-label="Memory sharing by specialist" className="flex flex-col gap-3">
+        {props.personas.map(persona => {
+          const choices = sharingChoices({ persona, personas: props.personas, topics: props.namespaces });
+          const granted = draft[persona.id] ?? [];
+          const anyOn = choices.some(choice => granted.includes(choice.value));
+          return (
+            <li key={persona.id} className="aui-row aui-row--2 aui-row--stack">
+              <div className="min-w-0">
+                <span className="text-sm font-medium text-text-primary">{persona.displayName}</span>
+                {anyOn ? null : <span className="block text-xs text-text-secondary">None</span>}
               </div>
-            )}
-          </fieldset>
-        );
-      })}
+              {choices.length === 0 ? (
+                <p className="text-sm text-text-secondary">No other specialists to share with yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label={`What ${persona.displayName} can see`}>
+                  {choices.map(choice => {
+                    const on = granted.includes(choice.value);
+                    return (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        aria-pressed={on}
+                        aria-label={`${persona.displayName} can see ${choice.subject}`}
+                        disabled={saving}
+                        onClick={() => toggle(persona.id, choice.value, !on)}
+                        className="aui-chip focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-60"
+                      >
+                        {on ? <Icon name="check" className="h-3 w-3 shrink-0" /> : null}
+                        {choice.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
       <div className="flex items-center gap-3">
         <button
           type="button"

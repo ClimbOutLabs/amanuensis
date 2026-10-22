@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MemorySharing } from '@/atoms/memory/MemorySharing.js';
@@ -27,68 +27,95 @@ function renderSharing(options: {
   return { onSave };
 }
 
-function toggle(name: string): HTMLElement {
-  return screen.getByRole('switch', { name });
+function chip(name: string): HTMLElement {
+  return screen.getByRole('button', { name });
+}
+
+function row(displayName: string): HTMLElement {
+  const list = screen.getByRole('list', { name: 'Memory sharing by specialist' });
+  const match = within(list)
+    .getAllByRole('listitem')
+    .find(item => within(item).queryByText(displayName, { selector: 'span' }) !== null);
+  if (match === undefined) throw new Error(`No row for ${displayName}`);
+  return match;
 }
 
 describe('MemorySharing', () => {
-  it('offers one toggle per other persona collection, derived from the persona list', () => {
+  it('renders one row per specialist, with a chip for each other specialist only', () => {
     renderSharing({});
 
-    expect(screen.getAllByRole('switch')).toHaveLength(6);
-    expect(toggle("Alpha can read Beta's collection")).toBeTruthy();
-    expect(toggle("Alpha can read Gamma's collection")).toBeTruthy();
-    expect(toggle("Beta can read Alpha's collection")).toBeTruthy();
-    expect(toggle("Gamma can read Beta's collection")).toBeTruthy();
-    expect(screen.queryByRole('switch', { name: "Alpha can read Alpha's collection" })).toBeNull();
+    const rows = within(screen.getByRole('list', { name: 'Memory sharing by specialist' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(within(row('Alpha')).getAllByRole('button')).toHaveLength(2);
+    expect(within(row('Alpha')).getByRole('button', { name: "Alpha can see Beta's memories" })).toBeTruthy();
+    expect(within(row('Alpha')).getByRole('button', { name: "Alpha can see Gamma's memories" })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: "Alpha can see Alpha's memories" })).toBeNull();
+    expect(screen.getAllByRole('button', { pressed: false })).toHaveLength(6);
   });
 
-  it('shows the saved grants as on and everything else as off', () => {
+  it('marks granted chips as pressed and the rest as not pressed', () => {
     renderSharing({ shares: { [ALPHA.id]: [personaVaultNamespace('Beta')] } });
 
-    expect(toggle("Alpha can read Beta's collection").getAttribute('aria-checked')).toBe('true');
-    expect(toggle("Alpha can read Gamma's collection").getAttribute('aria-checked')).toBe('false');
-    expect(toggle("Beta can read Alpha's collection").getAttribute('aria-checked')).toBe('false');
+    expect(chip("Alpha can see Beta's memories").getAttribute('aria-pressed')).toBe('true');
+    expect(chip("Alpha can see Gamma's memories").getAttribute('aria-pressed')).toBe('false');
+    expect(chip("Beta can see Alpha's memories").getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('saves granted persona collections keyed by persona id', async () => {
+  it('shows a quiet None label only on rows with nothing turned on', () => {
+    renderSharing({ shares: { [ALPHA.id]: [personaVaultNamespace('Beta')] } });
+
+    expect(within(row('Alpha')).queryByText('None')).toBeNull();
+    expect(within(row('Beta')).getByText('None')).toBeTruthy();
+    expect(within(row('Gamma')).getByText('None')).toBeTruthy();
+  });
+
+  it('shows the check mark only on pressed chips', () => {
+    renderSharing({ shares: { [ALPHA.id]: [personaVaultNamespace('Beta')] } });
+
+    expect(chip("Alpha can see Beta's memories").querySelector('svg')).not.toBeNull();
+    expect(chip("Alpha can see Gamma's memories").querySelector('svg')).toBeNull();
+  });
+
+  it('toggles a chip and saves granted specialists keyed by specialist id', async () => {
     const { onSave } = renderSharing({});
 
-    fireEvent.click(toggle("Alpha can read Beta's collection"));
-    fireEvent.click(toggle("Gamma can read Alpha's collection"));
+    fireEvent.click(chip("Alpha can see Beta's memories"));
+    expect(chip("Alpha can see Beta's memories").getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(chip("Gamma can see Alpha's memories"));
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
-      shares: { [ALPHA.id]: ['persona:Beta'], [GAMMA.id]: ['persona:Alpha'] },
+      shares: { [ALPHA.id]: [personaVaultNamespace('Beta')], [GAMMA.id]: [personaVaultNamespace('Alpha')] },
     });
     expect(await screen.findByText('Sharing saved.')).toBeTruthy();
   });
 
-  it('drops a persona from the saved config once its last grant is turned off', async () => {
-    const { onSave } = renderSharing({ shares: { [ALPHA.id]: ['persona:Beta'] } });
+  it('drops a specialist from the saved config once its last chip is turned off', async () => {
+    const { onSave } = renderSharing({ shares: { [ALPHA.id]: [personaVaultNamespace('Beta')] } });
 
-    fireEvent.click(toggle("Alpha can read Beta's collection"));
+    fireEvent.click(chip("Alpha can see Beta's memories"));
+    expect(chip("Alpha can see Beta's memories").getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ shares: {} }));
   });
 
-  it('offers topic collections to every persona next to the persona collections', () => {
+  it('offers topic memories as chips on every row next to the specialists', () => {
     renderSharing({ personas: [ALPHA, BETA], namespaces: [{ value: 'finance', label: 'finance' }] });
 
-    expect(screen.getAllByRole('switch')).toHaveLength(4);
-    expect(toggle('Alpha can read the finance collection')).toBeTruthy();
-    expect(toggle('Beta can read the finance collection')).toBeTruthy();
+    expect(within(row('Alpha')).getAllByRole('button')).toHaveLength(2);
+    expect(chip('Alpha can see the finance memories')).toBeTruthy();
+    expect(chip('Beta can see the finance memories')).toBeTruthy();
   });
 
-  it('keeps grants for collections it no longer lists', async () => {
+  it('keeps grants for memories it no longer lists', async () => {
     const { onSave } = renderSharing({
       personas: [ALPHA, BETA],
       shares: { [ALPHA.id]: ['persona:Retired'] },
     });
 
-    fireEvent.click(toggle("Alpha can read Beta's collection"));
+    fireEvent.click(chip("Alpha can see Beta's memories"));
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() =>
@@ -96,16 +123,16 @@ describe('MemorySharing', () => {
     );
   });
 
-  it('says so instead of rendering an empty box when a persona has nothing to read', () => {
+  it('says so on the row when there is no other specialist to share with', () => {
     renderSharing({ personas: [ALPHA] });
 
-    expect(screen.queryAllByRole('switch')).toHaveLength(0);
-    expect(screen.getByText('No other collections to read yet.')).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /can see/ })).toHaveLength(0);
+    expect(screen.getByText('No other specialists to share with yet.')).toBeTruthy();
   });
 
-  it('explains there is nothing to share when no persona exists', () => {
+  it('explains there is nothing to share when no specialist exists', () => {
     renderSharing({ personas: [] });
 
-    expect(screen.getByText('No personas are configured yet, so there is nothing to share with.')).toBeTruthy();
+    expect(screen.getByText('No specialists are set up yet, so there is nothing to share.')).toBeTruthy();
   });
 });
