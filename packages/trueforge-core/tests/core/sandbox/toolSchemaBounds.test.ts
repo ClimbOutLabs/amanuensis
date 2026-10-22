@@ -82,7 +82,7 @@ async function discoverBuiltInTools(): Promise<Array<{ name: string; inputSchema
   const registries: IToolSet[] = [
     sandbox,
     new TaskStateToolSet({ tracing: NOOP_AGENT_TRACING, bankedCount: () => 0 }),
-    new DeferredTool([], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() }),
+    new DeferredTool([], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger(), bundled: true }),
     new CurrentDateTime(NOOP_AGENT_TRACING),
     new AskUserQuestion(),
     new OpenUIInstructions(NOOP_AGENT_TRACING),

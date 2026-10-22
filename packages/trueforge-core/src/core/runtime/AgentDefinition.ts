@@ -104,6 +104,11 @@ export interface AgentDefinition {
 
   toolSets?: readonly IToolSet[] | undefined;
   /**
+   * False sends every built-in tool on the first model call, with no bundle index and no
+   * `load_bundle`, for a model where each extra call is slow. Absent sends tools in bundles.
+   */
+  bundleTools?: boolean | undefined;
+  /**
    * Offers the model no tools at all, neither connector tools nor built-in ones such as
    * schedules, files or checklists. For an agent that may only answer from what it already knows.
    */

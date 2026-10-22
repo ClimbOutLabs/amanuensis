@@ -49,7 +49,7 @@ test('an approved call_tool call with a made-up inner argument runs with only th
     preload: false,
     sentinel,
   });
-  const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
+  const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger(), bundled: true });
   const wire = { mcp_server: 'notes', tool_name: 'send_note', input: { text: 'hi', session_id: 'made-up' } };
   const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: wire });
   expect(info.approval_token_id).toBeTruthy();

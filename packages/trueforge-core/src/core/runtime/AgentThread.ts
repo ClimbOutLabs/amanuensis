@@ -1670,7 +1670,9 @@ export class AgentThread {
       ? new Map([...this.toolCallMemo.turn.callSignatures].map(([signature, record]) => [signature, record.count]))
       : new Map<string, number>();
 
-    this.toolBundles = this.definition.readOnly
+    // A read-only thread has no tools to bundle; a definition may opt out to send every tool up front.
+    const unbundled = this.definition.readOnly === true || this.definition.bundleTools === false;
+    this.toolBundles = unbundled
       ? undefined
       : new ToolBundles({
           tracing: this.tracing,
@@ -1715,6 +1717,7 @@ export class AgentThread {
     if (connectorToolSets.length) {
       this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
+        bundled: this.toolBundles !== undefined,
         logger: input.logger,
       });
     }
@@ -2866,9 +2869,10 @@ export class AgentThread {
         metaToolSet: this.deferredTool,
         deferredServers: userServers.some(server => !server.preload),
       });
-      // The bundle index lists bundles the thread only knows once its tools are listed, so the prompt is built again with it.
-      this.instruction = this.buildInstruction(this.definition.instruction);
     }
+    // The bundle index, and whether a connector left `preload` unset turns out preloaded, are only known once
+    // tools are listed, so the prompt is built again with them.
+    this.instruction = this.buildInstruction(this.definition.instruction);
     return { initializationInfo, authRequirementInfo };
   }
 

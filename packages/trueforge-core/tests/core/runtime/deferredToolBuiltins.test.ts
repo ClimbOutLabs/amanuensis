@@ -118,6 +118,7 @@ function makeDeferred(): DeferredTool {
   return new DeferredTool([server], {
     tracing: NOOP_AGENT_TRACING,
     logger: silentLogger,
+    bundled: true,
   });
 }
 
@@ -287,7 +288,7 @@ describe('call_tool naming a configured connector still matches the direct call'
 
   it('wrapped connector read matches the direct call', async () => {
     const toolSet = makeToolSet({ name: 'exa', url: 'https://mcp.exa.ai/mcp', tools: [webSearch] });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const input = { query: 'my salary history' };
     const direct = await toolSet.toolCallInfo({ name: 'web_search', arguments: input });
     const wrapped = await deferred.toolCallInfo({
@@ -302,7 +303,7 @@ describe('call_tool naming a configured connector still matches the direct call'
 
   it('wrapped connector send matches the direct call', async () => {
     const toolSet = makeToolSet({ name: 'gmail', url: 'https://gmail.example.com/mcp', tools: [sendEmail] });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const input = { to: ['alice@example.com'], subject: 'Plan', body: 'See attached.' };
     const direct = await toolSet.toolCallInfo({ name: 'send_email', arguments: input });
     const wrapped = await deferred.toolCallInfo({

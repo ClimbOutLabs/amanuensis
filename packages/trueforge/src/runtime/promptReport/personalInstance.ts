@@ -35,7 +35,7 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
 export type PersonalInstanceName =
-  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox';
+  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox' | 'personal-self-hosted';
 
 /** Every standard setup the report measures, in report order. */
 export const PERSONAL_INSTANCE_NAMES = [
@@ -43,6 +43,7 @@ export const PERSONAL_INSTANCE_NAMES = [
   'personal-with-google',
   'personal-no-sandbox',
   'personal-no-server-sandbox',
+  'personal-self-hosted',
 ] satisfies PersonalInstanceName[];
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
@@ -298,6 +299,8 @@ export async function buildPersonalInstance(input: {
           defaultModelParams: {},
           modelId: undefined,
           modelSupportsVision: false,
+          // A self-hosted model gets every built-in tool up front, as its provider resolves it.
+          bundleTools: input.name !== 'personal-self-hosted',
         }),
       mcp: name => (name === WEB_SEARCH_SERVER ? Promise.resolve(webSearchConnector()) : unused('mcp connection')),
       mcpRequestTimeoutMs: 60_000,
@@ -326,7 +329,8 @@ export async function buildPersonalInstance(input: {
     },
   );
   // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const sandboxEnabled =
+    input.name === 'personal' || input.name === 'personal-with-google' || input.name === 'personal-self-hosted';
   const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,

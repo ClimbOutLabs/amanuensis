@@ -90,6 +90,8 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
     - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
 
+    A custom provider gets every built-in tool on the first model call, so it never spends an extra call loading a tool bundle.
+
     Click **Add provider**.
   </Tab>
 </Tabs>

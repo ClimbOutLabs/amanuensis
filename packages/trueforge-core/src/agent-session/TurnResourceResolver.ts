@@ -104,6 +104,8 @@ interface ResolvedModel {
   /** See AgentDefinition.modelSupportsVision. Every implementation must set this explicitly. */
   modelSupportsVision: boolean;
   modelProperties?: AgentDefinition['modelProperties'];
+  /** See AgentDefinition.bundleTools. */
+  bundleTools?: boolean | undefined;
 }
 
 /** The saved Authorization header of a connector, whether its headers are static or resolved at connect. */
@@ -523,6 +525,7 @@ export class TurnResourceResolver<
         modelSupportsVision: resolvedModel.modelSupportsVision,
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
+        bundleTools: resolvedModel.bundleTools,
         clientTimezone: this.deps.clientTimezone,
         // Sub-agents receive the delegated task as a user message; their system
         // prompt is SUB_AGENT_IDENTITY (added by AgentThread), not user instructions.

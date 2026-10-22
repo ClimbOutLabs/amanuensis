@@ -128,10 +128,11 @@ describe('a model that goes silent after a tool result', () => {
     expect(started.status).toBe(200);
     const drained = started.text();
 
-    // The second model request is the continuation after the tool result; the provider stalls on it.
+    // The second model request is the continuation after the tool result; the provider stalls on it. The test
+    // provider is self-hosted, so the search tool is sent up front and no bundle load comes first.
     await waitFor({
       read: () => Promise.resolve(server.model.requests().length),
-      ready: count => count >= 3,
+      ready: count => count >= 2,
       budgetMs: 30_000,
     });
 

@@ -124,16 +124,20 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
+  private readonly bundled: boolean;
 
   constructor(
     servers: readonly IToolSet[],
     options: {
       tracing: AgentTracing;
       logger: Logger;
+      /** Whether built-in tools come in bundles, so a missing one is loaded with load_bundle. */
+      bundled: boolean;
     },
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
+    this.bundled = options.bundled;
     this.serverMap = new Map(servers.map(s => [s.name, s]));
     this.tools = this.buildTools();
   }
@@ -274,7 +278,11 @@ export class DeferredTool extends LocalToolMCP {
   private serverNotFoundText(mcpServer: string): string {
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with its bundle first.`;
+    const builtIn = `Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}`;
+    const missing = this.bundled
+      ? `; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with its bundle first.`
+      : '.';
+    return `No server named '${mcpServer}'. Servers: ${serverList}. ${builtIn}${missing}`;
   }
 
   private serverNotFoundResponse(mcpServer: string): CallToolResponse {

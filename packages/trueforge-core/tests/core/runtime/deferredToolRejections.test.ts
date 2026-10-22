@@ -49,7 +49,11 @@ describe('DeferredTool call_tool rejections', () => {
       preload: false,
       tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const error = await callToolErrorText(deferredTool, 'call_tool', {
       mcp_server: 'not-a-server',
@@ -62,6 +66,29 @@ describe('DeferredTool call_tool rejections', () => {
     );
   });
 
+  it('leaves load_bundle out of the reminder when built-in tools are not bundled', async () => {
+    const server = makeMockIMCPServer({
+      name: 'parallel-web',
+      preload: false,
+      tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
+    });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: false,
+    });
+
+    const error = await callToolErrorText(deferredTool, 'call_tool', {
+      mcp_server: 'not-a-server',
+      tool_name: 'search',
+      input: {},
+    });
+
+    expect(error).toBe(
+      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool.",
+    );
+  });
+
   it('says call_tool naming itself is top-level, not a server tool', async () => {
     const server = makeMockIMCPServer({
       name: 'parallel-web',
@@ -71,7 +98,11 @@ describe('DeferredTool call_tool rejections', () => {
         { name: 'fetch', description: 'fetch', inputSchema: OBJECT_INPUT_SCHEMA, preload: false },
       ],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const error = await callToolErrorText(deferredTool, 'call_tool', {
       mcp_server: 'parallel-web',
@@ -93,7 +124,11 @@ describe('DeferredTool call_tool rejections', () => {
         { name: 'fetch', description: 'fetch', inputSchema: OBJECT_INPUT_SCHEMA, preload: false },
       ],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const text = await callToolTextResult(deferredTool, 'call_tool', {
       mcp_server: 'tavily',
@@ -110,7 +145,11 @@ describe('DeferredTool call_tool rejections', () => {
       preload: false,
       tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const text = await callToolTextResult(deferredTool, 'call_tool', {
       mcp_server: 'tavily',
@@ -131,7 +170,11 @@ describe('DeferredTool call_tool rejections', () => {
       preload: false,
       tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const error = await callToolErrorText(deferredTool, 'call_tool', {
       mcp_server: 'tavily',
@@ -153,7 +196,11 @@ describe('DeferredTool call_tool rejections', () => {
         { name: 'fetch', description: 'fetch', inputSchema: OBJECT_INPUT_SCHEMA, preload: false },
       ],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const error = await callToolErrorText(deferredTool, 'call_tool', {
       mcp_server: 'parallel-web',
@@ -173,7 +220,11 @@ describe('DeferredTool call_tool rejections', () => {
       tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
     });
     (server.callTool as jest.Mock).mockResolvedValue(toolResultResponse({ text: 'ok' }));
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const text = await callToolTextResult(deferredTool, 'call_tool', {
       mcp_server: 'parallel-web',
@@ -189,7 +240,11 @@ describe('DeferredTool call_tool rejections', () => {
 describe('DeferredTool get_tool_info rejections', () => {
   it('names the configured servers when mcp_server does not exist', async () => {
     const server = makeMockIMCPServer({ name: 'parallel-web', preload: false });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const error = await callToolErrorText(deferredTool, GET_TOOL_INFO_NAME, {
       mcp_server: 'not-a-server',
@@ -210,7 +265,11 @@ describe('DeferredTool get_tool_info rejections', () => {
         { name: 'fetch', description: 'fetch', inputSchema: OBJECT_INPUT_SCHEMA, preload: false },
       ],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const text = await callToolTextResult(deferredTool, LIST_TOOLS_NAME, { mcp_server: 'parallel-web' });
 

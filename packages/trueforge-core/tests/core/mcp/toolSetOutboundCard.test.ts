@@ -88,7 +88,7 @@ describe('approval card for connector calls', () => {
 
   it('shows the same card when the model reaches the search through call_tool', async () => {
     const toolSet = makeToolSet({ name: 'exa', url: 'https://mcp.exa.ai/mcp', tools: [webSearch] });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const info = await deferred.toolCallInfo({
       name: 'call_tool',
       arguments: { mcp_server: 'exa', tool_name: 'web_search', input: { query: 'my salary history' } },
@@ -112,7 +112,7 @@ describe('approval card for connector calls', () => {
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
     const tool: ToolSchema = { name, description: 'Parallel tool.', inputSchema: schema };
     const toolSet = makeToolSet({ name: 'parallel-web', url: 'https://search.parallel.ai/mcp', tools: [tool] });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const direct = await toolSet.toolCallInfo({ name, arguments: input });
     const wrapped = await deferred.toolCallInfo({
       name: 'call_tool',
@@ -127,7 +127,7 @@ describe('approval card for connector calls', () => {
 
   it('shows a Gmail send through call_tool with recipients, subject and body', async () => {
     const toolSet = makeToolSet({ name: 'gmail', url: 'https://gmail.example.com/mcp', tools: [sendEmail] });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const info = await deferred.toolCallInfo({
       name: 'call_tool',
       arguments: {
@@ -149,7 +149,7 @@ describe('approval card for connector calls', () => {
   it('keeps an unknown connector tool on the fail-closed card, through call_tool too', async () => {
     const toolSet = makeToolSet({ name: 'misc', url: 'https://misc.example.com/mcp', tools: [mystery] });
     const direct = await toolSet.toolCallInfo({ name: 'frobnicate', arguments: { id: '7' } });
-    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true });
     const wrapped = await deferred.toolCallInfo({
       name: 'call_tool',
       arguments: { mcp_server: 'misc', tool_name: 'frobnicate', input: { id: '7' } },
@@ -179,7 +179,7 @@ describe('approval is bound to the connector it was granted for', () => {
     const wireArgs = { query: 'my salary history' };
     const wrapperArgs = { mcp_server: 'exa', tool_name: 'web_search', input: wireArgs };
     const cardSource = input.viaCallTool
-      ? new DeferredTool([atCard], { tracing: NOOP_AGENT_TRACING, logger: noopLogger })
+      ? new DeferredTool([atCard], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true })
       : atCard;
     const info = await cardSource.toolCallInfo(
       input.viaCallTool ? { name: 'call_tool', arguments: wrapperArgs } : { name: 'web_search', arguments: wireArgs },
@@ -187,7 +187,7 @@ describe('approval is bound to the connector it was granted for', () => {
     expect(info.tier).toBe(3);
     const atDispatch = makeToolSet({ name: 'exa', url: input.dispatchUrl, tools: [webSearch], services });
     const dispatchSource = input.viaCallTool
-      ? new DeferredTool([atDispatch], { tracing: NOOP_AGENT_TRACING, logger: noopLogger })
+      ? new DeferredTool([atDispatch], { tracing: NOOP_AGENT_TRACING, logger: noopLogger, bundled: true })
       : atDispatch;
     const wireName = input.viaCallTool ? 'call_tool' : 'web_search';
     const message: InternalEnrichedAssistantMessage = {

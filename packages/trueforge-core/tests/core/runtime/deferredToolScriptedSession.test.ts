@@ -28,7 +28,11 @@ describe('DeferredTool scripted model session', () => {
         { name: 'fetch', description: 'fetch', inputSchema: OBJECT_INPUT_SCHEMA, preload: false },
       ],
     });
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const results = [
       await listToolsText(deferredTool, 'gmail'),
@@ -48,7 +52,11 @@ describe('DeferredTool scripted model session', () => {
       ...makeMockIMCPServer({ name: 'parallel-web', preload: false }),
       listTools: jest.fn(() => Promise.reject(new Error('upstream timed out'))),
     };
-    const deferredTool = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      bundled: true,
+    });
 
     const text = await listToolsText(deferredTool, 'parallel-web');
 

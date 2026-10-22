@@ -19,6 +19,7 @@ const SETUPS: { name: PersonalInstanceName; title: string }[] = [
   { name: 'personal-with-google', title: 'Personal instance with Gmail and Google Calendar connected' },
   { name: 'personal-no-sandbox', title: 'Personal instance with the sandbox turned off (no exec tool)' },
   { name: 'personal-no-server-sandbox', title: 'Personal instance on a server with no sandbox (no exec tool)' },
+  { name: 'personal-self-hosted', title: 'Personal instance on a self-hosted model (every built-in tool, no bundles)' },
 ];
 
 const NAME_WIDTH = 60;

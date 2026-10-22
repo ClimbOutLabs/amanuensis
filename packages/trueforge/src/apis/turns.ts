@@ -515,6 +515,7 @@ function createTurnResolver(deps: {
           modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
+          bundleTools: resolved.bundleTools,
         };
       },
       mcp: async name => {

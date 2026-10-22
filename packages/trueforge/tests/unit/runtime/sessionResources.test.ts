@@ -878,3 +878,60 @@ describe('applyTokenFactoryRouting', () => {
     expect(routed.fallbackProviderConfig).toBeUndefined();
   });
 });
+
+describe('getModelDetails for self-hosted and cloud models', () => {
+  async function storeWithModels() {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteModelProviderStore(db);
+    await store.upsertProvider({
+      tenant_id: 'default',
+      name: 'home-gpu',
+      manifest: {
+        type: 'custom',
+        name: 'home-gpu',
+        base_url: 'https://gpu.home.example.com/v1',
+        auth: { api_key: 'sk-home' },
+        models: [
+          { model_id: 'thinker-uncapped', name: 'uncapped', properties: { context_length: 32000 } },
+          {
+            model_id: 'thinker-capped',
+            name: 'capped',
+            properties: { context_length: 32000, max_output_tokens: 2048 },
+          },
+        ],
+      },
+    });
+    await store.upsertProvider({
+      tenant_id: 'default',
+      name: 'openai',
+      manifest: {
+        type: 'openai',
+        base_url: 'https://api.openai.com/v1',
+        auth: { api_key: 'sk-cloud' },
+        models: [{ model_id: 'cloud-model', name: 'cloud-model', properties: { context_length: 128000 } }],
+      },
+    });
+    return store;
+  }
+
+  it('caps a self-hosted model with no output limit at 8192 tokens and sends it every tool up front', async () => {
+    const store = await storeWithModels();
+    const details = await getModelDetails({ tenant_id: 'default', name: 'home-gpu/uncapped', store });
+    expect(details.defaultModelParams).toEqual({ max_tokens: 8192 });
+    expect(details.bundleTools).toBe(false);
+  });
+
+  it('keeps the output limit configured on a self-hosted model', async () => {
+    const store = await storeWithModels();
+    const details = await getModelDetails({ tenant_id: 'default', name: 'home-gpu/capped', store });
+    expect(details.defaultModelParams).toEqual({ max_tokens: 2048 });
+  });
+
+  it('leaves a cloud model uncapped and on tool bundles', async () => {
+    const store = await storeWithModels();
+    const details = await getModelDetails({ tenant_id: 'default', name: 'openai/cloud-model', store });
+    expect(details.defaultModelParams).toEqual({});
+    expect(details.bundleTools).toBe(true);
+  });
+});

@@ -168,6 +168,7 @@ describe('a send reached through call_tool on a connector', () => {
     const deferred = new DeferredTool([connector], {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
+      bundled: true,
     });
     const response = await deferred.callTool({
       name: 'call_tool',

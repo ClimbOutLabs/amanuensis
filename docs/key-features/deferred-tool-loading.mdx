@@ -60,6 +60,8 @@ The meta tools are only sent while at least one connector has `preload` off. The
 
 ## Built-in tool bundles
 
+A custom provider, such as a model you run on your own server, skips bundles: every built-in tool goes out on every model call, with no bundle list and no `load_bundle`. A model on your own hardware is often slow to reason, so an extra call to load a bundle costs more time than a longer prompt.
+
 Built-in tools are grouped in bundles: `google` (email and calendar), `web`, `maps`, `sandbox`, `spaces`, `documents`, `schedules`, `sub_agents` and `extras`. The system prompt lists each bundle in one short line. A few built-in tools, such as `ask_user_question`, go out on every turn. Connector tools follow their `preload` setting, except that the search connector goes with `web` and the first-party email and calendar accounts go with `google`.
 
 Before the first model call of a turn, a router picks the bundles the message needs. It reads the message's words (a link or a question picks `web`, an email or a meeting picks `google`, and so on), whether files are attached, and the bundles used in the last three replies of the chat. It includes a bundle when unsure. A bundle's tools and its guidance in the system prompt go out together.

@@ -12,7 +12,9 @@ const silentLogger = makeSilentLogger();
 function deferredInstructionText(servers: IToolSet[]): string {
   const builder = InstructionBuilder.createSystemPrompt('test');
   const capabilities = builder.beginSection('agent-capabilities');
-  new DeferredTool(servers, { tracing: NOOP_AGENT_TRACING, logger: silentLogger }).buildInstruction(capabilities);
+  new DeferredTool(servers, { tracing: NOOP_AGENT_TRACING, logger: silentLogger, bundled: true }).buildInstruction(
+    capabilities,
+  );
   return builder.build();
 }
 

@@ -9,6 +9,71 @@ import {
 
 type Baseline = { total: number; rows: Record<string, number> };
 
+/**
+ * Measured 2026-10-22. A self-hosted model gets every built-in tool and every bundle's guidance up front, with no
+ * bundle index and no load_bundle, so each turn sends the same prompt. It is far larger than a bundled setup on
+ * purpose: on a self-hosted server a long prompt costs a few seconds of prefill, mostly served from its prefix
+ * cache, while each extra model call to load a bundle costs a full reasoning pass.
+ */
+const SELF_HOSTED: Baseline = {
+  total: 11094,
+  rows: {
+    'agent-identity': 97,
+    'model-identity': 79,
+    'agent-capabilities': 3110,
+    'agent-capabilities/internal-messages': 59,
+    'agent-capabilities/untrusted-tool-output': 104,
+    'agent-capabilities/source-discovery': 383,
+    'agent-capabilities/ability-boundaries': 91,
+    'agent-capabilities/web-images': 80,
+    'agent-capabilities/no-task-no-tools': 75,
+    'agent-capabilities/check-before-asking': 69,
+    'agent-capabilities/plain-speech': 114,
+    'agent-capabilities/sandbox': 246,
+    'agent-capabilities/sandbox/sandbox-schema-infer': 105,
+    'agent-capabilities/sandbox/sandbox-file-uploads': 52,
+    'agent-capabilities/documents': 267,
+    'agent-capabilities/sub-agents': 263,
+    'agent-capabilities/openui': 159,
+    'agent-capabilities/active-speaker-context': 91,
+    'agent-capabilities/spaces': 1035,
+    'agent-capabilities/schedules': 57,
+    ask_user_question: 261,
+    get_current_datetime: 100,
+    call_tool: 223,
+    get_tool_info: 149,
+    get_tool_output_schema: 183,
+    list_tools: 108,
+    create_document_report: 305,
+    extract_document_text: 242,
+    summarize_net_worth: 432,
+    render_map: 227,
+    render_places: 396,
+    render_route: 298,
+    get_openui_instructions: 101,
+    apply_patch: 297,
+    exec: 448,
+    replace_text: 362,
+    run_code: 541,
+    write_file: 261,
+    create_schedule: 314,
+    delete_schedule: 91,
+    list_schedules: 75,
+    pause_schedule: 94,
+    resume_schedule: 97,
+    create_space: 292,
+    get_space: 201,
+    list_blocks: 127,
+    list_spaces: 98,
+    revert_space: 192,
+    update_space: 482,
+    create_sub_agent: 272,
+    usage_summary: 275,
+    tavily_extract: 130,
+    tavily_search: 134,
+  },
+};
+
 /** Measured 2026-10-22 (built-in tools sent in bundles, after the tool description trim); the memory provider's tools are not captured yet, so they are not counted. */
 const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>> = {
   personal: {
@@ -312,6 +377,7 @@ const BASELINE: Record<PersonalInstanceName, Record<PromptReportTurn, Baseline>>
       },
     },
   },
+  'personal-self-hosted': { 'core-only': SELF_HOSTED, calendar: SELF_HOSTED, web: SELF_HOSTED },
 };
 
 /** Most tokens the bundle index section may take in any setup. */
@@ -319,6 +385,8 @@ const BUNDLE_INDEX_BUDGET = 300;
 
 /** Fail when a setup grows past the baseline by more than this share. */
 const HEADROOM = 0.05;
+
+const BUNDLED_NAMES = PERSONAL_INSTANCE_NAMES.filter(name => name !== 'personal-self-hosted');
 
 const CASES = PERSONAL_INSTANCE_NAMES.flatMap(name => PROMPT_REPORT_TURN_NAMES.map(turn => ({ name, turn })));
 
@@ -351,11 +419,31 @@ describe('personal instance prompt budget', () => {
     expect(report.totalTokens).toBeLessThanOrEqual(budget);
   });
 
-  it.each(PERSONAL_INSTANCE_NAMES)('keeps the bundle index of %s within its budget', async name => {
+  it.each(BUNDLED_NAMES)('keeps the bundle index of %s within its budget', async name => {
     const report = await measurePersonalInstance({ name, turn: 'core-only' });
     const index = report.sections.find(row => row.name === 'agent-capabilities/tool-bundles');
     expect(index?.tokens).toBeGreaterThan(0);
     expect(index?.tokens).toBeLessThanOrEqual(BUNDLE_INDEX_BUDGET);
+  });
+});
+
+describe('a self-hosted model', () => {
+  it('gets every built-in tool on every turn, with no bundle index and no load_bundle', async () => {
+    const bundled = await Promise.all(
+      PROMPT_REPORT_TURN_NAMES.map(turn => measurePersonalInstance({ name: 'personal', turn })),
+    );
+    const reports = await Promise.all(
+      PROMPT_REPORT_TURN_NAMES.map(turn => measurePersonalInstance({ name: 'personal-self-hosted', turn })),
+    );
+    const bundledTools = new Set(bundled.flatMap(report => report.tools.map(row => row.name)));
+    bundledTools.delete('load_bundle');
+    for (const report of reports) {
+      const tools = report.tools.map(row => row.name);
+      expect(tools).not.toContain('load_bundle');
+      expect(report.sections.map(row => row.name)).not.toContain('agent-capabilities/tool-bundles');
+      expect(tools).toEqual(expect.arrayContaining([...bundledTools]));
+      expect(report).toEqual(reports[0]);
+    }
   });
 });
 

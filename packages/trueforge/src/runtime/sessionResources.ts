@@ -43,7 +43,7 @@ import {
   slotSocketPaths,
 } from '../sandbox/slotBackend';
 import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../schemas/mcpServer';
-import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
+import type { ModelProperties, ModelProviderStreamTimeout, ModelProviderType } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
 import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
@@ -252,6 +252,13 @@ export function parseModelFqn(name: string): { providerName: string; modelName: 
   return { providerName: name.slice(0, slash), modelName: name.slice(slash + 1) };
 }
 
+/** Output cap for a self-hosted model with none configured, so one runaway reasoning pass cannot run unbounded. */
+const CUSTOM_DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+
+function defaultMaxOutputTokens(type: ModelProviderType): number | undefined {
+  return type === 'custom' ? CUSTOM_DEFAULT_MAX_OUTPUT_TOKENS : undefined;
+}
+
 /**
  * Load turn-ready model config and defaults for a configured FQN (`provider/model`).
  * Malformed FQN or missing provider/model → HTTPException(422).
@@ -271,6 +278,8 @@ export async function getModelDetails({
   modelProperties: ModelProperties;
   /** Stream progress deadlines: the provider's own, else the server-wide ones. */
   streamTimeout: Required<StreamTimeout>;
+  /** See AgentDefinition.bundleTools. */
+  bundleTools: boolean;
 }> {
   const parsed = parseModelFqn(name);
   if (parsed === undefined) {
@@ -297,6 +306,7 @@ export async function getModelDetails({
   // Provider types are adapter names, so this assignment is what keeps them so: a type with no
   // `buildLanguageModel` case fails to compile here.
   const { type, base_url: baseUrl, stream_timeout } = provider.manifest;
+  const maxTokens = model.properties.max_output_tokens ?? defaultMaxOutputTokens(type);
   return {
     providerConfig: {
       provider: { type, name: provider.name },
@@ -306,9 +316,12 @@ export async function getModelDetails({
       apiKey: provider.manifest.auth?.api_key ?? '',
       headers: {},
     },
-    defaultModelParams: model.properties.max_output_tokens ? { max_tokens: model.properties.max_output_tokens } : {},
+    defaultModelParams: maxTokens === undefined ? {} : { max_tokens: maxTokens },
     modelProperties: model.properties,
     streamTimeout: modelProviderStreamTimeout(stream_timeout),
+    // A self-hosted model often reasons at a few dozen tokens a second, so the extra model call a
+    // bundle load costs is a long wait; it gets every built-in tool up front instead.
+    bundleTools: type !== 'custom',
   };
 }
 

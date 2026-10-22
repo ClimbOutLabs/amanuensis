@@ -69,6 +69,7 @@ async function runTurn(input: {
   message?: string;
   history?: ContextMessage[];
   capabilityState?: CapabilityState | undefined;
+  bundleTools?: boolean | undefined;
 }) {
   const sets = toolSets();
   const requests: LLMCreateParamsStreaming[] = [];
@@ -96,7 +97,13 @@ async function runTurn(input: {
     threadId: 'main',
     title: 'Main',
     turnToolCallLedger: undefined,
-    definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test' },
+    definition: {
+      modelId: undefined,
+      configuredModels: undefined,
+      modelClient,
+      instruction: 'test',
+      bundleTools: input.bundleTools,
+    },
     context: [...(input.history ?? []), { role: 'user', content: input.message ?? 'Thanks!' }],
     capabilities,
     capabilityState: input.capabilityState,
@@ -302,5 +309,21 @@ describe('finding a bundle by name', () => {
 
   it('finds only bundles offered here', () => {
     expect(findBundle({ name: 'maps', offered: ['spaces'] })).toEqual({ closest: 'spaces' });
+  });
+});
+
+describe('a model that opts out of bundles', () => {
+  it('gets every built-in tool and every bundle section on its first request, with no load_bundle', async () => {
+    const { requests } = await runTurn({ steps: ['answer'], bundleTools: false });
+    expect(requests).toHaveLength(1);
+    expect(sentNames(requests[0]).sort()).toEqual(['add_note', 'list_notes', 'render_map', 'what_time']);
+    expect(systemPrompt(requests[0])).toContain('Spaces hold the notes');
+    expect(systemPrompt(requests[0])).not.toContain('<tool-bundles>');
+  });
+
+  it('keeps bundles for a model that does not opt out', async () => {
+    const { requests } = await runTurn({ steps: ['answer'], bundleTools: true });
+    expect(sentNames(requests[0])).toEqual(['load_bundle', 'what_time']);
+    expect(bundleIndex(requests[0])).toContain('- spaces:');
   });
 });

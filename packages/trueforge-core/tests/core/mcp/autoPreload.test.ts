@@ -120,7 +120,7 @@ describe('MCP auto-preload', () => {
 
     // The same failure resurfaces, in tool result text, the next time the server is actually used
     // through the deferred meta-tools — no special-casing needed beyond the existing error wrapping.
-    const deferredTool = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
+    const deferredTool = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger(), bundled: true });
     const result = await deferredTool.callTool({
       name: 'call_tool',
       arguments: { mcp_server: 'flaky', tool_name: 'tool_0', input: {} },
