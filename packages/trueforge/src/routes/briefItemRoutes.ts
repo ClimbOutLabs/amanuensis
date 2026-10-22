@@ -1,10 +1,11 @@
 import { createRoute } from '@hono/zod-openapi';
 import {
-  BriefItemCompletionSchema,
   BriefItemKeyParamSchema,
+  DeleteBriefItemDoneResponseSchema,
   ListBriefItemCompletionsRequestQuerySchema,
   ListBriefItemCompletionsResponseSchema,
   MarkBriefItemDoneRequestSchema,
+  MarkBriefItemDoneResponseSchema,
 } from '../schemas/briefItems';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { OpenApiTag } from './openapiTags';
@@ -27,8 +28,8 @@ export const markBriefItemDoneRoute = createRoute({
     body: { content: { 'application/json': { schema: MarkBriefItemDoneRequestSchema } }, required: true },
   },
   responses: {
-    200: {
-      content: { 'application/json': { schema: BriefItemCompletionSchema } },
+    201: {
+      content: { 'application/json': { schema: MarkBriefItemDoneResponseSchema } },
       description: 'The item as marked done.',
     },
     400: {
@@ -54,7 +55,10 @@ export const undoBriefItemDoneRoute = createRoute({
   'x-fern-sdk-method-name': 'undo',
   request: { params: BriefItemKeyParamSchema },
   responses: {
-    204: { description: 'The item is no longer marked done.' },
+    200: {
+      content: { 'application/json': { schema: DeleteBriefItemDoneResponseSchema } },
+      description: 'The item is no longer marked done.',
+    },
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid item key.',

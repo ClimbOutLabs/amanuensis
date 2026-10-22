@@ -691,6 +691,7 @@
         "type": "object"
       },
       "BriefItemCompletion": {
+        "description": "The item as marked done.",
         "properties": {
           "completed_at": {
             "description": "When the item was marked done, ISO 8601 UTC.",
@@ -2280,6 +2281,10 @@
         "type": "object"
       },
       "DeleteAgentResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteBriefItemDoneResponse": {
         "properties": {},
         "type": "object"
       },
@@ -5563,6 +5568,17 @@
           "section",
           "title",
           "session_id"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BriefItemCompletion"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -22812,11 +22828,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BriefItemCompletion"
+                  "$ref": "#/components/schemas/MarkBriefItemDoneResponse"
                 }
               }
             },
@@ -22882,7 +22898,14 @@
           }
         ],
         "responses": {
-          "204": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBriefItemDoneResponse"
+                }
+              }
+            },
             "description": "The item is no longer marked done."
           },
           "400": {

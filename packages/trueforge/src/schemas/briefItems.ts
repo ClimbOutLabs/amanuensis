@@ -22,6 +22,12 @@ export const MarkBriefItemDoneRequestSchema = z
   })
   .openapi('MarkBriefItemDoneRequest');
 
+export const MarkBriefItemDoneResponseSchema = z
+  .object({ data: BriefItemCompletionSchema.describe('The item as marked done.') })
+  .openapi('MarkBriefItemDoneResponse');
+
+export const DeleteBriefItemDoneResponseSchema = z.object({}).openapi('DeleteBriefItemDoneResponse');
+
 export const BriefItemKeyParamSchema = z
   .object({ item_key: ItemKeySchema.describe('Client key of the brief item.') })
   .openapi('BriefItemKeyParam');

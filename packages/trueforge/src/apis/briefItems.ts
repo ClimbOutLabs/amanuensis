@@ -50,7 +50,7 @@ export function createBriefItemsRouter(deps: BriefItemsRouterDeps) {
       outcome: 'logged',
       auto_deny_reason: null,
     });
-    return c.json(completion, 200);
+    return c.json({ data: completion }, 201);
   };
 
   const undoHandler: RouteHandler<typeof undoBriefItemDoneRoute> = async c => {
@@ -70,7 +70,7 @@ export function createBriefItemsRouter(deps: BriefItemsRouterDeps) {
         auto_deny_reason: null,
       });
     }
-    return c.body(null, 204);
+    return c.json({}, 200);
   };
 
   const listHandler: RouteHandler<typeof listBriefItemCompletionsRoute> = async c => {

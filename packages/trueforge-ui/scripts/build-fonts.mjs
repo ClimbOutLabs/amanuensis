@@ -9,13 +9,11 @@
  * keeps the font genuinely bundled. Run with `pnpm build:fonts`.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const pkgDir = dirname(require.resolve('@fontsource/inter-tight/package.json'));
-const serifPkgDir = dirname(require.resolve('@fontsource/newsreader/package.json'));
+const pkgDir = dirname(fileURLToPath(import.meta.resolve('@fontsource/inter-tight/package.json')));
+const serifPkgDir = dirname(fileURLToPath(import.meta.resolve('@fontsource/newsreader/package.json')));
 const outPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'fonts.css');
 
 const WEIGHTS = [400, 500, 600, 700];
