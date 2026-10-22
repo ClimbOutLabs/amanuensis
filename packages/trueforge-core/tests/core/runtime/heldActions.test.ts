@@ -10,6 +10,7 @@ import { InvalidAgentSendInputError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import type { ToolSource } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../../src/core/mcp/ToolSet';
@@ -26,6 +27,7 @@ import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadConstructorInput } from '../../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import { REMOVED_TOOL_RESULT } from '../../../src/core/runtime/replyBudget';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
@@ -134,6 +136,8 @@ interface Harness {
     context?: AgentThreadConstructorInput['context'];
     stopAfterToolResponse?: boolean;
     reuseLlm?: boolean;
+    /** The turn's ledger, for a reply that already removed a tool. */
+    turnToolCallLedger?: TurnToolCallLedger;
   }) => { thread: AgentThread; orchestrator: AgentThreadOrchestrator };
 }
 
@@ -227,7 +231,7 @@ function makeHarness(
         ],
         capabilityState: undefined,
         toolCallMemo: undefined,
-        turnToolCallLedger: undefined,
+        turnToolCallLedger: input.turnToolCallLedger,
         taskState: undefined,
         isRequestContinuation: input.context !== undefined,
         sentinel,
@@ -273,6 +277,29 @@ function approve(callId: string, scope?: 'once' | 'chat' | 'always') {
 }
 
 describe('an unattended run', () => {
+  it('a tool removed from the reply is refused before any hold, with no card and no run', async () => {
+    const h = makeHarness([() => toolCallsStream([sendNoteCall])]);
+    const turnToolCallLedger = createTurnToolCallLedger();
+    turnToolCallLedger.removedTools.push('send_note');
+    const { thread } = h.build({
+      unattended: true,
+      context: [{ role: 'user', content: 'Morning brief' }],
+      turnToolCallLedger,
+    });
+    const events: { type: string; content?: unknown }[] = [];
+    for await (const event of thread.execute({ signal: new AbortController().signal })) {
+      events.push(event as { type: string; content?: unknown });
+    }
+
+    expect(h.callTool).not.toHaveBeenCalled();
+    expect(events.map(event => event.type)).not.toContain(EventType.TOOL_APPROVAL_REQUIRED);
+    // The refusal is recorded as an automatic denial, never as a hold for the owner.
+    expect(h.audit).toEqual([
+      expect.objectContaining({ outcome: 'auto_denied', auto_deny_reason: 'tool_not_prepared' }),
+    ]);
+    expect(JSON.stringify(thread.toSnapshot().context)).toContain(REMOVED_TOOL_RESULT);
+  });
+
   it('holds a call that would ask, finishes without stopping, and never dispatches it', async () => {
     const h = makeHarness([() => toolCallsStream([sendNoteCall])]);
     const { thread, brief } = await runBrief(h);

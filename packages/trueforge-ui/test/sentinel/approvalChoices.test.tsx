@@ -33,6 +33,7 @@ describe('approval choices', () => {
   it('shows the safe verb, the quiet no, and Approve for this chat in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
+        approvalId="approval-1"
         othersWaiting={0}
         card={card}
         onApprove={vi.fn()}

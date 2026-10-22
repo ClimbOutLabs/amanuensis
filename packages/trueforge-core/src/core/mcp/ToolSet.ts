@@ -29,10 +29,13 @@ import {
 } from '../permissions/webSearch';
 import {
   isPageReaderTool,
+  isSearchResultTool,
   recordFetchedPages,
+  recordSearchResults,
   type FetchedPageScope,
   type FetchedPageStore,
 } from '../search/fetchedPages';
+import { TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -343,6 +346,24 @@ export class ToolSet implements IToolSet {
       // Only Aman's own page readers record: a tool from any other server may echo its input, so its
       // text is never a page the model read.
       recordFetchedPages({
+        pages: this.pages,
+        scope: this.pagesScope,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
+    }
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true &&
+      isSearchResultTool(params.name) &&
+      ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
+        (this.searchProvider && this.searchTools.has(params.name)))
+    ) {
+      // A search's results are sources, one link at a time; its query and any answer it wrote are not.
+      // A provider's search_tools list also holds its page readers, so only named search tools count.
+      recordSearchResults({
         pages: this.pages,
         scope: this.pagesScope,
         toolArguments: params.arguments ?? {},

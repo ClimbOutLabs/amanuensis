@@ -156,6 +156,7 @@ describe('download_attachment follows the chat sandbox', () => {
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
         sessionId: 's1',
         logger,
+        startsAnswer: true,
       },
       {
         store: new FakeTurnArtifactStore(),
