@@ -2,8 +2,10 @@ import dedent from 'dedent';
 import type { Logger } from 'winston';
 import { estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
+import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
 import { createSandboxLargeToolResponseGuidance, SANDBOX_SCHEMA_INFER_TAG } from '../../sandbox/Sandbox';
+import { TAVILY_EXTRACT_TOOL_NAME } from '../../search/TavilyClient';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { extractErrorLogFields } from '../../util/errorLogFields';
 import type { AgentCapability } from '../AgentCapability';
@@ -187,6 +189,239 @@ function sandboxRawOutputStorageGuidance(content: string): string {
     return 'Raw output storage: raw_output.storage_status=failed; durable storage failed, so the complete output is not available from a raw_output artifact.';
   }
   return 'Raw output storage: raw_output.storage_status=unavailable; this unbounded result has no durable raw_output artifact.';
+}
+
+/**
+ * Ingestion budgets. Each one bounds what a tool result contributes to the history the model
+ * resends on every later step. The full result is never changed upstream: grounding records fetched
+ * page text in ToolSet before this pass runs. Space bodies are not budgeted: a shortened body could be
+ * written back over the whole space by update_space.
+ */
+export const PAGE_READ_TOKEN_BUDGET = 2_500;
+export const SANDBOX_OUTPUT_EDGE_LINES = 40;
+
+const EXEC_OUTPUT_HINT =
+  'To see other lines, call exec again with output.head_lines, output.tail_lines or output.grep.';
+const RUN_CODE_OUTPUT_HINT = 'The other lines are not available from this result.';
+
+/** Words of at least four letters or digits, lowercased: the terms a page section may be kept for. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+}
+
+function userMessageText(message: ContextMessage): string | undefined {
+  if (!('role' in message) || message.role !== 'user') {
+    return undefined;
+  }
+  const { content } = message;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  return content.map(part => (part.type === 'text' ? part.text : '')).join(' ');
+}
+
+/** The words of the latest user message: the request a fetched page section is kept for. */
+function requestWordsOf(context: readonly ContextMessage[]): Set<string> {
+  for (const message of [...context].reverse()) {
+    const text = userMessageText(message);
+    if (text !== undefined) {
+      return new Set(wordsOf(text));
+    }
+  }
+  return new Set();
+}
+
+function mentionsRequest(block: string, request: ReadonlySet<string>): boolean {
+  return wordsOf(block).some(word => request.has(word));
+}
+
+/** Cuts text to about maxTokens. estimateTokensForString counts four characters per token. */
+function cutToTokens(text: string, maxTokens: number): string {
+  return text.slice(0, Math.floor(maxTokens * 4));
+}
+
+/**
+ * Keeps the opening block, then each heading with its first paragraph, and any paragraph that mentions a
+ * word from the request, in page order, until the token budget is spent. The opening block is always kept,
+ * cut to the budget if it alone is larger, so a page never comes back as only its note.
+ */
+export function budgetPageText(input: { text: string; request: ReadonlySet<string>; maxTokens: number }): string {
+  const { text, request, maxTokens } = input;
+  const totalTokens = estimateTokensForString(text);
+  if (totalTokens <= maxTokens) {
+    return text;
+  }
+  const blocks = text.split(/\n{2,}/);
+  // A group is one block to keep whole: a heading with its first paragraph, or one paragraph.
+  const structural: number[][] = [];
+  const requested: number[][] = [];
+  let openHeading: number[] | undefined;
+  blocks.forEach((block, index) => {
+    if (/^#{1,6}\s/.test(block.trim())) {
+      openHeading = [index];
+      structural.push(openHeading);
+      return;
+    }
+    if (openHeading !== undefined) {
+      openHeading.push(index);
+      openHeading = undefined;
+      return;
+    }
+    if (mentionsRequest(block, request)) {
+      requested.push([index]);
+    }
+  });
+
+  const kept = new Map<number, string>([[0, cutToTokens(blocks[0] ?? '', maxTokens)]]);
+  let keptTokens = estimateTokensForString(kept.get(0) ?? '');
+  for (const group of [...structural, ...requested]) {
+    const pending = group.filter(index => !kept.has(index));
+    const cost = pending.reduce((sum, index) => sum + estimateTokensForString(blocks[index] ?? ''), 0);
+    if (pending.length === 0 || keptTokens + cost > maxTokens) {
+      continue;
+    }
+    for (const index of pending) {
+      kept.set(index, blocks[index] ?? '');
+    }
+    keptTokens += cost;
+  }
+
+  const body = [...kept.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, block]) => block)
+    .join('\n\n');
+  const omitted = Math.max(0, Math.round(totalTokens - estimateTokensForString(body)));
+  return `${body}\n\n(Only part of this page is shown: about ${String(omitted)} more tokens were left out, and no tool can show them.)`;
+}
+
+/** Trims each page's text in a Tavily extract result to the page budget. The JSON shape stays. */
+export function budgetExtractPages(input: { content: string; request: ReadonlySet<string> }): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed['pages'])) {
+    return undefined;
+  }
+  const pages: unknown[] = [];
+  let changed = false;
+  for (const page of parsed['pages']) {
+    const original = isRecord(page) ? page['text'] : undefined;
+    if (!isRecord(page) || typeof original !== 'string') {
+      pages.push(page);
+      continue;
+    }
+    const text = budgetPageText({ text: original, request: input.request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+    changed ||= text !== original;
+    pages.push({ ...page, text });
+  }
+  return changed ? JSON.stringify({ ...parsed, pages }) : undefined;
+}
+
+/** Keeps the first and last lines of a long stream; a short one is returned unchanged. */
+function keepEdgeLines(text: string, hint: string): string {
+  const lines = text.split('\n');
+  if (lines.length <= SANDBOX_OUTPUT_EDGE_LINES * 2) {
+    return text;
+  }
+  const omitted = lines.length - SANDBOX_OUTPUT_EDGE_LINES * 2;
+  return [
+    ...lines.slice(0, SANDBOX_OUTPUT_EDGE_LINES),
+    `... ${String(omitted)} lines left out. ${hint} ...`,
+    ...lines.slice(-SANDBOX_OUTPUT_EDGE_LINES),
+  ].join('\n');
+}
+
+/**
+ * Trims long output in a sandbox result: exec keeps it in response.result, run_code at the top-level stdout
+ * and stderr. The exit code is a separate field and stays.
+ */
+export function budgetSandboxOutput(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  const next: Record<string, unknown> = { ...parsed };
+  let changed = false;
+  for (const key of ['stdout', 'stderr']) {
+    const value = parsed[key];
+    if (typeof value === 'string') {
+      const trimmed = keepEdgeLines(value, RUN_CODE_OUTPUT_HINT);
+      if (trimmed !== value) {
+        next[key] = trimmed;
+        changed = true;
+      }
+    }
+  }
+  const response = parsed['response'];
+  if (isRecord(response) && typeof response['result'] === 'string') {
+    const trimmed = keepEdgeLines(response['result'], EXEC_OUTPUT_HINT);
+    if (trimmed !== response['result']) {
+      next['response'] = { ...response, result: trimmed };
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(next) : undefined;
+}
+
+/**
+ * Applies each tool's ingestion budget to the results in place, before the processor measures them.
+ * Failures and screened-out results are left alone: the first is already a short message, the second
+ * is never shown to the model.
+ */
+function applyIngestionBudgets(input: {
+  results: ToolCallResult[];
+  sandbox: Sandbox | undefined;
+  context: readonly ContextMessage[];
+}): void {
+  let request: Set<string> | undefined;
+  for (const result of input.results) {
+    if (result.failure || result.screen?.action === 'withheld' || !result.info) {
+      continue;
+    }
+    const content = result.message.content;
+    const toolName = result.info.originalToolName;
+    let budgeted: string | undefined;
+    if (input.sandbox && result.info.toolSet === input.sandbox) {
+      budgeted = budgetSandboxOutput(content);
+    } else if (toolName === TAVILY_EXTRACT_TOOL_NAME) {
+      request ??= requestWordsOf(input.context);
+      budgeted = budgetExtractPages({ content, request });
+    } else if (toolName === 'web_fetch') {
+      request ??= requestWordsOf(input.context);
+      const text = budgetPageText({ text: content, request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+      budgeted = text === content ? undefined : text;
+    }
+    if (budgeted !== undefined) {
+      result.message.content = budgeted;
+      result.outputTransform = 'truncated';
+    }
+  }
+}
+
+/** Runs the ingestion budgets on every chat, before the size thresholds see the results. */
+export class IngestionBudgetProcessor implements ToolResponseProcessor {
+  process(
+    results: ToolCallResult[],
+    execution: Readonly<AgentThreadExecutionContext>,
+  ): Promise<ToolResponseProcessorResult> {
+    applyIngestionBudgets({ results, sandbox: execution.sandbox, context: execution.context });
+    return Promise.resolve({});
+  }
+}
+
+export function ingestionBudgets(): AgentCapability {
+  return { toolResponseProcessors: [new IngestionBudgetProcessor()] };
 }
 
 export class LargeToolResponseProcessor implements ToolResponseProcessor {

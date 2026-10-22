@@ -3,6 +3,10 @@ import { builtinsFromSpec } from '../../src/agent-session/builtinsFromSpec';
 import { AgentSpecSchema } from '../../src/agent-session/schemas/agentSpec';
 import { COMPACTION_TOUCHED_PATHS_STATE_KEY } from '../../src/core/capabilities/builtins/ContextCompaction';
 import {
+  IngestionBudgetProcessor,
+  LargeToolResponseProcessor,
+} from '../../src/core/capabilities/builtins/LargeToolResponse';
+import {
   GET_OPENUI_INSTRUCTIONS_TOOL_NAME,
   OPENUI_SERVER_ID,
   buildOpenUIInstruction,
@@ -126,6 +130,20 @@ describe('builtinsFromSpec compaction', () => {
       }),
     });
     expect(hasCompactionProcessor(capabilities)).toBe(false);
+  });
+});
+
+describe('builtinsFromSpec ingestion budgets', () => {
+  it('applies the ingestion budgets when large_tool_response is off', () => {
+    const capabilities = runBuiltins({
+      spec: AgentSpecSchema.parse({
+        model: { name: 'provider/model' },
+        config: { context_management: { large_tool_response: { enabled: false } } },
+      }),
+    });
+    const processors = capabilities.flatMap(cap => cap.toolResponseProcessors ?? []);
+    expect(processors.some(processor => processor instanceof IngestionBudgetProcessor)).toBe(true);
+    expect(processors.some(processor => processor instanceof LargeToolResponseProcessor)).toBe(false);
   });
 });
 

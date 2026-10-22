@@ -43,6 +43,9 @@ interface DraftList {
   nextPageToken: string | undefined;
 }
 
+/** The public calls a Gmail source must answer. The live client and the eval fixtures both satisfy it. */
+export type GmailApiPort = Pick<GmailApi, keyof GmailApi>;
+
 export class GmailApi {
   readonly #rest: GoogleRestClient;
 

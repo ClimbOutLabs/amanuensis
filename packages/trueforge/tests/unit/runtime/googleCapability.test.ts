@@ -2,12 +2,15 @@ import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
 import { defaultSentinelServices, forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import path from 'node:path';
 import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { buildEvalSources } from '../../../src/eval/fixtures';
 import { googleCapability } from '../../../src/runtime/googleCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 
 const OWNER = { tenant_id: 't1', created_by: 'ada' };
+const EVAL_FIXTURE_DIR = path.resolve(__dirname, '..', '..', '..', 'evals', 'fixtures');
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 
@@ -40,6 +43,7 @@ describe('googleCapability for mail', () => {
   const mount = (owner = OWNER, unattended = false) =>
     googleCapability({
       connections: store,
+      evalSources: undefined,
       owner,
       tracing: NOOP_AGENT_TRACING,
       sentinel: createSentinelHostContext({
@@ -66,6 +70,27 @@ describe('googleCapability for mail', () => {
 
   it('mounts nothing for a user who never connected', async () => {
     expect(await mount()).toBeUndefined();
+  });
+
+  it('in eval mode mounts the fixture mail and calendar tools with no stored login', async () => {
+    const capability = await googleCapability({
+      connections: undefined,
+      evalSources: buildEvalSources(EVAL_FIXTURE_DIR),
+      owner: OWNER,
+      tracing: NOOP_AGENT_TRACING,
+      sentinel: createSentinelHostContext({
+        ...OWNER,
+        conversation_id: 'c1',
+        services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      }),
+      attachmentStager: undefined,
+      logger: createLogger({ silent: true }),
+      timeZone: undefined,
+      fetchImpl: () => Promise.reject(new Error('no network in eval mode')),
+    });
+    expect(await toolNames(capability)).toEqual(
+      expect.arrayContaining(['read_email', 'draft_email', 'list_events', 'create_event']),
+    );
   });
 
   it('mounts the read tools for a connected user', async () => {
@@ -122,6 +147,7 @@ describe('googleCapability for calendar', () => {
   const mount = (owner = OWNER, unattended = false) =>
     googleCapability({
       connections: store,
+      evalSources: undefined,
       owner,
       tracing: NOOP_AGENT_TRACING,
       timeZone: 'America/Sao_Paulo',
