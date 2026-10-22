@@ -23,8 +23,8 @@ export interface FetchedPageScope {
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_PAGES = 50;
 
-/** Longest page text kept for checking a place claim; the same bound the Tavily reader hands the model. */
-export const FETCHED_PAGE_TEXT_MAX_CHARS = 8000;
+/** Longest page text kept for checking a place claim. Well above the page read budget (about 10,000 characters), so the full page fits. */
+export const FETCHED_PAGE_TEXT_MAX_CHARS = 64_000;
 
 /** Longest link kept as a store key. A longer link is not recorded; a page a person reads has a far shorter one. */
 const MAX_STORED_URL_CHARS = 2048;
