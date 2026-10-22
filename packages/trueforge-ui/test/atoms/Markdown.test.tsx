@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -223,6 +223,18 @@ describe('Markdown', () => {
     expect(img).toHaveAttribute('src', 'data:image/png;base64,AAAA');
   });
 
+  it('wraps a table on a read-only space page in its own scroll frame', () => {
+    const { container } = render(<Markdown content={'| A | B |\n| - | - |\n| 1 | 2 |'} readOnly />);
+    const frame = container.querySelector('.space-table-frame');
+    expect(frame?.querySelector('.space-table-scroll table')).not.toBeNull();
+  });
+
+  it('leaves a table in chat as a plain table', () => {
+    const { container } = render(<Markdown content={'| A | B |\n| - | - |\n| 1 | 2 |'} />);
+    expect(container.querySelector('.space-table-frame')).toBeNull();
+    expect(container.querySelector('table')).not.toBeNull();
+  });
+
   it('renders a placeholder instead of a live img for remote markdown images', () => {
     render(<Markdown content="![alt text](https://example.com/pic.png)" />);
     expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
@@ -397,12 +409,30 @@ describe('Markdown remote images', () => {
     expect(placeholder).toHaveTextContent('sales chart');
   });
 
-  it('opens the remote image in a new tab when the placeholder is activated', () => {
+  it('offers an open-in-a-new-tab link on the thumbnail', () => {
     render(<Markdown content="![x](https://evil.example/p.png)" />);
-    const placeholder = screen.getByTestId('aui-remote-image-placeholder');
-    expect(placeholder).toHaveAttribute('href', 'https://evil.example/p.png');
-    expect(placeholder).toHaveAttribute('target', '_blank');
-    expect(placeholder).toHaveAttribute('rel', 'noopener noreferrer');
+    const link = within(screen.getByTestId('aui-remote-image-placeholder')).getByRole('link', { name: 'Open image' });
+    expect(link).toHaveAttribute('href', 'https://evil.example/p.png');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('keeps the remote image off the page until the person asks for it', () => {
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    expect(document.querySelector('img[src="https://evil.example/p.png"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    const img = screen.getByRole('img', { name: 'sales chart' });
+    expect(img).toHaveAttribute('src', 'https://evil.example/p.png');
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('shows the alt text, not an empty box, when a requested remote image fails', () => {
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    fireEvent.error(screen.getByRole('img', { name: 'sales chart' }));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toHaveTextContent('Image unavailable: sales chart');
   });
 
   it('still renders data: images inline', () => {
@@ -433,6 +463,48 @@ describe('Markdown remote images', () => {
     const { container } = render(<Markdown content="![x]()" />);
     expect(container.querySelector('img')).not.toBeInTheDocument();
     expect(screen.queryByTestId('aui-remote-image-placeholder')).not.toBeInTheDocument();
+  });
+});
+
+describe('Markdown space pictures', () => {
+  const PICTURE = 'https://cdn.photos.test/chart.png';
+  const ROUTE = `/api/space-pictures?url=${encodeURIComponent(PICTURE)}`;
+
+  it('loads an https picture on its own through the owner’s picture route, with no referrer', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} spacePictures />);
+    expect(screen.queryByRole('button', { name: 'Show image: sales chart' })).toBeNull();
+    const img = screen.getByRole('img', { name: 'sales chart' });
+    expect(img).toHaveAttribute('src', ROUTE);
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('shows the one plain line when the picture cannot be shown', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} spacePictures />);
+    fireEvent.error(screen.getByRole('img', { name: 'sales chart' }));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByTestId('aui-space-picture-failed')).toHaveTextContent('This picture could not be shown.');
+  });
+
+  it('keeps a picture that is not https as a plain link, never an image', () => {
+    const { container } = render(<Markdown content="![sales chart](http://cdn.photos.test/chart.png)" spacePictures />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'sales chart' })).toHaveAttribute(
+      'href',
+      'http://cdn.photos.test/chart.png',
+    );
+  });
+
+  it('keeps a protocol-relative picture as a plain link', () => {
+    const { container } = render(<Markdown content="![x](//cdn.photos.test/chart.png)" spacePictures />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'x' })).toBeInTheDocument();
+  });
+
+  it('keeps the click-to-load thumbnail on read-only pages that are not spaces', () => {
+    render(<Markdown content={`![sales chart](${PICTURE})`} readOnly />);
+    expect(screen.getByRole('button', { name: 'Show image: sales chart' })).toBeInTheDocument();
+    expect(document.querySelector('img')).toBeNull();
   });
 });
 

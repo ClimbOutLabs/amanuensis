@@ -8,18 +8,10 @@ import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
-import type { AgentSpec } from '@/server/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
-let agentSpec: AgentSpec | null | undefined;
-const updateAgentSpec = vi.fn();
 const fetchMock = vi.fn();
-
-vi.mock('@truefoundry/assistant-ui-runtime', () => ({
-  useTrueFoundryAgentSpec: () => ({ agentSpec }),
-  useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
-}));
 
 // Walks up from wherever the runner started, so the stylesheet is found whether vitest
 // runs in the package or at the monorepo root. import.meta.url is not a file URL here.
@@ -39,8 +31,6 @@ const findStylesheet = (): string => {
 describe('AmanRuntimeRail', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    agentSpec = undefined;
-    updateAgentSpec.mockClear();
     fetchMock.mockReset();
     // The probe stays in flight unless a test overrides the mock, so sync tests
     // never see a post-assertion status flip.
@@ -264,77 +254,38 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByText(/^Release /)).not.toBeInTheDocument();
   });
 
-  it('shows the memory bank in use', () => {
-    render(
+  it('does not show a signed-in name or a memory status row', () => {
+    const { container } = render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
+        <PersonalizationProvider
+          api={{
+            getProfile: async () => ({
+              assistant_name: null,
+              assistant_identity: null,
+              voice_guidance: null,
+              user_name: 'Maria',
+              address_as: 'Mum',
+              user_profile: null,
+              pinned_preferences: [],
+              help_areas: [],
+              learned_profile: null,
+            }),
+            updateProfile: async profile => profile,
+            deleteProfile: async () => {},
+          }}
+        >
+          <AmanRuntimeRail modelName="local-model" />
+        </PersonalizationProvider>
       </RuntimeHarness>,
     );
 
-    expect(screen.getByText('Memory')).toBeInTheDocument();
-    expect(screen.getByText('amantest · on')).toBeInTheDocument();
-  });
-
-  it('shows the memory recall switch checked by default', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByRole('checkbox', { name: 'Toggle memory recall' })).toBeChecked();
-  });
-
-  it('calls updateAgentSpec with memory.recallEnabled false when the switch is clicked', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
-      </RuntimeHarness>,
-    );
-
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Toggle memory recall' }));
-
-    expect(updateAgentSpec).toHaveBeenCalledWith({
-      config: {
-        memory: {
-          recallEnabled: false,
-        },
-      },
-    });
-  });
-
-  it('says a bank that still needs sign-in is not on, and links to settings', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: false }} settingsHref="/settings" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText(/amantest · needs sign-in/)).toBeInTheDocument();
-    expect(screen.queryByText('amantest · on')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'sign in' })).toHaveAttribute('href', '/settings');
-  });
-
-  it('says memory is off and links to settings when no bank is configured', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail memoryBank={null} settingsHref="/settings" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText('Memory')).toBeInTheDocument();
-    expect(screen.getByText(/^Off/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'set up' })).toHaveAttribute('href', '/settings');
-  });
-
-  it('leaves the memory row out when the host could not find out', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.queryByText('Memory')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'You' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Memory' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Mum')).not.toBeInTheDocument();
+    expect(screen.queryByText('Maria')).not.toBeInTheDocument();
+    expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-section="account"]')).toBeNull();
+    expect(container.querySelector('[data-section="memory"]')).toBeNull();
   });
 
   it('renders an accessible fallback when no avatar is configured', () => {
@@ -377,86 +328,21 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
   });
 
-  it('groups the rail into labeled signed-in, answering, model, and memory sections', () => {
+  it('groups the rail into labeled answering and model sections', () => {
     render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail
-          modelName="local-model"
-          version="0.4.2"
-          memoryBank={{ name: 'amantest', connected: true }}
-          userName="Alex"
-          personaName="Mannie"
-        />
+        <AmanRuntimeRail modelName="local-model" version="0.4.2" personaName="Mannie" />
       </RuntimeHarness>,
     );
 
-    expect(screen.getByRole('heading', { name: 'You' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Answering' })).toBeInTheDocument();
     // The model moved behind Details; the section heading is gone from the rail itself.
     expect(screen.queryByRole('heading', { name: 'Model' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Memory' })).toBeInTheDocument();
-
-    // The props actually drive the conditional sections.
-    expect(screen.getByText('Alex')).toBeInTheDocument();
     expect(screen.getByText('Mannie')).toBeInTheDocument();
 
     // Old labels must not reappear.
     expect(screen.queryByRole('heading', { name: 'Status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
-  });
-
-  describe('the You row', () => {
-    const profileWith = (names: { address_as: string | null; user_name: string | null }) => ({
-      assistant_name: null,
-      assistant_identity: null,
-      voice_guidance: null,
-      ...names,
-      user_profile: null,
-      pinned_preferences: [],
-      help_areas: [],
-      learned_profile: null,
-    });
-
-    const renderRail = ({ profile, userName }: { profile: ReturnType<typeof profileWith> | null; userName?: string }) =>
-      render(
-        <RuntimeHarness messages={[]}>
-          <PersonalizationProvider
-            api={{
-              getProfile: async () => profile,
-              updateProfile: async value => value,
-              deleteProfile: async () => {},
-            }}
-          >
-            <AmanRuntimeRail userName={userName} />
-          </PersonalizationProvider>
-        </RuntimeHarness>,
-      );
-
-    it('shows the name the person asked to be called first', async () => {
-      renderRail({
-        profile: profileWith({ address_as: 'Mum', user_name: 'Maria' }),
-        userName: 'maria@example.com',
-      });
-
-      expect(await screen.findByText('Mum')).toBeInTheDocument();
-      expect(screen.queryByText('Maria')).not.toBeInTheDocument();
-    });
-
-    it('shows the name the person gave ahead of the sign-in name', async () => {
-      renderRail({ profile: profileWith({ address_as: null, user_name: 'Maria' }), userName: 'owner' });
-
-      expect(await screen.findByText('Maria')).toBeInTheDocument();
-    });
-
-    it('never shows the sign-in name owner, and hides the row when nothing else is set', async () => {
-      const { container } = renderRail({
-        profile: profileWith({ address_as: null, user_name: null }),
-        userName: 'owner',
-      });
-
-      expect(screen.queryByText('owner')).not.toBeInTheDocument();
-      expect(container.querySelector('[data-section="account"]')).toBeNull();
-    });
   });
 
   it('shows the probe latency next to a ready status', async () => {
@@ -637,7 +523,7 @@ describe('AmanRuntimeRail', () => {
   });
 });
 
-describe('AmanRuntimeRail receipt, rules and Needs you', () => {
+describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
   const settingsStub: SentinelUserSettings = {
     offline_mode: false,
     tier2_auto_allow: [],
@@ -658,7 +544,6 @@ describe('AmanRuntimeRail receipt, rules and Needs you', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
-    agentSpec = undefined;
     fetchMock.mockImplementation(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -667,14 +552,14 @@ describe('AmanRuntimeRail receipt, rules and Needs you', () => {
     vi.unstubAllGlobals();
   });
 
-  it('puts the panda first, then the status line, Needs you, Your rules and the receipt', async () => {
+  it('puts the panda first, then the status line, Needs you, Your rules and Recent actions', async () => {
     render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
           <AmanRuntimeRail
             avatarSrc="/aman-avatar.png"
             pendingApprovalIds={['approval-1']}
-            auditFeed={<p>Receipt body</p>}
+            auditFeed={<p>Recent actions body</p>}
             settingsHref="/settings"
           />
         </RuntimeHarness>
@@ -684,8 +569,10 @@ describe('AmanRuntimeRail receipt, rules and Needs you', () => {
     const order = Array.from(document.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order.slice(0, 4)).toEqual(['panda', 'needs-you', 'rules', 'receipt']);
-    expect(screen.getByText('Receipt body')).toBeInTheDocument();
+    expect(order.slice(0, 4)).toEqual(['panda', 'needs-you', 'rules', 'recent-actions']);
+    expect(screen.getByRole('region', { name: 'Recent actions' })).toContainElement(
+      screen.getByText('Recent actions body'),
+    );
     expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
   });
 

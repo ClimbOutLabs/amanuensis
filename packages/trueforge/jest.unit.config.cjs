@@ -35,6 +35,7 @@ module.exports = {
     '^@truefoundry/trueforge-core/request-reply/(.*)$': '<rootDir>/../trueforge-core/src/request-reply/$1',
     '^@truefoundry/trueforge-core/core$': '<rootDir>/../trueforge-core/src/core/index.ts',
     '^@truefoundry/trueforge-core/core/(.*)$': '<rootDir>/../trueforge-core/src/core/$1',
+    '^@truefoundry/trueforge-core/schemas/(.*)$': '<rootDir>/../trueforge-core/src/schemas/$1',
   },
   testTimeout: 30_000,
   maxWorkers: '50%',

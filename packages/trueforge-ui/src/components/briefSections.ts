@@ -81,18 +81,18 @@ export function parseBrief(markdown: string): BriefSection[] | null {
 
 export type BriefAuditSummary = {
   /** Things Aman read without changing anything, from the chat's audit log. */
-  readQuietly: number;
+  readAllowed: number;
   /** Actions that ran or were approved. Zero means nothing was sent. */
   actionsRan: number;
 };
 
 /** Counts for the brief's footer, read from the chat's audit entries. */
 export function summarizeBriefAudit(entries: readonly { outcome: string }[]): BriefAuditSummary {
-  let readQuietly = 0;
+  let readAllowed = 0;
   let actionsRan = 0;
   for (const entry of entries) {
-    if (entry.outcome === 'logged') readQuietly += 1;
+    if (entry.outcome === 'logged') readAllowed += 1;
     if (entry.outcome === 'ran' || entry.outcome === 'approved') actionsRan += 1;
   }
-  return { readQuietly, actionsRan };
+  return { readAllowed, actionsRan };
 }

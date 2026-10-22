@@ -20,6 +20,10 @@ describe('isStaleApprovalError', () => {
     expect(isStaleApprovalError(conflict('stale_approval_continuation'))).toBe(true);
   });
 
+  it('matches the typed 409 the server sends for Approve on a request that ended', () => {
+    expect(isStaleApprovalError(conflict('approval_request_ended'))).toBe(true);
+  });
+
   it('does not match other conflicts, other statuses, or non-errors', () => {
     expect(isStaleApprovalError(conflict('approval_conflict'))).toBe(false);
     expect(isStaleApprovalError(conflict(null))).toBe(false);

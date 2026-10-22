@@ -130,6 +130,7 @@ export type {
   UpdateTurnStateInput,
 } from './store/ISessionStore';
 export {
+  ApprovalRequestEndedError,
   ImplementationPlanGrantLifecycleError,
   InvalidPageTokenError,
   PreviousTurnRunningError,
@@ -151,7 +152,12 @@ export type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnReso
 export { TurnResourceResolver } from './TurnResourceResolver';
 export type { TurnModelRole, TurnSandboxFactory } from './TurnResourceResolver';
 
-export { SessionHandle, abnormalHandoffCauseForCancellation } from './SessionHandle';
+export {
+  SessionHandle,
+  abnormalHandoffCauseForCancellation,
+  withoutClearedApprovalEvent,
+  withoutClearedApprovals,
+} from './SessionHandle';
 export type { ApprovalResubmission } from './SessionHandle';
 export { Sessions } from './Sessions';
 export { TurnHandle } from './TurnHandle';
