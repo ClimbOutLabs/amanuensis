@@ -9,12 +9,19 @@ import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
-import { approvalQuestion, approvalStub, approvalTime, approveVerb, declineVerb } from './approvalCopy.js';
+import {
+  approvalQuestion,
+  approvalSentLine,
+  approvalStub,
+  approvalTime,
+  approveVerb,
+  declineVerb,
+} from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
-import type { SentinelApprovalCard } from './types.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
@@ -169,9 +176,15 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       <div className="min-w-0 space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
-          <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-            {sentAt === null ? 'Waiting for you' : `Done · ${sentAt}`}
-          </span>
+          {sentAt === null ? (
+            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+              {WAITING_FOR_YOU_LABEL}
+            </span>
+          ) : (
+            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+              {approvalSentLine(card, sentAt)}
+            </span>
+          )}
         </div>
         {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
 

@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { approvalQuestion, approvalStub, approveVerb, declineVerb } from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
+
+// The label has one owner in types.ts; a copy in approvalCopy would keep the old text when that owner changes.
+vi.mock('../../src/sentinel/types.js', async importOriginal => ({
+  ...(await importOriginal()),
+  WAITING_FOR_YOU_LABEL: 'Needs you now',
+}));
 
 function cardWith(overrides: Partial<SentinelApprovalCard>): SentinelApprovalCard {
   return {
@@ -112,5 +118,9 @@ describe('approval copy', () => {
   it('shows the time in the stub once a ticket is done', () => {
     const card = cardWith({ calendar_event: null });
     expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Done 09:14');
+  });
+
+  it('reads the waiting label from its one owner', () => {
+    expect(approvalStub(cardWith({ calendar_event: null }), { sentAt: null }).state).toBe('Needs you now');
   });
 });

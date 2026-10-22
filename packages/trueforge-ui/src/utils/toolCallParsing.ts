@@ -1,4 +1,5 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/extractorRegistry';
 import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
@@ -529,7 +530,8 @@ export function getJsonDisplayValue(content: string | undefined): {
   if (trimmed[0] === '"') {
     try {
       const decoded: unknown = JSON.parse(trimmed);
-      if (typeof decoded === 'string') return { value: decoded, isJson: false };
+      if (typeof decoded === 'string')
+        return { value: escapeDisplayText(decoded, { keepNewlines: true }), isJson: false };
     } catch {
       /* not a JSON string literal: show it as stored */
     }

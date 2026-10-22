@@ -1,5 +1,10 @@
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail } from './types.js';
+import {
+  WAITING_FOR_YOU_LABEL,
+  type SentinelApprovalCard,
+  type SentinelApprovalEmail,
+  type SentinelApprovalMailbox,
+} from './types.js';
 
 /**
  * The title of a mail card. Its verb is the verb on the primary button, so the title and the button
@@ -8,6 +13,15 @@ import type { SentinelApprovalCard, SentinelApprovalEmail } from './types.js';
 export function emailQuestion(email: SentinelApprovalEmail): string {
   if (email.action !== 'send') return 'Save this draft?';
   return email.reply_in_thread !== null ? 'Send this reply?' : 'Send this email?';
+}
+
+/** The people a card sends to, in plain words: the first name, then how many more. */
+function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string {
+  const [first, ...rest] = recipients;
+  if (first === undefined) return 'no one';
+  const name = first.name === '' ? first.address : first.name;
+  if (rest.length === 0) return name;
+  return `${name} and ${String(rest.length)} more`;
 }
 
 /** The question a ticket asks, one sentence the person can answer with a verb. */
@@ -47,9 +61,24 @@ export function declineVerb(card: SentinelApprovalCard): string {
   return card.email.action === 'send' ? "Don't send" : "Don't save";
 }
 
+/** Word for a finished approval, shown in the stub and the badge. */
+function doneWord(card: SentinelApprovalCard): string {
+  if (card.email === null) return 'Done';
+  if (card.email.action === 'send') return 'Sent';
+  return 'Saved';
+}
+
 /** Short time for a finished approval, e.g. 09:14. */
 export function approvalTime(now: Date): string {
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** The badge after an approval: "Sent to Rui · 09:14", or "Done · 09:14" for other kinds. */
+export function approvalSentLine(card: SentinelApprovalCard, time: string): string {
+  if (card.email !== null && card.email.action === 'send') {
+    return `Sent to ${recipientsText(card.email.to)} · ${time}`;
+  }
+  return `${doneWord(card)} · ${time}`;
 }
 
 export type ApprovalStub = {
@@ -82,7 +111,7 @@ export function approvalStub(card: SentinelApprovalCard, { sentAt }: { sentAt: s
   return {
     what: stubWhat(card),
     detail: stubDetail(card),
-    state: sentAt === null ? 'Waiting for you' : `Done ${sentAt}`,
+    state: sentAt === null ? WAITING_FOR_YOU_LABEL : `${doneWord(card)} ${sentAt}`,
   };
 }
 

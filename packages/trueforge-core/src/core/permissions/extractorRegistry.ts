@@ -1,4 +1,4 @@
-import { hasAnyHiddenCharacter, hasHiddenCharacters, replaceHiddenCharacters } from '../email/gmail/mimeText';
+import { hasAnyHiddenCharacter, hasHiddenCharacters, replaceHiddenCharacters } from '../email/gmail/mimeText.js';
 
 /**
  * Server-side extractor registry for Tier 3 approval cards.

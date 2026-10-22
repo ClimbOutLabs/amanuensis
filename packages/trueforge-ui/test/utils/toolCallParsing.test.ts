@@ -241,6 +241,14 @@ describe('tool output decoding', () => {
     expect(getToolResultContent(result)).toEqual({ data: 'line one\nline two', isJson: false });
   });
 
+  it('shows hidden characters in a decoded JSON string as escape text, not raw', () => {
+    const stored = JSON.stringify('pay‮me​nt');
+    const { value } = getJsonDisplayValue(stored);
+    expect(value).not.toContain('‮');
+    expect(value).not.toContain('​');
+    expect(value).toContain('\\u{202E}');
+  });
+
   it('still pretty-prints a JSON object result', () => {
     expect(getJsonDisplayValue('{"ok":true}')).toEqual({ value: '{\n  "ok": true\n}', isJson: true });
   });
