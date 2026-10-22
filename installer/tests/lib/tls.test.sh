@@ -24,6 +24,7 @@ test_a_default_install_is_served_over_https() {
   install_machine
   assert_rc 0
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_eq "$(env_value main TRUST_PAGE_URL)" "http://192.168.1.20:8791/trust" "the app is told the trust page address the installer prints"
   assert_eq "$(reg_value main tls)" local
   assert_eq "$(reg_value main tls_port)" 8443
   local file
@@ -33,7 +34,7 @@ test_a_default_install_is_served_over_https() {
   assert_contains "$file" "- '192.168.1.20:8791:8081'" "the plain port reaches only the front end"
   assert_contains "$file" "- '192.168.1.20:8443:8443'"
   assert_not_contains "$file" "192.168.1.20:8791:8790" "the app itself is not reachable from the network"
-  assert_not_contains "$file" "0.0.0.0"
+  assert_not_contains "$file" "'0.0.0.0:"
   assert_contains "$file" "image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9"
   assert_contains "$file" "network_mode: 'service:loopback'"
   assert_contains "$file" "user: '1000:1000'" "the front end runs as the person who installed, so the folders it reads stay theirs"
@@ -475,6 +476,8 @@ test_purging_the_last_instance_keeps_the_authority() {
   assert_no_path "$AMAN_HOME/tls/trust/main"
   assert_no_path "$AMAN_HOME/instances"
   assert_flat_contains "$OUT" "trust certificate was kept"
+  assert_flat_contains "$OUT" "kept in $AMAN_HOME/tls/ca"
+  assert_flat_contains "$OUT" "To delete it too: rm -r $AMAN_HOME/tls/ca"
   install_machine
   assert_rc 0
   assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" "$fp_before" "the install after the purge uses the same authority"

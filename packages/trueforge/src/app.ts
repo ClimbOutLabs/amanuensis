@@ -39,12 +39,13 @@ import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
+import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
-import { resolveRequestContext } from './auth/identity';
+import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT } from './auth/identity';
 import { listedOriginMiddleware } from './auth/listedOriginContext';
 import { createLoginProxy, isProxiableIssuer } from './auth/loginProxy';
 import {
@@ -95,14 +96,17 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { getPersonaKnowledgeIndexer } from './personaKnowledge/knowledgeIndexer';
 import { ensureAmanGuide } from './personas/amanGuide/install';
+import { createGuideSeeder, seedExistingGuides } from './personas/amanGuide/seed';
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
+import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
+import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
-import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
+import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
@@ -270,6 +274,8 @@ export interface ServerDeps<TTransaction> {
   agentStore: IAgentStore<TTransaction>;
   personalizationStore: IPersonalizationStore<TTransaction>;
   personaStore: IPersonaStore<TTransaction>;
+  /** The shared store, used at boot when there is no request to resolve a per-person store from. */
+  modelProviderStore: IModelProviderStore<TTransaction>;
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
@@ -310,7 +316,73 @@ export interface ServerDeps<TTransaction> {
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const app = new OpenAPIHono({ defaultHook: zodValidationHook });
-  const authMiddleware = createAuthMiddleware(deps.authenticator);
+  // Installs the Aman guide for a person and refreshes it on upgrade. It waits for a default model,
+  // since the guide answers with one.
+  const ensureAmanGuideFor = async ({
+    userId,
+    modelProviderStore,
+  }: {
+    userId: string;
+    modelProviderStore: IModelProviderStore;
+  }): Promise<void> => {
+    const modelName = await resolveDefaultChatModel({
+      tenantId: TENANT_ID,
+      modelProviderStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    if (modelName === undefined) {
+      return;
+    }
+    const indexer = getPersonaKnowledgeIndexer({
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      logger: deps.logger,
+    });
+    await ensureAmanGuide({
+      personaStore: deps.personaStore,
+      tenantId: TENANT_ID,
+      userId,
+      modelName,
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      enqueue: input => {
+        indexer.enqueue(input);
+      },
+      logger: deps.logger,
+    });
+  };
+  // One Iris per person: she is installed when a person first signs in to this process (a new account, or an
+  // existing one after a restart), and the standalone person at boot. Each request waits for her, so Settings
+  // lists her on the first load. The install never rejects, so a broken install cannot block a request.
+  const seedGuide = createGuideSeeder({ logger: deps.logger });
+  const authenticate = createAuthMiddleware(deps.authenticator);
+  const authMiddleware: MiddlewareHandler = async (c, next) => {
+    await authenticate(c, async () => {
+      const requestContext = c.get('request_context');
+      if (requestContext !== undefined) {
+        const userId = requestContext.subject.id;
+        await seedGuide(userId, () =>
+          ensureAmanGuideFor({ userId, modelProviderStore: deps.resolveModelProviderStore(c) }),
+        );
+      }
+      await next();
+    });
+  };
+  // Boot refreshes every person who already has Iris, then the standalone person, who may have none yet.
+  const bootGuides = seedExistingGuides({
+    listOwners: () => deps.personaStore.listPersonaOwners({ tenant_id: TENANT_ID }),
+    seed: userId =>
+      seedGuide(userId, () => ensureAmanGuideFor({ userId, modelProviderStore: deps.modelProviderStore })),
+    logger: deps.logger,
+  });
+  if (configuration.STANDALONE) {
+    void seedGuide(STANDALONE_REQUEST_CONTEXT.subject.id, () =>
+      ensureAmanGuideFor({
+        userId: STANDALONE_REQUEST_CONTEXT.subject.id,
+        modelProviderStore: deps.modelProviderStore,
+      }),
+    );
+  }
   const adminAuthMiddleware = createAdminAuthMiddleware(deps.authenticator);
   const scheduleExecutionAuthMiddleware = createApiKeyAuthMiddleware(configuration.TRUEFORGE_API_KEY);
   const authEnabled = getTrueForgeAuthMode() !== TrueForgeAuthMode.Standalone;
@@ -406,7 +478,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     }
   }
 
-  app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
+  app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION, eval_mode: configuration.AMAN_EVAL_MODE }));
   mountCatalogLogos(app, {
     logos: [...deps.modelCatalog.list(), ...deps.mcpCatalog.list()].map(entry => entry.logo),
     authMiddleware: createUiSessionAuthMiddleware(deps.authenticator),
@@ -444,6 +516,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
+        googleConnectionStore: deps.googleConnectionStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -742,33 +815,22 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
-  // Installs the Aman guide for a person on first sight and refreshes it on upgrade. It waits for a
-  // default model, since the guide answers with one.
-  const ensureAmanGuideFor = async ({ userId }: { userId: string }): Promise<void> => {
-    const modelName = await readDefaultChatModel({
-      globalSettingsStore: deps.globalSettingsStore,
-      logger: deps.logger,
-    });
-    if (modelName === undefined) {
-      return;
-    }
-    const indexer = getPersonaKnowledgeIndexer({
-      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-      logger: deps.logger,
-    });
-    await ensureAmanGuide({
-      personaStore: deps.personaStore,
-      tenantId: TENANT_ID,
-      userId,
-      modelName,
-      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-      enqueue: input => {
-        indexer.enqueue(input);
-      },
-      logger: deps.logger,
-    });
-  };
+  // Space pictures, browser session only: the owner\'s own spaces link them, and no agent or API token may fetch on the person\'s behalf.
+  app.route(
+    '/api/space-pictures',
+    withAuth(
+      createSpacePicturesRouter({
+        tenantId: TENANT_ID,
+        pictures: createSpacePictureService({
+          spaceStore: deps.spaceStore,
+          fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+          now: () => Date.now(),
+        }),
+        resolveRequestContext,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   app.route(
     '/api/v1/personas',
     withAuth(
@@ -981,5 +1043,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
 
   app.onError(createAppErrorHandler({ logger: deps.logger }));
 
-  return app;
+  // Resolves once the guide installs started at boot and by requests so far have finished.
+  return Object.assign(app, {
+    guidesSettled: async (): Promise<void> => {
+      await bootGuides;
+      await seedGuide.settled();
+    },
+  });
 }

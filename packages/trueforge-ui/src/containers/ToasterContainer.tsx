@@ -44,7 +44,7 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
   return error instanceof Error && ('statusCode' in error || 'body' in error);
 }
 
-function normalizeError(error: unknown): ToastContent {
+function normalizeError(error: unknown, options?: { trustPageUrl?: string }): ToastContent {
   if (isStaleApprovalError(error)) {
     return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
   }
@@ -65,10 +65,13 @@ function normalizeError(error: unknown): ToastContent {
   // so the words name the checks for both.
   const message = getErrorMessage(error, '');
   if (isNetworkFailureMessage(message)) {
+    const trustPageUrl = options?.trustPageUrl;
     return {
       title: 'Connection lost',
       description:
-        'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open the /trust page on this device and follow its steps.',
+        trustPageUrl !== undefined && trustPageUrl !== ''
+          ? `Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open ${trustPageUrl} on this device and follow its steps.`
+          : 'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open the /trust page on this device and follow its steps.',
     };
   }
 
@@ -88,7 +91,7 @@ function isNetworkFailureMessage(message: string): boolean {
   );
 }
 
-export function ToasterProvider({ children }: { children: ReactNode }) {
+export function ToasterProvider({ children, trustPageUrl }: { children: ReactNode; trustPageUrl?: string }) {
   const Toast = useSlot('Toast');
   const ToastStack = useSlot('ToastStack');
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -97,18 +100,21 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const showError = useCallback((error: unknown, options?: { title: string }) => {
-    console.error('[trueforge-ui]', error);
-    const content = normalizeError(error);
-    const item: ToastItem = {
-      id: nextToastId(),
-      variant: 'error',
-      ...content,
-      ...(options === undefined ? {} : { title: options.title }),
-    };
-    rememberErrorText([item.title, item.description].filter(Boolean).join(': '));
-    setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
-  }, []);
+  const showError = useCallback(
+    (error: unknown, options?: { title: string }) => {
+      console.error('[trueforge-ui]', error);
+      const content = normalizeError(error, { trustPageUrl });
+      const item: ToastItem = {
+        id: nextToastId(),
+        variant: 'error',
+        ...content,
+        ...(options === undefined ? {} : { title: options.title }),
+      };
+      rememberErrorText([item.title, item.description].filter(Boolean).join(': '));
+      setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
+    },
+    [trustPageUrl],
+  );
 
   const showSuccess = useCallback(
     (content: ToastContent) => {

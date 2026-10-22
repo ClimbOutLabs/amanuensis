@@ -5,6 +5,8 @@ import { useState, type FC } from 'react';
 import { Switch } from '../atoms/primitives/Switch.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
+import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
+import { TIER2_ACTION_KINDS, TIER2_ACTION_LABELS, type Tier2ActionKind } from './types.js';
 
 /**
  * Settings > Permissions: the user-only offline mode toggle, the web search switch, the maps
@@ -68,6 +70,18 @@ export const SentinelSettings: FC = () => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleTier2Toggle = async (input: { actionType: Tier2ActionKind; relaxed: boolean }) => {
+    // Derived from the latest saved settings, not this render's snapshot, so a toggle of
+    // another kind that is still saving is not overwritten.
+    await sentinel.updateSettings(({ tier2_auto_allow: current }) => ({
+      tier2_auto_allow: input.relaxed
+        ? current.includes(input.actionType)
+          ? current
+          : [...current, input.actionType]
+        : current.filter(kind => kind !== input.actionType),
+    }));
   };
 
   const handleSandboxChange = async (next: boolean) => {
@@ -138,7 +152,7 @@ export const SentinelSettings: FC = () => {
           </p>
           <p className="mt-1 text-sm text-text-secondary">
             {
-              "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode."
+              "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode."
             }
           </p>
           {searchError !== null && (
@@ -200,6 +214,26 @@ export const SentinelSettings: FC = () => {
           onCheckedChange={handleSandboxChange}
           aria-label="Run code in the sandbox without asking"
         />
+      </div>
+
+      <div className="rounded-lg border border-border p-4">
+        <p className="text-sm font-medium text-text-primary">Always allow</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          Off means the assistant asks before each of these. On means it runs them without asking.
+        </p>
+        <ul className="mt-3 space-y-2">
+          {TIER2_ACTION_KINDS.map(kind => (
+            <li key={kind} className="flex items-center justify-between gap-2 text-sm">
+              <span className="min-w-0 text-text-primary">{TIER2_ACTION_LABELS[kind]}</span>
+              <Tier2RelaxationToggle
+                actionType={kind}
+                relaxed={sentinel.settings?.tier2_auto_allow.includes(kind) ?? false}
+                disabled={sentinel.settings === null}
+                onChange={handleTier2Toggle}
+              />
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

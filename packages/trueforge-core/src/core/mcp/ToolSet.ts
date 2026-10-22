@@ -16,6 +16,7 @@ import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import { isMapsToolName } from '../permissions/mapsToolNames';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
   countSilentFetches,
   isSearchAskReason,
@@ -28,10 +29,13 @@ import {
 } from '../permissions/webSearch';
 import {
   isPageReaderTool,
+  isSearchResultTool,
   recordFetchedPages,
+  recordSearchResults,
   type FetchedPageScope,
   type FetchedPageStore,
 } from '../search/fetchedPages';
+import { TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -173,6 +177,7 @@ export class ToolSet implements IToolSet {
   private readonly searchPlumbingFields: readonly string[];
   private readonly pages: FetchedPageStore | undefined;
   private readonly pagesScope: FetchedPageScope | undefined;
+  private readonly bundle: ToolBundleName | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -210,6 +215,8 @@ export class ToolSet implements IToolSet {
      * host names the chat it belongs to. Set by the host only, alongside `pages`.
      */
     pagesScope?: FetchedPageScope | undefined;
+    /** The bundle every tool of this connector is sent with. Set by the host only; absent sends them on every request. */
+    bundle?: ToolBundleName | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -226,6 +233,12 @@ export class ToolSet implements IToolSet {
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
     this.pages = params.pages;
     this.pagesScope = params.pagesScope;
+    this.bundle = params.bundle;
+  }
+
+  bundleOf(_toolName: string): ToolBundleName | undefined {
+    void _toolName;
+    return this.bundle;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -333,6 +346,24 @@ export class ToolSet implements IToolSet {
       // Only Aman's own page readers record: a tool from any other server may echo its input, so its
       // text is never a page the model read.
       recordFetchedPages({
+        pages: this.pages,
+        scope: this.pagesScope,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
+    }
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true &&
+      isSearchResultTool(params.name) &&
+      ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
+        (this.searchProvider && this.searchTools.has(params.name)))
+    ) {
+      // A search's results are sources, one link at a time; its query and any answer it wrote are not.
+      // A provider's search_tools list also holds its page readers, so only named search tools count.
+      recordSearchResults({
         pages: this.pages,
         scope: this.pagesScope,
         toolArguments: params.arguments ?? {},
@@ -551,6 +582,10 @@ export class ToolSet implements IToolSet {
       };
     }
     const info = { ...toolEffectHints(tool), ...sourceInfo };
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return { info, classification: undefined };
+    }
     const caldavEvent = await this.caldavEventFor(params);
     const decision = await classifyHostToolCall({
       sentinel,

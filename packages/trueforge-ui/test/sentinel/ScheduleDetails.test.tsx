@@ -35,7 +35,13 @@ const MORNING_BRIEF_CARD = {
 
 function renderCard(card: SentinelApprovalCard) {
   render(
-    <PermissionApprovalCard toolName="create_schedule" card={card} tier={3} onApprove={vi.fn()} onDeny={vi.fn()} />,
+    <PermissionApprovalCard
+      approvalId="approval-1"
+      othersWaiting={0}
+      card={card}
+      onApprove={vi.fn()}
+      onDeny={vi.fn()}
+    />,
   );
 }
 
@@ -43,7 +49,7 @@ describe('schedule approval card', () => {
   it('says when it runs, exactly what it does, who runs it, and that it starts on approval', () => {
     renderCard(MORNING_BRIEF_CARD);
     expect(screen.getByText('New schedule')).toBeInTheDocument();
-    expect(screen.getByText(MORNING_BRIEF_CARD.plain_what)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create the schedule "Morning brief"?' })).toBeInTheDocument();
     const lines = Array.from(document.querySelectorAll('[data-role="schedule"] p, [data-role="schedule"] li')).map(
       node => node.textContent,
     );

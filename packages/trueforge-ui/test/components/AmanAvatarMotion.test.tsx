@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
+import { AVATAR_ALT, AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
 
 const SOURCES: AmanAvatarMotionSources = {
   idle: ['/aman-avatar/idle-a.mp4', '/aman-avatar/idle-b.mp4'],
@@ -31,7 +31,7 @@ let observerCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | 
 let observerDisconnect: ReturnType<typeof vi.fn> | null = null;
 
 function avatar(): HTMLElement {
-  return screen.getByRole('img', { name: /Amanuensis avatar/ });
+  return screen.getByRole('img', { name: AVATAR_ALT });
 }
 
 function videoElement(): HTMLVideoElement {
@@ -105,12 +105,12 @@ describe('AmanAvatarMotion', () => {
     expect(document.querySelectorAll('video')).toHaveLength(1);
   });
 
-  it('reflects the displayed state in the accessible name', () => {
+  it('keeps the same accessible name in every state', () => {
     const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
-    expect(avatar()).toHaveAccessibleName('Amanuensis avatar, idle');
+    expect(avatar()).toHaveAccessibleName(AVATAR_ALT);
 
     rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
-    expect(avatar()).toHaveAccessibleName('Amanuensis avatar, thinking');
+    expect(avatar()).toHaveAccessibleName(AVATAR_ALT);
   });
 
   it('acknowledges the send immediately with the thinking clip (attentive beat)', () => {

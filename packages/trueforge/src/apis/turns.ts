@@ -4,6 +4,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
+  ApprovalRequestEndedError,
   CancellationReason,
   EventType,
   PreviousTurnRunningError,
@@ -11,6 +12,7 @@ import {
   SessionStoreNotFoundError,
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
+  withoutClearedApprovals,
   type SessionHandle,
   type TurnHandle,
   type TurnInputItem,
@@ -57,6 +59,8 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { gateEvalApprovals } from '../eval/approvalGate';
+import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -81,7 +85,11 @@ import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
+import {
+  submitRetainWithVerification,
+  type RetainOutcomeLog,
+  type SummarizeTurnContext,
+} from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -132,6 +140,7 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+import { readServerSandboxAvailable } from './capabilities';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -205,6 +214,7 @@ export const TurnConflictCode = {
   PREVIOUS_TURN_RUNNING: 'previous_turn_running',
   TURN_ALREADY_EXISTS: 'turn_already_exists',
   APPROVAL_CONFLICT: 'approval_conflict',
+  APPROVAL_REQUEST_ENDED: 'approval_request_ended',
 } as const;
 
 /** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
@@ -222,6 +232,9 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
   }
   if (error instanceof TurnAlreadyExistsError) {
     return TurnConflictCode.TURN_ALREADY_EXISTS;
+  }
+  if (error instanceof ApprovalRequestEndedError) {
+    return TurnConflictCode.APPROVAL_REQUEST_ENDED;
   }
   return null;
 }
@@ -329,6 +342,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
+  /** The turn's input holds a new message from the person, not only approvals or tool responses. */
+  startsAnswer: boolean;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -337,6 +352,8 @@ function createTurnResolver(deps: {
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
+  /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
+  serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
@@ -381,6 +398,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
+    startsAnswer,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -388,6 +406,7 @@ function createTurnResolver(deps: {
     switchNotice,
     internalSourceState,
     boundRepository,
+    serverSandboxAvailable,
     repositoryStore,
     sessionStore,
     memoryClient,
@@ -527,6 +546,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
@@ -703,6 +723,7 @@ function createTurnResolver(deps: {
       },
       logger,
       boundRepository,
+      serverSandboxAvailable,
       clientTimezone,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
@@ -797,6 +818,7 @@ function createTurnResolver(deps: {
       schedules,
       personas,
       logger,
+      startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
@@ -998,6 +1020,50 @@ async function resolveAndSubmitArtifactPersistence(params: {
   }
 }
 
+/** Outcome logging for an interactive turn: its retain persona, and the store to read the chat's persona after it. */
+export interface TurnOutcomeLog extends RetainOutcomeLog {
+  personaStore: Pick<IPersonaStore, 'getSessionPersona'>;
+  tenantId: string;
+}
+
+/**
+ * Logs when the turn's memory went to the vault of the persona it started with but the chat
+ * ended under another (a `use_persona` switch during the turn).
+ */
+async function logTurnPersonaSwitch(params: {
+  outcomeLog: TurnOutcomeLog;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { outcomeLog, sessionId, turnId, logger } = params;
+  let activePersonaName: string;
+  try {
+    const active = await outcomeLog.personaStore.getSessionPersona({
+      tenant_id: outcomeLog.tenantId,
+      session_id: sessionId,
+    });
+    activePersonaName = active?.persona_name ?? 'shared';
+  } catch (error) {
+    logger.warn('Could not read the chat persona after a turn; persona switch not checked', {
+      sessionId,
+      turnId,
+      ...extractErrorLogFields(error),
+    });
+    return;
+  }
+  if (activePersonaName === outcomeLog.personaName) {
+    return;
+  }
+  logger.info('Turn memory saved under the persona the turn started with', {
+    sessionId,
+    turnId,
+    personaName: outcomeLog.personaName,
+    activePersonaName,
+    reason: 'persona_switched',
+  });
+}
+
 /**
  * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
  * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
@@ -1026,6 +1092,8 @@ export interface DrainTurnEventsInput {
          * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
          */
         summarize?: SummarizeTurnContext | undefined;
+        /** Present only for interactive turns; scheduled turns log nothing at info. */
+        outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
@@ -1096,7 +1164,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
         if (memory !== undefined) {
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
-          await submitRetainWithVerification({
+          const stored = await submitRetainWithVerification({
             client: memory.client,
             sessionId,
             turnId,
@@ -1107,7 +1175,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
             logger,
             summarize: memory.summarize,
+            outcomeLog: memory.outcomeLog,
           });
+          // Only a stored turn can have gone to the persona it started with; a skipped or failed
+          // retain is already explained by its own reason line.
+          if (stored && memory.outcomeLog !== undefined) {
+            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+          }
         }
         if (profileLearning !== undefined) {
           // The assistant's reply is deliberately not passed here: it is not a source of facts
@@ -1259,7 +1333,13 @@ export async function beginTurnExecution(params: {
     userRef,
     session,
     turnId,
+    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
+    serverSandboxAvailable: await readServerSandboxAvailable({
+      store: deps.sandboxProviderStore,
+      tenant_id: session.tenant_id,
+      logger: deps.logger,
+    }),
     personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
     personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -1498,7 +1578,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         limit: query.limit,
         page_token: query.page_token,
       });
-      return c.json({ data: data.map(toWireTurn), pagination }, 200);
+      const cleared = await session.clearedApprovalKeys();
+      return c.json({ data: data.map(turn => toWireTurn(withoutClearedApprovals(turn, cleared))), pagination }, 200);
     } catch (error) {
       if (error instanceof SessionStoreConflictError) {
         return c.json({ error: { message: error.message } }, 400);
@@ -1578,7 +1659,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     if (!turn) {
       return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
     }
-    return c.json({ data: toWireTurn(turn.record) }, 200);
+    const cleared = await session.clearedApprovalKeys();
+    return c.json({ data: toWireTurn(withoutClearedApprovals(turn.record, cleared)) }, 200);
   };
 
   const downloadSandboxFileHandler: RouteHandler<typeof downloadSandboxFileRoute> = async c => {
@@ -1749,7 +1831,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
-    const body = c.req.valid('json');
+    const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
 
     const session = await deps.sessions.get({
@@ -1767,6 +1849,31 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       })
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
+    }
+
+    // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
+    const body = configuration.AMAN_EVAL_MODE
+      ? {
+          ...submitted,
+          input: await gateEvalApprovals({
+            session,
+            previous_turn_id: submitted.previous_turn_id,
+            input: submitted.input,
+          }),
+        }
+      : submitted;
+
+    // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
+    // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
+    if (await session.answersOnlyEndedApprovals({ previous_turn_id: body.previous_turn_id, input: body.input })) {
+      const decisions = body.input ?? [];
+      if (decisions.every(item => item.type === EventType.USER_TOOL_APPROVAL && item.approval.status === 'deny')) {
+        const named = await session.dismissEndedApprovals({
+          previous_turn_id: body.previous_turn_id,
+          input: body.input,
+        });
+        return c.json({ data: toWireTurn(named) }, 200);
+      }
     }
 
     let referencedAgent: AgentRecord | undefined;
@@ -2061,6 +2168,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
+      startsAnswer: body.input?.some(isAgentInputUserMessage) ?? false,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -2068,6 +2176,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchNotice: persona?.switchNotice,
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
+      serverSandboxAvailable: await readServerSandboxAvailable({
+        store: sandboxProviderStore,
+        tenant_id: requestContext.tenant_id,
+        logger: deps.logger,
+      }),
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,
@@ -2222,6 +2335,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.Abandoned);
+      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,
@@ -2407,6 +2521,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,
+              outcomeLog: {
+                personaName: vaultScope?.personaName ?? 'shared',
+                personaStore: deps.personaStore,
+                tenantId: requestContext.tenant_id,
+              },
             },
       profileLearning,
       artifacts: {

@@ -270,6 +270,68 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   sandbox_drop
 }
 
+# Gives the checkout a remote holding exactly what the checkout holds, so a test can move the
+# remote ahead on its own. The checkout tracks the remote copy of its branch, as a real clone
+# does. The remote is called origin unless a test names it something else.
+repo_remote_add() {
+  local remote=${1:-origin} branch
+  branch=$(git -C "$REPO" branch --show-current)
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add "$remote" "$SB/origin.git"
+  git -C "$REPO" push -q "$remote" "HEAD:refs/heads/$branch"
+  git -C "$REPO" fetch -q "$remote" "+refs/heads/$branch:refs/remotes/$remote/$branch"
+  git -C "$REPO" branch --set-upstream-to="$remote/$branch" >/dev/null
+}
+
+# Moves origin one commit ahead of the checkout, the way a newer version lands on GitHub.
+repo_remote_advance() {
+  local branch work=$SB/origin-work
+  branch=$(git -C "$REPO" branch --show-current)
+  git clone -q --branch "$branch" "$SB/origin.git" "$work"
+  printf '%s\n' "newer version" >>"$work/Dockerfile.dev"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=t -c user.email=t@example.invalid commit -q -m "newer version"
+  git -C "$work" push -q origin "HEAD:refs/heads/$branch"
+  rm -rf "$work"
+}
+
+# Gives the checkout a remote holding a different branch only, so the checkout's own branch is
+# not on it, and the checkout tracks nothing.
+repo_remote_without_own_branch() {
+  local remote=${1:-origin}
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add "$remote" "$SB/origin.git"
+  git -C "$REPO" push -q "$remote" "HEAD:refs/heads/other-branch"
+}
+
+# An aman command the printed advice can call: on a real computer it is already installed; here
+# it runs this sandbox's staged installer, the way the installed command runs the real one.
+fixture_aman_command() {
+  mkdir -p "$SB/cmd"
+  cat >"$SB/cmd/aman" <<AMAN
+#!/usr/bin/env bash
+exec bash "$SB_INSTALLER/install.sh" "\$@"
+AMAN
+  chmod 755 "$SB/cmd/aman"
+}
+
+# Runs one printed command line exactly as printed, in the same environment an installer run
+# gets, with the aman command on the path. Output lands in POUT, PERR and PRC.
+run_printed_command() {
+  build_run_env
+  set +e
+  env -i "${RUN_ENV[@]}" PATH="$SB/cmd:$SB_BIN" bash -c "$1" >"$SB/pout" 2>"$SB/perr"
+  PRC=$?
+  set -e
+  POUT=$(cat "$SB/pout")
+  PERR=$(cat "$SB/perr")
+}
+
+# The command line the behind message told the person to run, without the words before it.
+printed_command() {
+  printf '%s\n' "$OUT" | sed -n 's/^To get the newer version, run: //p'
+}
+
 # The data volume exists (Docker made it when the app first started) but holds no database.
 no_database_yet() {
   mkdir -p "$SB_STATE/no_db"
@@ -318,7 +380,204 @@ test_owner_path_remove_upgrade_install() {
   sandbox_drop
 }
 
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin() {
+  t_begin "upgrade says a newer version exists when the checkout is behind origin, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  repo_remote_advance
+  local head_before builds
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin() {
+  t_begin "upgrade still says up to date when the checkout matches origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  sandbox_drop
+}
+
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin() {
+  t_begin "upgrade upgrades from the checkout as before when the checkout is ahead of origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  local old new
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  repo_commit_change "local work"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  new=$(app_tag "$AMAN_HOME/release/release.json")
+  if [ "$new" != "$old" ]; then t_pass; else t_fail "release not updated"; fi
+  sandbox_drop
+}
+
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached() {
+  t_begin "upgrade says it could not check for a newer version when origin cannot be reached, and carries on with the local check"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  rm -rf "$SB/origin.git"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "could not check for a newer version"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch() {
+  t_begin "upgrade behind with no upstream advises a pull naming the source and branch, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch head_before builds
+  branch=$(git -C "$REPO" branch --show-current)
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull origin $branch && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_behind_with_a_renamed_remote_and_no_upstream_names_that_remote() {
+  t_begin "upgrade behind with a renamed remote and no upstream names that remote in the pull it advises, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add github
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch head_before builds
+  branch=$(git -C "$REPO" branch --show-current)
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull github $branch && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_warns_that_the_branch_is_not_on_the_renamed_remote_when_it_is_missing_there() {
+  t_begin "upgrade says the branch is not on the renamed remote when the checkout's branch is missing there, and carries on"
+  sandbox_new
+  install_machine
+  repo_remote_without_own_branch github
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "on the branch $branch, which is not on github"
+  assert_not_contains "$OUT$ERR" "could not be reached"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_upgrade_behind_prints_one_command_that_pulls_and_then_upgrades() {
+  t_begin "upgrade behind prints one combined command, and running it as printed pulls, then upgrades"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch old new printed origin_head
+  branch=$(git -C "$REPO" branch --show-current)
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  origin_head=$(git -C "$SB/origin.git" rev-parse "refs/heads/$branch")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'run:')" 1 "the message gives one next step"
+  assert_not_contains "$OUT" "Then run"
+  printed=$(printed_command)
+  assert_eq "$printed" "git -C \"$REPO\" pull origin $branch && aman upgrade" "the one printed command"
+  fixture_aman_command
+  run_printed_command "$printed"
+  assert_eq "$PRC" 0 "the printed command runs: $PERR"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$origin_head" "the printed command pulled the newer version"
+  assert_flat_contains "$POUT" "Upgraded to"
+  new=$(app_tag "$AMAN_HOME/release/release.json")
+  if [ "$new" != "$old" ]; then t_pass; else t_fail "the printed command did not upgrade"; fi
+  sandbox_drop
+}
+
+test_upgrade_behind_from_a_folder_with_spaces_prints_a_command_that_works() {
+  t_begin "upgrade behind from a checkout in a folder with spaces prints a command that runs as printed"
+  sandbox_new
+  install_machine
+  local spaced="$SB/checkout with spaces"
+  mv "$REPO" "$spaced"
+  REPO=$spaced
+  repo_remote_add
+  repo_remote_advance
+  local branch printed origin_head
+  branch=$(git -C "$REPO" branch --show-current)
+  origin_head=$(git -C "$SB/origin.git" rev-parse "refs/heads/$branch")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  printed=$(printed_command)
+  assert_contains "$printed" "git -C \"$spaced\" pull" "the printed command quotes the folder path"
+  fixture_aman_command
+  run_printed_command "$printed"
+  assert_eq "$PRC" 0 "the printed command runs: $PERR"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$origin_head" "the printed command pulled the newer version"
+  sandbox_drop
+}
+
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
+  t_begin "upgrade says the branch is not on origin when the checkout's branch is missing there, and carries on"
+  sandbox_new
+  install_machine
+  repo_remote_without_own_branch
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "on the branch $branch, which is not on origin"
+  assert_not_contains "$OUT$ERR" "could not be reached"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
 test_noop_when_current
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there
+test_upgrade_behind_with_a_renamed_remote_and_no_upstream_names_that_remote
+test_upgrade_warns_that_the_branch_is_not_on_the_renamed_remote_when_it_is_missing_there
+test_upgrade_behind_prints_one_command_that_pulls_and_then_upgrades
+test_upgrade_behind_from_a_folder_with_spaces_prints_a_command_that_works
 test_backup_and_upgrade_force_cope_with_an_instance_without_a_database
 test_owner_path_remove_upgrade_install
 test_install_rerun_updates_instead_of_reusing_old_images

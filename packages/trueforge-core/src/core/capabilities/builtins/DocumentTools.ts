@@ -32,6 +32,7 @@ import type { ApprovalDecision } from '../../events/schema';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import type { Sandbox, SandboxDocumentSnapshot } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { throwIfSignalAborted } from '../../util/abort';
@@ -138,11 +139,7 @@ const reportSchema = z
     mode: z
       .enum(['compact', 'full'])
       .default('compact')
-      .describe(
-        `compact (default) renders a bounded digest: max ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
-          `${String(DOCUMENT_REPORT_MAX_ROWS)} rows total, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
-          'full renders a multi-page report with no row or section cap, for long reports such as financial plans.',
-      ),
+      .describe('compact (default) is capped as described above; full has no cap, for long reports.'),
     title: z.string().trim().min(1).max(120),
     summary: z.string().refine(v => v.length <= 500, 'must be at most 500 characters'),
     sections: z.array(reportSectionSchema),
@@ -313,6 +310,12 @@ export async function extractDocumentsFromSandbox(
 export class DocumentTools extends LocalToolMCP {
   readonly name = DOCUMENTS_SERVER_ID;
   readonly displayName = 'Documents';
+  protected override readonly bundle: ToolBundleName = 'documents';
+
+  // The net-worth mode is asked for by name, so it rides with the other on-request tools.
+  override bundleOf(toolName: string): ToolBundleName {
+    return toolName === SUMMARIZE_NET_WORTH_TOOL_NAME ? 'extras' : this.bundle;
+  }
 
   /**
    * Session-scale extraction budget: repeated extract_document_text calls
@@ -340,17 +343,17 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: CREATE_DOCUMENT_REPORT_TOOL_NAME,
       description:
-        `Render a document report as a downloadable DOCX; it does not interpret contents or calculate totals. ` +
-        `Compact mode (default) is a bounded digest: max ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
-        `${String(DOCUMENT_REPORT_MAX_ROWS)} rows total, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
-        'Full mode renders long reports such as financial plans across multiple pages with no row or section cap.',
+        `Render a downloadable DOCX report; it does not interpret contents or calculate totals. ` +
+        `compact (default) caps at ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
+        `${String(DOCUMENT_REPORT_MAX_ROWS)} rows and ${String(DOCUMENT_REPORT_MAX_NOTES)} notes. ` +
+        'full has no cap.',
       schema: reportSchema,
       handler: (input, approvalDecision) => this.createReport(input, approvalDecision),
     }),
     defineTool({
       name: SUMMARIZE_NET_WORTH_TOOL_NAME,
       description:
-        'Explicit net-worth report mode: extract supplied files, validate each cited exact source span, preserve conflicts and uncertain claims, compute asset/liability totals deterministically, and render a downloadable DOCX.',
+        'Net-worth DOCX from supplied files: checks each cited source span, keeps conflicts and uncertain claims, and computes asset and liability totals deterministically.',
       schema: netWorthSchema,
       handler: (input, approvalDecision) =>
         this.createNetWorthReport(input.file_paths, input.observations, input.title, approvalDecision),
@@ -469,5 +472,6 @@ export function documentCapability(options: { sandbox: Sandbox; tracing: AgentTr
   return {
     systemToolSets: [new DocumentTools(options.sandbox, options.tracing)],
     instructionBuilders: [buildDocumentsInstruction],
+    bundle: 'documents',
   };
 }

@@ -2,7 +2,7 @@
 
 import { normalizeSandboxArtifactBlocks } from '@truefoundry/trueforge-core/core/sandbox/sandboxArtifacts';
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -16,9 +16,11 @@ import { isChatImageSrc, useChatImageScope, useInsideChatTurn } from '../chatIma
 import { useSlot, useThemeMode } from '../theme/SlotsProvider.js';
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { type CitationSource } from '../utils/citationMarkers.js';
+import { rehypeHighlightText } from '../utils/rehypeHighlightText.js';
 import { remarkCitationMarkers } from '../utils/remarkCitationMarkers.js';
 import { remarkNormalizeProseTypography } from '../utils/remarkNormalizeProseTypography.js';
 import { transformMarkdownSource } from '../utils/transformMarkdownSource.js';
+import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import type { OpenUiFenceBlockProps } from './OpenUiFenceBlock.js';
 import type { SandboxArtifactDownloadProps } from './SandboxArtifactDownload.js';
@@ -45,6 +47,13 @@ export type MarkdownProps = {
   readOnly?: boolean;
   /** Citation sources for resolving model-emitted citation markers like 【14†excerpts】. */
   citationSources?: Map<number | string, CitationSource> | CitationSource[] | null;
+  /**
+   * A space page: its remote https pictures load through the owner's picture route, which serves
+   * only pictures a stored space contains. Any other remote picture stays a plain link.
+   */
+  spacePictures?: boolean;
+  /** Marks each case-insensitive match of this text in the rendered output. */
+  highlight?: string;
   className?: string;
 };
 
@@ -131,17 +140,121 @@ export function markdownUrlTransform(value: string): string {
   return '';
 }
 
+/** The owner's own picture route for a space picture; the server refuses any URL no stored space contains. */
+function spacePictureRouteUrl(src: string): string {
+  return `/api/space-pictures?url=${encodeURIComponent(src)}`;
+}
+
+function isHttpsSrc(src: string): boolean {
+  try {
+    return new URL(src.trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A picture on a space page, loaded on its own through the owner's picture route with no referrer.
+ * The one plain line below stands in when the route refuses or cannot fetch it.
+ */
+function SpacePicture({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span
+        className="my-2 flex h-24 w-40 max-w-full items-center justify-center rounded-lg border border-border bg-secondary-bg p-2 text-center text-xs text-text-secondary"
+        data-testid="aui-space-picture-failed"
+      >
+        This picture could not be shown.
+      </span>
+    );
+  }
+  return (
+    <img
+      src={spacePictureRouteUrl(src)}
+      alt={alt}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className="my-2 h-24 w-40 max-w-full rounded-lg border border-border bg-secondary-bg object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
+ * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only when
+ * the person asks, so an image URL in a prompt-injected page never reaches its host on render. Loads
+ * with no referrer; a failed load shows the alt text instead of an empty box.
+ */
+function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
+  const [requested, setRequested] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const host = remoteImageHost(src);
+  const label = alt !== '' ? alt : 'External image';
+  return (
+    <span
+      className="aui-remote-image my-2 inline-flex max-w-full flex-col gap-1 text-xs text-text-secondary"
+      data-testid="aui-remote-image-placeholder"
+    >
+      <span className="flex h-24 w-40 max-w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg p-2 text-center">
+        {requested && !failed ? (
+          <img
+            src={src}
+            alt={alt}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="h-full w-full rounded-lg object-cover"
+            onError={() => setFailed(true)}
+          />
+        ) : failed ? (
+          <span className="line-clamp-3 break-words">Image unavailable: {label}</span>
+        ) : (
+          <button
+            type="button"
+            className={auiButtonClass({
+              variant: 'secondary',
+              size: 'small',
+              className: 'h-auto max-w-full whitespace-normal py-1 text-center',
+            })}
+            aria-label={`Show image: ${label}`}
+            onClick={() => setRequested(true)}
+          >
+            Show image: {label}
+          </button>
+        )}
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate opacity-70">{host}</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="shrink-0 underline-offset-2 hover:underline">
+          Open image
+        </a>
+      </span>
+    </span>
+  );
+}
+
 /**
  * Inside a chat turn, only re-encoded images from this chat's image route render; a web link goes to
  * the server and stays hidden until the person asks to see it; any other source (data:, blob:, another
  * same-origin path), and every image of a turn without image access, is not rendered. Alt text is
  * always plain text.
  *
- * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
- * private data in an image URL. A placeholder shows the destination host instead, and clicking opens
- * the image in a new tab; same-origin, data: and blob: images still render inline.
+ * Outside a chat turn remote images never auto-load: a prompt injection can hide private data in an
+ * image URL. They show as a thumbnail that loads on request. A space page (`spacePictures`) is the one
+ * exception: its https pictures load through the owner's picture route. Same-origin, data: and blob:
+ * images still render inline.
  */
-function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgProps: ComponentProps<'img'> }) {
+function MarkdownImage({
+  src,
+  alt,
+  imgProps,
+  spacePictures,
+}: {
+  src: string;
+  alt: string;
+  imgProps: ComponentProps<'img'>;
+  spacePictures: boolean;
+}) {
   const scope = useChatImageScope();
   if (useInsideChatTurn()) {
     if (scope !== null && isChatImageSrc(src)) {
@@ -155,21 +268,57 @@ function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgPr
   if (isSafeInlineImageSrc(src)) {
     return <img {...imgProps} src={src} alt={alt} />;
   }
-  const host = remoteImageHost(src);
+  if (spacePictures) {
+    if (isHttpsSrc(src)) {
+      return <SpacePicture src={src.trim()} alt={alt} />;
+    }
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+        {alt !== '' ? alt : src}
+      </a>
+    );
+  }
+  return <RemoteImageThumbnail src={src} alt={alt} />;
+}
+
+/**
+ * A table on a read-only page (a space) sits in its own scroll box. The edge cue on either side
+ * shows only while there is more to see, so a wide table is never clipped without a sign of it.
+ * The scroll position is read back from the box rather than styled alone, because overlay
+ * scrollbars hide the usual hint on most desktops.
+ */
+function ScrollableTable(props: ComponentProps<'table'>) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (box == null) return;
+    const measure = () => {
+      const start = box.scrollLeft > 0;
+      const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+      setEdges(current => (current.start === start && current.end === end ? current : { start, end }));
+    };
+    measure();
+    box.addEventListener('scroll', measure, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(box);
+    return () => {
+      box.removeEventListener('scroll', measure);
+      observer?.disconnect();
+    };
+  }, []);
+
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        'aui-remote-image my-2 inline-flex max-w-full items-center gap-2 rounded border border-border bg-card-bg px-2 py-1 text-xs text-text-secondary',
-      )}
-      data-testid="aui-remote-image-placeholder"
-      title={src}
+    <div
+      className="space-table-frame"
+      data-more-start={edges.start ? '' : undefined}
+      data-more-end={edges.end ? '' : undefined}
     >
-      <span className="truncate">{alt !== '' ? alt : 'External image'}</span>
-      <span className="truncate opacity-70">{host}</span>
-    </a>
+      <div ref={scrollRef} className="space-table-scroll">
+        <table {...props} />
+      </div>
+    </div>
   );
 }
 
@@ -182,6 +331,7 @@ function makeComponents(opts: {
   onDownloadArtifact?: (path: string, filename: string) => Promise<void>;
   onFetchFile?: (path: string) => Promise<Blob>;
   readOnly?: boolean;
+  spacePictures?: boolean;
   OpenUiFenceBlock: ComponentType<OpenUiFenceBlockProps>;
   SandboxArtifactDownload: ComponentType<SandboxArtifactDownloadProps>;
   SyntaxHighlighter: ComponentType<SyntaxHighlighterProps>;
@@ -195,6 +345,7 @@ function makeComponents(opts: {
     onDownloadArtifact,
     onFetchFile,
     readOnly,
+    spacePictures,
     OpenUiFenceBlock,
     SandboxArtifactDownload,
     SyntaxHighlighter,
@@ -215,13 +366,23 @@ function makeComponents(opts: {
         </a>
       );
     },
+    table({ node: _node, ...props }) {
+      return readOnly ? <ScrollableTable {...props} /> : <table {...props} />;
+    },
     // An empty src renders nothing at all, not a placeholder.
     img({ src, alt, node: _node, ...props }) {
       const srcValue = typeof src === 'string' ? src : '';
       if (srcValue.trim() === '') {
         return null;
       }
-      return <MarkdownImage src={srcValue} alt={typeof alt === 'string' ? alt : ''} imgProps={props} />;
+      return (
+        <MarkdownImage
+          src={srcValue}
+          alt={typeof alt === 'string' ? alt : ''}
+          imgProps={props}
+          spacePictures={spacePictures === true}
+        />
+      );
     },
     // Strip default <pre> wrapper; each block renderer provides its own container.
     pre({ children }: { children?: ReactNode }) {
@@ -379,11 +540,9 @@ const MARKDOWN_SANITIZE_SCHEMA: SanitizeSchema = {
 //
 // Hosts must include KaTeX's own stylesheet (`katex/dist/katex.min.css`) for this output to lay
 // out and size correctly; this package does not bundle it (see packages/frontend's Vite entry).
-const REHYPE_PLUGINS: PluggableList = [
-  rehypeRaw,
-  [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA],
-  [rehypeKatex, { output: 'html' }],
-];
+const REHYPE_SANITIZE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]];
+const REHYPE_MATH_PLUGINS: PluggableList = [[rehypeKatex, { output: 'html' }]];
+const REHYPE_PLUGINS: PluggableList = [...REHYPE_SANITIZE_PLUGINS, ...REHYPE_MATH_PLUGINS];
 
 export function Markdown({
   content,
@@ -393,6 +552,8 @@ export function Markdown({
   onFetchFile,
   readOnly,
   citationSources,
+  spacePictures,
+  highlight,
   className,
 }: MarkdownProps) {
   const mode = useThemeMode();
@@ -416,6 +577,7 @@ export function Markdown({
         onDownloadArtifact,
         onFetchFile,
         readOnly,
+        spacePictures,
         OpenUiFenceBlock,
         SandboxArtifactDownload,
         SyntaxHighlighter,
@@ -428,6 +590,7 @@ export function Markdown({
       onDownloadArtifact,
       onFetchFile,
       readOnly,
+      spacePictures,
       OpenUiFenceBlock,
       SandboxArtifactDownload,
       SyntaxHighlighter,
@@ -445,6 +608,13 @@ export function Markdown({
 
   // Create remark plugins dynamically based on citation sources availability
   const remarkPlugins = useMemo(() => createRemarkPlugins(citationSources), [citationSources]);
+  const rehypePlugins = useMemo<PluggableList>(
+    () =>
+      highlight === undefined || highlight === ''
+        ? REHYPE_PLUGINS
+        : [...REHYPE_SANITIZE_PLUGINS, [rehypeHighlightText, { query: highlight }], ...REHYPE_MATH_PLUGINS],
+    [highlight],
+  );
 
   return (
     <div
@@ -452,7 +622,7 @@ export function Markdown({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={rehypePlugins}
         components={components}
         urlTransform={markdownUrlTransform}
       >

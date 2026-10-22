@@ -1,41 +1,40 @@
 'use client';
 
-import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { useRef, useState, type FC } from 'react';
 
+import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
+import { StubTear } from '../atoms/Reward.js';
+import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
+import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
+import {
+  approvalQuestion,
+  approvalSentLine,
+  approvalStub,
+  approvalTime,
+  approveVerb,
+  declineVerb,
+} from './approvalCopy.js';
+import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
-import { PERSONA_BADGE, PersonaDetails } from './PersonaDetails.js';
-import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
-import type {
-  SentinelApprovalCard,
-  SentinelApprovalEmail,
-  SentinelApprovalEmailAction,
-  SentinelApprovalMailbox,
-} from './types.js';
-
-type ApprovalCardTier = 2 | 3;
+import { PersonaDetails } from './PersonaDetails.js';
+import { ScheduleDetails } from './ScheduleDetails.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
 
-const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
-
-const EMAIL_BADGES: Record<SentinelApprovalEmailAction, string> = {
-  send: 'Send email',
-  save: 'Save draft',
-  change: 'Change draft',
-};
-
 export type PermissionApprovalCardProps = {
-  toolName: string;
+  /** Id of the approval this card answers; the composer banner finds the card by it. */
+  approvalId: string;
   card: SentinelApprovalCard;
-  /** Tier the server sent; it only changes the badge, never the controls. */
-  tier: ApprovalCardTier;
+  /** True for the one card per screen that takes the gold fill and edge. Set by the container. */
+  highlighted?: boolean;
+  /** How many other approvals wait on the person. A stub never tears while any do. */
+  othersWaiting: number;
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
@@ -85,7 +84,7 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 text-sm">
-      <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</dt>
+      <dt className="shrink-0 text-xs font-medium text-text-secondary">{label}</dt>
       <dd className="min-w-0">
         <FoldedText
           text={value}
@@ -97,60 +96,40 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
-  return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
-}
-
-/** What a change replaces, with the recipients of that saved draft. */
-function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
+/** The search service's own fields: kept out of the way, but still listed, behind a closed disclosure. */
+function PlumbingDetails({ text }: { text: string }) {
   return (
-    <dl className="rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="Replaces" value={replaces.subject} />
-      <DetailRow label="Replaced draft to" value={mailboxListText(replaces.to)} />
-    </dl>
-  );
-}
-
-/** The whole message, never cut: the body scrolls in its own box instead of being folded. */
-function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
-  return (
-    <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
-      {email.reply_in_thread !== null && (
-        <dl className="mb-1">
-          <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
-          <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
-        </dl>
-      )}
-      <p className="break-words text-sm text-text-primary">To: {mailboxListText(email.to)}</p>
-      {email.cc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Copy: {mailboxListText(email.cc)}</p>
-      )}
-      {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
-      )}
-      <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
-      <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
-        Message, exactly as sent
+    <details className="rounded border border-border bg-primary-bg px-3 py-2">
+      <summary className="cursor-pointer text-sm text-text-secondary">Search service details</summary>
+      <p className="mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        Also sent by the search service
       </p>
-      <div
-        role="region"
-        aria-label="Message, exactly as sent"
-        tabIndex={0}
-        className="max-h-80 overflow-auto rounded border border-border bg-card-bg px-3 py-2"
-      >
-        <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
-          {email.body === '' ? 'This message has no text.' : email.body}
-        </p>
-      </div>
-    </div>
+      <FoldedText
+        text={text}
+        as="pre"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+      />
+    </details>
   );
+}
+
+/**
+ * The main block of "Exactly what will be sent": every line except the search service's own, which the
+ * Details disclosure lists. Lines are matched exactly, so nothing is dropped from the full list.
+ */
+function visibleOutboundText(text: string, plumbing: string | null): string {
+  if (plumbing === null) return text;
+  const folded = new Set(plumbing.split('\n'));
+  return text
+    .split('\n')
+    .filter(line => !folded.has(line))
+    .join('\n');
 }
 
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <p className="mb-1 text-xs font-medium text-text-secondary">Full request</p>
       {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
       <FoldedText
         text={text}
@@ -162,16 +141,15 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 }
 
 /**
- * Plain-language approval card for Tier 3 actions and Tier 2 actions that ask. Every row renders only what the server sent:
- * `plain_what` is always present, everything else renders when non-null. The parsed
- * command renders whenever the card carries one; the server only attaches it to shell
- * cards, so the card never needs to know which tool it is. The card never infers the
- * tier; the container only mounts it for an explicit Tier 2 or Tier 3 approval.
+ * Approval ticket for calendar, schedule, specialist and other non-mail actions. The question is the
+ * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
+ * raw request and the connector's arguments fold into Details. Mail uses EmailApprovalCard instead.
  */
 export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
-  toolName,
+  approvalId,
   card,
-  tier,
+  highlighted = false,
+  othersWaiting,
   onApprove,
   onApproveForChat,
   onApproveAlways,
@@ -182,7 +160,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   disabled = false,
 }) => {
   const [changing, setChanging] = useState(false);
+  const [sentAt, setSentAt] = useState<string | null>(null);
+  const [tearing, setTearing] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const { tryPlay } = useRewardLedger();
   const hasDetails =
     card.destination !== null ||
     card.recipient !== null ||
@@ -190,45 +171,60 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email, calendar_event: calendarEvent, schedule, persona } = card;
-  // Approving a new-recipient send adds its addresses, so it never offers a grant and its labels say so.
+  const { calendar_event: calendarEvent, schedule, persona } = card;
+  // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
-  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
-  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
-  const badge =
-    email !== null
-      ? EMAIL_BADGES[email.action]
-      : calendarEvent !== null
-        ? CALENDAR_BADGES[calendarEvent.action]
-        : schedule !== null
-          ? SCHEDULE_BADGES[schedule.action]
-          : persona !== null
-            ? PERSONA_BADGE
-            : null;
+  const stub = approvalStub(card, { sentAt });
+  // A held search's chat choice only lifts its private-read check, so it says what it lets through.
+  const chatChoice = isSearchHoldCardText(card.plain_what)
+    ? APPROVAL_CHOICES.allowSearchesForChat
+    : APPROVAL_CHOICES.approveForChat;
+  const plumbingText = card.outbound_plumbing_text ?? null;
+  const outboundShown =
+    card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
+
+  // The stub tears only for an approval the ledger allows; otherwise it simply goes.
+  const markSent = (send: () => void) => () => {
+    const now = new Date();
+    setTearing(
+      tryPlay({
+        request: { kind: 'tear' },
+        context: { busy: false, waitingOnPerson: othersWaiting > 0, hasError: false, scheduleFailedToday: false },
+        now,
+      }),
+    );
+    setSentAt(approvalTime(now));
+    send();
+  };
+
+  const stubContent = (
+    <>
+      <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
+      <p className="aui-ticket__detail text-sm text-text-primary">{stub.detail}</p>
+      <p className="aui-ticket__label text-gold-ink">{stub.state}</p>
+    </>
+  );
+
   return (
-    <div className="rounded-lg border border-border bg-card-bg">
-      <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
-          <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
-          {badge === null ? (
-            <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
-              {toolName}
+    <article
+      data-role="approval-ticket"
+      data-approval-id={approvalId}
+      className={cn('aui-ticket aui-ticket--stub aui-ticket--punch aui-settle', highlighted && 'aui-ticket--selected')}
+    >
+      <div className="min-w-0 space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
+          {sentAt === null ? (
+            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+              {WAITING_FOR_YOU_LABEL}
             </span>
           ) : (
-            <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 text-xs text-text-secondary">
-              {badge}
+            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
+              {approvalSentLine(card, sentAt)}
             </span>
           )}
         </div>
-        <span className="shrink-0 rounded border border-border bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
-          {TIER_LABELS[tier]}
-        </span>
-      </div>
-
-      <div className="space-y-3 px-4 py-3">
-        <p className="text-sm text-text-primary">{card.plain_what}</p>
-        {card.plain_why !== null && <p className="text-sm text-text-secondary">Agent says: {card.plain_why}</p>}
+        {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
 
         {card.cannot_be_undone !== null && (
           <p className="flex items-start gap-2 text-sm text-text-secondary">
@@ -241,8 +237,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
-        {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
-
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
             {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
@@ -253,48 +247,29 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </dl>
         )}
 
-        {email !== null && <EmailMessage email={email} />}
-
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
         {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
         {persona !== null && <PersonaDetails persona={persona} />}
 
-        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
-
-        <div className="flex flex-wrap gap-2">
+        <div
+          className={cn(
+            'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
+            sentAt !== null && 'pointer-events-none opacity-0',
+          )}
+          aria-hidden={sentAt !== null}
+        >
           <Button
             variant="primary"
             size="small"
-            title={approveChoice.hint}
-            onClick={onApprove}
-            disabled={disabled}
+            title={APPROVAL_CHOICES.approve.hint}
+            onClick={markSent(onApprove)}
+            disabled={disabled || sentAt !== null}
             className="flex-1"
           >
-            {approveChoice.label}
+            {approveVerb(card)}
           </Button>
-          {onApproveForChat !== undefined && !newRecipients && (
-            <Button
-              variant="secondary"
-              size="small"
-              title={APPROVAL_CHOICES.approveForChat.hint}
-              onClick={onApproveForChat}
-              disabled={disabled}
-              className="flex-1"
-            >
-              {APPROVAL_CHOICES.approveForChat.label}
-            </Button>
-          )}
-          {onApproveAlways !== undefined && !newRecipients && (
-            <AlwaysAllowToolControl
-              size="small"
-              className="flex-1"
-              disabled={disabled}
-              description={`The agent will run "${toolName}" on this connector without asking, in every chat.`}
-              onConfirm={onApproveAlways}
-            />
-          )}
           {onChangeRequest !== undefined && (
             <Button
               ref={changeButtonRef}
@@ -305,21 +280,21 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               onClick={() => {
                 setChanging(true);
               }}
-              disabled={disabled}
+              disabled={disabled || sentAt !== null}
               className="flex-1"
             >
               {APPROVAL_CHOICES.changeIt.label}
             </Button>
           )}
           <Button
-            variant="secondary"
+            variant="ghost"
             size="small"
-            title={denyChoice.hint}
+            title={APPROVAL_CHOICES.deny.hint}
             onClick={onDeny}
-            disabled={disabled}
-            className="flex-1"
+            disabled={disabled || sentAt !== null}
+            className="flex-1 text-gold-ink"
           >
-            {denyChoice.label}
+            {declineVerb(card)}
           </Button>
         </div>
         {changing && onChangeRequest !== undefined && (
@@ -340,7 +315,38 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
           </Button>
         )}
+
+        <details className="text-sm">
+          <summary className="cursor-pointer text-text-secondary underline">Details</summary>
+          <div className="mt-2 space-y-3">
+            {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
+            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
+            {onApproveForChat !== undefined && !newRecipients && (
+              <Button
+                variant="secondary"
+                size="small"
+                title={chatChoice.hint}
+                onClick={markSent(onApproveForChat)}
+                disabled={disabled || sentAt !== null}
+              >
+                {chatChoice.label}
+              </Button>
+            )}
+            {onApproveAlways !== undefined && !newRecipients && (
+              <AlwaysAllowToolControl
+                size="small"
+                disabled={disabled || sentAt !== null}
+                description="The agent will run this kind of action on this connector without asking, in every chat."
+                onConfirm={markSent(onApproveAlways)}
+              />
+            )}
+          </div>
+        </details>
       </div>
-    </div>
+      {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
+      <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">
+        {stubContent}
+      </StubTear>
+    </article>
   );
 };

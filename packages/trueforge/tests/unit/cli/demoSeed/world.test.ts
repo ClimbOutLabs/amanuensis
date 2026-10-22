@@ -1,3 +1,8 @@
+import {
+  DRAFT_EMAIL_TOOL_NAME,
+  SEND_DRAFT_TOOL_NAME,
+  UPDATE_DRAFT_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { parseDateOnly, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
@@ -90,7 +95,9 @@ describe('buildDemoWorld content', () => {
     expect(scheduleManifest.task.startsWith(MORNING_BRIEF_PROMPT)).toBe(true);
     expect(scheduleManifest.task).toContain('write a short suggested reply in the brief');
     expect(scheduleManifest.task).toContain('Do not send or save anything');
-    expect(scheduleManifest.task).not.toContain('Draft a reply');
+    for (const tool of [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME]) {
+      expect(scheduleManifest.task).not.toContain(tool);
+    }
     expect(scheduleManifest.task).not.toContain('Needs your OK');
     expect(scheduleManifest.task).toContain('Travessa das Gaivotas 4, 1200-000 Lisboa');
   });

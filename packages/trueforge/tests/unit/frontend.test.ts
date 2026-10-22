@@ -16,7 +16,7 @@ function buildDir(): string {
 function appWithFrontend(dir: string): OpenAPIHono {
   const app = new OpenAPIHono();
   app.get('/api/v1/health', c => c.json({ ok: true }));
-  mountFrontend(app, { dir, uiBasePath: '/' });
+  mountFrontend(app, { dir, uiBasePath: '/', trustPageUrl: '' });
   return app;
 }
 
@@ -28,9 +28,10 @@ describe('mountFrontend', () => {
       mountFrontend(new OpenAPIHono(), {
         dir: path.join(tmpdir(), 'trueforge-missing-build'),
         uiBasePath: '/',
+        trustPageUrl: '',
       }),
     ).toBe(false);
-    expect(mountFrontend(new OpenAPIHono(), { dir: buildDir(), uiBasePath: '/' })).toBe(true);
+    expect(mountFrontend(new OpenAPIHono(), { dir: buildDir(), uiBasePath: '/', trustPageUrl: '' })).toBe(true);
   });
 
   it('substitutes the public UI prefix into the cached app shell', async () => {
@@ -40,12 +41,27 @@ describe('mountFrontend', () => {
       "<html><script>window.__TRUEFORGE_BASE_PATH__='%%TRUEFORGE_BASE_PATH%%';</script></html>",
     );
     const app = new OpenAPIHono();
-    mountFrontend(app, { dir, uiBasePath: '/custom/proxy/path/' });
+    mountFrontend(app, { dir, uiBasePath: '/custom/proxy/path/', trustPageUrl: '' });
 
     const response = await app.request('/', { headers: HTML_ACCEPT });
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("window.__TRUEFORGE_BASE_PATH__='/custom/proxy/path/'");
+  });
+
+  it('substitutes the trust page address into the cached app shell', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'trueforge-frontend-'));
+    writeFileSync(
+      path.join(dir, 'index.html'),
+      "<html><script>window.__TRUEFORGE_TRUST_PAGE_URL__='%%TRUEFORGE_TRUST_PAGE_URL%%';</script></html>",
+    );
+    const app = new OpenAPIHono();
+    mountFrontend(app, { dir, uiBasePath: '/', trustPageUrl: 'http://192.168.1.20:8791/trust' });
+
+    const response = await app.request('/', { headers: HTML_ACCEPT });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("window.__TRUEFORGE_TRUST_PAGE_URL__='http://192.168.1.20:8791/trust'");
   });
 
   it('serves the app shell for client-only deep links', async () => {

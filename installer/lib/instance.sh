@@ -177,9 +177,16 @@ instance_render() {
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
   [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
+  # compose file, because the compose file mounts it from this folder.
+  local email_on=0
+  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
   ensure_private_dir "$dir"
+  if [ "$email_on" = 1 ]; then
+    write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
+  fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -468,6 +475,7 @@ instance_derive() {
   fi
   I_ORIGINS=
   I_TLS_PORT=
+  I_TRUST_URL=
   I_PUBLIC_ADDRESSES=
   if [ -z "$I_PUBLIC_URL" ]; then
     # The sign-in service is only ever reached on this computer: other devices go through the app.
@@ -484,6 +492,8 @@ instance_derive() {
         I_TLS_PORT=$(pick_port 8443 "$all_reserved $I_PORT $I_LOGIN_PORT") || die "No free port was found on this computer for https near 8443."
         # shellcheck disable=SC2086
         I_ORIGINS=$(network_origin_list "$I_PORT" "$I_TLS_PORT" $OPT_ADDRESSES)
+        # The app shows this same link when a device does not trust this computer yet.
+        I_TRUST_URL=$(tls_trust_link_for "$I_ORIGINS" "$I_PORT")
       fi
       I_PUBLIC_ADDRESSES=$(network_public_addresses | tr '\n' ' ')
     fi
@@ -548,13 +558,18 @@ instance_apply_addresses() { # name open|close|refresh
   reg_set "$name" origins "$origins"
   reg_set "$name" extra_hosts "$extras"
   env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+  if tls_active "$name"; then
+    env_managed_set "$env" TRUST_PAGE_URL "$(tls_trust_link "$name")"
+  elif grep -q '^TRUST_PAGE_URL=' "$env"; then
+    env_managed_set "$env" TRUST_PAGE_URL ""
+  fi
   log_event "instance $name addresses $mode"
 }
 
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
+  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0 trust_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists. Making sure it is running."
@@ -565,6 +580,7 @@ instance_create() {
   fi
   issuer_check "$I_ISSUER"
   if [ -n "$I_ORIGINS" ]; then network_on=1; fi
+  if [ -n "$I_TRUST_URL" ]; then trust_on=1; fi
   INSTANCE_PENDING=$I_NAME
   if [ "$I_SANDBOX" = slots ]; then sandbox_ensure "$I_NAME"; fi
   remove_instance_dir "$I_NAME"
@@ -583,7 +599,8 @@ instance_create() {
     "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "IF_GATEWAY=$(gateway_flag "$I_ORIGINS" "$I_PUBLIC_URL")" "LOGIN_PORT=$I_LOGIN_PORT" \
     "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "OWNER_NAME=$I_OWNER_NAME" "API_KEY=$api_key" \
-    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
+    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" \
+    "IF_TRUST_URL=$trust_on" "TRUST_URL=$I_TRUST_URL" |
     write_if_changed "$dir/.env" 600 || true
   AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
@@ -613,14 +630,10 @@ print_proxy_requirements() {
   say "    the app contacts the login origin from inside its container."
 }
 
-# With --password-stdin the password is the first line of stdin, read before any prompt can take it; with
-# --token-factory-key-stdin the key is the next line.
+# The stdin answers were read before any prompt could take one; the sign-in password is checked here.
 read_password_first() {
   if [ "$PASSWORD_FROM_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     ask_password AMAN_PASSWORD
-  fi
-  if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
-    read_token_factory_key_stdin
   fi
 }
 
@@ -761,6 +774,7 @@ load_installed_release() {
   REL_STT_TAG=$CUR_STT_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
+  REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
 
@@ -779,11 +793,15 @@ gateway_flag() { # origins public_url
 # still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
 # service both read from this file. The Token Factory key cannot be made again and is skipped.
 instance_env_repair() {
-  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
+  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0 trust_on=0 trust_url=
   env="$(instance_dir "$name")/.env"
   # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
   owner_name_backfill "$name"
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
+  if tls_active "$name"; then
+    trust_on=1
+    trust_url=$(tls_trust_link "$name")
+  fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
@@ -808,7 +826,8 @@ instance_env_repair() {
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
     "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
     "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
-    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
+    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on" \
+    "IF_TRUST_URL=$trust_on" "TRUST_URL=$trust_url")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
@@ -1271,7 +1290,8 @@ cmd_instance_remove() {
   fi
   say "$line."
   if [ "$last_one" = 1 ] && [ -f "$(tls_ca_dir)/root.crt" ]; then
-    say "This computer's trust certificate was kept, so your devices will still trust Aman when you install it again."
+    say "This computer's trust certificate was kept in $(ui_path "$(tls_ca_dir)"), so your devices will still trust Aman when you install it again."
+    say "To delete it too: rm -r $(ui_path "$(tls_ca_dir)")"
   fi
   if [ "$last_one" = 1 ] && [ -d "$BACKUPS_DIR" ]; then
     say "Your backups in $BACKUPS_DIR were kept. To delete them: rm -r $BACKUPS_DIR"

@@ -1,12 +1,12 @@
-import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
-import { AmanAvatarMotion, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
-import type { MemoryBankStatus } from './AmanSetupContext.js';
+import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
+import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
   PersonalizationProvider,
   useOptionalPersonalization,
@@ -32,11 +32,6 @@ export type AmanRuntimeRailProps = {
    */
   activity?: AmanAvatarActivity;
   modelName?: string;
-  /**
-   * The sign-in name, used only when the person has not chosen one in Personalization. With
-   * neither, the account row is left out.
-   */
-  userName?: string | undefined;
   /** The persona or agent answering right now, when the host tracks one. */
   personaName?: string | undefined;
   /** Host-provided status wins; when omitted the rail probes `/healthz` itself. */
@@ -45,19 +40,15 @@ export type AmanRuntimeRailProps = {
   version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
-  /**
-   * The memory bank, null when memory is off, undefined when unknown. Unknown leaves the row out
-   * rather than claiming a state the host could not confirm.
-   */
-  memoryBank?: MemoryBankStatus | null | undefined;
-  /** Where "set up" points when memory is off; omitted renders plain text. */
+  /** Where the "Change in Settings" link points; omitted hides the link. */
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
+  /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
+  pendingApprovalIds?: readonly string[];
   /**
-   * Live permissions audit feed node, provided by the host (e.g. `SentinelAuditFeed`
-   * for the active session). Renders as a "Permissions" section; omitted leaves the
-   * section out entirely.
+   * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
+   * Omitted leaves the receipt out entirely.
    */
   auditFeed?: ReactNode;
 };
@@ -84,6 +75,33 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   offline: 'Offline',
   degraded: 'Degraded',
 };
+
+/**
+ * The status line: the connection when it is not fine, then the approval that waits on the person, otherwise
+ * what Aman is doing now.
+ */
+function statusLineLabel({
+  status,
+  activity,
+  waitingOnApproval,
+}: {
+  status: AmanRuntimeRailStatus;
+  activity: AmanAvatarActivity;
+  waitingOnApproval: boolean;
+}): string {
+  if (status !== 'ready') return STATUS_LABELS[status];
+  if (waitingOnApproval) return 'Waiting on your approval';
+  switch (activity) {
+    case 'idle':
+      return 'Ready';
+    case 'thinking':
+      return 'Working on it…';
+    case 'writing':
+      return 'Writing the answer…';
+    case 'error':
+      return 'Something went wrong';
+  }
+}
 
 /** Enough of a commit SHA to compare against a branch or an image tag by eye. */
 const SHORT_REF_LENGTH = 7;
@@ -113,71 +131,40 @@ function summarizeBuild({ version, buildRef }: { version: string; buildRef: stri
 
 type RuntimeRailContentProps = Omit<AmanRuntimeRailProps, 'personalizationApi'>;
 
-/**
- * Memory recall toggle: reads the current recallEnabled flag from the agent spec
- * and provides a switch to toggle it.
- */
-const MemoryRecallToggle: FC<{ memoryBank: MemoryBankStatus | null | undefined }> = ({ memoryBank }) => {
-  const { agentSpec } = useTrueFoundryAgentSpec();
-  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
-
-  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
-  const isConfigured = !!memoryBank?.connected;
-
-  const handleToggle = useCallback(() => {
-    if (!updateAgentSpec) return;
-    updateAgentSpec({
-      config: {
-        ...(agentSpec?.config ?? {}),
-        memory: {
-          ...(agentSpec?.config?.memory ?? {}),
-          recallEnabled: !recallEnabled,
-        },
-      },
-    });
-  }, [updateAgentSpec, agentSpec, recallEnabled]);
-
-  if (!isConfigured) {
-    return null;
-  }
-
-  return (
-    <label className="aman-runtime-rail__switch">
-      <input type="checkbox" checked={recallEnabled} onChange={handleToggle} aria-label="Toggle memory recall" />
-      <span>{recallEnabled ? 'On' : 'Off'}</span>
-    </label>
-  );
-};
-
 const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   avatarSrc,
   avatarMotion,
   activity = 'idle',
   modelName = 'Not configured',
-  userName,
   personaName,
   status: statusOverride,
   version,
   buildRef,
-  memoryBank,
   settingsHref,
+  pendingApprovalIds = [],
   auditFeed,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
+  // The sign-in name stays out of the rail; only the name the person gave Aman is shown here.
+  const personName = personDisplayName({ profile, signInName: null });
+  const sentinel = useOptionalSentinelApiState();
+  const settings = sentinel?.settings ?? null;
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const statusLabel = STATUS_LABELS[status];
+  const pendingCount = pendingApprovalIds.length;
+  // While an approval waits the panda keeps its writing clip, and the status line says why.
+  const statusLine = statusLineLabel({ status, activity, waitingOnApproval: pendingCount > 0 });
+  const avatarActivity: AmanAvatarActivity = pendingCount > 0 ? 'writing' : activity;
   const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
-  // Collapsed, and at phone width where the full status row is hidden, this one string is the
-  // only place the connection state and the active model stay readable.
-  const compactSummary = `${statusLabel} · ${modelName}`;
-  const personName = personDisplayName({ profile, signInName: userName });
+  // Collapsed, the dot is the only status left. Its words carry the connection state only; the
+  // model name stays behind Details.
+  const compactSummary = statusLabel;
   const trimmedPersonaName = personaName?.trim();
-
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
       const next = !previous;
@@ -231,34 +218,80 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
         <>
           <OfflineIndicator />
 
-          <div className="aman-runtime-rail__avatar-card">
+          <section
+            className="aui-ticket aui-ticket--punch aui-panda aman-runtime-rail__avatar-card"
+            data-section="panda"
+            aria-labelledby="aman-runtime-rail-title"
+          >
             {avatarMotion ? (
-              <AmanAvatarMotion activity={activity} sources={avatarMotion} className="aman-runtime-rail__avatar" />
+              <AmanAvatarMotion
+                activity={avatarActivity}
+                sources={avatarMotion}
+                className="aman-runtime-rail__avatar"
+              />
             ) : avatarSrc ? (
-              <img src={avatarSrc} alt="Amanuensis avatar" className="aman-runtime-rail__avatar" />
+              <img src={avatarSrc} alt={AVATAR_ALT} className="aman-runtime-rail__avatar" />
             ) : (
-              <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label="Amanuensis avatar">
+              <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label={AVATAR_ALT}>
                 A
               </span>
             )}
+            <div className="aman-runtime-rail__identity aui-panda__caption">
+              <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
+              <p className="aui-panda__role">{personName ? `${personName}'s Chief of Staff` : 'Your Chief of Staff'}</p>
+            </div>
+          </section>
+
+          <div className="aman-runtime-rail__status" data-status={status} aria-live="polite">
+            <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
+            <span>{statusLine}</span>
+            {selfProbed && (status === 'offline' || status === 'degraded') && (
+              <button
+                type="button"
+                className="aman-runtime-rail__retry"
+                onClick={connectivity.retry}
+                aria-label="Retry connectivity probe"
+                title="Retry connectivity probe"
+              >
+                Retry
+              </button>
+            )}
           </div>
 
-          <div className="aman-runtime-rail__identity">
-            <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
-          </div>
-
-          {personName === undefined ? null : (
+          {settings === null ? null : (
             <section
               className="aman-runtime-rail__section"
-              data-section="account"
-              aria-labelledby="aman-runtime-rail-account-label"
+              data-section="rules"
+              aria-labelledby="aman-runtime-rail-rules-label"
             >
-              <h3 id="aman-runtime-rail-account-label" className="aman-runtime-rail__section-label">
-                You
+              <h3 id="aman-runtime-rail-rules-label" className="aman-runtime-rail__section-label">
+                Your rules
               </h3>
-              <div className="aman-runtime-rail__section-value" title={personName}>
-                {personName}
-              </div>
+              <ul className="aman-runtime-rail__rules">
+                <li>{settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first'}</li>
+                <li>
+                  {settings.sandbox_without_asking ? 'Sandbox code runs without asking' : 'Sandbox code asks first'}
+                </li>
+                <li>{settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off'}</li>
+              </ul>
+              {settingsHref === undefined ? null : (
+                <a className="aman-runtime-rail__link" href={settingsHref}>
+                  Change in Settings
+                </a>
+              )}
+            </section>
+          )}
+
+          {auditFeed === undefined ? null : (
+            <section
+              className="aman-runtime-rail__section"
+              data-section="recent-actions"
+              aria-labelledby="aman-runtime-rail-recent-actions-label"
+            >
+              <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
+                Recent actions
+              </h3>
+              {auditFeed}
             </section>
           )}
 
@@ -277,91 +310,14 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             </section>
           )}
 
-          <section
-            className="aman-runtime-rail__section"
-            data-section="model"
-            aria-labelledby="aman-runtime-rail-model-label"
-          >
-            <h3 id="aman-runtime-rail-model-label" className="aman-runtime-rail__section-label">
-              Model
-            </h3>
-            <div className="aman-runtime-rail__section-value" title={modelName}>
-              {modelName}
-            </div>
-            <div className="aman-runtime-rail__status" data-status={status}>
-              <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-              <span>{statusLabel}</span>
-              {selfProbed && (status === 'offline' || status === 'degraded') && (
-                <button
-                  type="button"
-                  className="aman-runtime-rail__retry"
-                  onClick={connectivity.retry}
-                  aria-label="Retry connectivity probe"
-                  title="Retry connectivity probe"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          </section>
-
-          {memoryBank === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="memory"
-              aria-labelledby="aman-runtime-rail-memory-label"
-            >
-              <h3 id="aman-runtime-rail-memory-label" className="aman-runtime-rail__section-label">
-                Memory
-              </h3>
-              {memoryBank === null ? (
-                <div className="aman-runtime-rail__section-value">
-                  Off
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>set up</a>
-                    </>
-                  )}
-                </div>
-              ) : memoryBank.connected ? (
-                <>
-                  <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                    {memoryBank.name} · on
-                  </div>
-                  <MemoryRecallToggle memoryBank={memoryBank} />
-                </>
-              ) : (
-                <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                  {memoryBank.name} · needs sign-in
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>sign in</a>
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-
           {/* Everything an ordinary user would not act on sits behind one closed disclosure. */}
-          {auditFeed === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="permissions"
-              aria-labelledby="aman-runtime-rail-permissions-label"
-            >
-              <h3 id="aman-runtime-rail-permissions-label" className="aman-runtime-rail__section-label">
-                Permissions
-              </h3>
-              {auditFeed}
-            </section>
-          )}
-
           <details className="aman-runtime-rail__details">
             <summary className="aman-runtime-rail__details-summary">Details</summary>
             <dl className="aman-runtime-rail__details-list">
+              <dt>Model</dt>
+              <dd className="aman-runtime-rail__model" title={modelName}>
+                {modelName}
+              </dd>
               <dt>Connection check</dt>
               <dd>{selfProbed ? 'Run by this tab' : 'Reported by the app'}</dd>
               {selfProbed && connectivity.latencyMs != null && (

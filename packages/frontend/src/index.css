@@ -66,10 +66,28 @@ body {
     padding: 0.55rem 0.75rem max(0.55rem, env(safe-area-inset-bottom, 0px));
   }
 
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card,
+  /* The phone strip keeps the name, the connection dot and the toggle. The picture,
+   * the receipt, the rules and the diagnostics wait behind the full rail. */
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__status,
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__section,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__details,
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__footer {
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__footer,
+  .aman-shell > .aman-runtime-rail .aui-panda__role {
+    display: none;
+  }
+
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card::before {
     display: none;
   }
 
@@ -79,23 +97,6 @@ body {
     display: flex;
     flex: 0 0 auto;
     padding: 0;
-  }
-
-  /* Only the model stays as a visible section; the rest of the strip is the name,
-   * the dot, and the toggle. */
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__section:not([data-section='model']) {
-    display: none;
-  }
-
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__section[data-section='model'] {
-    min-width: 0;
-    max-width: 10rem;
-    border-top: 0;
-    padding-top: 0;
-  }
-
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__section[data-section='model'] .aman-runtime-rail__section-label {
-    display: none;
   }
 
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__identity {

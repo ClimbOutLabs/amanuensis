@@ -4,10 +4,13 @@ import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   allowsChatApproval,
+  allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  offersChatApproval,
+  SEARCH_CHAT_GRANT_KEY,
 } from '../../../src/core/mcp/approvalGrant';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import {
@@ -720,4 +723,64 @@ describe('secret-path detection covers every argument of an unannotated connecto
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
   });
+});
+
+describe('search chat grant', () => {
+  const searchHold: InternalToolCallInfo = {
+    type: 'mcp',
+    mcp_server_id: 'search',
+    mcp_server_name: 'search',
+    original_tool_name: 'web_search',
+    is_approval_required: true,
+    tier: 3,
+    tier_reason: 'mcp_search_after_private_read',
+    search_provider_call: true,
+  };
+
+  it('is offered only for the designated search provider held after a private read', () => {
+    expect(allowsSearchChatGrant(searchHold)).toBe(true);
+    expect(offersChatApproval(searchHold)).toBe(true);
+    expect(allowsSearchChatGrant({ ...searchHold, tier_reason: 'mcp_search_unreturned_url' })).toBe(false);
+    expect(allowsSearchChatGrant({ ...searchHold, search_provider_call: undefined })).toBe(false);
+    expect(allowsSearchChatGrant({ ...searchHold, secret_path_read: true })).toBe(false);
+  });
+
+  it('is stored under a key no tool grant can match', () => {
+    expect(SEARCH_CHAT_GRANT_KEY).not.toBe(approvalGrantKey(searchHold));
+  });
+});
+
+describe('calendar changes that reach guests never get a durable grant', () => {
+  it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
+    'refuses chat and always scope for %s, even when the server calls the tool a read',
+    tier_reason => {
+      const info: InternalToolCallInfo = {
+        type: 'mcp',
+        mcp_server_id: 'Calendar',
+        mcp_server_name: 'Calendar',
+        original_tool_name: 'create_event',
+        is_approval_required: true,
+        effect: 'inspect',
+        tier: 3,
+        tier_reason,
+      };
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(offersChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+      const call: InternalEnrichedToolCall = {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'create_event', arguments: '{}' },
+        tool_info: info,
+      };
+      // A grant stored for this key, by an older rule, admits nothing.
+      const admissions = effectiveToolAdmissions({
+        calls: [call],
+        decisions: new Map(),
+        chatApprovalGrants: new Set([approvalGrantKey(info)]),
+        implementationPlanGrants: new Set(),
+      });
+      expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+    },
+  );
 });

@@ -6,8 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VoiceInputProvider, type VoiceAvailability, type VoiceInputApi } from '@/components/VoiceInputContext.js';
 import { canSubmitComposer, ComposerContainer } from '@/containers/ComposerContainer.js';
 import { ToasterProvider } from '@/containers/ToasterContainer.js';
+import type { ApprovalCardPlacement } from '@/hooks/useApprovalCardPlacement.js';
 import { ComposerBusyProvider, notifyComposerBusyFailure } from '@/hooks/useComposerBusyState.js';
 import { composerDraftKey, ComposerDraftScopeProvider } from '@/hooks/useComposerDraft.js';
+import { COMPOSER_PLACEHOLDER_LINES } from '@/hooks/useComposerPlaceholder.js';
 import {
   CustomActionRenderersProvider,
   type CustomActionRendererProps,
@@ -51,6 +53,12 @@ const approvalsState = vi.hoisted(() => ({
     args: Record<string, unknown>;
     argsText: string;
   }>,
+}));
+
+// The composer banner stands in only while the approval's card is scrolled out of view.
+let approvalCardPlacement: ApprovalCardPlacement = 'missing';
+vi.mock('@/hooks/useApprovalCardPlacement.js', () => ({
+  useApprovalCardPlacement: () => approvalCardPlacement,
 }));
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
@@ -881,7 +889,8 @@ describe('ComposerContainer', () => {
     });
   });
 
-  it('shows the approval banner above a disabled composer while approvals are pending', () => {
+  it('shows the approval banner above a disabled composer while the approval card is off screen', () => {
+    approvalCardPlacement = 'off-screen';
     approvalsState.pending = [
       {
         approvalId: 'appr-1',
@@ -913,10 +922,35 @@ describe('ComposerContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('2 tools need your input')).toBeInTheDocument();
+    expect(screen.getByText('2 items need your approval')).toBeInTheDocument();
     expect(screen.getByText('(1/2)')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message input' })).toBeDisabled();
     expect(document.querySelector('[data-slot="aui_composer-approval-pause"]')).toBeInTheDocument();
+    approvalCardPlacement = 'missing';
+  });
+
+  it('hides the composer banner while the approval card is on screen, so there is one signal', () => {
+    approvalCardPlacement = 'on-screen';
+    approvalsState.pending = [
+      { approvalId: 'appr-1', threadId: 'root', toolName: 'call_tool', args: {}, argsText: '{}' },
+    ];
+    renderComposer(undefined, [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call' as const,
+            toolCallId: 'appr-1',
+            toolName: 'call_tool',
+            args: {},
+            approval: { id: 'appr-1', approved: undefined },
+          },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByText(/need your approval/)).toBeNull();
+    approvalCardPlacement = 'missing';
   });
 
   it('surfaces cancellation failures instead of silently clearing the running state', async () => {
@@ -1061,5 +1095,24 @@ describe('ComposerContainer voice input', () => {
 
     expect(await screen.findByRole('button', MIC)).toBeInTheDocument();
     expect(screen.queryByTitle('Select model')).not.toBeInTheDocument();
+  });
+
+  it('shows one of the listed placeholder lines and keeps it through re-renders and typing', () => {
+    const { rerender } = renderComposer();
+    const input = screen.getByLabelText('Message input');
+    const first = input.getAttribute('placeholder');
+
+    expect(COMPOSER_PLACEHOLDER_LINES).toContain(first);
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+    fireEvent.change(input, { target: { value: 'typing' } });
+
+    expect(input.getAttribute('placeholder')).toBe(first);
   });
 });

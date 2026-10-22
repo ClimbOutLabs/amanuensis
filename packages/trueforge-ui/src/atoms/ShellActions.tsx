@@ -53,7 +53,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
       {tourHidden ? (
         <button
           type="button"
-          title="Show the tour"
+          title="Replay the tour"
           className={auiButtonClass({
             variant: 'ghost',
             size: labeled ? undefined : 'icon',
@@ -62,7 +62,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
           onClick={() => setTourHidden(false)}
         >
           <Icon name="welcome-sparkle" size={labeled ? 14 : undefined} />
-          {labeled ? <span className="text-center">Show the tour</span> : null}
+          {labeled ? <span className="text-center">Replay the tour</span> : null}
         </button>
       ) : null}
       {shell != null && settingsChromeEnabled ? (

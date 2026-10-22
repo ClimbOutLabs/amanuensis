@@ -108,8 +108,8 @@ describe('SlotsProvider', () => {
       return (
         <div>
           <output data-testid={testId}>{preset}</output>
-          <button type="button" onClick={() => setPreset('gemini')}>
-            gemini
+          <button type="button" onClick={() => setPreset('midnight')}>
+            midnight
           </button>
         </div>
       );
@@ -125,16 +125,16 @@ describe('SlotsProvider', () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByTestId('host-preset')).toHaveTextContent('trueforge');
-    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('trueforge');
+    expect(screen.getByTestId('host-preset')).toHaveTextContent('paper');
+    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('paper');
 
     act(() => {
-      screen.getAllByText('gemini')[0]?.click();
+      screen.getAllByText('midnight')[0]?.click();
     });
 
     // One shared context: the host chrome follows the preset change made
     // inside the slotted tree instead of keeping its mount-time preset.
-    expect(screen.getByTestId('host-preset')).toHaveTextContent('gemini');
-    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('gemini');
+    expect(screen.getByTestId('host-preset')).toHaveTextContent('midnight');
+    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('midnight');
   });
 });

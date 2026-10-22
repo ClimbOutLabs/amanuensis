@@ -191,8 +191,8 @@ const TruefoundrySettingsBuilder = () => {
           ))}
         </nav>
 
-        <section className="flex flex-col h-full flex-1 overflow-y-hidden px-6 py-4">
-          <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto">
+        <section className="flex flex-col h-full flex-1 overflow-y-auto scroll-pb-6 px-6 py-4">
+          <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto pb-6">
             {showFirstRunGuide ? <AmanFirstRunGuide placement="settings" className="mb-4 max-w-none shrink-0" /> : null}
             <Suspense fallback={<SettingsSectionFallback />}>
               {section === 'models' ? <ModelSettings /> : null}

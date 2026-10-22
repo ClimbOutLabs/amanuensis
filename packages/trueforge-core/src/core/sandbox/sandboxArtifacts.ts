@@ -196,6 +196,8 @@ export function parseSandboxArtifacts(raw: string): SandboxArtifact[] {
 interface SandboxArtifactBlock {
   start: number;
   end: number;
+  /** Where the body stops: at the closing fence, or at the last artifact line of a block never closed. */
+  bodyEnd: number;
   body: string;
   closed: boolean;
 }
@@ -207,7 +209,110 @@ interface SandboxArtifactBlock {
  */
 const BLOCK_OPEN_RE = /(`{3,}|~{3,})[ \t]*sandbox[_-]artifacts\b/gi;
 
+/**
+ * Where the body of a block the model never closed stops. Only the declaration's own lines
+ * belong to the block: leading blank lines and the lines the parser accepts as artifacts. The
+ * first line that is none of those ends the block, so prose written after an unclosed marker
+ * stays prose instead of being swallowed as block body.
+ */
+function artifactBodyEnd(text: string, bodyStart: number): number {
+  let end = bodyStart;
+  let sawArtifactLine = false;
+  let lineStart = bodyStart;
+  while (lineStart < text.length) {
+    const newlineAt = text.indexOf('\n', lineStart);
+    const lineEnd = newlineAt === -1 ? text.length : newlineAt;
+    const line = text.slice(lineStart, lineEnd);
+    const isArtifactLine = parseSandboxArtifacts(line).length > 0;
+    if (!isArtifactLine && (sawArtifactLine || line.trim().length > 0)) {
+      break;
+    }
+    if (isArtifactLine) {
+      sawArtifactLine = true;
+      end = lineEnd;
+    }
+    if (newlineAt === -1) {
+      break;
+    }
+    lineStart = newlineAt + 1;
+  }
+  return end;
+}
+
+/** A line that opens or closes a markdown code fence: a run of backticks or tildes. */
+const FENCE_LINE_RE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
+
+/** The span between a code fence's opening line and its closing line. */
+interface FencedRegion {
+  contentStart: number;
+  contentEnd: number;
+}
+
+/**
+ * Finds the code fences in a message, as the spans between an opening fence line and its
+ * closing line. A closing line repeats the opening character at least as many times and
+ * carries nothing after it; a fence never closed runs to the end of the text.
+ */
+function findFencedRegions(text: string): FencedRegion[] {
+  const regions: FencedRegion[] = [];
+  let open: { char: string; length: number; contentStart: number } | null = null;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    const newlineAt = text.indexOf('\n', lineStart);
+    const lineEnd = newlineAt === -1 ? text.length : newlineAt;
+    // The slice of a CRLF line keeps its carriage return, which the fence pattern cannot match.
+    const line = text.slice(lineStart, lineEnd);
+    const match = FENCE_LINE_RE.exec(line.endsWith('\r') ? line.slice(0, -1) : line);
+    if (match) {
+      const run = match[1] ?? '';
+      const rest = match[2] ?? '';
+      if (open === null) {
+        // An opening line's info text never repeats the fence character. That is also what
+        // keeps a one-line artifacts block, whose line ends in its own closing fence, from
+        // opening a region here.
+        if (!rest.includes(run.charAt(0))) {
+          open = {
+            char: run.charAt(0),
+            length: run.length,
+            contentStart: newlineAt === -1 ? text.length : newlineAt + 1,
+          };
+        }
+      } else if (run.startsWith(open.char) && run.length >= open.length && rest.trim().length === 0) {
+        regions.push({ contentStart: open.contentStart, contentEnd: lineStart });
+        open = null;
+      }
+    }
+    if (newlineAt === -1) {
+      break;
+    }
+    lineStart = newlineAt + 1;
+  }
+  if (open !== null) {
+    regions.push({ contentStart: open.contentStart, contentEnd: text.length });
+  }
+  return regions;
+}
+
+/**
+ * Whether a block starting inside another fence is only a quoted example. A marker inside a
+ * code fence counts only when the block is that fence's sole content: a model may wrap a whole
+ * declaration in a markdown fence and still declare the file, while a marker shown partway
+ * through a sample declares nothing, so the sample is left exactly as written.
+ */
+function isInsideAnotherFence(options: { text: string; regions: FencedRegion[]; start: number; end: number }): boolean {
+  const region = options.regions.find(
+    candidate => candidate.contentStart <= options.start && options.start < candidate.contentEnd,
+  );
+  if (!region) {
+    return false;
+  }
+  const before = options.text.slice(region.contentStart, options.start);
+  const after = options.text.slice(options.end, region.contentEnd);
+  return before.trim().length > 0 || after.trim().length > 0;
+}
+
 function findSandboxArtifactBlocks(text: string): SandboxArtifactBlock[] {
+  const regions = findFencedRegions(text);
   const blocks: SandboxArtifactBlock[] = [];
   BLOCK_OPEN_RE.lastIndex = 0;
   for (let open = BLOCK_OPEN_RE.exec(text); open !== null; open = BLOCK_OPEN_RE.exec(text)) {
@@ -215,10 +320,13 @@ function findSandboxArtifactBlocks(text: string): SandboxArtifactBlock[] {
     const bodyStart = open.index + open[0].length;
     const closeAt = text.indexOf(fence, bodyStart);
     const closed = closeAt !== -1;
-    const bodyEnd = closed ? closeAt : text.length;
     const end = closed ? closeAt + fence.length : text.length;
-    blocks.push({ start: open.index, end, body: text.slice(bodyStart, bodyEnd), closed });
     BLOCK_OPEN_RE.lastIndex = end;
+    if (isInsideAnotherFence({ text, regions, start: open.index, end })) {
+      continue;
+    }
+    const bodyEnd = closed ? closeAt : artifactBodyEnd(text, bodyStart);
+    blocks.push({ start: open.index, end, bodyEnd, body: text.slice(bodyStart, bodyEnd), closed });
   }
   return blocks;
 }
@@ -253,7 +361,9 @@ export function normalizeSandboxArtifactBlocks({ text, complete }: { text: strin
   const artifacts: SandboxArtifact[] = [];
   for (const block of blocks) {
     rest += text.slice(cursor, block.start);
-    cursor = block.end;
+    // A finished message gives the prose after an unclosed block back; while the message is
+    // still streaming, everything after the unclosed marker stays hidden until it closes.
+    cursor = block.closed || !complete ? block.end : block.bodyEnd;
     if (block.closed || complete) {
       artifacts.push(...parseSandboxArtifacts(block.body));
     }

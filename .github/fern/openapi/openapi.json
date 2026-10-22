@@ -7724,6 +7724,34 @@
         ],
         "type": "object"
       },
+      "ReplyResultsByKind": {
+        "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
+        "properties": {
+          "error": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refused": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "refused",
+          "unavailable",
+          "error"
+        ],
+        "type": "object"
+      },
       "Repository": {
         "additionalProperties": false,
         "properties": {
@@ -8477,7 +8505,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived exact-tool grants created by \"Approve for this chat\" (server:tool pairs).",
+            "description": "Server-derived grants created by \"Approve for this chat\" (server:tool pairs) and \"Allow searches in this chat\".",
             "items": {
               "type": "string"
             },
@@ -10006,6 +10034,13 @@
               "null"
             ]
           },
+          "outbound_plumbing_text": {
+            "description": "Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "outbound_text": {
             "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
             "type": [
@@ -10143,6 +10178,14 @@
             ],
             "type": [
               "object",
+              "null"
+            ]
+          },
+          "reply_to": {
+            "default": null,
+            "description": "The address replies go to when it is not the sender, or null when replies go to the sender.",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -11562,6 +11605,51 @@
       "TurnMetrics": {
         "description": "Optional billable aggregate for the whole turn.",
         "properties": {
+          "claim_mismatch": {
+            "description": "True when the last tool call in this reply did not succeed.",
+            "type": "boolean"
+          },
+          "guard_fired": {
+            "description": "Reason code of the first guard that blocked a tool call, or null when none did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_call_input_tokens": {
+            "description": "Input tokens of the last model call in this turn: the context size the model last saw.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "results_by_kind": {
+            "$ref": "#/components/schemas/ReplyResultsByKind"
+          },
+          "steps": {
+            "description": "Model steps in this reply, including sub-agent steps.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sub_agent_steps": {
+            "description": "Model steps run by sub-agents in this reply.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time_to_first_token_ms": {
+            "description": "Milliseconds from the first model request to its first output, or null when there was none.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool_calls_by_tool": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Tool calls in this reply, counted per tool name.",
+            "type": "object"
+          },
           "total_cache_read_tokens": {
             "description": "Total cache-read tokens across model calls in this turn.",
             "minimum": 0,
@@ -11594,6 +11682,11 @@
           },
           "total_tokens": {
             "description": "Total tokens (input + output) across model calls in this turn.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wall_time_ms": {
+            "description": "Milliseconds from turn start to finish.",
             "minimum": 0,
             "type": "integer"
           }
@@ -20019,7 +20112,7 @@
                 }
               }
             },
-            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
+            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
           },
           "412": {
             "content": {

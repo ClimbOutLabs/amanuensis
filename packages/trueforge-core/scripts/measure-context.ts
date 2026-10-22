@@ -70,7 +70,7 @@ console.log('-'.repeat(50));
 console.log(`${'Static subtotal'.padEnd(42)}${String(total)}`);
 console.log(`
 Dynamic (measure live, not in v1):
-  memory recalled content    <= 2560  (MEMORY_RECALL_MAX_TOKENS + ENTITY_TOKENS)
+  memory recalled content    <= 1112  (MEMORY_RECALL_MAX_TOKENS + ENTITY_TOKENS)
   MCP tool definitions       varies   (2 servers in prod; likely the bulk)
   skill instructions         varies   (mounted skills, e.g. web-artifacts-builder)
   persona / user sections    varies   (per-session)

@@ -16,6 +16,7 @@ test_prompts_state_their_rule() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -38,6 +39,7 @@ Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -60,6 +62,7 @@ Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"Main\" has capital letters"
@@ -72,6 +75,7 @@ Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters. Use 1 to 24"
@@ -87,6 +91,7 @@ Your email=>not-an-email
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -150,6 +155,7 @@ test_a_short_password_asks_again_and_states_the_rule_each_time() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>short
@@ -171,6 +177,7 @@ test_five_bad_passwords_stop() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>a1
@@ -195,6 +202,7 @@ test_a_blocker_asks_nothing() {
   STUB_COMPOSE_VERSION=1.29.2
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect an email account=>n
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "x Docker Compose 1.29.2 is too old"

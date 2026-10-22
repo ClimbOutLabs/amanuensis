@@ -12,8 +12,10 @@ import {
   parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
+  parseSearchProviderChoice,
   parseTokenFactoryMode,
   parseTrustedProxyAddresses,
+  parseTrustPageUrl,
   TrueForgeAuthMode,
   type PublicUrlConfig,
   type ServerConfiguration,
@@ -344,6 +346,25 @@ describe('assertNetworkAuthRequirement', () => {
   });
 });
 
+describe('parseSearchProviderChoice', () => {
+  const parse = (raw: string | undefined) => parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw });
+
+  it('defaults to parallel when unset or blank', () => {
+    expect(parse(undefined)).toBe('parallel');
+    expect(parse('  ')).toBe('parallel');
+  });
+
+  it('parses parallel and tavily case-insensitively', () => {
+    expect(parse('tavily')).toBe('tavily');
+    expect(parse('TAVILY')).toBe('tavily');
+    expect(parse('Parallel')).toBe('parallel');
+  });
+
+  it('rejects any other provider, naming the allowed ones', () => {
+    expect(() => parse('exa')).toThrow('SEARCH_PROVIDER must be one of parallel, tavily; got "exa"');
+  });
+});
+
 describe('parseTokenFactoryMode', () => {
   const parse = (raw: string | undefined) =>
     parseTokenFactoryMode({ envKey: 'TOKEN_FACTORY_MODE', raw, defaultValue: 'off' });
@@ -487,6 +508,21 @@ describe('parseLoginUpstreamUrl', () => {
     'refuses %s',
     value => {
       expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
+});
+
+describe('parseTrustPageUrl', () => {
+  it('is empty when unset and keeps a plain http address', () => {
+    expect(parseTrustPageUrl(undefined)).toBe('');
+    expect(parseTrustPageUrl(' ')).toBe('');
+    expect(parseTrustPageUrl('http://192.168.1.20:8791/trust/')).toBe('http://192.168.1.20:8791/trust');
+  });
+
+  it.each(['https://192.168.1.20:8791/trust', 'http://192.168.1.20:8791/trust?x=1', 'nonsense'])(
+    'refuses %s',
+    value => {
+      expect(() => parseTrustPageUrl(value)).toThrow(/TRUST_PAGE_URL/);
     },
   );
 });

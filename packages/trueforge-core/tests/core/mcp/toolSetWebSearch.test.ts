@@ -449,7 +449,7 @@ describe('provider plumbing fields on the designated provider', () => {
     expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
     expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
-      "Search the web through finder. This search contains something that looks like a password or key.",
+      "Search the web through the search provider. This search contains something that looks like a password or key.",
     );
     expect(JSON.stringify(result)).not.toContain(key);
   });
@@ -985,7 +985,7 @@ describe('approval cards beside the designated provider', () => {
     const h = harness({ searchProvider: true, searchWithoutAsking: false });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.destination_host).toBe('search.example.com');
+    expect(info.tier3_card?.destination_host).toBe('the search provider');
     expect(info.tier3_card?.outbound_text).toContain(`query: ${query}`);
 
     // Dispatch re-derives the id with the connector, so a token minted without it would never redeem.
@@ -1016,9 +1016,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
-    expect(after.tier3_card?.plain_what).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(after.tier3_card?.plain_what).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
     expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(JSON.stringify(refused)).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
   });
 });

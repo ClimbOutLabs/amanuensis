@@ -65,6 +65,8 @@ export type TrueForgeUIProps = {
    * audit feed.
    */
   onActiveSessionChange?: (sessionId: string | undefined) => void;
+  /** Reports the ids of approvals waiting on the person in the active chat, for the host's waiting status. */
+  onPendingApprovalsChange?: (approvalIds: readonly string[]) => void;
   /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
@@ -91,6 +93,11 @@ export type TrueForgeUIProps = {
   chatFolders?: ChatFolderStore;
   /** Optional host persistence for spaces the model creates and updates through tools. */
   spaces?: SpaceStore;
+  /**
+   * The full address of the page where a device learns to trust this computer, as the
+   * installer prints it. Shown in the connection-lost message so the person can open it.
+   */
+  trustPageUrl?: string;
 };
 
 export type TrueForgeUIShellProps = Omit<TrueForgeUIProps, 'withRouter'> & { resolvedRoutes?: ResolvedRoutes };

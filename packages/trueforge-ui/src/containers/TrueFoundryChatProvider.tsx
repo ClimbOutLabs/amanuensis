@@ -26,6 +26,7 @@ import {
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
+import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
 type RuntimeAdapters = NonNullable<UseTrueFoundryAgentRuntimeOptions['adapters']>;
@@ -84,6 +85,8 @@ export type TrueFoundryChatProviderProps = {
    * 'idle' otherwise. Presentation policy (debounce, dwell) is the avatar's job, not this callback's.
    */
   onAgentActivity?: (activity: AmanAvatarActivity) => void;
+  /** Reports the ids of approvals waiting on the person, for hosts that show them outside the chat. */
+  onPendingApprovalsChange?: (approvalIds: readonly string[]) => void;
   children: ReactNode;
   /** Discriminated agent source. Prefer over legacy `agentName`. */
   agent?: TrueFoundryAgentConfig;
@@ -91,6 +94,11 @@ export type TrueFoundryChatProviderProps = {
   agentName?: string;
   /** Forwarded to `listSessions({ agentId })` for history filtering. */
   listSessionsAgentId?: string;
+  /**
+   * The full address of the page where a device learns to trust this computer, as the
+   * installer prints it. Shown in the connection-lost message so the person can open it.
+   */
+  trustPageUrl?: string;
 };
 
 function ChatRuntimeScope({
@@ -188,16 +196,18 @@ export function TrueFoundryChatProvider(props: TrueFoundryChatProviderProps) {
     adapters,
     onError,
     onAgentActivity,
+    onPendingApprovalsChange,
     children,
     agent,
     agentName,
     listSessionsAgentId,
+    trustPageUrl,
   } = props;
 
   const stableServer = useMemo(() => server, [server]);
 
   return (
-    <ToasterProvider>
+    <ToasterProvider trustPageUrl={trustPageUrl}>
       <AvatarActivityProvider onActivity={onAgentActivity}>
         <ComposerBusyScopeProvider>
           <ChatRuntimeScope
@@ -209,6 +219,9 @@ export function TrueFoundryChatProvider(props: TrueFoundryChatProviderProps) {
             adapters={adapters}
             onError={onError}
           >
+            {onPendingApprovalsChange === undefined ? null : (
+              <PendingApprovalsReporter onChange={onPendingApprovalsChange} />
+            )}
             {children}
           </ChatRuntimeScope>
         </ComposerBusyScopeProvider>

@@ -9,6 +9,7 @@ import type {
 import type { RegisteredCommandExecution } from '../../core/llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../../core/mcp/executeToolCalls';
 import type { ImplementationPlanGrant, ImplementationPlanGrantOwner } from '../../core/mcp/implementationPlanGrant';
+import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type {
   AgentThreadSnapshot,
   ContextMessage,
@@ -36,6 +37,11 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
 > & {
   custom: TSessionCustom | null;
 };
+
+export interface SetPrivateFingerprintsInput {
+  session_id: string;
+  fingerprints: ChatPrivateFingerprints;
+}
 
 /**
  * PATCH fields for an existing session; `undefined` fields are left unchanged.
@@ -153,6 +159,21 @@ export interface DeleteSessionFolderInput {
   tenant_id: string;
   folder_id: string;
   created_by: string;
+}
+
+/** A card whose request already ended and was cleared. It can never run, so this only hides it. */
+export interface ApprovalDismissalRecord {
+  thread_id: string;
+  tool_call_id: string;
+  dismissed_at: string;
+}
+
+export interface RecordApprovalDismissalInput extends ApprovalDismissalRecord {
+  session_id: string;
+}
+
+export interface ListApprovalDismissalsInput {
+  session_id: string;
 }
 
 export interface SetSessionFolderInput {
@@ -523,6 +544,13 @@ export interface ISessionStore<
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
 
+  /**
+   * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
+   * searches. Entries are joined; once incomplete or holding a secret, the record stays so. A missing session is a
+   * no-op. Deleted with the session.
+   */
+  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void>;
+
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;
 
@@ -653,6 +681,15 @@ export interface ISessionStore<
 
   /** Fails closed selected records left running by a prior process; providers cannot be reattached. */
   recoverRunningCommandExecutions(input: RecoverRunningCommandExecutionsInput): Promise<number>;
+
+  /**
+   * Records that a card whose request ended was cleared. Nothing runs and no turn is created.
+   * Recording the same thread and tool call again keeps the first record.
+   */
+  recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void>;
+
+  /** Every dismissal recorded for the session, so a reload does not show cleared cards again. */
+  listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]>;
 
   /** Adds thread snapshots to the turn (sub-agent spawns). */
   addThreads(input: AddThreadsInput): Promise<void>;

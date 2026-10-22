@@ -11,26 +11,34 @@ import {
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import {
+  toolInvocationRawId,
+  useTrueFoundryApprovals,
+  useTrueFoundryRespondToToolApproval,
+} from '@truefoundry/assistant-ui-runtime';
 import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
-import { MapCard } from '../components/MapCard.js';
+import { useIsMobile } from '../atoms/lib/useIsMobile.js';
+import { Button } from '../atoms/primitives/Button.js';
+import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
-import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
+import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
+import { useHighlightedCard } from '../hooks/useRewardLedger.js';
+import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
+import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
 import {
-  ASK_USER_TOOL_NAME,
-  MCP_META_TOOLS,
-  SANDBOX_TOOL_NAMES,
-  SUB_AGENT_TOOL_NAME,
   allowChatOptionId,
   allowOnceOptionId,
+  ASK_USER_TOOL_NAME,
   buildApprovalOptions,
   buildOutcomeText,
   formatDuration,
@@ -40,15 +48,20 @@ import {
   getToolResultContent,
   hasPendingAskUserResponse,
   hasPendingToolApproval,
+  MCP_META_TOOLS,
   mcpDisplayName,
+  notDoneText,
   parseAskUserQuestionArgs,
   parseMapsResult,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseToolNotDoneReason,
   parseToolOutputScreen,
   parseToolResultDisposition,
   resolveSubAgentMeta,
+  SANDBOX_TOOL_NAMES,
+  SUB_AGENT_TOOL_NAME,
   toStatus,
 } from '../utils/toolCallParsing.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
@@ -57,6 +70,7 @@ import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedAp
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
 import { ToolApprovalContainer } from './ToolApprovalContainer.js';
 import { ToolCallContentBlockContainer } from './ToolCallContentBlockContainer.js';
+import { useEndedApprovalDismiss } from './useEndedApprovalDismiss.js';
 
 function NestedReasoningContainer() {
   const isRunning = useAuiState(s => s.part.status?.type === 'running');
@@ -104,11 +118,20 @@ function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<strin
   }
 }
 
-function ExpiredApprovalNote() {
+/** What a person sees on a card whose request ended. Dismiss clears it without running anything. */
+function EndedApprovalNote({ onDismiss, dismissing }: { onDismiss: (() => void) | undefined; dismissing: boolean }) {
   return (
-    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
-      This request expired.
-    </p>
+    <div
+      data-role="approval-expired"
+      className="text-text-secondary flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
+    >
+      <p>This request ended. Ask again if you still need it.</p>
+      {onDismiss !== undefined && (
+        <Button.Secondary size="small" onClick={onDismiss} disabled={dismissing}>
+          Dismiss
+        </Button.Secondary>
+      )}
+    </div>
   );
 }
 
@@ -118,6 +141,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
+  const isMobile = useIsMobile();
+  // The approval ticket takes the one highlight only where the rail is hidden; mail never takes it.
+  const highlightedApprovalId = useHighlightedCard({
+    firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
+    nextAppointmentId: null,
+  });
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -226,21 +255,36 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
             }
           }
         : undefined;
+    // A draft option exists only when the server offers it on this approval; otherwise no button shows.
+    const saveDraftOption = options.find(option => option.id === SAVE_DRAFT_OPTION_ID);
+    // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+    const onChangeRequest = offersChangeIt(approvalInfo.card)
+      ? (text: string) => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+      : undefined;
+    if (approvalInfo.card.email !== null) {
+      return (
+        <EmailApprovalCard
+          approvalId={approvalInfo.toolCallId}
+          card={approvalInfo.card}
+          onApprove={() => onSelectOption(allowOnceId)}
+          onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+          onChangeRequest={onChangeRequest}
+          onSaveDraft={saveDraftOption === undefined ? undefined : () => onSelectOption(SAVE_DRAFT_OPTION_ID)}
+          disabled={isNestedReadonly}
+        />
+      );
+    }
     return (
       <PermissionApprovalCard
-        toolName={part.toolName}
+        approvalId={approvalInfo.toolCallId}
         card={approvalInfo.card}
-        tier={approvalInfo.tier}
+        highlighted={highlightedApprovalId === approvalInfo.toolCallId}
+        othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== approvalInfo.toolCallId).length}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
-        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
-        onChangeRequest={
-          offersChangeIt(approvalInfo.card)
-            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
-            : undefined
-        }
+        onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
@@ -304,6 +348,9 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
       </p>
     );
   }
+  if (mapsResult.state === 'refused') {
+    return <RefusedMapStep refused={mapsResult.refused ?? []} />;
+  }
   if (part.status?.type === 'running' && mapsResult.data === null) {
     return (
       <div className="maps-card" data-testid="map-card-loading">
@@ -314,6 +361,31 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
   return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
+}
+
+/**
+ * A pin call whose every place failed the page check. No map card: the step shows one quiet line,
+ * and its details hold the refusal the person can read.
+ */
+function RefusedMapStep({ refused }: { refused: MapRefusedPlace[] }) {
+  const ToolCallCard = useSlot('ToolCallCard');
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ToolCallCard
+      toolName="Checked places for a map"
+      status="muted"
+      expanded={expanded}
+      onToggle={() => setExpanded(prev => !prev)}
+      showResponseLine
+      responseSlot={
+        refused.length === 0 ? (
+          <p className="maps-place-note">No place in this answer could be checked against its page.</p>
+        ) : (
+          <RefusedPlaceList refused={refused} />
+        )
+      }
+    />
+  );
 }
 
 function RequestResponseSlots({
@@ -395,10 +467,25 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   // Sub-agent messages live inside their parent's message and follow it.
   const isNestedMessage = useNestedApprovalBridge();
   const isNewestMessage = useAuiState(s => s.message.isLast);
+  // A sub-agent's card names its own thread; the chat's own cards are on the root thread.
+  const endedThreadId = isNestedMessage
+    ? (sentinelState?.approvalFor(part.toolCallId)?.threadId ?? null)
+    : MAIN_THREAD_ID;
+  const endedDismiss = useEndedApprovalDismiss({ toolCallId: part.toolCallId, threadId: endedThreadId });
   const hasPendingApproval = hasPendingToolApproval(approval);
-  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  // A card the server no longer lists as waiting belongs to a request that ended, even when it sits on the newest message.
+  const { pending: pendingApprovals } = useTrueFoundryApprovals();
+  const waitingToolCallIds = useWaitingToolCallIds(pendingApprovals.map(pending => pending.approvalId));
+  const endedOnServer =
+    hasPendingApproval &&
+    waitingToolCallIds !== undefined &&
+    !waitingToolCallIds.has(toolInvocationRawId(part.toolCallId));
+  const approvalExpired = hasPendingApproval && ((!isNestedMessage && !isNewestMessage) || endedOnServer);
   const showApproval = hasPendingApproval && !approvalExpired;
-  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
+  const expiredNote =
+    approvalExpired && !endedDismiss.cleared ? (
+      <EndedApprovalNote onDismiss={endedDismiss.onDismiss} dismissing={endedDismiss.dismissing} />
+    ) : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
@@ -410,7 +497,12 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       ? toStatus(part.status?.type)
       : disposition.tone;
   const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
-  const outcomeText = outputWasWithheld ? outputScreen.label : buildOutcomeText(disposition, failureReason);
+  const notDoneReason = outputWasWithheld ? undefined : parseToolNotDoneReason(part.result);
+  const outcomeText = outputWasWithheld
+    ? outputScreen.label
+    : notDoneReason !== undefined
+      ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
+      : buildOutcomeText(disposition, failureReason);
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);

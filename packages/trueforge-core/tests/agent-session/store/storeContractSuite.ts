@@ -33,6 +33,7 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
+import type { ChatPrivateFingerprints, PrivateFingerprint } from '../../../src/core/permissions/privateTextCheck';
 import { AbnormalHandoffSchema } from '../../../src/core/runtime/AbnormalHandoff';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
@@ -101,6 +102,15 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     empty_inspection_nudge_generation: 0,
     no_progress_nudge_generation: 0,
     policy_blocked_calls_this_turn: 0,
+    write_calls_this_turn: 0,
+    successful_writes_this_turn: 0,
+    last_call_signature: undefined,
+    tool_markup_leaks_this_turn: 0,
+    tool_markup_retries_this_turn: 0,
+    steps_by_thread: [],
+    removed_tools: [],
+    removed_tool_rejection_streaks: [],
+    unfinished_by_thread: [],
     ...overrides,
   };
 }
@@ -711,6 +721,65 @@ export function runStoreContractSuite<
       await new Promise(r => setTimeout(r, 5));
       const second = await store.getSessionByExternalId({ tenant_id: tenant, external_id: 'run-1' });
       expect(mustGet(second).last_activity_timestamp_ms).toBe(mustGet(first).last_activity_timestamp_ms);
+    });
+  });
+
+  describe('setPrivateFingerprints', () => {
+    const fingerprints: ChatPrivateFingerprints = {
+      complete: true,
+      has_text: true,
+      secret: false,
+      entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+    };
+
+    async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
+      return (await store.getSession({ tenant_id: tenant, session_id: sessionId }))?.private_fingerprints;
+    }
+
+    it('starts as null for a new session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      expect(await savedFingerprints(store)).toBeNull();
+    });
+
+    it('round-trips what was saved', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+      expect(await savedFingerprints(store)).toEqual(fingerprints);
+    });
+
+    it('merges a later save: entries are joined, and an incomplete or secret record stays so', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
+      await store.setPrivateFingerprints({
+        session_id: sessionId,
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+      });
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+
+      const merged = await savedFingerprints(store);
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
+      expect(merged?.entries).toHaveLength(2);
+    });
+
+    it('is a no-op for a missing session', async () => {
+      const store = createStore();
+      await store.setPrivateFingerprints({ session_id: missingSessionId, fingerprints });
+      expect(await store.getSession({ tenant_id: tenant, session_id: missingSessionId })).toBeUndefined();
+    });
+
+    it('is removed with the session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+      expect(await store.getSession({ tenant_id: tenant, session_id: sessionId })).toBeUndefined();
+
+      await seedSession(store);
+      expect(await savedFingerprints(store)).toBeNull();
     });
   });
 
@@ -2695,6 +2764,48 @@ export function runStoreContractSuite<
       expect(data.filter(event => event.type === EventType.TURN_DONE)).toHaveLength(0);
     });
 
+    it('keeps steps and their events appended before the freeze', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-steps' }));
+      const keys = { session_id: sessionId, turn_id: 'turn-steps' };
+      const step = createToolResponseV2({
+        id: 'step-result',
+        thread_id: MAIN_THREAD_ID,
+        tool_call_id: 'step-call',
+        created_at: new Date().toISOString(),
+        raw_content: JSON.stringify({ ok: true }),
+        model_content: null,
+        screen: null,
+        disposition: 'executed_ok',
+        remediation: undefined,
+        admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+        memoized: false,
+        repeat_count: 1,
+      }).event;
+      await store.appendToThreadContext({
+        ...keys,
+        thread_id: MAIN_THREAD_ID,
+        context: [userMessage('step ran')],
+        current_context_usage: null,
+        completion: null,
+        tool_call_memo: undefined,
+        task_state: undefined,
+      });
+      await store.appendToEvents({ ...keys, events: [step] });
+
+      await store.freezeAndGetTurn({
+        ...keys,
+        turn_done_event: makeTurnDoneEvent(makeCancelledTurnState(CancellationReason.CancelledForNextTurn)),
+      });
+
+      const record = mustGet(await store.getTurn(keys));
+      expect(record.state.status).toBe('cancelled');
+      expect(contextContents(record.snapshot.threads[MAIN_THREAD_ID]?.context)).toContain('step ran');
+      const { data } = await store.listTurnEvents({ ...keys, limit: 10, page_token: undefined, order: undefined });
+      expect(data.map(event => event.id)).toContain('step-result');
+    });
+
     it('cancels a running turn, persists turn.done, and fences all turn-scoped writes', async () => {
       const store = createStore();
       await seedSession(store);
@@ -3931,6 +4042,75 @@ export function runStoreContractSuite<
         ).toEqual([expect.objectContaining({ disposition: 'outcome_unknown' })]);
       },
     );
+  });
+
+  describe('approval dismissals', () => {
+    it('records a dismissal once per thread and tool call, keeping the first record', async () => {
+      const store = createStore();
+      await seedSession(store);
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T11:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([
+        {
+          thread_id: 'thread-child',
+          tool_call_id: 'call-send',
+          dismissed_at: '2026-10-22T10:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('keeps dismissals scoped to their own session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'other-session',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: 'other-session' })).resolves.toEqual([]);
+    });
+
+    it("drops a session's dismissals when the session is deleted", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+    });
   });
 
   describe('pagination', () => {

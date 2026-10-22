@@ -37,10 +37,19 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'mcp_destructive_hint',
   'mcp_open_world_hint',
   'connector_send',
-  'calendar_write',
+  'calendar_write_guests',
+  'caldav_calendar_guests',
+  'caldav_invitation_reply',
+  'connector_calendar_write',
   'schedule_write',
   'persona_write',
 ]);
+
+/**
+ * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
+ * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ */
+export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
@@ -53,6 +62,7 @@ export const AUTO_DENY_REASONS = [
   'offline_mode',
   'outbound_guard',
   'private_text_check',
+  'tool_not_prepared',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
@@ -81,6 +91,12 @@ export const Tier3EmailSchema = z
       })
       .nullable()
       .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
+    // Cards stored before this field existed read as replies going to the sender, as they did then.
+    reply_to: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The address replies go to when it is not the sender, or null when replies go to the sender.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -167,6 +183,13 @@ export const Tier3CardSchema = z
       .nullable()
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
+    outbound_plumbing_text: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.',
+      ),
     email: Tier3EmailSchema.nullable().optional(),
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),

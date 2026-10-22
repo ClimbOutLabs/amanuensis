@@ -13,8 +13,16 @@ export type ApprovalNavBannerProps = {
   onNext: () => void;
   /** Scroll the thread to the currently selected approval. */
   onFocusCurrent: () => void;
+  /** Names the one waiting item, e.g. "email": the banner then reads "1 email waiting for your approval". */
+  kind?: string;
   className?: string;
 };
+
+/** The banner's words: one item names its kind, several count the items. */
+export function approvalBannerLabel(total: number, kind: string | undefined): string {
+  if (total !== 1) return `${String(total)} items need your approval`;
+  return kind === undefined ? '1 item needs your approval' : `1 ${kind} waiting for your approval`;
+}
 
 export function ApprovalNavBanner({
   total,
@@ -24,9 +32,10 @@ export function ApprovalNavBanner({
   onPrev,
   onNext,
   onFocusCurrent,
+  kind,
   className,
 }: ApprovalNavBannerProps) {
-  const label = total === 1 ? '1 tool needs your input' : `${String(total)} tools need your input`;
+  const label = approvalBannerLabel(total, kind);
 
   return (
     <div

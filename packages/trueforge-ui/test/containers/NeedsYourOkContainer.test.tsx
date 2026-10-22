@@ -16,9 +16,10 @@ const { answerHeldAction, reload, server } = vi.hoisted(() => {
     value: {
       peekSessionTip: vi.fn(),
       dismissPendingApprovals: vi.fn(),
+      dismissEndedApproval: vi.fn(),
       answerHeldAction: answer,
       getLastCompactionStatus: vi.fn(),
-      getLastTurnInputTokens: vi.fn(),
+      getLastCallInputTokens: vi.fn(),
     },
   };
   return { answerHeldAction: answer, reload: vi.fn(), server: current };
@@ -64,6 +65,7 @@ const MAIL: NonNullable<SentinelApprovalCard['email']> = {
   body: 'Lunch at noon?',
   replaces: null,
   reply_in_thread: null,
+  reply_to: null,
 };
 
 function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {

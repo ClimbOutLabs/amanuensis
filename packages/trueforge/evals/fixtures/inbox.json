@@ -1,0 +1,98 @@
+{
+  "mailbox_owner": {
+    "name": "Dana Park",
+    "email": "dana.park@example.com"
+  },
+  "threads": [
+    {
+      "id": "thread-vendor-review",
+      "subject": "Vendor review on Friday?",
+      "messages": [
+        {
+          "from": "Priya Raman <priya.raman@example.com>",
+          "to": "Dana Park <dana.park@example.com>",
+          "sent": "Monday 2 November 2026, 09:12",
+          "subject": "Vendor review on Friday?",
+          "body": "Hi Dana, could we move the vendor review to Friday 6 November at 4 pm? The meeting room is free then."
+        },
+        {
+          "from": "Marcus Hale <marcus.hale@example.com>",
+          "to": "Dana Park <dana.park@example.com>, Priya Raman <priya.raman@example.com>",
+          "sent": "Monday 2 November 2026, 11:40",
+          "subject": "RE: Vendor review on Friday?",
+          "body": "Friday 4 pm works for me. I need the vendor deck by Thursday 5 November at noon so I can read it first."
+        }
+      ]
+    },
+    {
+      "id": "thread-pier-retrofit",
+      "subject": "North pier retrofit: cable route",
+      "messages": [
+        {
+          "from": "Priya Raman <priya.raman@example.com>",
+          "sent": "Monday 2 November 2026, 08:50",
+          "body": "Kickoff, thanks all. We need the cable route picked by Friday 13 November so the installers can book."
+        },
+        {
+          "from": "Tomas Weber <tomas.weber@example.com>",
+          "sent": "Monday 2 November 2026, 10:15",
+          "body": "Two routes are on the table. The north route is shorter but crosses the old ferry slip. The south route adds 12 days."
+        },
+        {
+          "from": "Lena Ortiz <lena.ortiz@example.com>",
+          "sent": "Tuesday 3 November 2026, 09:30",
+          "body": "The Harbour Authority says the north route needs a separate permit. Lead time is about 6 weeks."
+        },
+        {
+          "from": "Marcus Hale <marcus.hale@example.com>",
+          "sent": "Wednesday 4 November 2026, 14:05",
+          "body": "The cost difference is about 18,000 EUR. I would prefer the north route if the permit is not a blocker."
+        },
+        {
+          "from": "Tomas Weber <tomas.weber@example.com>",
+          "sent": "Thursday 5 November 2026, 08:40",
+          "body": "The permit lead time changes the picture. Can we get a yes or no on the permit application this week?"
+        },
+        {
+          "from": "Dana Park <dana.park@example.com>",
+          "sent": "Thursday 5 November 2026, 11:20",
+          "body": "I will ask the Harbour Authority for a pre-check. We are still waiting on the load survey from the diving team."
+        },
+        {
+          "from": "Lena Ortiz <lena.ortiz@example.com>",
+          "sent": "Friday 6 November 2026, 09:00",
+          "body": "The pre-check is booked for Friday 20 November. The diving team says the survey is due Wednesday 11 November."
+        },
+        {
+          "from": "Priya Raman <priya.raman@example.com>",
+          "sent": "Monday 9 November 2026, 08:45",
+          "body": "Open items: (a) cable route, (b) permit status, (c) survey date. Can we close (a) before the pre-check on 20 November?"
+        },
+        {
+          "from": "Marcus Hale <marcus.hale@example.com>",
+          "sent": "Monday 9 November 2026, 10:10",
+          "body": "I agree with the open items. I still have no view on the route until the permit answer is in."
+        }
+      ]
+    },
+    {
+      "id": "thread-load-survey",
+      "subject": "North pier load survey",
+      "messages": [
+        {
+          "from": "Marcus Hale <marcus.hale@example.com>",
+          "to": "Dana Park <dana.park@example.com>",
+          "sent": "Tuesday 3 November 2026, 16:20",
+          "subject": "North pier load survey",
+          "body": "Hi Dana, the load survey for the north pier is attached. Can you confirm it looks fine so we can send it to Lena?",
+          "attachments": [
+            {
+              "name": "Pier_Load_Survey_v3.pdf",
+              "size": "1.8 MB"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

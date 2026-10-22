@@ -16,7 +16,7 @@ import {
   searchHoldAuditText,
 } from './searchHoldText';
 import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
-import { SEARCH_AFTER_READ_SILENT_REASON } from './webSearch';
+import { SEARCH_AFTER_READ_SILENT_REASON, SEARCH_CHAT_GRANTED_SILENT_REASON } from './webSearch';
 
 /** Recorded outcome, per tier. */
 export type AuditOutcome = 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
@@ -58,7 +58,8 @@ export async function recordClassificationAudit(input: {
   const silentRun =
     decision.reason === MAPS_SILENT_REASON ||
     decision.reason === MAPS_AFTER_READ_SILENT_REASON ||
-    decision.reason === SEARCH_AFTER_READ_SILENT_REASON;
+    decision.reason === SEARCH_AFTER_READ_SILENT_REASON ||
+    decision.reason === SEARCH_CHAT_GRANTED_SILENT_REASON;
   const silentSandboxRun = SANDBOX_SILENT_REASONS.has(decision.reason);
   if (decision.tier === 1 && (decision.sensitive_read || silentRun || silentSandboxRun)) {
     outcome = 'logged';
@@ -120,7 +121,7 @@ export function heldCallAuditText(
   const card = info.tier3_card ?? null;
   if (info.search_provider_call === true || (card !== null && isSearchHoldCardText(card.plain_what))) {
     return searchHoldAuditText({
-      server: card?.destination ?? SEARCH_SERVER_FALLBACK,
+      server: SEARCH_SERVER_FALLBACK,
       say: savedSearchHold(card?.why_asked_again ?? null)?.say ?? HOLD_SAY.generic,
     });
   }
@@ -132,6 +133,33 @@ export function heldCallAuditText(
  * down ('denied'), or approved without a later dispatch row ('approved'). An approval that still asks
  * is recorded after dispatch like any other.
  */
+/**
+ * One `auto_denied` row per call refused before it ran. A call refused before classification has no tier,
+ * so it is recorded at Tier 3, the tier that always asks before a change.
+ */
+export async function recordNotPreparedRefusals(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  refusals: readonly { toolName: string; tier: Tier | undefined; message: string }[];
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  for (const refusal of input.refusals) {
+    await writer.record({
+      tenant_id: input.identity.tenant_id,
+      created_by: input.identity.created_by,
+      conversation_id: input.identity.conversation_id,
+      tier: refusal.tier ?? 3,
+      tool_name: refusal.toolName,
+      description: `${refusal.toolName}: not done. ${refusal.message}`,
+      outcome: 'auto_denied',
+      auto_deny_reason: 'tool_not_prepared',
+    });
+  }
+}
+
 export async function recordHeldActionAudit(input: {
   services: SentinelServices;
   identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;

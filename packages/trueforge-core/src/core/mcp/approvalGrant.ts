@@ -7,7 +7,8 @@ import {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
-import { GRANT_BARRED_TIER_REASONS } from '../permissions/tier';
+import { GRANT_BARRED_TIER_REASONS, OWN_CALENDAR_CHANGE_REASONS } from '../permissions/tier';
+import { SEARCH_AFTER_PRIVATE_READ_REASON } from '../permissions/webSearch';
 import {
   implementationPlanAllowsScope,
   implementationPlanMatchesBinding,
@@ -86,7 +87,39 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (info.implementation_plan_grant !== undefined) {
     return true;
   }
+  if (isOwnCalendarChange(info)) {
+    return true;
+  }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
+}
+
+/** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
+function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
+  return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
+}
+
+/**
+ * Stored in the chat's approval grants by "Allow searches in this chat". It is one value per chat, so it never
+ * matches an `approvalGrantKey`, and it only lifts the private-read hold for the designated search provider.
+ */
+export const SEARCH_CHAT_GRANT_KEY = JSON.stringify(['search_after_private_read', 'v1']);
+
+/**
+ * Whether a held search may offer "Allow searches in this chat". Only the designated search provider's call
+ * held for a private read qualifies; every other search check still runs whatever the grant says.
+ */
+export function allowsSearchChatGrant(info: InternalToolCallInfo): boolean {
+  return (
+    info.search_provider_call === true &&
+    info.tier_reason === SEARCH_AFTER_PRIVATE_READ_REASON &&
+    info.implementation_plan_grant === undefined &&
+    !secretPathReadBarsDurableGrant(info)
+  );
+}
+
+/** Whether the approval card may offer a chat-scoped allow for this call. */
+export function offersChatApproval(info: InternalToolCallInfo): boolean {
+  return allowsChatApproval(info) || allowsSearchChatGrant(info);
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
@@ -112,14 +145,15 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
-  return (
-    info.type === 'mcp' &&
-    info.effect === 'inspect' &&
-    !secretPathReadBarsDurableGrant(info) &&
-    !tierBarsDurableGrant(info) &&
-    info.implementation_plan_grant === undefined &&
-    info.search_provider_call !== true
-  );
+  if (
+    secretPathReadBarsDurableGrant(info) ||
+    tierBarsDurableGrant(info) ||
+    info.implementation_plan_grant !== undefined ||
+    info.search_provider_call === true
+  ) {
+    return false;
+  }
+  return isOwnCalendarChange(info) || (info.type === 'mcp' && info.effect === 'inspect');
 }
 
 /**

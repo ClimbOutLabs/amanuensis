@@ -209,7 +209,7 @@ function pluralize(count: number, singular: string): string {
 /** The footer sentence. Only counts the audit log holds; nothing is claimed about sends it does not show. */
 export function briefFooterLine(summary: BriefAuditSummary): string {
   const parts: string[] = [];
-  if (summary.readQuietly > 0) parts.push(`${pluralize(summary.readQuietly, 'thing')} read quietly.`);
+  if (summary.readAllowed > 0) parts.push(`${pluralize(summary.readAllowed, 'thing')} read, allowed by your settings.`);
   parts.push(summary.actionsRan === 0 ? 'Nothing was sent.' : `${pluralize(summary.actionsRan, 'action')} ran.`);
   return parts.join(' ');
 }

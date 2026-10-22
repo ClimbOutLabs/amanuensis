@@ -2,13 +2,14 @@
 
 import { ComposerPrimitive, useAui, useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec, useTrueFoundryCancel } from '@truefoundry/assistant-ui-runtime';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
-import { useComposerDraft } from '../hooks/useComposerDraft.js';
+import { takeComposerPrefill, useComposerDraft } from '../hooks/useComposerDraft.js';
 import { useComposerPauseView } from '../hooks/useComposerPauseView.js';
+import { useComposerPlaceholder } from '../hooks/useComposerPlaceholder.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { SlotsProvider, useSlot, useSlotIsDefault } from '../theme/SlotsProvider.js';
@@ -60,6 +61,10 @@ function ComposerBody({
   const hasModel = Boolean(agentSpec?.model?.name?.trim());
   const { isBusy, send, resetBusy } = useComposerBusyState();
   useComposerDraft();
+  useEffect(() => {
+    const prefill = takeComposerPrefill();
+    if (prefill !== null) aui.composer().setText(prefill);
+  }, [aui]);
   const canManageSession = useActiveSessionCanManage();
   const cancel = useTrueFoundryCancel();
   const toaster = useToasterOptional();
@@ -183,7 +188,9 @@ function ComposerWithOptionalDraft({
   return <ComposerBody placeholder={placeholder} forceDisabled={forceDisabled} connectedToBanner={connectedToBanner} />;
 }
 
-export function ComposerContainer({ placeholder = 'Ask anything...' }: ComposerContainerProps) {
+export function ComposerContainer({ placeholder: placeholderOverride }: ComposerContainerProps) {
+  const pickedPlaceholder = useComposerPlaceholder();
+  const placeholder = placeholderOverride ?? pickedPlaceholder;
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();
 

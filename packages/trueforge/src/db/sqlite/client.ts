@@ -156,6 +156,7 @@ const JSON_RESULT_COLUMNS = new Set([
   'shell_binding',
   'approval_grants',
   'task_checklist',
+  'private_fingerprints',
   'aliases',
   'implementation_plan_grant',
   'created_by_subject',

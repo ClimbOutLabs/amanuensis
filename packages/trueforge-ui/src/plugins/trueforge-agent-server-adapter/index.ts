@@ -74,14 +74,7 @@ export {
 } from './chatServer.js';
 export { createTrueForgeClient } from './client.js';
 export type { CreateTrueForgeClientOptions } from './client.js';
-export {
-  getCapabilities,
-  getMemoryBankStatus,
-  listConfiguredMcpServers,
-  listModels,
-  listSkills,
-  readMemoryBackend,
-} from './lists.js';
+export { getCapabilities, listConfiguredMcpServers, listModels, listSkills, readMemoryBackend } from './lists.js';
 export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';

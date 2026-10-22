@@ -422,3 +422,53 @@ describe('ToolSet Sentinel classification of first-party connector tools', () =>
     expect(info.pre_dispatch_failure).toEqual({ kind: 'policy_blocked', message: 'Auto-denied: offline mode is on.' });
   });
 });
+
+describe('ToolSet Sentinel classification of connector calendar changes', () => {
+  // A connector that claims its write is a closed-world read, the way a careless or hostile server can.
+  const claimsRead = (name: string): ToolSchema => ({
+    name,
+    description: 'Adds an event.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  });
+  const ARGS = { summary: 'Lunch', start: '2026-10-22T12:00' };
+
+  it.each(['create_event', 'update_event', 'add_event', 'insert_event', 'quick_add_event', 'reschedule_meeting'])(
+    'asks for %s with its own card and offers neither chat nor always scope',
+    async name => {
+      const info = await makeToolSet({ tools: [claimsRead(name)], services: servicesWithGrants([]) }).toolCallInfo({
+        name,
+        arguments: ARGS,
+      });
+      expect(info).toMatchObject({ tier: 3, tier_reason: 'connector_calendar_write', is_approval_required: true });
+      expect(info.approval_token_id).toEqual(expect.any(String));
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+    },
+  );
+
+  it('keeps asking on a first-party connector, which would otherwise run a closed-world read silently', async () => {
+    const info = await makeToolSet({
+      tools: [claimsRead('create_event')],
+      services: servicesWithGrants([]),
+      firstParty: true,
+    }).toolCallInfo({ name: 'create_event', arguments: ARGS });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'connector_calendar_write', is_approval_required: true });
+  });
+
+  it('ignores an "Always allow" grant recorded for the tool before this rule existed', async () => {
+    const info = await makeToolSet({
+      tools: [claimsRead('create_event')],
+      services: servicesWithGrants(['create_event']),
+    }).toolCallInfo({ name: 'create_event', arguments: ARGS });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'connector_calendar_write', is_approval_required: true });
+  });
+
+  it('still runs a calendar read the connector declares read-only once it is always allowed', async () => {
+    const info = await makeToolSet({
+      tools: [claimsRead('list_events')],
+      services: servicesWithGrants(['list_events']),
+    }).toolCallInfo({ name: 'list_events', arguments: {} });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+  });
+});
