@@ -168,9 +168,12 @@ describe('recordSearchResults', () => {
       { name: 'Anna Kowalski Clinic', address: 'Dover, Elm Road 42' },
       { name: 'Anna Kowalski Practice', address: '42 Elm, Dover Road' },
       { name: 'Anna Kowal\u200Bski', address: '42 Elm Ro\u200Bad Dover' },
-      { name: '\u0410nn\u0430 K\u043Ew\u0430lski', address: '42 \u0415lm R\u043E\u0430d D\u043Ev\u0435r' },
     ];
-    for (const [at, place] of claims.entries()) {
+    const lookalikes = {
+      name: '\u0410nn\u0430 K\u043Ew\u0430lski',
+      address: '42 \u0415lm R\u043E\u0430d D\u043Ev\u0435r',
+    };
+    for (const [at, place] of [...claims, lookalikes].entries()) {
       const pages = newStore();
       recordSearchResults({ pages, scope: SCOPE, toolArguments: { query: KOWALSKI_QUERY }, texts: [] });
       const snippetUrl = `https://echo.example/snippet-${at}`;
@@ -183,10 +186,51 @@ describe('recordSearchResults', () => {
         const claim = { ...place, languages: null, hours: null, price: null, phone: null, source_url };
         expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({
           ok: false,
-          reason: 'place_only_in_search_query',
+          reason: place === lookalikes ? 'mixed_script_word' : 'place_only_in_search_query',
         });
       }
     }
+  });
+
+  it.each([
+    ['a Cyrillic к inside a Latin word', 'Dr Anna \u043Aowalski', '42 Elm Road \u0501over'],
+    ['Komi and palochka letters inside Latin words', 'Dr Anna Kowalski', '42 \u0435\u04CFm Road \u0501over'],
+    ['a Greek κ inside a Latin word', 'Dr Anna \u03BAowalsk\u03B9', '42 Elm Road Dover'],
+  ])('refuses a place with %s, even when the snippet holds the same letters', (_case, name, address) => {
+    const pages = newStore();
+    const url = 'https://echo.example/look-alike';
+    recordSearchResults({
+      pages,
+      scope: SCOPE,
+      toolArguments: { query: KOWALSKI_QUERY },
+      texts: [JSON.stringify({ results: [{ url, title: name, snippet: address }] })],
+    });
+    pages.remember({ scope: SCOPE, url, text: `${name}\n${address}` });
+    const claim = { name, address, languages: null, hours: null, price: null, phone: null, source_url: url };
+    expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({ ok: false, reason: 'mixed_script_word' });
+  });
+
+  it('records nothing and refuses every claim after a search with a word that mixes scripts', () => {
+    const pages = newStore();
+    const url = 'https://people.example/anna';
+    const recorded = recordSearchResults({
+      pages,
+      scope: SCOPE,
+      toolArguments: { query: 'Dr Anna \u043A\u043Ewalski 42 \u0435\u04CFm Road \u0501over' },
+      texts: [JSON.stringify({ results: [{ url, title: 'Dr Anna Kowalski', snippet: '42 Elm Road Dover' }] })],
+    });
+    expect(recorded).toBe(0);
+    pages.remember({ scope: SCOPE, url, text: 'Dr Anna Kowalski\n42 Elm Road Dover' });
+    const claim = {
+      name: 'Dr Anna Kowalski',
+      address: '42 Elm Road Dover',
+      languages: null,
+      hours: null,
+      price: null,
+      phone: null,
+      source_url: url,
+    };
+    expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({ ok: false, reason: 'place_only_in_search_query' });
   });
 
   it('pins a listing whose name shares one word with the search', () => {

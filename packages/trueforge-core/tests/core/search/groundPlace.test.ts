@@ -1,5 +1,5 @@
 import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
-import { groundPlace, isInCalendar, type PlaceClaim } from '../../../src/core/search/groundPlace';
+import { groundPlace, hasMixedScriptWord, isInCalendar, type PlaceClaim } from '../../../src/core/search/groundPlace';
 import { GARDEN_TEXT, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL } from './tavilyFixtures';
 
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
@@ -394,5 +394,25 @@ describe('groundPlace reads a listing as one block', () => {
   ])('keeps the nearest address after the name: %s', (text, name, address) => {
     const pages = blockStore(text);
     expect(groundPlace({ claim: blockClaim(name, address), pages, scope: SCOPE })).toMatchObject({ ok: true });
+  });
+});
+
+describe('hasMixedScriptWord', () => {
+  it.each(['Dr Anna \u043Aowalski', '42 Elm Road \u0501over', 'K\u03BFwalski', 'Kowal\u200B\u0455ki'])(
+    'finds a word that mixes scripts in %s',
+    text => {
+      expect(hasMixedScriptWord(text)).toBe(true);
+    },
+  );
+
+  it.each([
+    'Harbour Family Clinic, 12 Example Street',
+    'Caf\u00E9 Zur Linde, Hauptstra\u00DFe 5',
+    'Ta\u0301verna \u0395\u03BB\u03B9\u03AC, 3 Mill Lane',
+    '\u041A\u0430\u0444\u0435 \u041C\u043E\u0441\u043A\u0432\u0430',
+    '\u3059\u3057\u6771\u4EAC\u30BF\u30EF\u30FC',
+    'Ｓｕｓｈｉ Bar 12',
+  ])('keeps words in one script each: %s', text => {
+    expect(hasMixedScriptWord(text)).toBe(false);
   });
 });

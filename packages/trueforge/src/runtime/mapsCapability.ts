@@ -572,6 +572,8 @@ const REFUSAL_REASONS = {
     'The name and address are not together on that page. Copy them from one listing and try again.',
   place_only_in_search_query:
     'That place only appears in the words you searched with. Read a page that lists it, then try again.',
+  mixed_script_word:
+    'A word in the name or address mixes letters from different alphabets. Copy it from the page in one alphabet and try again.',
 } as const;
 
 const OUT_OF_AREA_REASON =

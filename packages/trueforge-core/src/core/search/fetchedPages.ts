@@ -1,6 +1,6 @@
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import { namesUrl } from '../permissions/webSearch';
-import { normalizedWords, significantWords } from './groundPlace';
+import { hasMixedScriptWord, normalizedWords, significantWords } from './groundPlace';
 import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 
 /**
@@ -55,6 +55,8 @@ interface ChatSearches {
   words: Set<string>;
   /** Store keys of the links those searches returned. */
   result_links: Set<string>;
+  /** A search had a word that mixes scripts, so its words cannot be compared; every claim counts as an echo. */
+  has_mixed_script_word: boolean;
   expires_at: number;
 }
 
@@ -210,6 +212,7 @@ export class FetchedPageStore {
       queries: 0,
       words: new Set<string>(),
       result_links: new Set<string>(),
+      has_mixed_script_word: false,
       expires_at: 0,
     };
     this.#searches.delete(key);
@@ -224,7 +227,9 @@ export class FetchedPageStore {
       entry.queries = 1;
       entry.words = new Set(words);
       entry.result_links.clear();
+      entry.has_mixed_script_word = false;
     }
+    entry.has_mixed_script_word ||= hasMixedScriptWord(query);
     this.#searches.set(key, entry);
     while (this.#searches.size > MAX_CHATS_WITH_QUERIES) {
       const oldest = this.#searches.keys().next().value;
@@ -257,12 +262,12 @@ export class FetchedPageStore {
   /**
    * Whether a name, address or result text is mostly words from this chat's searches, compared as a
    * set so order, punctuation and an added word do not hide it. Deny by default: text with no telling
-   * words, or a chat with no searches left, counts as an echo.
+   * words, a chat with no searches left, or a chat whose searches mixed scripts in a word, counts as an echo.
    */
   echoesQueries({ scope, text }: { scope: FetchedPageScope; text: string }): boolean {
     const entry = this.#liveSearches(chatKey(scope));
     const telling = [...significantWords(text)];
-    if (entry === undefined || telling.length === 0) {
+    if (entry === undefined || entry.has_mixed_script_word || telling.length === 0) {
       return true;
     }
     const searched = telling.filter(word => entry.words.has(word)).length;
