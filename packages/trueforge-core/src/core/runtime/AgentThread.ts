@@ -1492,10 +1492,9 @@ export class AgentThread {
   private postToolCallContextProcessor: PostToolCallAgentContextProcessor[];
 
   private instruction: string | undefined;
-  // UTC date the instruction was built with; a mismatch at request time
-  // triggers a rebuild so a thread that crosses UTC midnight never sends a
-  // stale current-date section.
-  private instructionDateUtc: string | undefined;
+  // Per-reply block (date, person). Fixed for the thread's life: a thread that
+  // crosses UTC midnight keeps the date its reply started with.
+  private replyContext: string;
   private toolResponseProcessors: ToolResponseProcessor[];
   private untrustedTextScreens: readonly UntrustedTextScreen[];
   private instructionBuilders: readonly {
@@ -1699,26 +1698,46 @@ export class AgentThread {
     }
 
     this.instruction = this.buildInstruction(this.definition.instruction);
+    // Built once per reply, never per step: the static instruction above stays
+    // byte-identical across days and people, so provider prefix caching holds.
+    this.replyContext = this.buildReplyContext();
   }
 
-  private buildInstruction(userInstruction?: string): string {
-    const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
-    const builder = InstructionBuilder.createSystemPrompt(identity);
+  /**
+   * The per-reply block, sent right after the static instruction. Today's date and the
+   * person's name change between replies, so they live here instead of in the static
+   * instruction. Built once when the thread starts, so every step of a reply sends the
+   * same bytes. Sub-agents get the date only.
+   */
+  private buildReplyContext(): string {
+    const builder = new InstructionBuilder('reply-context');
+    builder.addContent(
+      'Host context for this reply. The person did not write it, and it is not part of their message.',
+    );
     // Ambient, not a tool: a model that must remember to ask for the date will
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
-    // time of day: the prompt prefix then changes once per day instead of
-    // every turn, so provider prefix caching keeps working. The
-    // get_current_datetime tool remains for precise time.
-    this.instructionDateUtc = new Date().toISOString().slice(0, 10);
+    // time of day. The get_current_datetime tool remains for precise time.
+    const dateUtc = new Date().toISOString().slice(0, 10);
     const local = resolveLocalTime(new Date(), this.definition.clientTimezone);
     const localDateClause = local.isFallback
       ? ''
       : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
     builder.addSection(
       'current-date',
-      `Today's date is ${this.instructionDateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
+    if (personName) {
+      // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
+      builder.addSection('person', `The person you work for is ${personName}.`, true);
+    }
+    return builder.build();
+  }
+
+  private buildInstruction(userInstruction?: string): string {
+    const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
+    const builder = InstructionBuilder.createSystemPrompt(identity);
     // A model whose own release postdates its training data will otherwise
     // insist it doesn't exist, because nothing tells it what it is.
     // `definition.modelId` is the upstream, provider-specific identifier
@@ -2471,6 +2490,10 @@ export class AgentThread {
         return total;
       }
     }
+    total += estimateTokensForString(this.replyContext);
+    if (total > limit) {
+      return total;
+    }
     if (this.definition.messages) {
       for (const msg of this.definition.messages) {
         if (isLLMContextMessage(msg)) {
@@ -2502,14 +2525,6 @@ export class AgentThread {
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
-    // A long-running thread can cross UTC midnight between LLM steps. Within a
-    // day the rebuilt string is byte-identical, so prefix caching is untouched;
-    // on a date change the one rebuild trades a single cache miss for a
-    // correct current-date section.
-    if (this.instruction && this.instructionDateUtc !== new Date().toISOString().slice(0, 10)) {
-      this.instruction = this.buildInstruction(this.definition.instruction);
-    }
-
     let messages: ChatCompletionMessageParam[] = [];
 
     if (this.instruction) {
@@ -2518,7 +2533,6 @@ export class AgentThread {
         content: this.instruction,
       });
     }
-
     if (this.definition.messages) {
       for (const msg of this.definition.messages) {
         if (isLLMContextMessage(msg)) {
@@ -2535,6 +2549,14 @@ export class AgentThread {
       .map(msg => toOpenAIChatMessage(msg));
 
     messages.push(...contextMessages);
+
+    // Order is the cache order: static instruction, history, then this reply's fixed block
+    // and the ephemeral recall block, both just before the current message. The history and
+    // the static instruction therefore stay one reusable prefix across replies and steps.
+    messages.splice(currentMessageIndex(messages), 0, {
+      role: 'system',
+      content: this.replyContext,
+    });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
       messages = processor.processPreLLMEphemeral(messages) ?? messages;
@@ -2609,7 +2631,9 @@ export class AgentThread {
       }
     }
 
-    const totalInstructionTokens = Math.round(estimateTokensForString(this.instruction ?? ''));
+    const totalInstructionTokens = Math.round(
+      estimateTokensForString(this.instruction ?? '') + estimateTokensForString(this.replyContext),
+    );
     const harnessInstructionTokens = Math.max(0, totalInstructionTokens - instructionsEstimate - skillsEstimate);
     const harnessEstimate = harnessInstructionTokens + tfyManagedToolTokens;
 
@@ -5156,6 +5180,17 @@ function estimateRawContextTextLength(context: readonly ContextMessage[]): numbe
   }
   return total;
 }
+
+/** Index of the latest user message, the one a reply answers. Appends when there is none. */
+function currentMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      return i;
+    }
+  }
+  return messages.length;
+}
+
 function assertUniqueStateKeys(capabilities: readonly AgentCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {

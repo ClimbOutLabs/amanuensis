@@ -118,6 +118,26 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
+/** A text part that is one whole host-written block, such as `<aman-memory>…</aman-memory>`. */
+const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
+
+/**
+ * What the person wrote in a user message. The host puts per-reply context (the reply block,
+ * recalled memory) into the same message as labelled blocks; like a real model, the script
+ * reads directives only from the person's own words, never from recalled chat titles.
+ */
+function personText(content: unknown): string {
+  const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
+  const own: string[] = [];
+  for (const part of parts) {
+    const text = typeof part === 'string' ? part : isRecord(part) ? part['text'] : undefined;
+    if (typeof text === 'string' && !HOST_BLOCK.test(text)) {
+      own.push(text);
+    }
+  }
+  return own.join(' ');
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -183,7 +203,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text);
     directive = match?.[1];
   }
@@ -244,7 +264,7 @@ function textArgument(messages: ChatMessage[]): string {
   for (const message of messages) {
     if (message.role === 'user') {
       text =
-        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(personText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
     }
   }
   return text;
@@ -257,7 +277,7 @@ function callToolServer(messages: ChatMessage[]): string {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     if (new RegExp(`${RUN_DIRECTIVE_PREFIX}[A-Za-z0-9_-]+`).test(text)) {
       server = new RegExp(`${SERVER_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text)?.[1] ?? DEFAULT_CALL_TOOL_SERVER;
     }
@@ -270,7 +290,7 @@ function searchDirectiveText(messages: ChatMessage[]): string {
   let text = '';
   for (const message of messages) {
     if (message.role === 'user') {
-      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(messageText(message.content))?.[1]?.trim() ?? '';
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(personText(message.content))?.[1]?.trim() ?? '';
     }
   }
   return text;
@@ -298,7 +318,7 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
   let toolResults = 0;
   for (const message of messages) {
     if (message.role === 'user') {
-      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(messageText(message.content));
+      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(personText(message.content));
       if (match?.[1] !== undefined) {
         directive = match[1];
         toolResults = 0;
@@ -480,7 +500,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
     const quoteToolResult = parsed.messages.some(message =>
-      messageText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+      personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
     );
     const replyText = rejectingJudge
       ? '{"helpful":[]}'
