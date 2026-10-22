@@ -33,7 +33,7 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
-import type { ChatPrivateFingerprints } from '../../../src/core/permissions/privateTextCheck';
+import type { ChatPrivateFingerprints, PrivateFingerprint } from '../../../src/core/permissions/privateTextCheck';
 import { AbnormalHandoffSchema } from '../../../src/core/runtime/AbnormalHandoff';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
@@ -733,15 +733,27 @@ export function runStoreContractSuite<
       expect(await savedFingerprints(store)).toBeNull();
     });
 
-    it('round-trips what was saved, and a later save replaces it', async () => {
+    it('round-trips what was saved', async () => {
       const store = createStore();
       await seedSession(store);
       await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
       expect(await savedFingerprints(store)).toEqual(fingerprints);
+    });
 
-      const replaced: ChatPrivateFingerprints = { complete: false, has_text: false, secret: true, entries: [] };
-      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints: replaced });
-      expect(await savedFingerprints(store)).toEqual(replaced);
+    it('merges a later save: entries are joined, and an incomplete or secret record stays so', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
+      await store.setPrivateFingerprints({
+        session_id: sessionId,
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+      });
+      await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
+
+      const merged = await savedFingerprints(store);
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
+      expect(merged?.entries).toHaveLength(2);
     });
 
     it('is a no-op for a missing session', async () => {

@@ -49,6 +49,7 @@ import type { Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../core/util/abort';
 import { threadCapabilities } from './builtinsFromSpec';
+import { chatFingerprintSaves } from './ChatFingerprintSaves';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { SessionRecord } from './models/SessionRecord';
 import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
@@ -362,6 +363,7 @@ export class SessionHandle<
     // acquisition phase we close the resolver (best-effort, error swallowed)
     // and rethrow — same pattern as the gateway's sessionTurnHandler, which
     // wraps getAgent/handler.init and calls gatewayStore.dispose() on failure.
+    let fingerprintTurnBegun = false;
     try {
       const tracing = input.resolver.createTracing();
       const agent = this.session.agent;
@@ -416,11 +418,23 @@ export class SessionHandle<
       const chatApprovalGrants = new Set(
         this.session.approval_grants.filter(value => !isSerializedImplementationPlanGrant(value)),
       );
+      const webSearchTurn = input.resolver.webSearchTurn;
       // This chat's own grants, read live: an approval during this send adds to the same set.
-      input.resolver.webSearchTurn.searchChatGranted = () => chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
-      input.resolver.webSearchTurn.chatFingerprints =
-        this.session.private_fingerprints ?? emptyChatPrivateFingerprints();
-      input.resolver.webSearchTurn.savedFingerprintsLoaded = this.session.private_fingerprints !== null;
+      webSearchTurn.searchChatGranted = () => chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
+      // Registered before the record is read, so an earlier turn either shows as unsaved or its save is read.
+      const earlierTurnUnsaved = chatFingerprintSaves.begin({
+        session_id: this.session.session_id,
+        state: webSearchTurn,
+      });
+      fingerprintTurnBegun = true;
+      const savedFingerprints =
+        (await this.store.getSession({ tenant_id: this.tenant_id, session_id: this.session.session_id }))
+          ?.private_fingerprints ?? null;
+      webSearchTurn.chatFingerprints = savedFingerprints ?? emptyChatPrivateFingerprints();
+      webSearchTurn.savedFingerprintsLoaded = savedFingerprints !== null;
+      if (earlierTurnUnsaved) {
+        webSearchTurn.fingerprintsLost = true;
+      }
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not
@@ -607,6 +621,9 @@ export class SessionHandle<
         commandExecutionOwnerId: input.command_execution_owner_id,
       });
     } catch (error) {
+      if (fingerprintTurnBegun) {
+        chatFingerprintSaves.forget({ session_id: this.session.session_id, state: input.resolver.webSearchTurn });
+      }
       await input.resolver.close().catch((closeError: unknown) => {
         input.resolver.logger.warn('TurnResourceResolver.close() failed after createTurn() error', {
           err: closeError,

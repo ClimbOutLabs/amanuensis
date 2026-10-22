@@ -11,7 +11,6 @@ import type {
 } from '../core/events/schema';
 import { EventType as HarnessEventType, newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
-import { chatFingerprintsAfterTurn, type WebSearchTurnState } from '../core/permissions/webSearch';
 import type { AbnormalHandoff, AbnormalHandoffCause } from '../core/runtime/AbnormalHandoff';
 import {
   InternalEventType,
@@ -23,6 +22,7 @@ import {
 } from '../core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../core/runtime/contextUsage';
 import type { AgentThreadMetrics } from '../core/runtime/metrics';
+import { chatFingerprintSaves } from './ChatFingerprintSaves';
 import type { ITurnResourceResolver } from './ITurnResourceResolver';
 import type { TurnRecord } from './models/TurnRecord';
 import { EventType, type PersistedTurnEvent, type TurnCreatedEvent, type TurnDoneEvent } from './schemas/events';
@@ -529,31 +529,17 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
                 };
           }
         } finally {
-          await this.persistChatFingerprints(resolver.webSearchTurn);
+          await chatFingerprintSaves.finish({
+            session_id: this.turn.session_id,
+            state: resolver.webSearchTurn,
+            store: this.store,
+            logger: resolver.logger,
+          });
           await resolver.close().catch((err: unknown) => {
             resolver.logger.warn('TurnResourceResolver.close() failed', { err });
           });
         }
       }
-    }
-  }
-
-  /**
-   * Saves the chat's private-text fingerprints when this turn read private data or lost one. A turn that read
-   * nothing leaves the saved fingerprints as they are.
-   */
-  private async persistChatFingerprints(state: WebSearchTurnState): Promise<void> {
-    if (state.privateReadCalls === 0 && !state.fingerprintsLost && !state.chatFingerprints.secret) {
-      return;
-    }
-    try {
-      await this.store.setPrivateFingerprints({
-        session_id: this.turn.session_id,
-        fingerprints: chatFingerprintsAfterTurn(state),
-      });
-    } catch (err: unknown) {
-      // The chat's saved fingerprints stay as they were, so a later search of this chat asks.
-      this.resolver?.logger.warn('Saving the chat fingerprints failed', { err });
     }
   }
 

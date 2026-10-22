@@ -4,6 +4,7 @@ import {
   validateImplementationPlanGrant,
   type ImplementationPlanGrant,
 } from '../../core/mcp/implementationPlanGrant';
+import { mergeChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type { AgentThreadSnapshot } from '../../core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../core/runtime/contextUsage';
 import type { SessionFolderRecord } from '../models/SessionFolderRecord';
@@ -335,7 +336,10 @@ export class InMemorySessionStore<
     if (stored === undefined) {
       return;
     }
-    stored.record.private_fingerprints = input.fingerprints;
+    stored.record.private_fingerprints = mergeChatPrivateFingerprints({
+      stored: stored.record.private_fingerprints,
+      saved: deepCopy(input.fingerprints),
+    });
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {

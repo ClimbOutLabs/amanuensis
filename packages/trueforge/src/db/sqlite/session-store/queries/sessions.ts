@@ -38,6 +38,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
 import {
   ChatPrivateFingerprintsSchema,
+  mergeChatPrivateFingerprints,
   type ChatPrivateFingerprints,
 } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import { sql, type Kysely } from 'kysely';
@@ -408,9 +409,23 @@ export async function listSessions(
 }
 
 export async function setPrivateFingerprints(db: Kysely<Database>, input: SetPrivateFingerprintsInput): Promise<void> {
-  await db
-    .updateTable('session')
-    .set({ private_fingerprints: jsonbBind(input.fingerprints) })
-    .where('session_id', '=', input.session_id)
-    .execute();
+  await db.transaction().execute(async trx => {
+    const row = await trx
+      .selectFrom('session')
+      .select(jsonText<ChatPrivateFingerprints | null>(sql.ref('private_fingerprints')).as('private_fingerprints'))
+      .where('session_id', '=', input.session_id)
+      .executeTakeFirst();
+    if (row === undefined) {
+      return;
+    }
+    const fingerprints = mergeChatPrivateFingerprints({
+      stored: ChatPrivateFingerprintsSchema.nullable().parse(row.private_fingerprints),
+      saved: input.fingerprints,
+    });
+    await trx
+      .updateTable('session')
+      .set({ private_fingerprints: jsonbBind(fingerprints) })
+      .where('session_id', '=', input.session_id)
+      .execute();
+  });
 }

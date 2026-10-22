@@ -72,6 +72,31 @@ export const ChatPrivateFingerprintsSchema = z.object({
 });
 export type ChatPrivateFingerprints = z.infer<typeof ChatPrivateFingerprintsSchema>;
 
+/**
+ * The record a save leaves: what was stored joined with what one turn saved. Once incomplete or holding a secret, a
+ * chat stays so, and one turn's save never drops the fingerprints another turn saved.
+ */
+export function mergeChatPrivateFingerprints(input: {
+  stored: ChatPrivateFingerprints | null;
+  saved: ChatPrivateFingerprints;
+}): ChatPrivateFingerprints {
+  const { stored, saved } = input;
+  if (stored === null) {
+    return saved;
+  }
+  const entries = new Map(stored.entries.map(entry => [fingerprintKey(entry), entry]));
+  for (const entry of saved.entries) {
+    entries.set(fingerprintKey(entry), entry);
+  }
+  const fits = entries.size <= MAX_PRIVATE_FINGERPRINTS;
+  return {
+    complete: stored.complete && saved.complete && fits,
+    has_text: stored.has_text || saved.has_text,
+    secret: stored.secret || saved.secret,
+    entries: fits ? [...entries.values()] : [],
+  };
+}
+
 export function emptyChatPrivateFingerprints(): ChatPrivateFingerprints {
   // A chat with no private read yet has nothing it could miss, so it starts complete.
   return { complete: true, has_text: false, secret: false, entries: [] };

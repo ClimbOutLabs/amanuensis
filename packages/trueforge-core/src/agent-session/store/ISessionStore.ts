@@ -530,8 +530,9 @@ export interface ISessionStore<
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
 
   /**
-   * Replaces the chat's kept private-text fingerprints. Written once at the end of a turn that read private data,
-   * so a later turn of the chat can check its searches. Deleted with the session.
+   * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
+   * searches. Entries are joined; once incomplete or holding a secret, the record stays so. A missing session is a
+   * no-op. Deleted with the session.
    */
   setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void>;
 

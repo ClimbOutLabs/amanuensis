@@ -405,6 +405,11 @@ export function privateFingerprintsUsable(state: WebSearchTurnState): boolean {
   );
 }
 
+/** Whether this turn holds private-text fingerprints, or a lost one, that the chat's saved record must take in. */
+export function hasPrivateFingerprintsToSave(state: WebSearchTurnState): boolean {
+  return state.privateReadCalls > 0 || state.fingerprintsLost || state.chatFingerprints.secret;
+}
+
 /** The chat's fingerprints as the next turn of this chat loads them. */
 export function chatFingerprintsAfterTurn(state: WebSearchTurnState): ChatPrivateFingerprints {
   return {
