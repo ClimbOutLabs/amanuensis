@@ -25,23 +25,23 @@ function AddOnsControl({ disabled, isRunning }: ComposerLeftSectionProps) {
 function ModelAndReasoningControls({ disabled, isRunning }: ComposerRightSectionProps) {
   return (
     <div className="flex min-w-0 items-center gap-1">
-      <div className="aui-composer-model-selector relative min-w-0">
+      <div className="aui-composer-model-selector relative min-w-0 shrink">
         <button
           type="button"
           disabled={disabled || isRunning}
           aria-label="Select model"
-          className="aui-composer-model-button inline-flex h-8 max-w-48 min-w-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium"
+          className="aui-composer-model-button inline-flex h-8 w-full max-w-[10rem] min-w-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium"
         >
           <span className="truncate">openai/gpt-4.1-mini</span>
           <span aria-hidden="true">⌄</span>
         </button>
       </div>
-      <div className="aui-composer-reasoning-selector relative min-w-0">
+      <div className="aui-composer-reasoning-selector relative min-w-0 shrink">
         <button
           type="button"
           disabled={disabled || isRunning}
           aria-label="Select reasoning effort"
-          className="aui-composer-reasoning-button inline-flex h-8 max-w-[10rem] min-w-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium"
+          className="aui-composer-reasoning-button inline-flex h-8 w-full max-w-[10rem] min-w-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium"
         >
           <span className="truncate">high reasoning</span>
           <span aria-hidden="true">⌄</span>

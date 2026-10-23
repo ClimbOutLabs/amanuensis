@@ -154,7 +154,7 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
   );
 
   return (
-    <div ref={containerRef} className="aui-composer-model-selector relative min-w-0">
+    <div ref={containerRef} className="aui-composer-model-selector relative min-w-0 shrink">
       <button
         ref={buttonRef}
         type="button"
@@ -167,7 +167,7 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
           variant: 'ghost',
           size: 'small',
           className: cn(
-            'aui-composer-model-button text-text-secondary hover:text-text-primary h-8 max-w-[10rem] min-w-0 shrink gap-1 rounded-full px-2 text-xs font-normal',
+            'aui-composer-model-button text-text-secondary hover:text-text-primary h-8 w-full max-w-[10rem] min-w-0 gap-1 rounded-full px-2 text-xs font-normal',
             'hover:bg-ghost-button-hover',
           ),
         })}

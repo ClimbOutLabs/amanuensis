@@ -153,7 +153,7 @@ export function DraftReasoningEffortSelector({ disabled, isRunning }: DraftReaso
   );
 
   return (
-    <div ref={containerRef} className="aui-composer-reasoning-selector relative min-w-0">
+    <div ref={containerRef} className="aui-composer-reasoning-selector relative min-w-0 shrink">
       <button
         type="button"
         disabled={disabled || isRunning}
@@ -166,7 +166,7 @@ export function DraftReasoningEffortSelector({ disabled, isRunning }: DraftReaso
           variant: 'ghost',
           size: 'small',
           className: cn(
-            'aui-composer-reasoning-button h-8 max-w-[10rem] min-w-0 gap-1.5 rounded-full px-2 text-xs font-medium',
+            'aui-composer-reasoning-button h-8 w-full max-w-[10rem] min-w-0 gap-1.5 rounded-full px-2 text-xs font-medium',
             'hover:bg-ghost-button-hover',
           ),
         })}
