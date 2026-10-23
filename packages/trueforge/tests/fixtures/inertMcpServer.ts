@@ -47,6 +47,8 @@ export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
 export const INERT_WEB_SEARCH_TOOL = 'web_search';
+/** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
+export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -109,6 +111,7 @@ export interface InertMcpServer {
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
   webSearchInvocations: () => number;
+  webFetchInvocations: () => number;
   /**
    * Resets every invocation counter, the request count and the last `Authorization` value, drops
    * any redirect, and returns both memory tools to `'result'` mode.
@@ -125,6 +128,8 @@ export interface InertMcpServer {
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
   sever: () => void;
+  /** Answers every later request only after `ms`, like a slow connector; 0 answers at once again. */
+  setResponseDelay: (ms: number) => void;
   restore: () => void;
   /** Sets the result shape the next (and every subsequent) `ask_memory` call answers with. */
   setAskMemoryMode: (mode: MemoryToolMode) => void;
@@ -156,6 +161,7 @@ interface Counters {
   askMemory: number;
   searchMemory: number;
   webSearch: number;
+  webFetch: number;
 }
 
 interface MemoryModes {
@@ -210,11 +216,13 @@ function buildMcpServer({
   gates,
   memoryModes,
   webSearch,
+  searchProvider,
 }: {
   counters: Counters;
   gates: WriteGate[];
   memoryModes: MemoryModes;
   webSearch: boolean;
+  searchProvider: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -323,6 +331,48 @@ function buildMcpServer({
     );
   }
 
+  if (searchProvider) {
+    server.registerTool(
+      INERT_WEB_SEARCH_TOOL,
+      {
+        description: 'Pretends to search the open web for each query. Never reaches the network.',
+        inputSchema: {
+          objective: z.string(),
+          search_queries: z.array(z.string()),
+          session_id: z.string().optional(),
+          model_name: z.string().optional(),
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      ({ search_queries }) => {
+        counters.webSearch += 1;
+        const n = counters.webSearch;
+        return textResult(
+          search_queries
+            .map(query => `Result for ${query}: https://source-${String(n)}.example.org/article`)
+            .join('\n'),
+        );
+      },
+    );
+    server.registerTool(
+      INERT_WEB_FETCH_TOOL,
+      {
+        description: 'Pretends to read web pages. Never reaches the network.',
+        inputSchema: {
+          urls: z.array(z.string()),
+          objective: z.string().optional(),
+          session_id: z.string().optional(),
+          model_name: z.string().optional(),
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      ({ urls }) => {
+        counters.webFetch += 1;
+        return textResult(urls.map(url => `${url}: a short page about Lantern Row.`).join('\n'));
+      },
+    );
+  }
+
   return server;
 }
 
@@ -372,8 +422,16 @@ export function asTransport(transport: StreamableHTTPServerTransport): Transport
   };
 }
 
-export async function startInertMcpServer(options?: { webSearch?: boolean }): Promise<InertMcpServer> {
+export async function startInertMcpServer(options?: {
+  webSearch?: boolean;
+  /** Adds `web_search` and `web_fetch` in the search provider's argument shape; excludes `webSearch`. */
+  searchProvider?: boolean;
+}): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
+  const searchProvider = options?.searchProvider === true;
+  if (webSearch && searchProvider) {
+    throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
+  }
   const counters: Counters = {
     echo: 0,
     read: 0,
@@ -382,6 +440,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
     askMemory: 0,
     searchMemory: 0,
     webSearch: 0,
+    webFetch: 0,
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
   const gates: WriteGate[] = [];
@@ -389,6 +448,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
   let severed = false;
   let redirect: InertRedirect | undefined;
   let requestCount = 0;
+  let responseDelayMs = 0;
   let lastAuthorizationHeader: string | undefined;
   let running = false;
   let boundPort: number | undefined;
@@ -401,6 +461,9 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
     }
 
     requestCount += 1;
+    if (responseDelayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, responseDelayMs));
+    }
     if (redirect !== undefined) {
       req.resume();
       res.writeHead(redirect.status, { location: `${redirect.to}${req.url ?? '/'}` });
@@ -448,7 +511,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, webSearch }).connect(asTransport(transport));
+    await buildMcpServer({ counters, gates, memoryModes, webSearch, searchProvider }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
 
@@ -519,6 +582,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,
     webSearchInvocations: () => counters.webSearch,
+    webFetchInvocations: () => counters.webFetch,
     resetInvocations: () => {
       counters.echo = 0;
       counters.read = 0;
@@ -527,6 +591,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
       counters.askMemory = 0;
       counters.searchMemory = 0;
       counters.webSearch = 0;
+      counters.webFetch = 0;
       memoryModes.ask = 'result';
       memoryModes.search = 'result';
       lastAuthorizationHeader = undefined;
@@ -552,6 +617,9 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
           released.resolve();
         },
       };
+    },
+    setResponseDelay: ms => {
+      responseDelayMs = ms;
     },
     sever: () => {
       severed = true;

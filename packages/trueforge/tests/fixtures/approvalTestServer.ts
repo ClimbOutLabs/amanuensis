@@ -63,7 +63,13 @@ import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription'
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
-import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
+import {
+  INERT_SERVER_NAME,
+  INERT_WEB_FETCH_TOOL,
+  INERT_WEB_SEARCH_TOOL,
+  startInertMcpServer,
+  type InertMcpServer,
+} from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
@@ -219,9 +225,12 @@ export async function startApprovalTestServer(options?: {
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
   inertWebSearch?: boolean | undefined;
+  /** Makes the inert connector the web search provider, with `web_search` and `web_fetch`. */
+  searchProvider?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
+  const searchProvider = options?.searchProvider === true;
+  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true, searchProvider });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -278,6 +287,7 @@ export async function startApprovalTestServer(options?: {
       name: INERT_SERVER_NAME,
       url: mcp.url,
       description: 'Inert connector used by approval-flow tests.',
+      ...(searchProvider ? { search_provider: true, search_tools: [INERT_WEB_SEARCH_TOOL, INERT_WEB_FETCH_TOOL] } : {}),
     },
     first_party: false,
   });

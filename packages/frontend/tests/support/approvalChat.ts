@@ -1,5 +1,6 @@
 /** A real server app behind Vite, with a chat paused on an approval card, for browser tests. */
 import assert from 'node:assert/strict';
+import type { ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 
 import type { Plugin } from 'vite';
@@ -25,8 +26,11 @@ function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** Serves `/api/*` from the real server app in this process, as the dev proxy would. */
-export function inProcessApi(api: ApprovalTestServer): Plugin {
+/**
+ * Serves `/api/*` from the real server app in this process, as the dev proxy would. Responses still
+ * open are kept in `openResponses` when given, so a test can cut them as a server restart would.
+ */
+export function inProcessApi(api: ApprovalTestServer, openResponses?: Set<ServerResponse>): Plugin {
   return {
     name: 'in-process-api',
     configureServer(server) {
@@ -36,6 +40,8 @@ export function inProcessApi(api: ApprovalTestServer): Plugin {
           next();
           return;
         }
+        openResponses?.add(res);
+        res.on('close', () => openResponses?.delete(res));
         const chunks: Buffer[] = [];
         req.on('data', (chunk: Buffer) => chunks.push(chunk));
         req.on('end', () => {
