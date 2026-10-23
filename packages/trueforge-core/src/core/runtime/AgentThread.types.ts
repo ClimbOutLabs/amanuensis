@@ -12,6 +12,7 @@ import type {
   BaseMCPAuthRequiredEvent,
   BaseThreadDoneEvent,
   ContextCompactionEvent,
+  ContextCompactionStartedEvent,
   DocumentIngestionEvent,
   MCPInitializeEvent,
   MCPServerAuthInfo,
@@ -173,6 +174,7 @@ export type AgentThreadEvent =
   | AgentThreadAppendContext
   | ThreadOverwriteContextEvent
   | ContextCompactionEvent
+  | ContextCompactionStartedEvent
   | InternalThreadDoneEvent
   | InternalMCPAuthRequiredEvent
   | InternalCapabilityStateEvent

@@ -94,6 +94,7 @@ export interface SessionTable {
   /** Inline spec binding; XOR with `agent_id`. */
   agent_spec: JsonbColumn<AgentSpec> | null;
   title: string | null;
+  /** Unused; kept because installed databases already have the column. */
   title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;

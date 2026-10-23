@@ -25,8 +25,15 @@ function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** Serves `/api/*` from the real server app in this process, as the dev proxy would. */
-export function inProcessApi(api: ApprovalTestServer): Plugin {
+/**
+ * Serves `/api/*` from the real server app in this process, as the dev proxy would. `beforeRequest`
+ * runs once the request body is read and before the app sees it, so a test can make the server slow;
+ * like a real server, the app still handles a request whose page hung up meanwhile.
+ */
+export function inProcessApi(
+  api: ApprovalTestServer,
+  options?: { beforeRequest?: (request: { method: string; url: string }) => Promise<void> },
+): Plugin {
   return {
     name: 'in-process-api',
     configureServer(server) {
@@ -45,9 +52,14 @@ export function inProcessApi(api: ApprovalTestServer): Plugin {
           }
           const method = req.method ?? 'GET';
           const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks);
-          api
-            .request(url, { method, headers, body })
-            .then(response => {
+          Promise.resolve(options?.beforeRequest?.({ method, url }))
+            .then(() => api.request(url, { method, headers, body }))
+            .then(async response => {
+              if (res.destroyed) {
+                // The page hung up while the server was slow; drop the answer as a real socket would.
+                await response.body?.cancel();
+                return;
+              }
               res.statusCode = response.status;
               response.headers.forEach((value, name) => res.setHeader(name, value));
               if (response.body === null) {

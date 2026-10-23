@@ -72,6 +72,8 @@ export * from "./ContextCompactionEvent.js";
 export * from "./ContextCompactionEventMode.js";
 export * from "./ContextCompactionEventOutcome.js";
 export * from "./ContextCompactionEventReason.js";
+export * from "./ContextCompactionStartedEvent.js";
+export * from "./ContextCompactionStartedEventMode.js";
 export * from "./ContextManagementConfig.js";
 export * from "./CreateAppBugReportResponse.js";
 export * from "./CreatedBySubject.js";

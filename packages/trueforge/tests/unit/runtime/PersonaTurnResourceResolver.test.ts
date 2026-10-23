@@ -82,6 +82,7 @@ function makeResolver(
   personalization?: PersonalizationProfile,
   knowledge?: { block: string; hits: readonly PersonaKnowledgeHit[] },
   switchNotice?: PersonaSwitchNotice,
+  modelProperties?: (name: string) => { contextLength: number | undefined } | undefined,
 ) {
   const requested: string[] = [];
   // The resolver owns the speaker projection: callers hand over the raw
@@ -95,6 +96,7 @@ function makeResolver(
           defaultModelParams: { temperature: name === PERSONA_MODEL ? 0.1 : 0.9 },
           modelId: undefined,
           modelSupportsVision: false,
+          modelProperties: modelProperties?.(name),
         });
       },
       mcp: () => Promise.reject(new Error('unused')),
@@ -159,6 +161,17 @@ describe('PersonaTurnResourceResolver', () => {
     // The identity prompt names the persona's model; with no resolver-supplied id the catalog
     // name loses its provider prefix.
     expect(resolved.definition.modelId).toBe('persona-model');
+  });
+
+  it('sizes the persona turn against the persona window, not the chat window, and keeps compaction on the chat', async () => {
+    // Chat window equals the persona's output budget: a window taken from the chat model would fail the pre-flight guard.
+    const { resolver } = makeResolver(PERSONA, undefined, undefined, undefined, name =>
+      name === PERSONA_MODEL ? { contextLength: 200_000 } : { contextLength: 32_768 },
+    );
+    const resolved = await resolve(resolver, makeSpec());
+
+    expect(resolved.definition.modelProperties?.contextLength).toBe(200_000);
+    expect(resolved.compactionModel?.modelProperties?.contextLength).toBe(32_768);
   });
 
   it('adds the persona as one escaped section, leaving the agent instructions in place', async () => {

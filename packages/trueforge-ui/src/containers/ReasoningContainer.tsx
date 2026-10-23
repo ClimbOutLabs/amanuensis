@@ -1,12 +1,23 @@
 'use client';
 
 import { useAuiState } from '@assistant-ui/react';
+import { useState } from 'react';
 
 import { useSlot } from '../theme/SlotsProvider.js';
 import type { ThreadGroupPart } from './ToolGroupContainer.js';
 
+/** Shown only while agent details are on; the caller owns that check. */
 export function ReasoningContainer({ group }: { group: ThreadGroupPart }) {
   const ReasoningCard = useSlot('ReasoningCard');
+  const [expanded, setExpanded] = useState(false);
+  const text = useAuiState(s =>
+    group.indices
+      .flatMap(index => {
+        const part = s.message.parts[index];
+        return part?.type === 'reasoning' && part.text.trim() !== '' ? [part.text] : [];
+      })
+      .join('\n\n'),
+  );
 
   const streaming = useAuiState(s => {
     if (s.message.status?.type !== 'running') return false;
@@ -27,10 +38,11 @@ export function ReasoningContainer({ group }: { group: ThreadGroupPart }) {
 
   return (
     <ReasoningCard
-      // Keep the provider contract, but never pass raw model reasoning to a
-      // slot that could render it into accessible or DOM text.
-      content=""
+      // The card stays closed until the person opens it; the text is never in the page before that.
+      content={text}
       isStreaming={streaming}
+      expanded={expanded}
+      onToggle={() => setExpanded(open => !open)}
       headingText="Thinking…"
     />
   );

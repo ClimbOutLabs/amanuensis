@@ -188,6 +188,8 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
         // catalog name without its provider prefix, as the base resolver does.
         modelId: personaModel.modelId ?? persona.model_name.slice(persona.model_name.indexOf('/') + 1),
         modelSupportsVision: personaModel.modelSupportsVision,
+        // The pre-flight guard sizes the persona's output against this window, so it must be the persona's own.
+        modelProperties: personaModel.modelProperties,
         // Iris only explains Aman from what she knows: she is never given a tool that sends, writes or schedules.
         readOnly: isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by }),
       },

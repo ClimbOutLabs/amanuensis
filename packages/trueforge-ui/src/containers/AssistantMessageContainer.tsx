@@ -10,7 +10,7 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
@@ -29,6 +29,7 @@ import {
   hasPendingAskUserResponse,
   hasPendingToolApproval,
   parseToolResultDisposition,
+  toolCallDisposition,
 } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
@@ -47,9 +48,18 @@ import { answersBriefPrompt, messageText } from './briefTurn.js';
  * Dispatches a leaf message part to its renderer. "data" parts (generative
  * UI) are out of scope for this SDK entirely.
  */
-function AssistantReasoningProgress() {
+function AssistantReasoningProgress({ text }: { text: string }) {
   const ReasoningCard = useSlot('ReasoningCard');
-  return <ReasoningCard content="" isStreaming headingText="Thinking…" />;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ReasoningCard
+      content={text}
+      isStreaming
+      expanded={expanded}
+      onToggle={() => setExpanded(open => !open)}
+      headingText="Thinking…"
+    />
+  );
 }
 
 function AssistantLeafPartContainer({ part, stepHidden = false }: { part: EnrichedPartState; stepHidden?: boolean }) {
@@ -57,7 +67,7 @@ function AssistantLeafPartContainer({ part, stepHidden = false }: { part: Enrich
     case 'text':
       return <AssistantTextContainer />;
     case 'reasoning':
-      return part.status?.type === 'running' ? <AssistantReasoningProgress /> : null;
+      return part.status?.type === 'running' ? <AssistantReasoningProgress text={part.text} /> : null;
     case 'image':
       return <MessageImageContainer />;
     case 'tool-call':
@@ -106,7 +116,7 @@ function isToolPartErrored(part: PartState): boolean {
 function isToolPartUnfinished(part: PartState): boolean {
   if (part.type !== 'tool-call') return false;
   if (isToolPartErrored(part)) return true;
-  const disposition = parseToolResultDisposition(part.result);
+  const disposition = toolCallDisposition(part);
   return disposition !== undefined && disposition.disposition !== 'executed_ok';
 }
 

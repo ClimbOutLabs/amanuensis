@@ -33,6 +33,7 @@ export function newEventId(): string {
 export const EventType = {
   AGENT_CONTEXT_OVERWRITE: 'agent.context.overwrite',
   AGENT_CONTEXT_COMPACTION: 'agent.context.compaction',
+  AGENT_CONTEXT_COMPACTION_STARTED: 'agent.context.compaction_started',
   DOCUMENT_INGESTION: 'document.ingestion',
   MCP_AUTH_REQUIRED: 'mcp.auth_required',
   MCP_INITIALIZE: 'mcp.initialize',
@@ -536,6 +537,24 @@ export const ContextCompactionEventSchema = z
   })
   .openapi('ContextCompactionEvent');
 
+/**
+ * Yielded before a compaction pass calls the summarizer, which can take minutes on a slow model, so
+ * a client can say the conversation is being tidied instead of looking stuck. The matching
+ * `agent.context.compaction` event ends it; a cancelled turn may end without one.
+ */
+export const ContextCompactionStartedEventSchema = z
+  .object({
+    type: z
+      .literal(EventType.AGENT_CONTEXT_COMPACTION_STARTED)
+      .describe('A context-compaction attempt started. It ends with agent.context.compaction or the turn ending.'),
+    id: EventIdSchema,
+    created_at: z.string().describe('ISO 8601 event timestamp.'),
+    thread_id: z.string().describe('Thread the compaction runs on.'),
+    mode: z.enum(['coding', 'conversation']).describe('Which host template is used for the summary.'),
+    tokens_before: z.number().nonnegative().describe('Estimated context tokens before this attempt.'),
+  })
+  .openapi('ContextCompactionStartedEvent');
+
 export const MCPServerAuthInfoSchema = z
   .object({
     id: z.string().describe('Internal MCP server id.'),
@@ -725,6 +744,7 @@ export type BaseThreadDoneEvent = z.infer<typeof BaseThreadDoneEventSchema>;
 export type ThreadDoneEvent = z.infer<typeof ThreadDoneEventSchema>;
 export type ThreadOverwriteContextEvent = z.infer<typeof ThreadOverwriteContextEventSchema>;
 export type ContextCompactionEvent = z.infer<typeof ContextCompactionEventSchema>;
+export type ContextCompactionStartedEvent = z.infer<typeof ContextCompactionStartedEventSchema>;
 export type BaseMCPAuthRequiredEvent = z.infer<typeof BaseMCPAuthRequiredEventSchema>;
 export type MCPServerAuthInfo = z.infer<typeof MCPServerAuthInfoSchema>;
 export type MCPAuthRequiredEvent = z.infer<typeof MCPAuthRequiredEventSchema>;

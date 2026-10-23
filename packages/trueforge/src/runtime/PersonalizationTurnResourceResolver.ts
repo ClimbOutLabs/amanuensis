@@ -1,5 +1,6 @@
 import { TurnResourceResolver } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
+import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { TurnCustom } from '../db/sessionCustom';
 import {
   buildPersonalizationContext,
@@ -10,14 +11,16 @@ import {
 } from '../personalization/profile';
 import { personalizationContextCapability } from './personalizationContext';
 
-export function personalizationCapabilitiesForTurn(
-  context: PersonalizationContext | undefined,
-  isSubAgent: boolean,
-): AgentCapability[] {
-  if (!context || isSubAgent) {
+export function personalizationCapabilitiesForTurn(input: {
+  context: PersonalizationContext | undefined;
+  isSubAgent: boolean;
+  webSearch: WebSearchTurnState;
+}): AgentCapability[] {
+  const { context, webSearch } = input;
+  if (!context || input.isSubAgent) {
     return [];
   }
-  return [personalizationContextCapability(context)];
+  return [personalizationContextCapability({ context, webSearch })];
 }
 
 /**
@@ -69,7 +72,11 @@ export class PersonalizationTurnResourceResolver extends TurnResourceResolver<Tu
     }
     // Every root thread gets its identity, even with no profile yet; the names come from the profile.
     // Sub-agent threads are handled above, so the render here always serves the root thread.
-    const personalizationCapabilities = personalizationCapabilitiesForTurn(this.personalizationContext(), false);
+    const personalizationCapabilities = personalizationCapabilitiesForTurn({
+      context: this.personalizationContext(),
+      isSubAgent: false,
+      webSearch: this.webSearchTurn,
+    });
     return {
       ...resolved,
       definition: { ...resolved.definition, identity: rootIdentityNames(this.#profile) },

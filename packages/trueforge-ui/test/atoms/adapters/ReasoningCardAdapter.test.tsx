@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ReasoningCard } from '@/atoms/adapters/ReasoningCardAdapter.js';
@@ -41,6 +41,44 @@ describe('ReasoningCard', () => {
     expect(screen.getByTestId('reason-title')).toHaveTextContent('Thinking through changes');
     expect(screen.getByText('In progress')).toBeInTheDocument();
     expect(screen.queryByText(/Internal instructions|private\.txt/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /step/i })).not.toBeInTheDocument();
+  });
+
+  it('opens to show the streaming reasoning text when the caller passes a toggle', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <ReasoningCard
+        content="Check the calendar first."
+        isStreaming
+        expanded={false}
+        onToggle={onToggle}
+        headingText="Thinking…"
+        dataTestPrefix="reason"
+      />,
+    );
+
+    expect(screen.queryByText('Check the calendar first.')).not.toBeInTheDocument();
+    expect(screen.getByTestId('reason-reasoning')).toHaveAttribute('data-reasoning-redacted', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ReasoningCard
+        content="Check the calendar first."
+        isStreaming
+        expanded
+        onToggle={onToggle}
+        headingText="Thinking…"
+        dataTestPrefix="reason"
+      />,
+    );
+    expect(screen.getByTestId('reason-reasoning-text')).toHaveTextContent('Check the calendar first.');
+    expect(screen.getByTestId('reason-reasoning')).toHaveAttribute('data-reasoning-redacted', 'false');
+  });
+
+  it('offers no toggle when the stream carries no reasoning text', () => {
+    render(<ReasoningCard content="" isStreaming expanded onToggle={() => {}} headingText="Thinking…" />);
+
     expect(screen.queryByRole('button', { name: /step/i })).not.toBeInTheDocument();
   });
 });

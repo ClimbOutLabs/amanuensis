@@ -1,5 +1,7 @@
 import { EventType, type AgentApprovalDecisionMessage, type ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall } from '../../../src/core/llm/LLMTypes';
+import { approvalGrantKey } from '../../../src/core/mcp/approvalGrant';
+import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils';
 import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
@@ -53,10 +55,12 @@ function assistantWithToolCalls(toolCalls: InternalEnrichedToolCall[]): ContextM
   return [assistant];
 }
 
+const NO_DENIALS: ReadonlySet<string> = new Set();
+
 describe('getClosableOpenToolCalls', () => {
   it('closes ordinary dangling tool calls on the last assistant message', () => {
     const context = assistantWithToolCalls([makeToolCall('tc-1'), makeToolCall('tc-2')]);
-    expect(getClosableOpenToolCalls(context)).toEqual(
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(
       new Map([
         ['tc-1', UNKNOWN_OUTCOME],
         ['tc-2', UNKNOWN_OUTCOME],
@@ -69,7 +73,7 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-1'), makeToolCall('tc-2')]),
       { role: 'tool', tool_call_id: 'tc-1', content: 'done' },
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-2', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-2', UNKNOWN_OUTCOME]]));
   });
 
   it('closes nothing while an approval-required call is still undecided', () => {
@@ -77,7 +81,7 @@ describe('getClosableOpenToolCalls', () => {
       makeToolCall('tc-ordinary'),
       makeToolCall('tc-approval', { is_approval_required: true }),
     ]);
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map());
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map());
   });
 
   it('does not tell the model an allowed side-effecting call went unexecuted', () => {
@@ -85,7 +89,7 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true, effect: 'edit' })]),
       decisionFor('tc-approval', { status: 'allow' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-approval', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-approval', UNKNOWN_OUTCOME]]));
   });
 
   it('allows retry only when the durable checkpoint proves a side effect never reached execution', () => {
@@ -93,7 +97,7 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-edit', { effect: 'edit' })]),
       { type: 'internal.tool.execution_tracking', tool_call_ids: ['tc-edit'] },
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-edit', NOT_EXECUTED]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-edit', NOT_EXECUTED]]));
   });
 
   it('reports a started side effect with no terminal response as unknown and does not invite replay', () => {
@@ -109,7 +113,7 @@ describe('getClosableOpenToolCalls', () => {
         created_at: '2026-08-26T00:00:00.000Z',
       },
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-edit', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-edit', UNKNOWN_OUTCOME]]));
   });
 
   it('invites a plain retry only when repeating the call is harmless', () => {
@@ -117,7 +121,7 @@ describe('getClosableOpenToolCalls', () => {
       makeToolCall('tc-inspect', { effect: 'inspect' }),
       makeToolCall('tc-read-only', { read_only_hint: true }),
     ]);
-    expect(getClosableOpenToolCalls(context)).toEqual(
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(
       new Map([
         ['tc-inspect', NOT_EXECUTED],
         ['tc-read-only', NOT_EXECUTED],
@@ -127,7 +131,7 @@ describe('getClosableOpenToolCalls', () => {
 
   it('treats a call with no effect metadata as side-effecting', () => {
     const context = assistantWithToolCalls([makeToolCall('tc-unknown')]);
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-unknown', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-unknown', UNKNOWN_OUTCOME]]));
   });
 
   it('closes a denied approval call with the denial the user gave', () => {
@@ -135,8 +139,8 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
       decisionFor('tc-approval', { status: 'deny', reason: 'not this repo' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(
-      new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: not this repo' })]]),
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(
+      new Map([['tc-approval', deniedToolCallText('not this repo')]]),
     );
   });
 
@@ -145,9 +149,18 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
       decisionFor('tc-approval', { status: 'deny' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(
-      new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: no reason provided' })]]),
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(
+      new Map([['tc-approval', deniedToolCallText(undefined)]]),
     );
+  });
+
+  it('closes an unanswered call that repeats a no from this turn, and keeps a real wait open', () => {
+    const repeat = makeToolCall('tc-repeat', { is_approval_required: true });
+    const context = assistantWithToolCalls([repeat]);
+    expect(getClosableOpenToolCalls(context, new Set([approvalGrantKey(repeat.tool_info)]))).toEqual(
+      new Map([['tc-repeat', deniedToolCallText(undefined)]]),
+    );
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map());
   });
 
   it('keeps a decided call closed out once its tool response exists', () => {
@@ -156,7 +169,7 @@ describe('getClosableOpenToolCalls', () => {
       decisionFor('tc-approval', { status: 'allow' }),
       { role: 'tool', tool_call_id: 'tc-approval', content: 'executed' },
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map());
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map());
   });
 
   it('closes nothing when one approval call is decided and another is not', () => {
@@ -167,7 +180,7 @@ describe('getClosableOpenToolCalls', () => {
       ]),
       decisionFor('tc-decided', { status: 'allow' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map());
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map());
   });
 
   it('returns empty when any open call is client-side', () => {
@@ -175,7 +188,7 @@ describe('getClosableOpenToolCalls', () => {
       makeToolCall('tc-ordinary'),
       makeToolCall('tc-client', { is_client_side: true }),
     ]);
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map());
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map());
   });
 
   it('excludes thread-creation tool calls (is_thread_creation)', () => {
@@ -183,7 +196,7 @@ describe('getClosableOpenToolCalls', () => {
       makeToolCall('tc-regular'),
       makeToolCall('tc-sub-agent', { is_thread_creation: true }),
     ]);
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-regular', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-regular', UNKNOWN_OUTCOME]]));
   });
 
   it('treats legacy sub-agent calls without is_thread_creation as ordinary closable calls', () => {
@@ -194,7 +207,7 @@ describe('getClosableOpenToolCalls', () => {
         original_tool_name: 'create_sub_agent',
       }),
     ]);
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-legacy-sub-agent', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['tc-legacy-sub-agent', UNKNOWN_OUTCOME]]));
   });
 
   it('only inspects tool calls on the last assistant message', () => {
@@ -211,10 +224,10 @@ describe('getClosableOpenToolCalls', () => {
         tool_calls: [makeToolCall('new-tc')],
       },
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['new-tc', UNKNOWN_OUTCOME]]));
+    expect(getClosableOpenToolCalls(context, NO_DENIALS)).toEqual(new Map([['new-tc', UNKNOWN_OUTCOME]]));
   });
 
   it('returns empty when there is no assistant message with tool calls', () => {
-    expect(getClosableOpenToolCalls([{ role: 'user', content: 'hello' }])).toEqual(new Map());
+    expect(getClosableOpenToolCalls([{ role: 'user', content: 'hello' }], NO_DENIALS)).toEqual(new Map());
   });
 });

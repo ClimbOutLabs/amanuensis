@@ -35,7 +35,8 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
-import { recordPrivateToolResult } from '../permissions/webSearch';
+import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { isSearchAskReason, isSilentSearchReason, recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
@@ -51,7 +52,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallRemediation, deniedToolCallResponse } from './ToolSet';
+import { deniedToolCallRemediation, deniedToolCallResponse, REPEATED_DENIAL_REMEDIATION } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -139,7 +140,7 @@ export function selectRepeatedActionStopMessage(input: {
   repeatedGithubFileRead: boolean;
 }): string {
   if (input.repeatedDeniedApproval) {
-    return 'The model repeated an action the user already denied or that is waiting for their OK, so the turn was stopped. Change strategy or explain why a different action is needed.';
+    return 'Stopped because the assistant kept asking for something you said no to, or something still waiting for your OK. Tell it what you want instead.';
   }
   if (input.repeatedSideEffects) {
     return 'The model attempted a side-effecting action whose dependent precondition was violated (a preceding workspace mutation did not complete as expected, or the durable execution marker was missing), so the turn was stopped and the action was not retried.';
@@ -237,6 +238,8 @@ export interface ToolCallMemoSnapshot {
   write_calls_this_turn: number;
   /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
   successful_writes_this_turn: number;
+  /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
+  step_kinds_this_turn: TurnStepKind[];
   /** Signature of the call made last in the turn, across threads; the consecutive-repeat stop. */
   last_call_signature: string | undefined;
   /** Tool calls written as text in the turn, and the retries sent for them. */
@@ -299,6 +302,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'policy_blocked_calls_this_turn'
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
+  | 'step_kinds_this_turn'
   | 'last_call_signature'
   | 'tool_markup_leaks_this_turn'
   | 'tool_markup_retries_this_turn'
@@ -334,6 +338,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Same as the policy counter: a snapshot written before the write cap omits the key.
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
+  step_kinds_this_turn?: TurnStepKind[] | undefined;
   last_call_signature?: string | undefined;
   tool_markup_leaks_this_turn?: number | undefined;
   tool_markup_retries_this_turn?: number | undefined;
@@ -359,6 +364,9 @@ export interface CallSignatureRecord {
   retried: boolean;
 }
 
+/** A kind of step that can back a claim in the reply: any sandbox step, a sandbox command, a git step, a read. */
+export type TurnStepKind = 'sandbox' | 'command' | 'git' | 'read';
+
 export interface TurnToolCallLedger {
   /** Exact-call signatures that ran this turn, with the count and the write count at their last run. */
   callSignatures: Map<string, CallSignatureRecord>;
@@ -368,6 +376,8 @@ export interface TurnToolCallLedger {
   writeCallsThisTurn: number;
   /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
   successfulWritesThisTurn: number;
+  /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
+  stepKindsThisTurn: Set<TurnStepKind>;
   /** Tool calls written as text this turn. None of them ran. */
   toolMarkupLeaksThisTurn: number;
   /** Retries sent to the model for tool calls written as text this turn. */
@@ -393,6 +403,7 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     lastCallSignature: undefined,
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
+    stepKindsThisTurn: new Set(),
     toolMarkupLeaksThisTurn: 0,
     toolMarkupRetriesThisTurn: 0,
     stoppedForWriteCap: false,
@@ -440,6 +451,9 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     }
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    for (const kind of ledger.stepKindsThisTurn) {
+      merged.stepKindsThisTurn.add(kind);
+    }
     merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
     merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
   }
@@ -591,6 +605,7 @@ export function createToolCallMemoState(
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
   state.turn.lastCallSignature = snapshot.last_call_signature;
   state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
   state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
@@ -679,6 +694,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
     last_call_signature: state.turn.lastCallSignature,
     tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
     tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,
@@ -866,10 +882,45 @@ export const IDENTICAL_CALL_STOP_AT = 4;
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
 /**
- * Write calls (tier 3) a turn may run before the host stops it. The call past the cap never
- * runs; the turn ends once the batch that reached the cap has resolved.
+ * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
+ * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
+ * turn ends once the batch that reached the cap has resolved.
  */
 export const MAX_WRITE_CALLS_PER_TURN = 5;
+
+/**
+ * Whether a call only reads and changes nothing: a host-classified inspection, a tool its server
+ * declares read-only, or a call the classifier ran as the search provider's search or page read.
+ * Missing metadata counts as a change, so it never resolves to the reassuring answer.
+ */
+export function isReadOnlyCall(
+  info: Pick<InternalToolCallInfo, 'effect' | 'read_only_hint' | 'search_provider_call' | 'tier_reason'>,
+): boolean {
+  if (info.effect !== undefined) {
+    return info.effect === 'inspect';
+  }
+  if (info.read_only_hint === true) {
+    return true;
+  }
+  return isSearchProviderRead(info);
+}
+
+function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return (
+    info.search_provider_call === true &&
+    info.tier_reason !== undefined &&
+    (isSilentSearchReason(info.tier_reason) || isSearchAskReason(info.tier_reason))
+  );
+}
+
+/**
+ * Whether the host itself ruled a call a read: the search provider's search or page read, or a maps
+ * lookup. Only these skip the write cap; a server's own read-only claim never does, so a write it
+ * wrongly calls read-only still counts.
+ */
+export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+}
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
 
@@ -968,8 +1019,7 @@ export function prepareSideEffectToolCalls({
       toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
-      toolCall.tool_info.effect === 'inspect' ||
-      (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
+      isReadOnlyCall(toolCall.tool_info) ||
       approvalDecisions.get(toolCall.id)?.status === 'deny' ||
       (toolCall.tool_info.is_approval_required === true && approvalDecisions.get(toolCall.id)?.status !== 'allow')
     ) {
@@ -1534,27 +1584,19 @@ export async function executeToolCalls({
         memoState.deniedApprovalIdentities.has(approvalGrantKey(toolCall.tool_info))
       ) {
         memoState.repeatedDeniedApproval = true;
+        // A repeat of a "no" from earlier in this turn is that same "no": no new card, and the same firm result.
         return {
           toolCall,
           toolInfo,
-          response: toolResultResponse({
-            text: JSON.stringify({
-              error: 'This exact action was already denied in this turn. Change strategy or explain what you need.',
-            }),
-            isError: true,
-          }),
+          response: deniedToolCallResponse(undefined),
           failure: true,
           completedAt: new Date().toISOString(),
           memoized: false,
           repeatCount: 1,
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
-          disposition: 'policy_blocked',
-          remediation: {
-            reason_code: 'repeated_denied_action',
-            message: 'Change strategy or explain why a different action is needed.',
-            suggested_action: 'change_strategy',
-          },
+          disposition: 'denied',
+          remediation: REPEATED_DENIAL_REMEDIATION,
           admissionProvenance: admission,
         };
       }
@@ -1589,9 +1631,7 @@ export async function executeToolCalls({
         };
       }
       const shouldMemoize =
-        toolCall.tool_info.effect === 'inspect' ||
-        (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
-        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,
