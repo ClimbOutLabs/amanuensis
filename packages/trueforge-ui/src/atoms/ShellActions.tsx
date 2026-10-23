@@ -81,7 +81,7 @@ export function ShellActions({
         </button>
       ) : null}
       {labeled ? <SessionsBrowserButton compact={!rows} /> : null}
-      <BugReportButton />
+      <BugReportButton row={labeled && rows} />
       <ActionSlot />
     </div>
   );

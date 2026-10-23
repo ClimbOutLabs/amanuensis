@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { AgentConfigInstructionsProvider } from '@/atoms/draft/AgentConfigInstructionsContext.js';
+import { BugReportProvider, type BugReportApi } from '@/components/BugReportContext.js';
 import { SidebarLayout } from '@/layouts/SidebarLayout.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -177,8 +178,14 @@ function mockSpaceStore(): SpaceStore {
 
 /** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
  *  (it renders nothing without one — see `SpacesButton`). */
-function renderSidebarLayoutWithSpaces() {
-  return render(
+const bugReportApi: BugReportApi = {
+  generateBugReport: () => Promise.reject(new Error('not used')),
+  generateAppBugReport: () => Promise.reject(new Error('not used')),
+  getBugReportHandoff: () => Promise.reject(new Error('not used')),
+};
+
+function renderSidebarLayoutWithSpaces({ withBugReport = false }: { withBugReport?: boolean } = {}) {
+  const layout = (
     <SlotsProvider>
       <ServerProvider server={mockServer()}>
         <ShellModeProvider>
@@ -193,8 +200,9 @@ function renderSidebarLayoutWithSpaces() {
           </SpaceProvider>
         </ShellModeProvider>
       </ServerProvider>
-    </SlotsProvider>,
+    </SlotsProvider>
   );
+  return render(withBugReport ? <BugReportProvider api={bugReportApi}>{layout}</BugReportProvider> : layout);
 }
 
 describe('SidebarLayout rail layout', () => {
@@ -282,5 +290,14 @@ describe('SidebarLayout More menu', () => {
     for (const railItem of ['Start new chat', 'Hide recent chats', 'Spaces', 'Agents']) {
       expect(names).not.toContain(railItem);
     }
+  });
+
+  it('shows Report a bug in the More menu as a row with its words, like the other rows', () => {
+    renderSidebarLayoutWithSpaces({ withBugReport: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' })).toHaveTextContent(
+      'Report a bug',
+    );
   });
 });
