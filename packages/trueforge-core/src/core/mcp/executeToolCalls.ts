@@ -237,6 +237,8 @@ export interface ToolCallMemoSnapshot {
   write_calls_this_turn: number;
   /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
   successful_writes_this_turn: number;
+  /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
+  step_kinds_this_turn: TurnStepKind[];
   /** Signature of the call made last in the turn, across threads; the consecutive-repeat stop. */
   last_call_signature: string | undefined;
   /** Tool calls written as text in the turn, and the retries sent for them. */
@@ -299,6 +301,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'policy_blocked_calls_this_turn'
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
+  | 'step_kinds_this_turn'
   | 'last_call_signature'
   | 'tool_markup_leaks_this_turn'
   | 'tool_markup_retries_this_turn'
@@ -334,6 +337,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Same as the policy counter: a snapshot written before the write cap omits the key.
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
+  step_kinds_this_turn?: TurnStepKind[] | undefined;
   last_call_signature?: string | undefined;
   tool_markup_leaks_this_turn?: number | undefined;
   tool_markup_retries_this_turn?: number | undefined;
@@ -359,6 +363,9 @@ export interface CallSignatureRecord {
   retried: boolean;
 }
 
+/** A kind of step that can back a claim in the reply: any sandbox step, a sandbox command, a git step, a read. */
+export type TurnStepKind = 'sandbox' | 'command' | 'git' | 'read';
+
 export interface TurnToolCallLedger {
   /** Exact-call signatures that ran this turn, with the count and the write count at their last run. */
   callSignatures: Map<string, CallSignatureRecord>;
@@ -368,6 +375,8 @@ export interface TurnToolCallLedger {
   writeCallsThisTurn: number;
   /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
   successfulWritesThisTurn: number;
+  /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
+  stepKindsThisTurn: Set<TurnStepKind>;
   /** Tool calls written as text this turn. None of them ran. */
   toolMarkupLeaksThisTurn: number;
   /** Retries sent to the model for tool calls written as text this turn. */
@@ -393,6 +402,7 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     lastCallSignature: undefined,
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
+    stepKindsThisTurn: new Set(),
     toolMarkupLeaksThisTurn: 0,
     toolMarkupRetriesThisTurn: 0,
     stoppedForWriteCap: false,
@@ -440,6 +450,9 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     }
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    for (const kind of ledger.stepKindsThisTurn) {
+      merged.stepKindsThisTurn.add(kind);
+    }
     merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
     merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
   }
@@ -591,6 +604,7 @@ export function createToolCallMemoState(
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
   state.turn.lastCallSignature = snapshot.last_call_signature;
   state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
   state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
@@ -679,6 +693,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
     last_call_signature: state.turn.lastCallSignature,
     tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
     tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,

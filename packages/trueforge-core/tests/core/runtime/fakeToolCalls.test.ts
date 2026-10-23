@@ -13,7 +13,7 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import {
   createToolCallMemoState,
@@ -287,7 +287,44 @@ describe('leaked markup', () => {
     const events = await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual([]);
-    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTE}`);
+    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTES.change}`);
+  });
+
+  it('adds the clone note when the reply says it cloned a repository and only the clock ran', async () => {
+    const toolSet = makeMockIMCPServer({
+      name: 'clock',
+      preload: true,
+      tools: [
+        { name: 'get_current_datetime', description: 'Current time', inputSchema: { type: 'object' }, preload: true },
+      ],
+    });
+    jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+      Promise.resolve({
+        type: 'mcp',
+        mcp_server_id: toolSet.id,
+        mcp_server_name: toolSet.name,
+        original_tool_name: params.name,
+        read_only_hint: true,
+      }),
+    );
+    jest
+      .mocked(toolSet.callTool)
+      .mockImplementation(() => Promise.resolve(toolResultResponse({ text: '"2026-10-23T09:00:00Z"' })));
+    const reply =
+      "I've cloned the lanternworks/tide-tables repository into your workspace. It has three folders: src, docs and scripts.";
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-clock', name: 'get_current_datetime', args: {} }] });
+      }
+      return replyStream({ text: reply });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['get_current_datetime']);
+    expect(deliveredText(events)).toBe(`${reply}\n\n${UNBACKED_CLAIM_NOTES.clone}`);
   });
 
   it('leaves the reply alone when a write call succeeded in the same turn', async () => {
