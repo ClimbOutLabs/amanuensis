@@ -147,11 +147,27 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
 /** A call's result and its card answer. A "no" on the card fills the result locally with no envelope. */
 type ToolCallOutcomeSource = { result?: unknown; approval?: { approved?: boolean | undefined } | undefined };
 
+/** How a denied call shows, whether the result says so or the person said no on the card. */
+function deniedView({
+  expired,
+  remediation,
+}: {
+  expired: boolean;
+  remediation: string | undefined;
+}): ToolDispositionView {
+  return {
+    disposition: 'denied',
+    label: expired ? 'Expired' : 'Denied',
+    tone: 'muted',
+    ...(remediation ? { remediation } : {}),
+  };
+}
+
 /** The disposition a call shows, counting a "no" on its card before the server's result arrives. */
 export function toolCallDisposition(part: ToolCallOutcomeSource): ToolDispositionView | undefined {
   return (
     parseToolResultDisposition(part.result) ??
-    (part.approval?.approved === false ? { disposition: 'denied', label: 'Denied', tone: 'muted' } : undefined)
+    (part.approval?.approved === false ? deniedView({ expired: false, remediation: undefined }) : undefined)
   );
 }
 
@@ -175,12 +191,7 @@ export function parseToolResultDisposition(content: unknown): ToolDispositionVie
       : undefined;
   switch (outcome.disposition) {
     case 'denied':
-      return {
-        disposition: outcome.disposition,
-        label: isExpiredApprovalResult(content) ? 'Expired' : 'Denied',
-        tone: 'muted',
-        ...(remediation ? { remediation } : {}),
-      };
+      return deniedView({ expired: isExpiredApprovalResult(content), remediation });
     case 'policy_blocked':
       return {
         disposition: outcome.disposition,

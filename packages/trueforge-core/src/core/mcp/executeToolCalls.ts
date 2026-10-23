@@ -51,7 +51,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallRemediation, deniedToolCallResponse } from './ToolSet';
+import { deniedToolCallRemediation, deniedToolCallResponse, REPEATED_DENIAL_REMEDIATION } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -1546,11 +1546,7 @@ export async function executeToolCalls({
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
           disposition: 'denied',
-          remediation: {
-            reason_code: 'repeated_denied_action',
-            message: 'You already said no to this, so it was not asked again.',
-            suggested_action: 'contact_user',
-          },
+          remediation: REPEATED_DENIAL_REMEDIATION,
           admissionProvenance: admission,
         };
       }

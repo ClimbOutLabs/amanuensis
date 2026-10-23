@@ -9,7 +9,7 @@ import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { approvalExpiredReason } from '../../../src/core/permissions/approvalExpiry';
 import { changeRequestReason } from '../../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
-import type { AgentThreadEvent } from '../../../src/core/runtime/AgentThread.types';
+import { InternalEventType, type AgentThreadEvent } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
@@ -210,6 +210,46 @@ describe('a "no" to a search holds for the rest of the turn', () => {
 
     await answer({ thread, toolCallId: 'search-2', reason: 'No thanks' });
     expect(cardIds(await run(thread))).toEqual([]);
+  });
+
+  it('lets a new message through when the turn stopped right after a repeat of a no was saved', async () => {
+    const { thread, toolSet } = makeThread([
+      search('search-1', 'Dana Example'),
+      search('search-2', 'Dana Example biography'),
+      { kind: 'text' },
+    ]);
+    await run(thread);
+    await answer({ thread, toolCallId: 'search-1', reason: 'No thanks' });
+
+    // Stop the turn on the save that holds the repeat, before it is refused.
+    const controller = new AbortController();
+    try {
+      for await (const event of thread.execute({ signal: controller.signal })) {
+        if (
+          event.type === InternalEventType.AGENT_CONTEXT_APPEND &&
+          event.context.some(message => 'tool_calls' in message && message.tool_calls?.[0]?.id === 'search-2')
+        ) {
+          controller.abort();
+        }
+      }
+    } catch {
+      // A stopped turn may end by throwing; the saved state is what matters here.
+    }
+    expect(thread.hasOpenToolCallId('search-2')).toBe(true);
+
+    for await (const event of thread.send([
+      { type: EventType.USER_MESSAGE, content: 'Never mind, what is on today?' },
+    ])) {
+      void event;
+    }
+
+    expect(thread.hasOpenToolCallId('search-2')).toBe(false);
+    const closed = thread
+      .toSnapshot()
+      .context.find(message => 'role' in message && message.role === 'tool' && message.tool_call_id === 'search-2');
+    expect(JSON.stringify(closed)).toContain('\\"disposition\\":\\"denied\\"');
+    expect(JSON.stringify(closed)).toContain('Do not try it again');
+    expect(toolSet.callTool).not.toHaveBeenCalled();
   });
 
   it('does not let a no to a different kind of action block a search', async () => {

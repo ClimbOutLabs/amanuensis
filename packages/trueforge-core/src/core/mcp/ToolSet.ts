@@ -89,6 +89,13 @@ const DENIED_SAID = 'The person said no to this.';
 const DENIED_NEXT_STEP =
   'Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.';
 
+/** Marks a call refused because it repeats a "no" from earlier in the turn; it never asked again. */
+export const REPEATED_DENIAL_REMEDIATION: ToolResultRemediation = {
+  reason_code: 'repeated_denied_action',
+  message: 'You already said no to this, so it was not asked again.',
+  suggested_action: 'contact_user',
+};
+
 /** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
 export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
   return isApprovalExpiredReason(reason)

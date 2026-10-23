@@ -77,6 +77,7 @@ import {
   allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
+  awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
   offersChatApproval,
@@ -669,22 +670,6 @@ function assertValidTransition(from: AgentThreadState, to: AgentThreadState): vo
   }
 }
 
-/**
- * Whether a call waits for the person's answer. A call that matches a "no" from earlier in this turn
- * gets no new card: the run refuses it as that same "no", so rewording a search cannot ask again.
- */
-function awaitsApproval(input: {
-  call: InternalEnrichedToolCall;
-  decisions: ReadonlyMap<string, ApprovalDecision>;
-  deniedApprovalIdentities: ReadonlySet<string>;
-}): boolean {
-  return (
-    input.call.tool_info.is_approval_required === true &&
-    !input.decisions.has(input.call.id) &&
-    !input.deniedApprovalIdentities.has(approvalGrantKey(input.call.tool_info))
-  );
-}
-
 function deriveAgentThreadState(input: {
   context: ContextMessage[];
   chatApprovalGrants: ReadonlySet<string>;
@@ -840,9 +825,13 @@ function lastAssistantInContext(context: ContextMessage[]): InternalEnrichedAssi
 // regular tool calls (which the closer repairs), while still blocking on approval/client-side/
 // sub-agent calls that genuinely need resolution. Takes the already-computed open set; copies it
 // since it mutates (deletes) the closable ids.
-function getUnclosableOpenToolCallIds(context: ContextMessage[], openToolCallIds: Set<string>): Set<string> {
-  const blockingOpenToolCallIds = new Set(openToolCallIds);
-  for (const id of getClosableOpenToolCalls(context).keys()) {
+function getUnclosableOpenToolCallIds(input: {
+  context: ContextMessage[];
+  openToolCallIds: Set<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): Set<string> {
+  const blockingOpenToolCallIds = new Set(input.openToolCallIds);
+  for (const id of getClosableOpenToolCalls(input.context, input.deniedApprovalIdentities).keys()) {
     blockingOpenToolCallIds.delete(id);
   }
   return blockingOpenToolCallIds;
@@ -1076,7 +1065,11 @@ function validateInputMessageTypesGivenContext(input: {
   const openToolCallIds = getOpenToolCallIds(input.context);
   // Subset that blocks a fresh user message: excludes calls OpenToolCallCloser will auto-close
   // during preSend, so a dangling regular tool call doesn't reject a user message it will repair.
-  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds(input.context, openToolCallIds);
+  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds({
+    context: input.context,
+    openToolCallIds,
+    deniedApprovalIdentities: input.deniedApprovalIdentities,
+  });
   const pendingApprovalCalls = new Map(
     getPendingApprovalToolCalls({
       context: input.context,
@@ -1727,7 +1720,10 @@ export class AgentThread {
     );
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
-    this.preSendContextProcessors = [new OpenToolCallCloser(), ...capabilityPreSend];
+    this.preSendContextProcessors = [
+      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      ...capabilityPreSend,
+    ];
 
     assertUniqueStateKeys(capabilities);
     const claimed = claimCapabilityState(capabilities, input.capabilityState, this.logger);
@@ -4196,7 +4192,7 @@ export class AgentThread {
         toolCallIds: orphanedCalls.map(call => call.id),
         toolNames: orphanedCalls.map(call => call.function.name),
       });
-      const closeouts = getClosableOpenToolCallOutcomes(this.context);
+      const closeouts = getClosableOpenToolCallOutcomes(this.context, this.toolCallMemo.deniedApprovalIdentities);
       const completedAt = new Date().toISOString();
       for (const call of orphanedCalls) {
         // The canonical closer refuses to classify a batch containing a
