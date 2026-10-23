@@ -1368,33 +1368,24 @@ export async function classifyUnstampedToolCall(input: {
 }
 
 /**
- * The called tools that change nothing, by the same side-effect classification dispatch uses.
- * Read from each tool's own metadata before its arguments are trusted; a tool whose metadata
- * cannot be read counts as one that changes something.
+ * The called tools whose reads the host itself vouches for, looked up by name before their
+ * arguments are trusted. A server's own read-only claim never counts here.
  */
-async function readOnlyToolNames({
+function hostVouchedReadToolNames({
   calls,
   toolMapping,
 }: {
   calls: readonly RawToolCall[];
   toolMapping: Map<string, MappedMCPTool>;
-}): Promise<Set<string>> {
-  const readOnly = new Set<string>();
+}): Set<string> {
+  const vouched = new Set<string>();
   for (const name of new Set(calls.map(call => call.function.name))) {
     const toolInfo = toolMapping.get(name);
-    if (toolInfo === undefined) {
-      continue;
-    }
-    const info = await resolveToolCallInfo({
-      toolInfo,
-      params: { name: toolInfo.originalToolName },
-      resolveUnderlyingTool: false,
-    });
-    if (isReadOnlyCall(info)) {
-      readOnly.add(name);
+    if (toolInfo?.toolSet.isHostVouchedReadTool?.(toolInfo.originalToolName) === true) {
+      vouched.add(name);
     }
   }
-  return readOnly;
+  return vouched;
 }
 
 async function enrichAssistantMessage({
@@ -3563,7 +3554,7 @@ export class AgentThread {
       // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
-      readOnlyTools: await readOnlyToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
+      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);

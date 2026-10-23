@@ -80,7 +80,7 @@ export function guardModelReply(input: {
   message: RawAssistantMessage;
   tools: ChatCompletionTool[];
   knownEventIds: ReadonlySet<string>;
-  /** Tools known to change nothing; for these an optional true-or-false argument that cannot be repaired is dropped. */
+  /** Tools whose reads the host vouches for; for these an optional true-or-false argument that cannot be repaired is dropped. */
   readOnlyTools: ReadonlySet<string>;
 }): ModelReplyGuardOutcome {
   const { message, tools, knownEventIds, readOnlyTools } = input;

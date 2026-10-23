@@ -379,8 +379,9 @@ function checkObject(input: CheckInput & { value: Record<string, unknown> }): Ch
 /**
  * Checks a whole call's arguments. Returns the arguments to send (repaired and pruned) and the
  * problems that could not be repaired. A call with problems must not be sent; the problems are
- * the model's instructions for its one retry. `readOnly` must be true only for a tool known not to
- * change anything: then an optional true-or-false argument that cannot be repaired is dropped.
+ * the model's instructions for its one retry. `readOnly` must be true only for a read the host itself
+ * vouches for, never on a server's own claim: then an optional true-or-false argument that cannot be
+ * repaired is dropped.
  */
 export function checkToolArguments(input: {
   schema: ToolParameterSchema;

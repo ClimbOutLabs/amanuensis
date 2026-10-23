@@ -156,6 +156,12 @@ export interface IToolSet {
   toolCallInfo(params: CallToolRequest['params'], resolveUnderlyingTool?: boolean): Promise<InternalToolCallInfo>;
 
   /**
+   * By-name form of isHostVouchedRead, for before a call is classified: whether the host itself
+   * vouches this tool only reads. Never reads the tool's own annotations. Absent means never.
+   */
+  isHostVouchedReadTool?(name: string): boolean;
+
+  /**
    * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
    * tool sets whose approvals are not bound to a connector.
    */
