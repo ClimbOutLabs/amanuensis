@@ -4,14 +4,16 @@ import type { ReactNode } from 'react';
 
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { Icon } from '../icons/Icon.js';
-import { auiButtonClass } from './lib/buttonClasses.js';
-import { Button } from './primitives/Button.js';
+import { DraftComposerActionsMenu, type DraftComposerAction } from './draft/DraftComposerActionsMenu.js';
+import { cn } from './lib/cn.js';
 import { VoiceInputButton } from './VoiceInputButton.js';
 
 export type ComposerLeftSectionProps = {
   disabled: boolean;
   isRunning: boolean;
   onAttach?: () => void;
+  /** Work on a repo menu item; omitted when the feature is unavailable here. */
+  workOnRepo?: DraftComposerAction | null;
 };
 
 export type ComposerRightSectionProps = {
@@ -33,25 +35,24 @@ export type ComposerLeftSectionSlot = (props: ComposerLeftSectionProps) => React
 export type ComposerRightSectionSlot = (props: ComposerRightSectionProps) => ReactNode;
 export type ComposerSendButtonSlot = (props: ComposerSendButtonProps) => ReactNode;
 
-export function ComposerLeftSection({ onAttach }: ComposerLeftSectionProps) {
-  if (!onAttach) return null;
+/** The round "+" menu: attach, then add-ons where a model is picked, then work on a repo. */
+export function ComposerLeftSection({ disabled, onAttach, workOnRepo = null }: ComposerLeftSectionProps) {
+  const actions: DraftComposerAction[] = [
+    ...(onAttach === undefined
+      ? []
+      : [{ id: 'attach', label: 'Attach a file', icon: 'paperclip', onSelect: onAttach }]),
+    ...(workOnRepo ? [workOnRepo] : []),
+  ];
 
-  return (
-    <button
-      type="button"
-      aria-label="Attach"
-      title="Attach"
-      className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-      onClick={onAttach}
-    >
-      <Icon name="paperclip" />
-    </button>
-  );
+  return <DraftComposerActionsMenu actions={actions} disabled={disabled} />;
 }
 
 export function ComposerRightSection({ disabled }: ComposerRightSectionProps): ReactNode {
   return <VoiceInputButton disabled={disabled} />;
 }
+
+const roundButtonBase =
+  'inline-flex size-11 shrink-0 cursor-pointer sm:size-8 items-center justify-center rounded-full transition-colors focus-visible:ring-1 focus-visible:ring-focus-ring focus-visible:outline-none disabled:cursor-not-allowed';
 
 export function ComposerSendButton({
   canSubmit,
@@ -61,34 +62,49 @@ export function ComposerSendButton({
   onCancel,
 }: ComposerSendButtonProps) {
   if (isRunning) {
+    const stopLabel = isStopping ? 'Stopping' : 'Stop';
     return (
-      <Button.Primary
+      <button
         type="button"
-        size="small"
-        className="aui-composer-cancel-button"
+        data-slot="aui_composer-cancel"
+        data-state="stop"
+        className={cn(
+          roundButtonBase,
+          'aui-composer-cancel-button bg-primary-button-bg text-primary-button-text hover:bg-primary-button-hover disabled:opacity-60',
+        )}
         disabled={!onCancel || isStopping}
         onClick={onCancel}
-        aria-label={isStopping ? 'Stopping' : 'Cancel'}
+        aria-label={stopLabel}
+        title={stopLabel}
       >
-        <Spinner size={14} />
-        {isStopping ? 'Stopping…' : 'Cancel'}
-      </Button.Primary>
+        {isStopping ? (
+          <Spinner size={14} />
+        ) : (
+          <span aria-hidden="true" className="block size-3 rounded-sm bg-current" />
+        )}
+      </button>
     );
   }
 
   return (
-    <Button.Primary
+    <button
       type="button"
-      size="icon"
       data-slot="aui_composer-send"
-      className="aui-composer-send-button shadow-none"
+      data-state={canSubmit ? 'ready' : 'muted'}
+      className={cn(
+        roundButtonBase,
+        'aui-composer-send-button',
+        canSubmit
+          ? 'bg-primary-button-bg text-primary-button-text hover:bg-primary-button-hover'
+          : 'bg-secondary-bg text-text-secondary',
+      )}
       disabled={!canSubmit}
       onClick={onSubmit}
       title="Send message"
       aria-label="Send message"
     >
-      <Icon name="arrow-up" />
-    </Button.Primary>
+      <Icon name="arrow-up" className="size-4" />
+    </button>
   );
 }
 

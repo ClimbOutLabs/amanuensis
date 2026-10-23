@@ -66,14 +66,14 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     await send.tap();
     assert.equal(await page.locator('body').getAttribute('data-submitted'), 'true');
 
-    const cancel = page.getByRole('button', { name: 'Cancel' });
+    const cancel = page.getByRole('button', { name: 'Stop' });
     await cancel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-    const cancelBox = await cancel.boundingBox();
-    assert.ok(cancelBox != null, 'Cancel should have browser geometry while running');
-    assert.ok(cancelBox.x >= 0, `Cancel starts outside viewport: ${cancelBox.x}`);
-    assert.ok(cancelBox.x + cancelBox.width <= 320, `Cancel ends outside viewport: ${cancelBox.x + cancelBox.width}`);
-    assert.ok(cancelBox.width >= 44, `Cancel width is below touch target: ${cancelBox.width}`);
-    assert.ok(cancelBox.height >= 44, `Cancel height is below touch target: ${cancelBox.height}`);
+    const stopBox = await cancel.boundingBox();
+    assert.ok(stopBox != null, 'Stop should have browser geometry while running');
+    assert.ok(stopBox.x >= 0, `Stop starts outside viewport: ${stopBox.x}`);
+    assert.ok(stopBox.x + stopBox.width <= 320, `Stop ends outside viewport: ${stopBox.x + stopBox.width}`);
+    assert.ok(stopBox.width >= 44, `Stop width is below touch target: ${stopBox.width}`);
+    assert.ok(stopBox.height >= 44, `Stop height is below touch target: ${stopBox.height}`);
 
     await cancel.tap();
     assert.equal(await page.locator('body').getAttribute('data-cancelled'), 'true');

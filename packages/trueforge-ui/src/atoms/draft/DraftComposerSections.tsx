@@ -1,6 +1,5 @@
 'use client';
 
-import { Icon } from '../../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { ActivePersonaIndicator } from '../ActivePersonaIndicator.js';
@@ -9,13 +8,12 @@ import {
   type ComposerLeftSectionProps,
   type ComposerRightSectionProps,
 } from '../ComposerSections.js';
-import { auiButtonClass } from '../lib/buttonClasses.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
-import { Tooltip } from '../primitives/Tooltip.js';
+import type { DraftComposerAction } from './DraftComposerActionsMenu.js';
 import { DraftReasoningEffortSelector } from './DraftReasoningEffortSelector.js';
 
-export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: ComposerLeftSectionProps) {
+export function DraftComposerLeftSection({ disabled, isRunning, onAttach, workOnRepo }: ComposerLeftSectionProps) {
   const shell = useOptionalShellMode();
   const DraftCompositeSelector = useSlot('DraftCompositeSelector');
   const DraftAgentConfigTrigger = useSlot('DraftAgentConfigTrigger');
@@ -23,50 +21,39 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
-  const compactActions = [
-    {
-      id: 'agent-config',
-      label: 'Agent config',
-      icon: 'sliders',
-      onSelect: () => shell?.setAgentConfigOpen(true),
-    },
+  const builderActions: DraftComposerAction[] = [
+    ...(compact
+      ? [
+          {
+            id: 'agent-config',
+            label: 'Agent config',
+            icon: 'sliders',
+            onSelect: () => shell?.setAgentConfigOpen(true),
+          },
+        ]
+      : []),
     ...(onAttach === undefined
       ? []
-      : [
-          {
-            id: 'attach',
-            label: 'Attach a file',
-            icon: 'paperclip',
-            onSelect: onAttach,
-          },
-        ]),
+      : [{ id: 'attach', label: 'Attach a file', icon: 'paperclip', onSelect: onAttach }]),
+    ...(workOnRepo ? [workOnRepo] : []),
   ];
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-1">
       {!isBuilder ? (
         <>
-          <DraftCompositeSelector disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
+          <DraftCompositeSelector
+            disabled={disabled}
+            isRunning={isRunning}
+            onAttach={onAttach}
+            workOnRepo={workOnRepo}
+          />
           <ActivePersonaIndicator disabled={disabled || isRunning} />
         </>
-      ) : null}
-      {isBuilder && compact ? (
-        <DraftComposerActionsMenu actions={compactActions} disabled={disabled || isRunning} />
-      ) : null}
+      ) : (
+        <DraftComposerActionsMenu actions={builderActions} disabled={disabled || isRunning} />
+      )}
       {isBuilder && !compact && isMobile ? <DraftAgentConfigTrigger disabled={disabled} isRunning={isRunning} /> : null}
-      {isBuilder && !compact && onAttach != null ? (
-        <Tooltip content="Attach a file">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label="Attach a file"
-            className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-            onClick={onAttach}
-          >
-            <Icon name="paperclip" />
-          </button>
-        </Tooltip>
-      ) : null}
     </div>
   );
 }
@@ -78,9 +65,9 @@ export function DraftComposerRightSection({ disabled, isRunning }: ComposerRight
 
   return (
     <div className="flex min-w-0 items-center gap-1">
+      {/* The model menu holds reasoning effort. The builder has no model menu, so it keeps the standalone control. */}
       {!isBuilder ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
-      <DraftReasoningEffortSelector disabled={disabled} isRunning={isRunning} />
-      {/* Default trailing controls (mic) go last, beside Send, as in the plain composer. */}
+      {isBuilder ? <DraftReasoningEffortSelector disabled={disabled} isRunning={isRunning} /> : null}
       <ComposerRightSection disabled={disabled} isRunning={isRunning} />
     </div>
   );

@@ -4,7 +4,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { DraftCompositeSelector } from '@/atoms/draft/DraftCompositeSelector.js';
-import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentSkill, AgentSpec, CatalogServer, SkillCatalogServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -50,7 +49,6 @@ function renderSelector({
   getSkills,
   getMcp,
   catalog = settingsCatalog,
-  compact = false,
 }: {
   onAttach?: () => void;
   getCapabilities?: () => Promise<{
@@ -63,7 +61,6 @@ function renderSelector({
   getSkills?: () => Promise<AgentSkill[]>;
   getMcp?: () => Promise<{ id: string; name: string; authenticated: boolean }[]>;
   catalog?: CatalogServer | null;
-  compact?: boolean;
 } = {}) {
   const server = createMockAgentUIServer({
     ...(catalog === null ? {} : { catalog }),
@@ -91,7 +88,13 @@ function renderSelector({
       </DraftCatalogProvider>
     </ServerProvider>
   );
-  return render(compact ? <CompactLayoutProvider>{selector}</CompactLayoutProvider> : selector);
+  return render(selector);
+}
+
+/** Opens the "+" menu and picks Add-ons, as a person does. */
+function openAddOns() {
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /Add-ons/ }));
 }
 
 describe('DraftCompositeSelector', () => {
@@ -112,10 +115,8 @@ describe('DraftCompositeSelector', () => {
 
   it('shows the selected add-on count only for a valid model', () => {
     const view = renderSelector();
-    const addOnsTrigger = screen.getByRole('button', { name: 'Add-ons (2)' });
-    expect(addOnsTrigger).toHaveTextContent('Add-ons');
-    expect(addOnsTrigger).toHaveTextContent('2');
-    fireEvent.click(addOnsTrigger);
+    expect(screen.getByRole('button', { name: 'Add' })).toHaveTextContent('2');
+    openAddOns();
     expect(screen.getByRole('dialog', { name: 'Add to composer' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Connectors/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Skills/ })).toBeInTheDocument();
@@ -131,6 +132,7 @@ describe('DraftCompositeSelector', () => {
         </DraftCatalogProvider>
       </ServerProvider>,
     );
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Connectors/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Add to composer' })).not.toBeInTheDocument();
   });
@@ -143,7 +145,7 @@ describe('DraftCompositeSelector', () => {
     );
     renderSelector({ getSkills: async () => [skill] });
 
-    fireEvent.click(screen.getByRole('button', { name: /Add-ons/ }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     expect(await screen.findByRole('menuitemcheckbox', { name: /echo/ })).toBeInTheDocument();
@@ -153,7 +155,7 @@ describe('DraftCompositeSelector', () => {
 
   it('uses contrasting search surfaces in light and dark themes', () => {
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     expect(screen.getByPlaceholderText('Search connectors...')).toHaveClass(
       'border-input-border',
@@ -164,7 +166,7 @@ describe('DraftCompositeSelector', () => {
 
   it('filters the complete connector catalog client-side', async () => {
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     expect(await screen.findByRole('menuitemcheckbox', { name: /GitHub/ })).toBeInTheDocument();
     expect(screen.getByRole('menuitemcheckbox', { name: /Slack/ })).toBeInTheDocument();
@@ -175,64 +177,77 @@ describe('DraftCompositeSelector', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: /Slack/ })).not.toBeInTheDocument();
   });
 
-  it('shows selected connectors and skills in the picker tooltip', () => {
+  it('shows selected connectors and skills as the Add-ons item hint', () => {
     renderSelector();
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Add-ons (2)' }));
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Connectors: Slack');
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Skills: Research');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: /Add-ons/ })).toHaveAttribute(
+      'title',
+      'Connectors: Slack\nSkills: Research',
+    );
   });
 
-  it('truncates connector tooltip names after 4 with a remainder count', () => {
+  it('truncates connector names in the Add-ons hint after 4 with a remainder count', () => {
     agentSpec = {
       ...agentSpec,
       mcpServers: [
-        { id: 'a', name: 'Alpha' },
-        { id: 'b', name: 'Beta' },
-        { id: 'c', name: 'Gamma' },
-        { id: 'd', name: 'Delta' },
-        { id: 'e', name: 'Epsilon' },
-        { id: 'f', name: 'Zeta' },
+        { id: 'alpha', name: 'Alpha' },
+        { id: 'beta', name: 'Beta' },
+        { id: 'gamma', name: 'Gamma' },
+        { id: 'delta', name: 'Delta' },
+        { id: 'epsilon', name: 'Epsilon' },
+        { id: 'zeta', name: 'Zeta' },
       ],
       skills: [],
     };
     renderSelector();
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Add-ons (6)' }));
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Connectors: Alpha, Beta, Gamma, Delta +2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: /Add-ons/ })).toHaveAttribute(
+      'title',
+      'Connectors: Alpha, Beta, Gamma, Delta +2',
+    );
   });
 
-  it('renders attachment as a standalone tooltip control', () => {
+  it('lists attach and add-ons in the plus menu', () => {
     const onAttach = vi.fn();
     renderSelector({ onAttach });
 
-    const attach = screen.getByRole('button', { name: 'Attach a file' });
-    fireEvent.mouseEnter(attach);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Attach a file');
-    fireEvent.click(attach);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const items = screen.getAllByRole('menuitem').map(item => item.textContent);
+    expect(items).toEqual(['Attach a file', 'Add-ons']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach a file' }));
     expect(onAttach).toHaveBeenCalledOnce();
     expect(screen.queryByRole('dialog', { name: 'Add to composer' })).not.toBeInTheDocument();
   });
 
-  it('groups compact tools and attachment actions under a plus menu', () => {
-    const onAttach = vi.fn();
-    renderSelector({ onAttach, compact: true });
+  it('never shows a zero count on the plus button', () => {
+    agentSpec = { ...agentSpec, mcpServers: [], skills: [] };
+    renderSelector();
 
-    expect(screen.queryByRole('button', { name: 'Add-ons (2)' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
+    const plus = screen.getByRole('button', { name: 'Add' });
+    expect(plus).toHaveTextContent('');
+    expect(plus.querySelector('[data-slot="aui_composer-plus-badge"]')).toBeNull();
+  });
+
+  it('disables the work on a repo item in the plus menu when the sandbox is off', () => {
+    const onSelect = vi.fn();
+    render(
+      <ServerProvider server={createMockAgentUIServer({ getModels: async () => [] })}>
+        <DraftCatalogProvider>
+          <DraftCompositeSelector
+            workOnRepo={{ id: 'work-on-repo', label: 'Work on a repo', icon: 'folder', disabled: true, onSelect }}
+          />
+        </DraftCatalogProvider>
+      </ServerProvider>,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Add-ons (2)' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach a file' }));
-
-    expect(onAttach).toHaveBeenCalledOnce();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add-ons (2)' }));
-    expect(screen.getByRole('dialog', { name: 'Add to composer' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Work on a repo' })).toBeDisabled();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('debounces connector changes into one draft update', async () => {
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /GitHub/ }));
 
     expect(updateAgentSpec).not.toHaveBeenCalled();
@@ -251,7 +266,7 @@ describe('DraftCompositeSelector', () => {
   it('treats omitted capabilities as enabled and patches only capability branches', async () => {
     agentSpec = { ...agentSpec, config: {} };
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Capabilities/ }));
 
     const generativeUi = screen.getByRole('switch', { name: 'Generative UI' });
@@ -269,7 +284,7 @@ describe('DraftCompositeSelector', () => {
 
   it('folds dirty connector toggles into a capability update', async () => {
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /GitHub/ }));
     fireEvent.click(screen.getByRole('button', { name: /Capabilities/ }));
     fireEvent.click(screen.getByRole('switch', { name: 'Generative UI' }));
@@ -291,7 +306,7 @@ describe('DraftCompositeSelector', () => {
 
   it('opens settings from the empty connectors state', async () => {
     renderSelector({ getMcp: async () => [] });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     fireEvent.click(await screen.findByRole('button', { name: /Please configure Connectors in the settings/ }));
 
@@ -301,7 +316,7 @@ describe('DraftCompositeSelector', () => {
 
   it('opens settings from the empty skills state', async () => {
     renderSelector({ getSkills: async () => [] });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     fireEvent.click(await screen.findByRole('button', { name: /Please configure Skills in the settings/ }));
@@ -319,7 +334,7 @@ describe('DraftCompositeSelector', () => {
       }),
       getSkills: async () => [],
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Skills run in a sandbox, which is not configured.');
@@ -338,7 +353,7 @@ describe('DraftCompositeSelector', () => {
       }),
       getSkills: async () => [],
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     fireEvent.click(await screen.findByRole('button', { name: /Please configure Skills in the settings/ }));
@@ -348,7 +363,7 @@ describe('DraftCompositeSelector', () => {
 
   it('does not offer connector settings without a settings catalog', async () => {
     renderSelector({ getMcp: async () => [], catalog: null });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     expect(await screen.findByText('No connectors')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Please configure Connectors/ })).not.toBeInTheDocument();
@@ -365,7 +380,7 @@ describe('DraftCompositeSelector', () => {
       }),
       getMcp: async () => [],
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     expect(await screen.findByText('No connectors')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Please configure Connectors/ })).not.toBeInTheDocument();
@@ -373,7 +388,7 @@ describe('DraftCompositeSelector', () => {
 
   it('does not offer skills settings when the skills settings section is unavailable', async () => {
     renderSelector({ getSkills: async () => [], catalog: createMockCatalog() });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     expect(await screen.findByText('No skills')).toBeInTheDocument();
@@ -383,7 +398,7 @@ describe('DraftCompositeSelector', () => {
   it('renders the sandbox toggle from the spec value', async () => {
     agentSpec = { ...agentSpec, skills: [], config: { sandbox: { enabled: true, fileDownloads: false } } };
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (1)' }));
+    openAddOns();
 
     const sandboxSwitch = await screen.findByRole('switch', { name: 'Sandbox' });
     expect(sandboxSwitch).toHaveAttribute('aria-checked', 'true');
@@ -397,7 +412,7 @@ describe('DraftCompositeSelector', () => {
       config: { sandbox: { enabled: true, fileDownloads: false }, memory: { recallEnabled: false } },
     };
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (1)' }));
+    openAddOns();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Sandbox' }));
 
@@ -412,7 +427,7 @@ describe('DraftCompositeSelector', () => {
   it('clears attached skills and notes it when turning the sandbox off', async () => {
     agentSpec = { ...agentSpec, config: { sandbox: { enabled: true, fileDownloads: true } } };
     renderSelector();
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     const sandboxSwitch = await screen.findByRole('switch', { name: 'Sandbox' });
     expect(screen.getByText(/Turning this off clears attached skills/)).toBeInTheDocument();
@@ -433,7 +448,7 @@ describe('DraftCompositeSelector', () => {
         },
       }),
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
 
     const sandboxSwitch = await screen.findByRole('switch', { name: 'Sandbox' });
     expect(sandboxSwitch).toBeDisabled();
@@ -451,7 +466,7 @@ describe('DraftCompositeSelector', () => {
       getSkills: async () => [],
       catalog: createMockCatalog({ skillCatalog }),
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (2)' }));
+    openAddOns();
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     expect(await screen.findByText('No skills')).toBeInTheDocument();

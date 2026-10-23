@@ -9,7 +9,6 @@ import { useOptionalCatalogServer, useServerCapabilities } from '../../server/Se
 import { useOptionalShellMode, type SettingsSection } from '../../server/ShellModeContext.js';
 import type { AgentSkill, ConnectorState } from '../../server/types.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
-import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { auiInputClass } from '../lib/inputClasses.js';
@@ -18,12 +17,12 @@ import { BottomSheet } from '../primitives/BottomSheet.js';
 import { Button } from '../primitives/Button.js';
 import { CatalogLogo } from '../primitives/CatalogLogo.js';
 import { Switch } from '../primitives/Switch.js';
-import { Tooltip } from '../primitives/Tooltip.js';
 import { readAgentCapabilities, withAgentCapabilities } from './agentCapabilities.js';
 import { readSandboxEnabled, withSandboxEnabled } from './agentSandbox.js';
 import { DraftCapabilitiesPanel } from './DraftCapabilitiesPanel.js';
 import { DraftCatalogEmptyState } from './DraftCatalogEmptyState.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
+import type { DraftComposerAction } from './DraftComposerActionsMenu.js';
 import { connectorsWithSelectedStubs } from './mcpConnectorStubs.js';
 import { skillFamilyId, skillRepoName } from './SkillVersionSelector.js';
 
@@ -286,6 +285,8 @@ export type DraftCompositeSelectorProps = {
   disabled?: boolean;
   isRunning?: boolean;
   onAttach?: () => void;
+  /** Work on a repo menu item; omitted when the feature is unavailable here. */
+  workOnRepo?: DraftComposerAction | null;
 };
 
 function SectionHeading({ label, count }: { label: string; count: number }) {
@@ -296,7 +297,12 @@ function SectionHeading({ label, count }: { label: string; count: number }) {
   );
 }
 
-export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftCompositeSelectorProps) {
+export function DraftCompositeSelector({
+  disabled,
+  isRunning,
+  onAttach,
+  workOnRepo = null,
+}: DraftCompositeSelectorProps) {
   const DraftComposerActionsMenu = useSlot('DraftComposerActionsMenu');
   const { skills, connectors, connectorLogos, loading, ensureLoaded, refreshConnectors } = useDraftCatalog();
   const capabilities = useServerCapabilities();
@@ -340,7 +346,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const selectedMcpIds = useMemo(() => new Set(selectedMcp.map(m => m.id)), [selectedMcp]);
   const hasValidModel = Boolean(agentSpec?.model?.name.trim());
   const addOnsCount = selectedMcp.length + selectedSkills.length;
-  const selectionTooltip = useMemo(() => {
+  const selectionSummary = useMemo(() => {
     const formatNames = (items: Array<{ name: string }>) => {
       const names = items.map(item => item.name);
       if (names.length <= 4) return names.join(', ');
@@ -721,73 +727,31 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
       )}
     </>
   );
-  const compactActions = [
+  const menuActions: DraftComposerAction[] = [
+    ...(onAttach === undefined
+      ? []
+      : [{ id: 'attach', label: 'Attach a file', icon: 'paperclip', onSelect: onAttach }]),
     ...(hasValidModel
       ? [
           {
-            id: 'tools',
-            label: `Add-ons (${addOnsCount})`,
+            id: 'add-ons',
+            label: 'Add-ons',
             icon: 'wrench',
+            title: selectionSummary,
             onSelect: () => openPicker(),
           },
         ]
       : []),
-    ...(onAttach === undefined
-      ? []
-      : [
-          {
-            id: 'attach',
-            label: 'Attach a file',
-            icon: 'paperclip',
-            onSelect: onAttach,
-          },
-        ]),
+    ...(workOnRepo ? [workOnRepo] : []),
   ];
 
   return (
-    <div ref={containerRef} className="relative flex flex-wrap items-center">
-      {compactLayout ? (
-        <DraftComposerActionsMenu actions={compactActions} disabled={disabled || isRunning} />
-      ) : hasValidModel ? (
-        <Tooltip content={selectionTooltip} className="max-w-xs whitespace-pre-line text-left" side="top">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label={`Add-ons (${addOnsCount})`}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-controls={open ? menuId : undefined}
-            className={auiButtonClass({ variant: 'ghost', size: 'large', className: 'gap-1.5 px-2 text-xs' })}
-            onClick={() => {
-              if (open) {
-                setOpenAndFlush(false);
-                return;
-              }
-              openPicker();
-            }}
-          >
-            <Icon name="wrench" />
-            <span>Add-ons</span>
-            <span className="rounded bg-primary-button-bg/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary-button-bg">
-              {addOnsCount}
-            </span>
-          </button>
-        </Tooltip>
-      ) : null}
-
-      {!compactLayout && onAttach ? (
-        <Tooltip content="Attach a file">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label="Attach a file"
-            className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-            onClick={onAttach}
-          >
-            <Icon name="paperclip" />
-          </button>
-        </Tooltip>
-      ) : null}
+    <div ref={containerRef} className="relative flex items-center">
+      <DraftComposerActionsMenu
+        actions={menuActions}
+        disabled={disabled || isRunning}
+        badgeCount={hasValidModel ? addOnsCount : 0}
+      />
 
       {open && hasValidModel ? (
         isMobile || compactLayout ? (

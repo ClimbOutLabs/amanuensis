@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ComposerLeftSection } from '@/atoms/ComposerSections.js';
 import {
   RepositoryWorkProvider,
   type GithubRepositoryDetails,
@@ -95,22 +97,74 @@ function fakeApi(state: FakeState): RepositoryWorkApi {
   };
 }
 
+/** The composer's "+" menu opens the panel, as it does in the product. */
+function ControlsHarness({
+  api,
+  sessionId,
+  isRunning,
+  turnFailed = false,
+  sandboxOff,
+  sendMessage,
+}: {
+  api: RepositoryWorkApi;
+  sessionId: string | null;
+  isRunning: boolean;
+  turnFailed?: boolean;
+  sandboxOff: boolean;
+  sendMessage: (text: string) => void;
+}) {
+  const [panelOpen, setPanelOpen] = useState(false);
+  return (
+    <RepositoryWorkProvider api={api}>
+      <ComposerLeftSection
+        disabled={false}
+        isRunning={isRunning}
+        workOnRepo={{
+          id: 'work-on-repo',
+          label: 'Work on a repo',
+          icon: 'folder',
+          disabled: sandboxOff,
+          onSelect: () => setPanelOpen(open => !open),
+        }}
+      />
+      <WorkOnRepoControls
+        sessionId={sessionId}
+        isRunning={isRunning}
+        turnFailed={turnFailed}
+        sandboxOff={sandboxOff}
+        sendMessage={sendMessage}
+        panelOpen={panelOpen}
+        onPanelOpenChange={setPanelOpen}
+      />
+    </RepositoryWorkProvider>
+  );
+}
+
 function renderControls(
   api: RepositoryWorkApi,
   props: { sessionId: string | null; isRunning?: boolean; sandboxOff?: boolean },
 ) {
   const sendMessage = vi.fn();
   const view = render(
-    <RepositoryWorkProvider api={api}>
-      <WorkOnRepoControls
-        sessionId={props.sessionId}
-        isRunning={props.isRunning ?? false}
-        sandboxOff={props.sandboxOff ?? false}
-        sendMessage={sendMessage}
-      />
-    </RepositoryWorkProvider>,
+    <ControlsHarness
+      api={api}
+      sessionId={props.sessionId}
+      isRunning={props.isRunning ?? false}
+      sandboxOff={props.sandboxOff ?? false}
+      sendMessage={sendMessage}
+    />,
   );
   return { sendMessage, view };
+}
+
+/** Opens the "+" menu and picks "Work on a repo". */
+function openWorkOnRepo(): HTMLElement {
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  const item = screen.getByRole('menuitem', { name: 'Work on a repo' });
+  if (!(item instanceof HTMLButtonElement && item.disabled)) {
+    fireEvent.click(item);
+  }
+  return item;
 }
 
 describe('WorkOnRepoControls', () => {
@@ -119,7 +173,7 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     const { sendMessage, view } = renderControls(api, { sessionId: 'session-1' });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     fireEvent.click(await screen.findByRole('button', { name: /octo-example\/demo-repo/ }));
     expect(await screen.findByLabelText('Branch')).toHaveValue('main');
 
@@ -130,16 +184,18 @@ describe('WorkOnRepoControls', () => {
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness api={api} sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness
+        api={api}
+        sessionId="session-1"
+        isRunning={false}
+        sandboxOff={false}
+        sendMessage={sendMessage}
+      />,
     );
     await waitFor(() => {
       expect(api.startRepositoryWork).toHaveBeenCalledWith({
@@ -157,26 +213,23 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     const { sendMessage, view } = renderControls(api, { sessionId: 'session-1' });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     fireEvent.click(await screen.findByRole('button', { name: /octo-example\/demo-repo/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start work' }));
     expect(sendMessage).toHaveBeenCalledTimes(1);
 
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness api={api} sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />,
     );
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls
-          sessionId="session-1"
-          isRunning={false}
-          turnFailed
-          sandboxOff={false}
-          sendMessage={sendMessage}
-        />
-      </RepositoryWorkProvider>,
+      <ControlsHarness
+        api={api}
+        sessionId="session-1"
+        isRunning={false}
+        turnFailed
+        sandboxOff={false}
+        sendMessage={sendMessage}
+      />,
     );
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -187,18 +240,20 @@ describe('WorkOnRepoControls', () => {
     expect(screen.queryByText('Working on demo-repo')).not.toBeInTheDocument();
 
     // Starting over with a clone turn that goes through connects as usual.
-    fireEvent.click(screen.getByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     fireEvent.click(await screen.findByRole('button', { name: /octo-example\/demo-repo/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start work' }));
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness api={api} sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />,
     );
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness
+        api={api}
+        sessionId="session-1"
+        isRunning={false}
+        sandboxOff={false}
+        sendMessage={sendMessage}
+      />,
     );
     await waitFor(() => {
       expect(api.startRepositoryWork).toHaveBeenCalledTimes(1);
@@ -212,7 +267,7 @@ describe('WorkOnRepoControls', () => {
     vi.mocked(api.listGithubRepositories).mockRejectedValue(new Error('Connect GitHub first, under Connectors.'));
     renderControls(api, { sessionId: 'session-1' });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     expect(await screen.findByRole('alert')).toHaveTextContent('Connect GitHub first, under Connectors.');
   });
 
@@ -221,7 +276,7 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     const { sendMessage } = renderControls(api, { sessionId: 'session-1' });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     fireEvent.change(screen.getByLabelText('Or paste a GitHub repo address'), {
       target: { value: 'https://github.com/octo-example/demo-repo' },
     });
@@ -292,7 +347,7 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     renderControls(api, { sessionId: 'session-1', sandboxOff: true });
 
-    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeDisabled();
+    expect(openWorkOnRepo()).toBeDisabled();
     expect(
       screen.getByText(
         'Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.',
@@ -311,7 +366,7 @@ describe('WorkOnRepoControls', () => {
     await waitFor(() => {
       expect(api.unbindSessionRepository).toHaveBeenCalledWith('session-1');
     });
-    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop working on this repo' })).not.toBeInTheDocument();
   });
 
   it('starts from a new chat: paste only, and binds once the chat exists and settles', async () => {
@@ -319,7 +374,7 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     const { sendMessage, view } = renderControls(api, { sessionId: null });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
+    openWorkOnRepo();
     expect(screen.queryByText('Your GitHub repos')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Or paste a GitHub repo address'), {
       target: { value: 'https://github.com/octo-example/demo-repo' },
@@ -334,16 +389,18 @@ describe('WorkOnRepoControls', () => {
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness api={api} sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
-      <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
-      </RepositoryWorkProvider>,
+      <ControlsHarness
+        api={api}
+        sessionId="session-1"
+        isRunning={false}
+        sandboxOff={false}
+        sendMessage={sendMessage}
+      />,
     );
     await waitFor(() => {
       expect(api.startRepositoryWork).toHaveBeenCalledWith({

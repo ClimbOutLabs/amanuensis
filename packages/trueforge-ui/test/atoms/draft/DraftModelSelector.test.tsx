@@ -74,7 +74,9 @@ describe('DraftModelSelector', () => {
 
     const trigger = await screen.findByTitle('Select model');
     await waitFor(() => expect(trigger).toHaveTextContent('gpt-4.1'));
-    expect(trigger.querySelector('img')?.getAttribute('src')).toBe('https://assets.example/openai.svg');
+    // The trigger is plain muted text with a chevron: no provider logo or letter badge.
+    expect(trigger.querySelector('img')).toBeNull();
+    expect(trigger).toHaveTextContent(/^gpt-4\.1$/);
     fireEvent.click(trigger);
 
     const listbox = screen.getByRole('listbox', { name: 'Select model' });
@@ -111,6 +113,40 @@ describe('DraftModelSelector', () => {
     });
     expect(screen.queryByRole('listbox', { name: 'Select model' })).not.toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('puts reasoning effort in the model menu and picking one updates the spec', async () => {
+    const effortModels: ModelSelection[] = [
+      {
+        id: 'gpt-4.1',
+        name: 'openai/gpt-4.1',
+        provider: { name: 'OpenAI' },
+        properties: { reasoningEfforts: ['low', 'high'] },
+      },
+    ];
+    agentSpec = { model: { name: 'openai/gpt-4.1', params: { maxTokens: 512, reasoningEffort: 'low' } } };
+    renderSelector({}, { getModels: async () => effortModels });
+
+    fireEvent.click(await screen.findByTitle('Select model'));
+    const effortList = await screen.findByRole('listbox', { name: 'Select reasoning effort' });
+    expect(within(effortList).getByRole('option', { name: 'low' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(within(effortList).getByRole('option', { name: 'high' }));
+    expect(updateAgentSpec).toHaveBeenCalledWith({
+      model: {
+        name: 'openai/gpt-4.1',
+        params: { maxTokens: 512, reasoningEffort: 'high' },
+      },
+    });
+    expect(screen.queryByRole('listbox', { name: 'Select reasoning effort' })).not.toBeInTheDocument();
+  });
+
+  it('leaves out the effort section when the model has no efforts', async () => {
+    renderSelector();
+
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('listbox', { name: 'Select model' });
+    expect(screen.queryByRole('listbox', { name: 'Select reasoning effort' })).not.toBeInTheDocument();
   });
 
   it('clears sticky reasoningEffort when switching to a model without efforts', async () => {

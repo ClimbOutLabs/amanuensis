@@ -2,10 +2,11 @@ import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useAui } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { FolderGit2, GitBranch } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useAuiState } from '@/assistant-ui.js';
 import { chatSandboxKnownOff } from '@/atoms/draft/agentSandbox.js';
+import type { DraftComposerAction } from '@/atoms/draft/DraftComposerActionsMenu.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import {
   useOptionalRepositoryWork,
@@ -28,7 +29,50 @@ export type WorkOnRepoControlsProps = {
   sandboxOff: boolean;
   /** Sends a chat message in this thread; used for the clone request the person approves. */
   sendMessage: (text: string) => void;
+  /** Whether the picker panel is open; the "+" menu toggles it. */
+  panelOpen: boolean;
+  onPanelOpenChange: (open: boolean) => void;
 };
+
+type WorkOnRepoMenuState = {
+  panelOpen: boolean;
+  setPanelOpen: (open: boolean) => void;
+  sandboxOff: boolean;
+};
+
+const WorkOnRepoMenuContext = createContext<WorkOnRepoMenuState | null>(null);
+
+/**
+ * Holds the "Work on a repo" panel state for the thread. Provides nothing when the
+ * feature is unavailable here (no repo service, no sandbox, or a help chat), so the
+ * "+" menu item and the panel both disappear together.
+ */
+export function WorkOnRepoMenuProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const api = useOptionalRepositoryWork();
+  const capabilities = useServerCapabilities();
+  const draft = useTrueFoundryAgentSpec();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const available = enabled && api != null && capabilities?.sandbox.enabled !== false;
+  const sandboxOff = chatSandboxKnownOff(draft);
+  const value = useMemo<WorkOnRepoMenuState | null>(
+    () => (available ? { panelOpen, setPanelOpen, sandboxOff } : null),
+    [available, panelOpen, sandboxOff],
+  );
+  return <WorkOnRepoMenuContext.Provider value={value}>{children}</WorkOnRepoMenuContext.Provider>;
+}
+
+/** The "Work on a repo" entry for the "+" menu, or null when the feature is unavailable. */
+export function useWorkOnRepoMenuAction(): DraftComposerAction | null {
+  const menu = useContext(WorkOnRepoMenuContext);
+  if (menu === null) return null;
+  return {
+    id: 'work-on-repo',
+    label: 'Work on a repo',
+    icon: 'folder',
+    disabled: menu.sandboxOff,
+    onSelect: () => menu.setPanelOpen(!menu.panelOpen),
+  };
+}
 
 type PendingStart = {
   cloneUrl: string;
@@ -136,13 +180,14 @@ export function WorkOnRepoControls({
   turnFailed = false,
   sandboxOff,
   sendMessage,
+  panelOpen,
+  onPanelOpenChange,
 }: WorkOnRepoControlsProps) {
   const api = useRepositoryWork();
   const [binding, setBinding] = useState<SessionRepositoryBinding | null>(null);
   const [repository, setRepository] = useState<RepositorySummary | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
   const [proposals, setProposals] = useState<RepositoryCommandProposal[]>([]);
-  const [panelOpen, setPanelOpen] = useState(false);
   const [repoOptions, setRepoOptions] = useState<GithubRepositoryOption[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [urlValue, setUrlValue] = useState('');
@@ -193,8 +238,8 @@ export function WorkOnRepoControls({
     setProposals([]);
     setPendingStart(null);
     setStartError(null);
-    setPanelOpen(false);
-  }, [sessionId]);
+    onPanelOpenChange(false);
+  }, [sessionId, onPanelOpenChange]);
 
   useEffect(() => {
     void refreshBinding();
@@ -267,19 +312,29 @@ export function WorkOnRepoControls({
     })();
   }, [api, pendingStart, sessionId, isRunning, turnFailed, refreshBinding]);
 
-  const openPanel = useCallback(() => {
-    setPanelOpen(true);
-    if (sessionId && repoOptions === null) {
-      void (async () => {
-        try {
-          setRepoOptions(await api.listGithubRepositories(sessionId));
+  // Loads the repo list the first time the panel opens for this chat.
+  useEffect(() => {
+    if (!panelOpen || !sessionId || repoOptions !== null) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const options = await api.listGithubRepositories(sessionId);
+        if (!cancelled) {
+          setRepoOptions(options);
           setListError(null);
-        } catch (error) {
+        }
+      } catch (error) {
+        if (!cancelled) {
           setListError(getErrorMessage(error, 'Your repos could not be loaded. Try again.'));
         }
-      })();
-    }
-  }, [api, sessionId, repoOptions]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, panelOpen, sessionId, repoOptions]);
 
   const pickDetails = useCallback((details: GithubRepositoryDetails) => {
     setSelected(details);
@@ -330,8 +385,8 @@ export function WorkOnRepoControls({
       fullName: selected.full_name,
       branch: chosenBranch,
     });
-    setPanelOpen(false);
-  }, [selected, chosenBranch, sendMessage]);
+    onPanelOpenChange(false);
+  }, [selected, chosenBranch, sendMessage, onPanelOpenChange]);
 
   const confirmProposal = useCallback(
     async (proposal: RepositoryCommandProposal) => {
@@ -451,24 +506,12 @@ export function WorkOnRepoControls({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="small"
-          disabled={sandboxOff}
-          onClick={panelOpen ? () => setPanelOpen(false) : openPanel}
-        >
-          <FolderGit2 aria-hidden className="mr-1.5 h-3.5 w-3.5" />
-          Work on a repo
-        </Button>
-        {pendingStart ? (
-          <p className="text-[0.8125rem] text-text-secondary">
-            Aman is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on the{' '}
-            {pendingStart.branch} branch.
-          </p>
-        ) : null}
-      </div>
+      {pendingStart ? (
+        <p className="text-[0.8125rem] text-text-secondary">
+          Aman is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on the{' '}
+          {pendingStart.branch} branch.
+        </p>
+      ) : null}
       {sandboxOff ? (
         <p className="text-[0.8125rem] text-text-secondary">
           Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.
@@ -575,16 +618,20 @@ export function WorkOnRepoControls({
 }
 
 export function ThreadWorkOnRepoControls() {
-  const api = useOptionalRepositoryWork();
-  const capabilities = useServerCapabilities();
-  // Without a sandbox on this server the clone can never run, so the control is left out.
-  if (api == null || capabilities?.sandbox.enabled === false) {
+  const menu = useContext(WorkOnRepoMenuContext);
+  if (menu === null) {
     return null;
   }
-  return <ConnectedThreadWorkOnRepoControls />;
+  return <ConnectedThreadWorkOnRepoControls panelOpen={menu.panelOpen} onPanelOpenChange={menu.setPanelOpen} />;
 }
 
-function ConnectedThreadWorkOnRepoControls() {
+function ConnectedThreadWorkOnRepoControls({
+  panelOpen,
+  onPanelOpenChange,
+}: {
+  panelOpen: boolean;
+  onPanelOpenChange: (open: boolean) => void;
+}) {
   const aui = useAui();
   const remoteId = useAuiState(state => state.threadListItem.remoteId);
   const draft = useTrueFoundryAgentSpec();
@@ -607,6 +654,8 @@ function ConnectedThreadWorkOnRepoControls() {
       turnFailed={turnFailed}
       sandboxOff={chatSandboxKnownOff(draft)}
       sendMessage={sendMessage}
+      panelOpen={panelOpen}
+      onPanelOpenChange={onPanelOpenChange}
     />
   );
 }

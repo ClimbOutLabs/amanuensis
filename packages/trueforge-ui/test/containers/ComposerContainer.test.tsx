@@ -430,7 +430,7 @@ describe('ComposerContainer', () => {
     await waitFor(() => expect(window.sessionStorage.getItem(key)).toBe('lost?, edited'));
   });
 
-  it('shows Stopping… after Cancel and leaves the running state once the turn stops', async () => {
+  it('shows Stopping after Stop and leaves the running state once the turn stops', async () => {
     let finishCancel: () => void = () => undefined;
     cancelRun.mockImplementationOnce(
       () =>
@@ -450,9 +450,9 @@ describe('ComposerContainer', () => {
       </RuntimeHarness>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
     const stopping = await screen.findByRole('button', { name: 'Stopping' });
-    expect(stopping).toHaveTextContent('Stopping…');
+    expect(stopping).toBeDisabled();
     expect(stopping).toBeDisabled();
     expect(cancelRun).toHaveBeenCalledOnce();
 
@@ -466,7 +466,7 @@ describe('ComposerContainer', () => {
     );
     finishCancel();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping' })).not.toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
   });
 
@@ -498,7 +498,7 @@ describe('ComposerContainer', () => {
         </ComposerBusyProvider>
       </RuntimeHarness>,
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument());
 
     view.rerender(
       <RuntimeHarness
@@ -513,7 +513,7 @@ describe('ComposerContainer', () => {
         </ComposerBusyProvider>
       </RuntimeHarness>,
     );
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument());
     expect(input.value).toBe('');
 
     fireEvent.change(input, { target: { value: 'second' } });
@@ -1012,12 +1012,12 @@ describe('ComposerContainer', () => {
     const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
     fireEvent.change(input, { target: { value: 'start a turn' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     await waitFor(() => expect(cancelRun).toHaveBeenCalledOnce());
     expect(await screen.findByText('cancel request failed')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     resolvePendingSubmit?.();
   });
 
@@ -1047,7 +1047,8 @@ describe('ComposerContainer', () => {
 
     // A plain New Chat (mutable, not the agent builder) must still show the capabilities picker
     // (connectors / skills / sandbox) and the model picker in the composer.
-    expect(screen.getByRole('button', { name: /Add-ons/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: 'Add-ons' })).toBeInTheDocument();
     expect(await screen.findByTitle('Select model')).toBeInTheDocument();
   });
 });

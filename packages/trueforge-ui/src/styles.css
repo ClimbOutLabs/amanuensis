@@ -282,52 +282,6 @@
   color: var(--text-primary);
 }
 
-/* Keep the send action in the narrow composer footer instead of allowing the
- * selector row to push it beyond a 320px viewport. The breakpoint is below
- * the supported 390px layout, so ordinary mobile and desktop stay unchanged. */
-@media (max-width: 359px) {
-  [data-slot='aui_composer-shell'] .aui-composer-footer {
-    align-items: flex-start;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-leading,
-  [data-slot='aui_composer-shell'] .aui-composer-actions {
-    flex-basis: 100%;
-    width: 100%;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    margin-left: 0;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-model-button {
-    max-width: 7rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-reasoning-button {
-    max-width: 6rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button,
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button {
-    width: 2.75rem;
-    height: 2.75rem;
-  }
-
-  /* The running-state Cancel replaces Send and inherits the 32px `sm` height; pin it to the same
-   * 44px touch target explicitly rather than relying on min-height alone. */
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
-    height: 2.75rem;
-  }
-}
-
 /* Amanuensis host chrome: warm paper, charcoal copy, and a restrained brass accent. */
 .aman-runtime-rail {
   display: flex;

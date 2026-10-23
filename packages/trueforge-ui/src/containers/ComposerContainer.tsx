@@ -19,6 +19,7 @@ import { ComposerAttachmentsContainer } from './AttachmentsContainer.js';
 import { CustomActionContainer } from './CustomActionContainer.js';
 import { McpAuthContainer } from './McpAuthContainer.js';
 import { useToasterOptional } from './ToasterContainer.js';
+import { useWorkOnRepoMenuAction } from './WorkOnRepoControls.js';
 
 export type ComposerContainerProps = {
   placeholder?: string;
@@ -73,6 +74,7 @@ function ComposerBody({
     if (!isBusy) setIsStopping(false);
   }, [isBusy]);
   const toaster = useToasterOptional();
+  const workOnRepo = useWorkOnRepoMenuAction();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const disabled = isBusy || forceDisabled || !canManageSession;
   const canSubmit = canSubmitComposer({ disabled, hasText, hasAttachments, requiresModel, hasModel });
@@ -120,6 +122,7 @@ function ComposerBody({
                 : undefined
             }
             attachments={<ComposerAttachmentsContainer />}
+            workOnRepo={workOnRepo}
             input={
               <ComposerPrimitive.Input
                 data-slot="aui_composer-input"

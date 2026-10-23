@@ -79,18 +79,23 @@ describe('draft composer sections', () => {
     const onAttach = vi.fn();
     render(<DraftSections onAttach={onAttach} />);
 
-    expect(screen.getByRole('button', { name: 'Add-ons (3)' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Attach a file' }));
+    const plus = screen.getByRole('button', { name: 'Add' });
+    expect(plus).toHaveTextContent('3');
+    fireEvent.click(plus);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Attach a file' }));
 
     expect(onAttach).toHaveBeenCalledTimes(1);
   });
 
-  it('composes model and reasoning selectors in the right section', async () => {
+  it('composes the model picker in the right section, with effort inside its menu', async () => {
     render(<DraftSections />);
 
     expect(await screen.findByTitle('Select model')).toHaveTextContent('gpt-4.1');
-    expect(await screen.findByTitle('Select reasoning effort')).toHaveTextContent('high');
-    // Without shell builder mode, left chrome is Tools — not Agent config.
+    // Effort lives in the model menu, so there is no separate effort control here.
+    expect(screen.queryByTitle('Select reasoning effort')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Select model'));
+    expect(await screen.findByRole('listbox', { name: 'Select reasoning effort' })).toBeInTheDocument();
+    // Without shell builder mode, left chrome is the plus menu, not Agent config.
     expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
   });
 
@@ -146,13 +151,11 @@ describe('draft composer sections', () => {
   it('propagates disabled and running state to composed controls', async () => {
     const { rerender } = render(<DraftSections disabled />);
 
-    expect(screen.getByRole('button', { name: 'Add-ons (3)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
     expect(await screen.findByTitle('Select model')).toBeDisabled();
-    expect(await screen.findByTitle('Select reasoning effort')).toBeDisabled();
 
     rerender(<DraftSections isRunning />);
-    expect(screen.getByRole('button', { name: 'Add-ons (3)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
     expect(await screen.findByTitle('Select model')).toBeDisabled();
-    expect(await screen.findByTitle('Select reasoning effort')).toBeDisabled();
   });
 });

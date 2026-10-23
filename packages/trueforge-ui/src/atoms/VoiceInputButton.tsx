@@ -245,7 +245,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
           aria-label={micTitle}
           aria-pressed={phase === 'recording'}
           className={cn(
-            auiButtonClass({ variant: 'ghost', size: 'icon' }),
+            auiButtonClass({ variant: 'ghost', size: 'icon', className: 'size-11 rounded-full sm:size-8' }),
             phase === 'recording' && 'bg-failure-bg/15',
             phase === 'denied' && 'text-failure-text',
           )}
