@@ -11,13 +11,10 @@ import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { BottomSheet } from '../atoms/primitives/BottomSheet.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../atoms/primitives/Dialog.js';
+import { CHAT_TITLE_MAX_LENGTH, normalizeChatTitle, useSaveChatTitle } from '../hooks/useChatTitleSave.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
-import { useOptionalServer } from '../server/ServerContext.js';
 import { useToasterOptional } from './ToasterContainer.js';
-
-/** Max chat title length; mirrors `UpdateSessionRequestSchema.title` in packages/trueforge. */
-const CHAT_TITLE_MAX_LENGTH = 200;
 
 /** Escape cancels without saving in every inline rename/create form below. */
 function cancelOnEscape(onCancel: () => void) {
@@ -184,8 +181,7 @@ function RenameChatDialog({
   open: boolean;
   onOpenChange(open: boolean): void;
 }) {
-  const server = useOptionalServer();
-  const aui = useAui();
+  const saveTitle = useSaveChatTitle();
   const [name, setName] = useState(currentTitle);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,21 +192,16 @@ function RenameChatDialog({
     setError(null);
   }, [currentTitle, open]);
 
-  if (server === null) return null;
+  if (saveTitle === null) return null;
 
   const rename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalized = name.trim();
+    const normalized = normalizeChatTitle(name);
     if (normalized.length === 0 || normalized === currentTitle) return;
     setBusy(true);
     setError(null);
     try {
-      await server.updateSession({ sessionId, title: normalized });
-      try {
-        await aui.threadListItem().rename(normalized);
-      } catch {
-        // Persistence above already succeeded; the local rename is a best-effort display update.
-      }
+      await saveTitle({ sessionId, title: normalized });
       onOpenChange(false);
     } catch (renameError) {
       setError(errorMessage(renameError));
@@ -239,7 +230,7 @@ function RenameChatDialog({
           <button
             type="submit"
             className={auiButtonClass({ variant: 'secondary', className: 'h-9 shrink-0 px-3' })}
-            disabled={busy || name.trim().length === 0 || name.trim() === currentTitle}
+            disabled={busy || normalizeChatTitle(name).length === 0 || normalizeChatTitle(name) === currentTitle}
           >
             Rename
           </button>

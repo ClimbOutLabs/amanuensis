@@ -29,6 +29,7 @@ import {
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
@@ -82,6 +83,7 @@ function stubTurnExecutionDeps(
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
     mcpCatalog: McpCatalog.loadShipped(),
+    sentinelSettingsStore: new InMemorySentinelSettingsStore(),
     scheduleStore,
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
