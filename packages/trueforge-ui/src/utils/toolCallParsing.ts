@@ -124,6 +124,8 @@ function isExpiredApprovalResult(content: unknown): boolean {
 
 const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
 
+const DECLINED_REASON = 'you said no';
+
 /**
  * The short plain reason a call did not run (refused, denied, or never started), or undefined when it ran.
  * Refused calls must never read as finished, so every step label is built from this.
@@ -132,7 +134,7 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
   const disposition = parseToolResultDisposition(content);
   switch (disposition?.disposition) {
     case 'denied':
-      return isExpiredApprovalResult(content) ? 'nobody answered in time' : 'you said no';
+      return isExpiredApprovalResult(content) ? 'nobody answered in time' : DECLINED_REASON;
     case 'policy_blocked':
       return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
     case 'never_ran':
@@ -140,6 +142,22 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** A call's result and its card answer. A "no" on the card fills the result locally with no envelope. */
+type ToolCallOutcomeSource = { result?: unknown; approval?: { approved?: boolean | undefined } | undefined };
+
+/** The disposition a call shows, counting a "no" on its card before the server's result arrives. */
+export function toolCallDisposition(part: ToolCallOutcomeSource): ToolDispositionView | undefined {
+  return (
+    parseToolResultDisposition(part.result) ??
+    (part.approval?.approved === false ? { disposition: 'denied', label: 'Denied', tone: 'muted' } : undefined)
+  );
+}
+
+/** The plain reason a call did not run, counting a "no" on its card, or undefined when it ran. */
+export function toolCallNotDoneReason(part: ToolCallOutcomeSource): string | undefined {
+  return parseToolNotDoneReason(part.result) ?? (part.approval?.approved === false ? DECLINED_REASON : undefined);
 }
 
 /** Step wording for a call that did not run: email sends say "Not sent", everything else "Not done". */
