@@ -7,8 +7,8 @@ import {
   type ToolSource,
 } from '../../../src/core';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
-import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
+import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
@@ -31,6 +31,7 @@ function makeToolSet(params: {
   services: SentinelServices;
   requireApprovalForTools?: string[];
   firstParty?: boolean;
+  serverName?: string;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
@@ -42,8 +43,8 @@ function makeToolSet(params: {
     }),
   );
   const remote = new RemoteMCP({
-    name: SERVER_NAME,
-    id: SERVER_NAME,
+    name: params.serverName ?? SERVER_NAME,
+    id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
     headers: {},
     logger: noopLogger,
@@ -131,24 +132,27 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     ['send_message', 'a name the classifier ranks as a send', true],
     ['delete_note', 'a name the classifier ranks as destructive', true],
     ['install_note_pack', 'a name the classifier ranks as an install', false],
-  ])('asks for %s though the server declares it read-only and closed-world (%s), never with a standing grant', async (name, _why, chat) => {
-    const tool: ToolSchema = {
-      name,
-      description: 'Claims to only read.',
-      inputSchema: schema,
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    };
-    const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
-      name,
-      arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
-    });
-    expect(info.tier).toBe(3);
-    expect(info.is_approval_required).toBe(true);
-    expect(info.effect).toBe('inspect');
-    // A send or a delete is a consequence the person may answer once for the chat; an install is not.
-    expect(allowsChatApproval(info)).toBe(chat);
-    expect(allowsToolGrant(info)).toBe(false);
-  });
+  ])(
+    'asks for %s though the server declares it read-only and closed-world (%s), never with a standing grant',
+    async (name, _why, chat) => {
+      const tool: ToolSchema = {
+        name,
+        description: 'Claims to only read.',
+        inputSchema: schema,
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      };
+      const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
+        name,
+        arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
+      });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(true);
+      expect(info.effect).toBe('inspect');
+      // A send or a delete is a consequence the person may answer once for the chat; an install is not.
+      expect(allowsChatApproval(info)).toBe(chat);
+      expect(allowsToolGrant(info)).toBe(false);
+    },
+  );
 
   it('tells the owner in plain words, end to end, when a send is refused before it runs', async () => {
     const reply: ToolSchema = { name: 'reply', description: 'Replies.', inputSchema: schema };
@@ -162,7 +166,12 @@ describe('ToolSet Sentinel classification of connector tools', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' }, tool_info: info },
+          {
+            id: 'c1',
+            type: 'function',
+            function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' },
+            tool_info: info,
+          },
         ],
       },
       toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),
@@ -471,5 +480,25 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
       services: servicesWithGrants(['list_events']),
     }).toolCallInfo({ name: 'list_events', arguments: {} });
     expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+  });
+});
+
+describe("the operator's own Email sidecar, whose tools publish no annotations", () => {
+  const unannotated = (name: string): ToolSchema => ({ name, description: name, inputSchema: schema });
+  const tools = ['get_emails_content', 'list_emails_metadata', 'send_email'].map(unannotated);
+
+  it('reads mail with no card on the default gate, and still asks before sending', async () => {
+    const email = makeToolSet({ tools, services: servicesWithGrants([]), firstParty: true, serverName: 'Email' });
+    for (const name of ['get_emails_content', 'list_emails_metadata']) {
+      expect(await email.toolCallInfo({ name, arguments: {} })).toMatchObject({ tier: 1, is_approval_required: false });
+    }
+    expect(
+      (await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } })).is_approval_required,
+    ).toBe(true);
+  });
+
+  it('keeps the default gate for the same tools on a connector the host does not vouch for', async () => {
+    const other = makeToolSet({ tools, services: servicesWithGrants([]), firstParty: false, serverName: 'Email' });
+    expect((await other.toolCallInfo({ name: 'get_emails_content', arguments: {} })).is_approval_required).toBe(true);
   });
 });

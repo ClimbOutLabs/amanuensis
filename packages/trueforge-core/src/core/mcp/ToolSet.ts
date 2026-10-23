@@ -19,7 +19,7 @@ import {
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
-import { isStandingTrustDecision } from '../permissions/connectorTrust';
+import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/connectorTrust';
 import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
@@ -684,7 +684,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: isSilentSearchReason(decision.reason),
+              waiveUnclassified: isHostVouchedDecision(decision),
             })),
       },
       classification: decision,

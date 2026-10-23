@@ -47,6 +47,8 @@ export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
 export const INERT_WEB_SEARCH_TOOL = 'web_search';
+/** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
+export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -210,11 +212,13 @@ function buildMcpServer({
   gates,
   memoryModes,
   webSearch,
+  mail,
 }: {
   counters: Counters;
   gates: WriteGate[];
   memoryModes: MemoryModes;
   webSearch: boolean;
+  mail: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -323,6 +327,16 @@ function buildMcpServer({
     );
   }
 
+  if (mail) {
+    for (const name of INERT_MAIL_TOOLS) {
+      server.registerTool(
+        name,
+        { description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`, inputSchema: {} },
+        () => textResult('[]'),
+      );
+    }
+  }
+
   return server;
 }
 
@@ -372,8 +386,9 @@ export function asTransport(transport: StreamableHTTPServerTransport): Transport
   };
 }
 
-export async function startInertMcpServer(options?: { webSearch?: boolean }): Promise<InertMcpServer> {
+export async function startInertMcpServer(options?: { webSearch?: boolean; mail?: boolean }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
+  const mail = options?.mail === true;
   const counters: Counters = {
     echo: 0,
     read: 0,
@@ -448,7 +463,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean }): Pr
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, webSearch }).connect(asTransport(transport));
+    await buildMcpServer({ counters, gates, memoryModes, webSearch, mail }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
 

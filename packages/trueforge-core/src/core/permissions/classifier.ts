@@ -64,7 +64,7 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
-import { FIRST_PARTY_TOOL_REASON } from './connectorTrust';
+import { FIRST_PARTY_TOOL_REASON, MAIL_READ_REASON } from './connectorTrust';
 import {
   classifyContextFor,
   type SentinelCallIdentity,
@@ -2138,9 +2138,6 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
 function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
-
-/** The reason a silent Email read is recorded with. */
-const MAIL_READ_REASON = 'mail_read';
 
 /** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
 async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
