@@ -4,6 +4,8 @@
  * grow with the length of the input.
  */
 
+import { isTrackingImageLink } from '../../chatImages';
+
 /** Longest HTML read; the rest is dropped. Mail bodies that matter are far shorter. */
 export const MAX_HTML_CHARS = 300_000;
 
@@ -108,41 +110,66 @@ function indexOfLower(input: { text: string; needle: string; from: number }): nu
   return -1;
 }
 
+function isSpace(char: string | undefined): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f';
+}
+
+/** True where an attribute name stops. */
+function endsName(char: string | undefined): boolean {
+  return isSpace(char) || char === '=' || char === '>' || char === '/';
+}
+
+/**
+ * The value of one attribute of a start tag, read attribute by attribute so a name inside another
+ * attribute's value (a `src` query, an `alt` text, a `style`) never matches. '' for an attribute
+ * written without a value; null when the tag does not have it.
+ */
 function attributeValue(input: { tag: string; name: string }): string | null {
-  const lower = input.tag.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(input.name, from);
-    if (at === -1) {
+  const { tag } = input;
+  let cursor = 1;
+  while (cursor < tag.length && !endsName(tag[cursor])) {
+    cursor += 1;
+  }
+  while (cursor < tag.length) {
+    while (isSpace(tag[cursor]) || tag[cursor] === '/') {
+      cursor += 1;
+    }
+    if (cursor >= tag.length || tag[cursor] === '>') {
       return null;
     }
-    from = at + input.name.length;
-    const before = lower.charCodeAt(at - 1);
-    if (at > 0 && isNameChar(before)) {
-      continue;
-    }
-    let cursor = from;
-    while (lower[cursor] === ' ') {
+    const nameStart = cursor;
+    while (cursor < tag.length && !endsName(tag[cursor])) {
       cursor += 1;
     }
-    if (lower[cursor] !== '=') {
-      return input.name === 'hidden' ? '' : null;
+    const name = tag.slice(nameStart, cursor).toLowerCase();
+    let equals = cursor;
+    while (isSpace(tag[equals])) {
+      equals += 1;
     }
-    cursor += 1;
-    while (lower[cursor] === ' ') {
-      cursor += 1;
+    let value = '';
+    if (tag[equals] === '=') {
+      cursor = equals + 1;
+      while (isSpace(tag[cursor])) {
+        cursor += 1;
+      }
+      const quote = tag[cursor];
+      if (quote === '"' || quote === "'") {
+        const end = tag.indexOf(quote, cursor + 1);
+        value = tag.slice(cursor + 1, end === -1 ? undefined : end);
+        cursor = end === -1 ? tag.length : end + 1;
+      } else {
+        const start = cursor;
+        while (cursor < tag.length && !isSpace(tag[cursor]) && tag[cursor] !== '>') {
+          cursor += 1;
+        }
+        value = tag.slice(start, cursor);
+      }
     }
-    const quote = input.tag[cursor];
-    if (quote === '"' || quote === "'") {
-      const end = input.tag.indexOf(quote, cursor + 1);
-      return input.tag.slice(cursor + 1, end === -1 ? undefined : end);
+    if (name === input.name) {
+      return value;
     }
-    let end = cursor;
-    while (end < input.tag.length && input.tag[end] !== ' ' && input.tag[end] !== '>') {
-      end += 1;
-    }
-    return input.tag.slice(cursor, end);
   }
+  return null;
 }
 
 /** True for a CSS declaration that takes the element's text out of sight. */
@@ -304,6 +331,41 @@ export function htmlToText(source: string): string {
     .trim();
 }
 
+/** Images this small or smaller on a side are tracking pixels, not pictures anyone would look at. */
+const TRACKING_PIXEL_MAX_SIDE = 2;
+
+/** True for a width or height in pixels (a bare number or `px`) no larger than a tracking pixel. */
+function tinySide(value: string | null): boolean {
+  const size = value === null ? null : /^(\d*\.?\d+)(?:px)?(?:!important)?$/i.exec(value.trim());
+  return size?.[1] !== undefined && Number.parseFloat(size[1]) <= TRACKING_PIXEL_MAX_SIDE;
+}
+
+/** True for an `<img>` tag drawn so small or so hidden that it can only be there to report the email was opened. */
+function isTrackingPixelTag(tag: string): boolean {
+  if (tinySide(attributeValue({ tag, name: 'width' })) || tinySide(attributeValue({ tag, name: 'height' }))) {
+    return true;
+  }
+  const style = (attributeValue({ tag, name: 'style' }) ?? '').toLowerCase().replace(/\s/g, '');
+  return style.split(';').some(declaration => {
+    const colon = declaration.indexOf(':');
+    const property = declaration.slice(0, colon);
+    const value = declaration.slice(colon + 1);
+    switch (colon === -1 ? '' : property) {
+      case 'display':
+        return value.startsWith('none');
+      case 'visibility':
+        return value.startsWith('hidden');
+      case 'width':
+      case 'height':
+      case 'max-width':
+      case 'max-height':
+        return tinySide(value);
+      default:
+        return false;
+    }
+  });
+}
+
 /** Longest image address kept; longer ones are dropped rather than cut. */
 const MAX_IMAGE_LINK_CHARS = 2048;
 
@@ -359,7 +421,13 @@ export function htmlImageLinks(input: { source: string; max: number }): string[]
     if (!isNameChar(boundary)) {
       const raw = imageSource(tag);
       const link = raw === null ? '' : decodeEntities(raw).trim();
-      if (/^https?:\/\//i.test(link) && link.length <= MAX_IMAGE_LINK_CHARS && !links.includes(link)) {
+      if (
+        /^https?:\/\//i.test(link) &&
+        link.length <= MAX_IMAGE_LINK_CHARS &&
+        !links.includes(link) &&
+        !isTrackingPixelTag(tag) &&
+        !isTrackingImageLink(link)
+      ) {
         links.push(link);
       }
     }
