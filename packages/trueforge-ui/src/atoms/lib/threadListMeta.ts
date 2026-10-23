@@ -66,21 +66,30 @@ export function filterIndicesByTitle({
   });
 }
 
+/** Chats shown in one group before its "Show more" row, and how many more each press adds. */
+export const RECENT_CHATS_PAGE_SIZE = 5;
+
 /**
- * Splits indices into threads used since local midnight and older ones. A thread with no message yet
- * counts as today, the same way the recency sort treats it as newest.
+ * Sorts the chats for the Chats column. A chat in a folder lives only in its folder; the rest split
+ * into Today (since local midnight) and Earlier. Folders come newest-use first, and folders with no
+ * chat keep the order they were given. A chat with no message yet counts as newest.
  */
-export function splitIndicesByDay({
+export function groupRecentChats({
   indices,
   threadIds,
   threadItems,
+  folderIds,
+  folderIdOf,
   now,
 }: {
   indices: readonly number[];
   threadIds: readonly string[];
   threadItems: readonly { id: string; remoteId?: string | null; lastMessageAt?: Date | null }[];
+  /** Folder ids in the order to show them when their newest use ties. */
+  folderIds: readonly string[];
+  folderIdOf: (remoteId: string) => string | undefined;
   now: Date;
-}): { today: number[]; earlier: number[] } {
+}): { folders: { folderId: string; indices: number[] }[]; today: number[]; earlier: number[] } {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const timeByKey = new Map<string, number>();
   for (const item of threadItems) {
@@ -88,18 +97,55 @@ export function splitIndicesByDay({
     timeByKey.set(item.id, t);
     if (item.remoteId != null) timeByKey.set(item.remoteId, t);
   }
+  const byFolder = new Map<string, number[]>();
   const today: number[] = [];
   const earlier: number[] = [];
   for (const index of indices) {
     const id = threadIds[index];
-    const t = id === undefined ? 0 : (timeByKey.get(id) ?? 0);
+    if (id === undefined) continue;
+    const remoteId = threadItems.find(item => item.id === id)?.remoteId ?? undefined;
+    const folderId = remoteId == null ? undefined : folderIdOf(remoteId);
+    if (folderId !== undefined) {
+      byFolder.set(folderId, [...(byFolder.get(folderId) ?? []), index]);
+      continue;
+    }
+    const t = timeByKey.get(id) ?? 0;
     if (t >= startOfToday) {
       today.push(index);
     } else {
       earlier.push(index);
     }
   }
-  return { today, earlier };
+  const newestUse = (indexList: readonly number[]) =>
+    Math.max(...indexList.map(index => timeByKey.get(threadIds[index] ?? '') ?? 0));
+  const folderOrder = folderIds
+    .map((folderId, order) => ({ folderId, order, indexList: byFolder.get(folderId) ?? [] }))
+    .sort((a, b) => {
+      const aUse = a.indexList.length === 0 ? Number.NEGATIVE_INFINITY : newestUse(a.indexList);
+      const bUse = b.indexList.length === 0 ? Number.NEGATIVE_INFINITY : newestUse(b.indexList);
+      return bUse - aUse || a.order - b.order;
+    });
+  return {
+    folders: folderOrder.map(({ folderId, indexList }) => ({ folderId, indices: indexList })),
+    today,
+    earlier,
+  };
+}
+
+/**
+ * The rows a group shows: its first `limit` chats, plus the open chat even when it falls past them,
+ * in their original order.
+ */
+export function visibleChatIndices({
+  indices,
+  limit,
+  openIndex,
+}: {
+  indices: readonly number[];
+  limit: number;
+  openIndex: number | undefined;
+}): number[] {
+  return indices.filter((index, position) => position < limit || index === openIndex);
 }
 
 export function readThreadAgentName(custom: unknown): string | undefined {

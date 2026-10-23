@@ -15,7 +15,6 @@ import {
   canReuseMutableShell,
   filterIndicesByTitle,
   readThreadAgentName,
-  splitIndicesByDay,
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
@@ -26,6 +25,7 @@ import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
+import { RecentChatsGroups } from './RecentChatsGroups.js';
 
 /**
  * Simplified relative to the reference: renders threads in a single flat list
@@ -186,15 +186,12 @@ function ThreadListItemByIndex({
 
 function ThreadListItemsByRecency({
   indices,
-  grouped = false,
   onThreadOpen,
   canDeleteSession,
   canDeleteResource,
   canRenameSession,
 }: {
   indices: number[];
-  /** Splits the flat list under Today and Earlier headings. Folders keep their own sections. */
-  grouped?: boolean;
   onThreadOpen?: () => void;
   canDeleteSession: boolean;
   canDeleteResource: (sessionId: string) => boolean;
@@ -205,33 +202,18 @@ function ThreadListItemsByRecency({
   const chatFolders = useOptionalChatFolders();
 
   if (chatFolders === null || chatFolders.folders.length === 0) {
-    const rows = (list: number[]) =>
-      list.map(index => (
-        <ThreadListItemByIndex
-          key={threadIds[index] ?? String(index)}
-          index={index}
-          onThreadOpen={onThreadOpen}
-          canDeleteSession={canDeleteSession}
-          canDeleteResource={canDeleteResource}
-          canRenameSession={canRenameSession}
-        />
-      ));
-    if (!grouped) return <>{rows(indices)}</>;
-    const { today, earlier } = splitIndicesByDay({ indices, threadIds, threadItems, now: new Date() });
     return (
       <>
-        {today.length > 0 ? (
-          <>
-            <h3 className="m-0 px-2.5 pt-2 pb-1 text-[0.75rem] font-normal text-text-secondary">Today</h3>
-            {rows(today)}
-          </>
-        ) : null}
-        {earlier.length > 0 ? (
-          <>
-            <h3 className="m-0 px-2.5 pt-2 pb-1 text-[0.75rem] font-normal text-text-secondary">Earlier</h3>
-            {rows(earlier)}
-          </>
-        ) : null}
+        {indices.map(index => (
+          <ThreadListItemByIndex
+            key={threadIds[index] ?? String(index)}
+            index={index}
+            onThreadOpen={onThreadOpen}
+            canDeleteSession={canDeleteSession}
+            canDeleteResource={canDeleteResource}
+            canRenameSession={canRenameSession}
+          />
+        ))}
       </>
     );
   }
@@ -300,6 +282,7 @@ function RecentChatsSection({
   hideScrollbar,
   collapsible,
   search,
+  folderHeading,
 }: {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
@@ -307,6 +290,8 @@ function RecentChatsSection({
   /** `recent-history` renders in a narrow, always-open rail; only `default` collapses. */
   collapsible: boolean;
   search?: RecentChatsSearch;
+  /** Puts a Folders heading with the new-folder control above the list. */
+  folderHeading: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   const shell = useOptionalShellMode();
@@ -356,7 +341,7 @@ function RecentChatsSection({
             <Icon name="search" className="size-3.5" />
           </button>
         ) : null}
-        {chatFolders !== null ? <NewFolderButton /> : null}
+        {chatFolders !== null && !folderHeading ? <NewFolderButton /> : null}
       </div>
       {search?.open ? (
         <label className="mx-1 mb-1 flex shrink-0 items-center gap-2 rounded-[1.25rem] border border-border bg-card-bg px-3 py-1.5 focus-within:border-gold-line">
@@ -371,6 +356,12 @@ function RecentChatsSection({
             autoFocus
           />
         </label>
+      ) : null}
+      {folderHeading && chatFolders !== null ? (
+        <div className="flex shrink-0 items-center justify-between px-2.5 pt-1 pb-0.5">
+          <h3 className="m-0 text-[0.75rem] font-normal text-text-secondary">Folders</h3>
+          <NewFolderButton />
+        </div>
       ) : null}
       {isOpen ? (
         <div
@@ -490,6 +481,17 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     ? filterIndicesByTitle({ indices, threadIds, threadItems, query: searchOpen ? searchQuery : '' })
     : indices;
 
+  const renderChatRow = (index: number) => (
+    <ThreadListItemByIndex
+      key={threadIds[index] ?? String(index)}
+      index={index}
+      onThreadOpen={onThreadOpen}
+      canDeleteSession={canDeleteSession}
+      canDeleteResource={canDeleteResource}
+      canRenameSession={canRenameSession}
+    />
+  );
+
   let listBody: ReactNode;
   if (isIdle) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
@@ -502,14 +504,17 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   } else {
     listBody = (
       <ThreadListPrimitive.Root className="flex min-h-0 flex-col gap-0.5">
-        <ThreadListItemsByRecency
-          indices={shownIndices}
-          grouped={isRecentHistory}
-          onThreadOpen={onThreadOpen}
-          canDeleteSession={canDeleteSession}
-          canDeleteResource={canDeleteResource}
-          canRenameSession={canRenameSession}
-        />
+        {isRecentHistory ? (
+          <RecentChatsGroups indices={shownIndices} renderRow={renderChatRow} />
+        ) : (
+          <ThreadListItemsByRecency
+            indices={shownIndices}
+            onThreadOpen={onThreadOpen}
+            canDeleteSession={canDeleteSession}
+            canDeleteResource={canDeleteResource}
+            canRenameSession={canRenameSession}
+          />
+        )}
       </ThreadListPrimitive.Root>
     );
   }
@@ -532,6 +537,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
         viewportRef={viewportRef}
         hideScrollbar={isRecentHistory}
         collapsible={!isRecentHistory}
+        folderHeading={isRecentHistory}
         search={
           isRecentHistory
             ? {
