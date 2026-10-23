@@ -12,6 +12,7 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
@@ -47,6 +48,7 @@ export interface MemoryTurnContext {
 /** Root-only: sub-agent threads get no memory capability (same gating as personalization/persona). */
 function memoryCapabilitiesForTurn(input: {
   memory: MemoryTurnContext;
+  webSearch: WebSearchTurnState;
   logger: PersonaTurnResourceResolver['logger'];
   isSubAgent: boolean;
 }): AgentCapability[] {
@@ -64,6 +66,7 @@ function memoryCapabilitiesForTurn(input: {
       sessionTitle: memory.sessionTitle,
       recallEnabled: memory.recallEnabled,
       internalSourceState: memory.internalSourceState,
+      webSearch: input.webSearch,
     }),
   ];
 }
@@ -167,6 +170,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const recallEnabled = input.spec.config.memory.recall_enabled;
     const memoryCapabilities = memoryCapabilitiesForTurn({
       memory: { ...this.#memory, recallEnabled },
+      webSearch: this.webSearchTurn,
       logger: this.logger,
       isSubAgent,
     });

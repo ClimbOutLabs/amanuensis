@@ -8,8 +8,8 @@
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
  * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
- * a tool that takes one (default `inert`). A tool the request does not send is reached the way a
- * model would: it loads the tool's bundle with `load_bundle` first.
+ * a tool that takes one (default `inert`). The model never loads anything first: a tool the
+ * request does not send is never called, so a test that needs it fails.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
@@ -46,6 +46,12 @@ export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
 /** Searches the web like `STALL_AFTER_TOOL_DIRECTIVE`, then starts its answer and goes silent mid-sentence. */
 export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
 export const STALLED_ANSWER_START = 'Here is what I found so far';
+/**
+ * Calls the write tool; once it has answered (a denial counts), the model thinks out loud a little at a
+ * time and never finishes, the shape of a self-hosted model that thinks for minutes per step.
+ */
+export const THINK_AFTER_WRITE_DIRECTIVE = 'think_after_write';
+const THINKING_CHUNK_INTERVAL_MS = 50;
 /**
  * A question carrying this marker makes the knowledge relevance judge keep no
  * passage, so a library lookup for it is a near-miss.
@@ -98,6 +104,8 @@ export interface ScriptedModelServer {
   setPacing: (pacing: ModelPacing | undefined) => void;
   /** Cuts every open response, as a server whose process died would. */
   hangUpAll: () => void;
+  /** Thinking streams still open: a cancelled turn must hang up every one of them. */
+  openThinkingStreams: () => number;
   close: () => Promise<void>;
 }
 
@@ -197,39 +205,6 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
   return undefined;
 }
 
-/**
- * The bundle a model would load for a tool it cannot see, read from the tool's name as a model reads
- * the bundle index. A connector's other tools ride with the search connector, so `inert` is web.
- */
-const BUNDLE_FOR_TOOL: [match: string, bundle: string][] = [
-  ['tavily', 'web'],
-  ['web_search', 'web'],
-  ['inert', 'web'],
-  ['render_', 'maps'],
-  ['list_inbox', 'google'],
-  ['usage_summary', 'extras'],
-  ['exec', 'sandbox'],
-];
-
-/** A `load_bundle` result, which answers the load, not the scripted step. */
-function isBundleLoadResult(message: ChatMessage): boolean {
-  return (
-    message.role === 'tool' &&
-    /\b[a-z_]+ is (already )?loaded\. Its (tools|guidance)/.test(messageText(message.content))
-  );
-}
-
-/** The bundle to load before calling `match`, when the tool is not sent and its bundle is not loaded yet. */
-function bundleToLoad({ match, request }: { match: string; request: ChatCompletionRequest }): string | undefined {
-  if (resolveToolName({ directive: 'load_bundle', tools: request.tools }) === undefined) {
-    return undefined;
-  }
-  const bundle = BUNDLE_FOR_TOOL.find(([part]) => match.includes(part))?.[1];
-  const system = messageText(request.messages.find(message => message.role === 'system')?.content);
-  const offered = new RegExp(`^- ${bundle ?? ''}: .*$`, 'm').exec(system)?.[0];
-  return bundle === undefined || offered === undefined || offered.endsWith('(loaded)') ? undefined : bundle;
-}
-
 /** The text of the last tool result in the conversation, if a tool has answered. */
 function lastToolResultText(messages: ChatMessage[]): string | undefined {
   const results = messages.filter(message => message.role === 'tool');
@@ -241,9 +216,6 @@ function lastToolResultText(messages: ChatMessage[]): string | undefined {
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
   for (const message of messages) {
-    if (isBundleLoadResult(message)) {
-      continue;
-    }
     if (message.role === 'tool') {
       directive = undefined;
       continue;
@@ -411,7 +383,7 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
       }
       continue;
     }
-    if (directive !== undefined && message.role === 'tool' && !isBundleLoadResult(message)) {
+    if (directive !== undefined && message.role === 'tool') {
       toolResults += 1;
     }
   }
@@ -562,6 +534,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const open = new Set<ServerResponse>();
   const calls: ModelCall[] = [];
   let pacing: ModelPacing | undefined;
+  const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -613,6 +586,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       progress.toolResults === 0
     ) {
       requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
+      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (progress.directive === RESEARCH_DIRECTIVE) {
@@ -640,16 +615,6 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
           name: threeAtOnceName,
           callId: `call_${String(callCounter)}`,
           argumentsJson: JSON.stringify({ text }),
-        });
-      }
-    } else if (toolName === undefined && requestedTool !== undefined) {
-      const bundle = bundleToLoad({ match: requestedTool.match, request: parsed });
-      if (bundle !== undefined) {
-        callCounter += 1;
-        toolCalls.push({
-          name: 'load_bundle',
-          callId: `call_${String(callCounter)}`,
-          argumentsJson: JSON.stringify({ name: bundle }),
         });
       }
     } else if (toolName !== undefined) {
@@ -705,6 +670,22 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       res.on('close', () => stalled.delete(res));
       return;
     }
+    if (toolCalls.length === 0 && progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults > 0) {
+      thinking.add(res);
+      const timer = setInterval(() => {
+        const chunk = chunkEnvelope({
+          index: 0,
+          delta: { role: 'assistant', reasoning_content: 'Still weighing it. ' },
+          finish_reason: null,
+        });
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }, THINKING_CHUNK_INTERVAL_MS);
+      res.on('close', () => {
+        clearInterval(timer);
+        thinking.delete(res);
+      });
+      return;
+    }
     const paced = pacing;
     if (paced === undefined) {
       const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
@@ -751,9 +732,10 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         res.destroy();
       }
     },
+    openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        for (const res of [...stalled, ...open]) {
+        for (const res of [...stalled, ...thinking, ...open]) {
           res.destroy();
         }
         httpServer.closeAllConnections();

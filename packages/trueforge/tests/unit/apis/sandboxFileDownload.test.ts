@@ -30,7 +30,6 @@ import { submitArtifactPersistence } from '../../../src/runtime/artifacts/persis
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Parsed rather than built literally, so config defaults match what the create route stores. */
@@ -53,7 +52,6 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
   app.route(
     '/',
     createTurnsRouter({
-      sentinelSettingsStore: new InMemorySentinelSettingsStore(),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

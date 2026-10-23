@@ -11,6 +11,7 @@ import { useCallback, useMemo, type ReactNode } from 'react';
 import { withImageDownscaling } from '../server/imageAttachmentAdapter.js';
 
 import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
+import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
 import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import {
   ComposerBusyScopeProvider,
@@ -25,8 +26,10 @@ import {
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 import { isNetworkFailureError, LiveConnectionLostError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
+import { turnRefusalFor, TurnRefusedError } from '../utils/turnRefusal.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
@@ -136,6 +139,7 @@ function ChatRuntimeScope({
 }) {
   const { showError } = useToaster();
   const reportError = onError ?? showError;
+  const assistantName = assistantDisplayName(useOptionalPersonalization()?.profile?.assistant_name);
   const activitySink = useAvatarActivitySink();
   // Scopes this chat instance's own busy-state world (see `ComposerBusyScopeProvider` below):
   // two chats rendered side by side get two distinct scopes, so a failure reported here can
@@ -178,9 +182,10 @@ function ChatRuntimeScope({
         // Reload so the expired card is replaced by the chat's current state.
         publishStaleApproval();
       }
-      reportError(error);
+      const refusal = turnRefusalFor({ error, assistantName });
+      reportError(refusal === undefined ? error : new TurnRefusedError(refusal, { cause: error }));
     },
-    [activitySink, composerBusyScope, reportError, streamDrops],
+    [activitySink, assistantName, composerBusyScope, reportError, streamDrops],
   );
 
   const runtime = useTrueFoundryAgentRuntime({

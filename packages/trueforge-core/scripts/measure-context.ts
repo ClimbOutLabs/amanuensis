@@ -25,11 +25,11 @@ import {
 } from '../src/core/runtime/contextUtils';
 import {
   createSandboxExecDescription,
+  createSandboxWriteFileDescription,
   SANDBOX_APPLY_PATCH_DESCRIPTION,
   SANDBOX_REPLACE_TEXT_DESCRIPTION,
   SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
-  SANDBOX_WRITE_FILE_DESCRIPTION,
 } from '../src/core/sandbox/Sandbox';
 
 const tokens = (text: string): number => Math.round(estimateTokensForString(text));
@@ -47,10 +47,16 @@ const rows: Row[] = [
   { section: 'system: ability-boundaries', tokens: tokens(ABILITY_BOUNDARIES_PROMPT) },
   { section: 'system: no-task-no-tools', tokens: tokens(NO_TASK_NO_TOOLS_PROMPT) },
   { section: 'system: plain-speech', tokens: tokens(PLAIN_SPEECH_PROMPT) },
-  { section: 'tool: sandbox exec description', tokens: tokens(createSandboxExecDescription({ offline: false })) },
+  {
+    section: 'tool: sandbox exec description',
+    tokens: tokens(createSandboxExecDescription({ offline: false, fileDownload: true })),
+  },
   { section: 'tool: apply_patch description', tokens: tokens(SANDBOX_APPLY_PATCH_DESCRIPTION) },
   { section: 'tool: replace_text description', tokens: tokens(SANDBOX_REPLACE_TEXT_DESCRIPTION) },
-  { section: 'tool: write_file description', tokens: tokens(SANDBOX_WRITE_FILE_DESCRIPTION) },
+  {
+    section: 'tool: write_file description',
+    tokens: tokens(createSandboxWriteFileDescription({ fileDownload: true })),
+  },
   {
     section: 'tool: run_registered_command description',
     tokens: tokens(SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION),

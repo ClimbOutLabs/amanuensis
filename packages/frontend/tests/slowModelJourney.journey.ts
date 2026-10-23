@@ -722,8 +722,8 @@ journey(
 
 /** Each stretch of chat text saying the history is being shortened now, not that it was. */
 function shorteningLines(text: string): string[] {
-  return [...text.matchAll(/[^.\n]*\b(shortening|compacting|summari[sz]ing|making room)\b[^.\n]*/gi)].map(match =>
-    match[0].trim(),
+  return [...text.matchAll(/[^.\n]*\b(shortening|compacting|summari[sz]ing|making room|tidying)\b[^.\n]*/gi)].map(
+    match => match[0].trim(),
   );
 }
 
