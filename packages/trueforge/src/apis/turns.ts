@@ -1073,9 +1073,9 @@ async function logTurnPersonaSwitch(params: {
 }
 
 /**
- * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
- * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
- * of dropping them when a SIGTERM lands in the drain window.
+ * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait, up to the
+ * follow-up time limit, for the TURN_DONE submissions (artifact persistence, memory retain,
+ * profile learning) instead of dropping them when a SIGTERM lands in the drain window.
  */
 export interface DrainTurnEventsInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
@@ -1125,12 +1125,30 @@ export interface DrainTurnEventsInput {
 }
 
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
-  const drain = runTurnEventDrain(input);
+  // Registered before the stream runs so the chat's next turn, which freezes this one first,
+  // always finds it. Settles once this turn's files are saved, or when the drain of a turn that
+  // did not finish ends.
+  const artifactCapture = Promise.withResolvers<undefined>();
+  input.turnDrains.trackArtifactCapture({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    capture: artifactCapture.promise,
+  });
+  const drain = runTurnEventDrain({
+    input,
+    markArtifactsCaptured: () => {
+      artifactCapture.resolve(undefined);
+    },
+  });
   input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
   return drain;
 }
 
-async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
+async function runTurnEventDrain(params: {
+  input: DrainTurnEventsInput;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, markArtifactsCaptured } = params;
   const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
@@ -1151,9 +1169,9 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
-        // Not awaited here: the stream must finish now, so the chat's next turn never waits on
-        // this work. The drain still awaits it below, so shutdown covers it.
-        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput });
+        // Not awaited here: the stream must finish now, so the chat's next turn waits only on
+        // the artifact step. The drain awaits the rest below, up to its time limit.
+        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
       }
     }
     if (followUp !== undefined) {
@@ -1174,23 +1192,42 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
     }
   } finally {
+    if (followUp === undefined) {
+      markArtifactsCaptured();
+    }
     executionDeadline.dispose();
   }
 }
 
 /**
- * The work a finished turn does after its answer: usage, memory, profile learning, artifacts.
+ * The work a finished turn does after its answer: artifacts, usage, memory, profile learning.
  * Never throws; a failure is logged.
  */
 async function runTurnFollowUp(params: {
   input: DrainTurnEventsInput;
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
+  markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput } = params;
+  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
   const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
   try {
-    // First, so the answer's usage is visible before the slower follow-up work below.
+    // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
+    // on this step, so its tools cannot change a file before this turn has saved it.
+    try {
+      if (artifacts !== undefined) {
+        await resolveAndSubmitArtifactPersistence({
+          ...artifacts,
+          sessionId,
+          turnId,
+          assistantText: formatAssistantMessageText(state.output?.content),
+          logger,
+        });
+      }
+    } finally {
+      markArtifactsCaptured();
+    }
+    // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
       if (modelUsage !== undefined) {
         await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
@@ -1198,8 +1235,7 @@ async function runTurnFollowUp(params: {
     };
     await flushUsage();
     if (memory !== undefined) {
-      // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
-      // it, and the verification pass inside retries a failed retain once.
+      // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
         client: memory.client,
         sessionId,
@@ -1222,8 +1258,8 @@ async function runTurnFollowUp(params: {
     if (profileLearning !== undefined) {
       // The assistant's reply is deliberately not passed here: it is not a source of facts
       // about the user, so the learning pass only ever sees the user's own turn text.
-      // Awaited so the tracked drain covers the pass; the pass writes its audit event to
-      // the turnEventStream (how an open tab sees it without reloading the turn).
+      // The pass writes its audit event to the turnEventStream (how an open tab sees it
+      // without reloading the turn).
       await submitProfileLearning({
         ...profileLearning,
         sessionId,
@@ -1235,15 +1271,6 @@ async function runTurnFollowUp(params: {
     }
     // The summarization and profile learning calls above record after the first flush.
     await flushUsage();
-    if (artifacts !== undefined) {
-      await resolveAndSubmitArtifactPersistence({
-        ...artifacts,
-        sessionId,
-        turnId,
-        assistantText: formatAssistantMessageText(state.output?.content),
-        logger,
-      });
-    }
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
   }
@@ -1262,9 +1289,11 @@ async function waitForTurnFollowUp(params: {
   const timedOut = await Promise.race([
     followUp.then(() => false),
     new Promise<boolean>(resolve => {
+      // Unref'd so a pending follow-up never keeps the process alive on its own.
       timeout = setTimeout(() => {
         resolve(true);
       }, timeoutMs);
+      timeout.unref();
     }),
   ]).finally(() => {
     clearTimeout(timeout);
@@ -1274,6 +1303,32 @@ async function waitForTurnFollowUp(params: {
       sessionId,
       turnId,
       timeoutMs,
+    });
+  }
+}
+
+/** Longest a turn waits for the previous turn of its chat to save its sandbox files. */
+const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
+
+/**
+ * Waits, up to a short limit, for the chat's previous turn to save its sandbox files, since this
+ * turn reuses that sandbox. The wait never covers that turn's model calls.
+ */
+export async function waitForPreviousTurnArtifacts(params: {
+  turnDrains: TurnDrainRegistry;
+  sessionId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { turnDrains, sessionId, logger } = params;
+  const stillRunning = await turnDrains.waitForArtifactCapture({
+    sessionId,
+    timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+  });
+  if (stillRunning !== undefined) {
+    logger.warn('The previous turn was still saving its files, so this turn started without waiting longer', {
+      sessionId,
+      previousTurnId: stillRunning.turnId,
+      timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
     });
   }
 }
@@ -1424,6 +1479,9 @@ export async function beginTurnExecution(params: {
     command_execution_owner_id: configuration.EXECUTOR_ID,
     unattended: params.unattended,
   });
+
+  // After createTurn froze the previous turn, before any tool of this turn runs.
+  await waitForPreviousTurnArtifacts({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
   executionDeadline.arm();
 

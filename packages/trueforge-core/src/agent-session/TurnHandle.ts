@@ -229,7 +229,7 @@ function streamingTurnKey(input: { session_id: string; turn_id: string }): strin
 
 /**
  * Cancels a turn this process is streaming and resolves once the stream has written its steps
- * and terminal state. A turn no stream is running for returns at once. Callers must not await
+ * and terminal state, or after 10 s. A turn no stream is running for returns at once. Callers must not await
  * this from the consumer that drives the stream, since the stream cannot finish while that
  * consumer is suspended.
  */

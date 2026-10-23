@@ -9,15 +9,19 @@ import {
 import type { ExtendedChatCompletionChunk, ILLM, RawAssistantMessageWithUsage } from '@truefoundry/trueforge-core/core';
 import { Writable } from 'stream';
 import winston from 'winston';
-import { drainTurnEvents } from '../../../src/apis/turns';
+import { drainTurnEvents, waitForPreviousTurnArtifacts } from '../../../src/apis/turns';
 import configuration from '../../../src/config';
 import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
+import type { ISandboxProviderStore } from '../../../src/db/sandboxProviderStore';
+import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { summarizeTurnContent, type SummarizeTurnResult } from '../../../src/runtime/memory/memorySummarize';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
+import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/runtime/memory/memorySummarize', () => {
@@ -31,6 +35,13 @@ const mockSummarize = jest.mocked(summarizeTurnContent);
 
 /** How long the next turn may take to reach its first model call. */
 const FIRST_MODEL_CALL_BOUND_MS = 2_000;
+
+const CHART_PATH = '/workspace/chart.png';
+
+/** Each answer declares the chart, as a turn that made or changed it does. */
+function answerText(callNumber: number): string {
+  return [`Answer ${String(callNumber)}.`, '', '```sandbox_artifacts', `[chart.png](${CHART_PATH})`, '```'].join('\n');
+}
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
 async function* answerStream(
@@ -99,15 +110,18 @@ function withinBound<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 /**
- * One chat, two turns, both drained by the server's drain with memory and turn summaries on.
- * The first turn's summary call is whatever `mockSummarize` does.
+ * One chat, two turns, both drained by the server's drain with memory, turn summaries and
+ * artifact saving on. The first turn's summary call is whatever `mockSummarize` does. Each
+ * model call stands in for a tool run: it writes its own bytes to the chart in the shared sandbox.
  */
 async function chatWithTwoTurns() {
   const modelCalls: string[] = [];
+  const sandboxFiles = new Map<string, Buffer | Error>();
   const llm: ILLM = {
     create: jest.fn(() => {
       modelCalls.push(`call-${String(modelCalls.length + 1)}`);
-      return answerStream(`Answer ${String(modelCalls.length)}.`);
+      sandboxFiles.set(CHART_PATH, Buffer.from(`chart from turn ${String(modelCalls.length)}`));
+      return answerStream(answerText(modelCalls.length));
     }),
     createNonStream: jest.fn(),
   };
@@ -121,7 +135,16 @@ async function chatWithTwoTurns() {
       mcpConnectTimeoutMs: 5_000,
       logger: silent,
     });
-  const sessions = new Sessions({ sessionStore: new InMemorySessionStore() });
+  const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
+  const sessions = new Sessions<SessionCustom, TurnCustom>({ sessionStore });
+  const turnArtifactStore = new FakeTurnArtifactStore();
+  // Unused: the resolver below hands back the fake sandbox directly.
+  const sandboxProviderStore: ISandboxProviderStore = {
+    getSandboxProvider: jest.fn(),
+    getSandboxProviderForUpdate: jest.fn(),
+    upsertSandboxProvider: jest.fn(),
+    updateSandboxStatus: jest.fn(),
+  };
   const session = await sessions.create({
     tenant_id: 'tenant-1',
     session_id: 'session-next-turn',
@@ -165,6 +188,14 @@ async function chatWithTwoTurns() {
       signal: abortController.signal,
       resolver: resolver(),
     });
+    // The chat's sandbox, which the next turn inherits from this one.
+    await sessionStore.patchSandboxInfo({
+      session_id: session.session_id,
+      turn_id: turn.id,
+      sandbox_info: { sandbox_id: 'sandbox-1' },
+    });
+    // Same place as in beginTurnExecution: after the previous turn is frozen, before any tool runs.
+    await waitForPreviousTurnArtifacts({ turnDrains, sessionId: session.session_id, logger });
     const executionDeadline = new TurnExecutionDeadline({
       abortController,
       default_timeout_ms: 60_000,
@@ -193,11 +224,32 @@ async function chatWithTwoTurns() {
         sessionTitle: undefined,
         summarize: summarizeContext(),
       },
+      artifacts: {
+        turnArtifactStore,
+        sandboxProviderStore,
+        sandboxProviderResolver: () => Promise.resolve(new FakeSandboxProvider(sandboxFiles)),
+        sessions,
+        tenantId: 'tenant-1',
+      },
     });
     return { turn, drain, doneSeen: doneSeen.promise };
   }
 
-  return { runTurn, modelCalls, retain, turnDrains, lines };
+  async function savedChart(turnId: string): Promise<string | undefined> {
+    const record = await turnArtifactStore.getArtifact({
+      tenant_id: 'tenant-1',
+      session_id: session.session_id,
+      turn_id: turnId,
+      path: CHART_PATH,
+    });
+    if (record?.digest === undefined || record.digest === null) {
+      return undefined;
+    }
+    const blob = await turnArtifactStore.getBlob({ tenant_id: 'tenant-1', digest: record.digest });
+    return blob?.toString();
+  }
+
+  return { runTurn, modelCalls, retain, turnDrains, lines, savedChart };
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
@@ -211,12 +263,25 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 describe("the next turn of a chat does not wait on the previous turn's follow-up work", () => {
+  // A summary call that stays pending for the rest of its test, then is released so no
+  // follow-up work outlives the test.
+  let pendingSummary = Promise.withResolvers<void>();
+  const summaryPendingUntilTeardown = async (): Promise<SummarizeTurnResult> => {
+    await pendingSummary.promise;
+    return { status: 'failed', reason: 'released at teardown', fallback: 'model_timeout' };
+  };
+
   beforeEach(() => {
     mockSummarize.mockReset();
+    pendingSummary = Promise.withResolvers<void>();
+  });
+
+  afterEach(() => {
+    pendingSummary.resolve();
   });
 
   it("reaches its first model call while the previous turn's summary model never answers", async () => {
-    mockSummarize.mockImplementation(() => new Promise<SummarizeTurnResult>(() => undefined));
+    mockSummarize.mockImplementation(summaryPendingUntilTeardown);
     const chat = await chatWithTwoTurns();
 
     const first = await chat.runTurn({ turnId: 'turn-1', previousTurnId: 'none', text: 'Look up a cafe' });
@@ -265,6 +330,28 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     expect(chat.turnDrains.size).toBe(0);
   });
 
+  it("saves the first turn's chart as it was, even when the next turn changes it before the first summary is back", async () => {
+    const summaryGate = Promise.withResolvers<void>();
+    mockSummarize.mockImplementation(async () => {
+      await summaryGate.promise;
+      return { status: 'summarized', summary: 'The person asked for a chart.' };
+    });
+    const chat = await chatWithTwoTurns();
+
+    const first = await chat.runTurn({ turnId: 'turn-1', previousTurnId: 'none', text: 'Make a chart' });
+    await first.doneSeen;
+    await waitFor(() => mockSummarize.mock.calls.length > 0);
+
+    // The next turn's tool rewrites the same file while the first turn's summary is still out.
+    const second = await chat.runTurn({ turnId: 'turn-2', previousTurnId: 'turn-1', text: 'Make the title bigger' });
+    await withinBound(second.doneSeen, 'Answering the next turn');
+
+    summaryGate.resolve();
+    await Promise.all([first.drain, second.drain]);
+    expect(await chat.savedChart('turn-1')).toBe('chart from turn 1');
+    expect(await chat.savedChart('turn-2')).toBe('chart from turn 2');
+  });
+
   it('keeps the full-text fallback when the summary times out', async () => {
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'timed out', fallback: 'model_timeout' });
     const chat = await chatWithTwoTurns();
@@ -282,7 +369,7 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     const original = configuration.TURN_FOLLOW_UP_TIMEOUT_MS;
     configuration.TURN_FOLLOW_UP_TIMEOUT_MS = 50;
     try {
-      mockSummarize.mockImplementation(() => new Promise<SummarizeTurnResult>(() => undefined));
+      mockSummarize.mockImplementation(summaryPendingUntilTeardown);
       const chat = await chatWithTwoTurns();
 
       const first = await chat.runTurn({ turnId: 'turn-1', previousTurnId: 'none', text: 'Look up a cafe' });
@@ -301,5 +388,38 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     } finally {
       configuration.TURN_FOLLOW_UP_TIMEOUT_MS = original;
     }
+  });
+
+  it('starts after 10 s when the previous turn is still saving its files, and logs it', async () => {
+    const turnDrains = new TurnDrainRegistry();
+    const { logger, lines } = captureLogger();
+    const capture = Promise.withResolvers<void>();
+    turnDrains.trackArtifactCapture({ sessionId: 'session-next-turn', turnId: 'turn-1', capture: capture.promise });
+
+    jest.useFakeTimers();
+    try {
+      let started = false;
+      const waiting = waitForPreviousTurnArtifacts({ turnDrains, sessionId: 'session-next-turn', logger }).then(() => {
+        started = true;
+      });
+      await jest.advanceTimersByTimeAsync(9_999);
+      expect(started).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      await waiting;
+      expect(started).toBe(true);
+    } finally {
+      jest.useRealTimers();
+      capture.resolve();
+    }
+
+    await new Promise(resolve => setImmediate(resolve));
+    const entries: Record<string, unknown>[] = lines.map(line => JSON.parse(line));
+    expect(entries.filter(entry => entry['level'] === 'warn')).toEqual([
+      expect.objectContaining({
+        message: 'The previous turn was still saving its files, so this turn started without waiting longer',
+        sessionId: 'session-next-turn',
+        previousTurnId: 'turn-1',
+      }),
+    ]);
   });
 });

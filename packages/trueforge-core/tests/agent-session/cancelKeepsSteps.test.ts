@@ -146,10 +146,66 @@ describe('freezing a finished turn whose consumer is still busy', () => {
     })();
     await doneSeen.promise;
 
+    // Well under the 10 s freeze cap: the stream counts as settled once its terminal state is written.
+    const startedAt = Date.now();
     const frozen = await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.CancelledForNextTurn });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
     expect(frozen.state.status).toBe('done');
 
     consumerBusy.resolve();
+    await drained;
+  });
+});
+
+describe('freezing a turn whose stream is stuck', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('stops waiting for the stream after 10 s and ends the turn', async () => {
+    const store = new InMemorySessionStore();
+    const sessions = new Sessions({ sessionStore: store });
+    const session = await sessions.create({
+      tenant_id: 'tenant-1',
+      session_id: 'session-stuck-stream',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      external_id: null,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver: makeTestResolver(),
+    });
+
+    // The consumer stops on the first event, so the stream cannot reach its terminal write.
+    const consumerStuck = deferred();
+    const firstEventSeen = deferred();
+    const drained = (async () => {
+      for await (const _event of turn.stream()) {
+        firstEventSeen.resolve();
+        await consumerStuck.promise;
+      }
+    })();
+    await firstEventSeen.promise;
+
+    jest.useFakeTimers();
+    let frozenStatus: string | undefined;
+    const freezing = session
+      .freezeTurn({ turn_id: turn.id, reason: CancellationReason.CancelledForNextTurn })
+      .then(frozen => {
+        frozenStatus = frozen.state.status;
+      });
+    await jest.advanceTimersByTimeAsync(9_999);
+    expect(frozenStatus).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(1);
+    await freezing;
+    expect(frozenStatus).toBe('cancelled');
+
+    jest.useRealTimers();
+    consumerStuck.resolve();
     await drained;
   });
 });
