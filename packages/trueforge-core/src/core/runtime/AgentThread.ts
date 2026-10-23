@@ -35,6 +35,7 @@ import {
   type AgentParent,
   type ApprovalDecision,
   type ContextCompactionEvent,
+  type ContextCompactionStartedEvent,
   type DocumentIngestionEvent,
   type MCPInitializeEvent,
   type MCPServerInitInfo,
@@ -2773,6 +2774,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,
@@ -2786,6 +2788,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,
@@ -2842,6 +2845,11 @@ export class AgentThread {
           case EventType.AGENT_CONTEXT_COMPACTION:
             // Counts-only record that a compaction attempt ran (see ContextCompaction.ts);
             // carries no context mutation of its own, so just stamp thread_id and forward it.
+            yield { ...response, thread_id: this.threadId };
+            break;
+          case EventType.AGENT_CONTEXT_COMPACTION_STARTED:
+            // Yielded before the summarizer runs and before any overwrite, so a client can say
+            // the conversation is being tidied while the slow call is in flight.
             yield { ...response, thread_id: this.threadId };
             break;
           case InternalEventType.PASSTHROUGH:
@@ -3206,6 +3214,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,

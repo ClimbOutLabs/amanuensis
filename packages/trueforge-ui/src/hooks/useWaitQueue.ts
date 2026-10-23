@@ -15,6 +15,7 @@ import {
   type WaitQueuePart,
   type WaitQueueSnapshot,
 } from '../utils/waitQueueJourney.js';
+import { useContextCompactionActive } from './useContextCompactionActive.js';
 
 export type WaitQueueView = {
   snapshot: WaitQueueSnapshot;
@@ -96,6 +97,8 @@ export function useWaitQueue(): WaitQueueView {
   const memoryApi = useOptionalMemoryRecall();
   const memoryContext = useMemoryTurnContext(turnId);
   const reducedMotion = usePrefersReducedMotion();
+  const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
+  const compacting = useContextCompactionActive(sessionId);
 
   const queueParts = useMemo(() => parts.map(toQueuePart), [parts]);
 
@@ -136,8 +139,8 @@ export function useWaitQueue(): WaitQueueView {
   const elapsedMs = !isRunning || startMs === null ? 0 : Math.max(0, Date.now() - startMs);
 
   const snapshot = useMemo(
-    () => deriveWaitQueue({ isRunning, parts: queueParts, memory }),
-    [isRunning, queueParts, memory],
+    () => deriveWaitQueue({ isRunning, parts: queueParts, memory, compacting }),
+    [isRunning, queueParts, memory, compacting],
   );
 
   return { snapshot, elapsedMs, longWait: elapsedMs >= LONG_WAIT_MS, reducedMotion };
