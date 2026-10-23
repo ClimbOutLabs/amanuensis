@@ -100,6 +100,7 @@ function nextTurn(input: {
     has_text: false,
     secret: false,
     entries: [],
+    attached_files: 0,
   };
   ctx.web_search.savedFingerprintsLoaded = input.saved !== null;
   markPrivateDataReadFromHistory(ctx.web_search);
