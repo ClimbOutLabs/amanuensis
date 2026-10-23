@@ -64,6 +64,8 @@ export class TurnDrainRegistry {
           timeout = setTimeout(() => {
             resolve(true);
           }, input.timeoutMs);
+          // Unref'd so a pending capture never keeps the process alive on its own.
+          timeout.unref();
         }),
       ]);
       return timedOut ? { turnId: entry.turnId } : undefined;

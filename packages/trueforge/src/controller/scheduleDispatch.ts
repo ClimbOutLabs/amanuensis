@@ -1,8 +1,10 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import { BRIEF_ITEM_DONE_WINDOW_MS, type IBriefItemCompletionStore } from '../db/briefItemCompletionStore';
 import type { IPersonaStore } from '../db/personaStore';
 import {
   cronRunName,
@@ -116,17 +118,44 @@ export interface PreparedScheduleTurn {
   persona: Persona | undefined;
 }
 
+/**
+ * The task text for a run. A morning brief gets one more line naming the items the owner marked done in
+ * the last seven days, so the brief leaves them out.
+ */
+export async function scheduleTaskText(params: {
+  task: string;
+  owner: { tenant_id: string; created_by: string };
+  briefItems: Pick<IBriefItemCompletionStore, 'listCompletedSince'>;
+  now: Date;
+}): Promise<string> {
+  const { task, owner, briefItems, now } = params;
+  if (!isMorningBriefPrompt(task)) {
+    return task;
+  }
+  const done = await briefItems.listCompletedSince({
+    ...owner,
+    since: new Date(now.getTime() - BRIEF_ITEM_DONE_WINDOW_MS),
+  });
+  const titles = [...new Set(done.map(item => item.title))];
+  if (titles.length === 0) {
+    return task;
+  }
+  return `${task}\nAlready done, leave these out of the brief: ${titles.join('; ')}.`;
+}
+
 export async function startScheduleRun(params: {
   item: ScheduleDispatchItem;
   sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'getOrCreateByExternalId'>;
   agentStore: Pick<IAgentStore, 'getAgent'>;
   personaStore: Pick<IPersonaStore, 'getPersona'>;
+  briefItems: Pick<IBriefItemCompletionStore, 'listCompletedSince'>;
 }): Promise<PreparedScheduleTurn | undefined> {
   const {
     item: { run, schedule },
     sessions,
     agentStore,
     personaStore,
+    briefItems,
   } = params;
 
   const named = await agentStore.getAgent({ tenant_id: schedule.tenant_id, name: schedule.agent_name });
@@ -161,7 +190,17 @@ export async function startScheduleRun(params: {
 
   return {
     session,
-    input: [{ type: 'user.message', content: schedule.manifest.task }],
+    input: [
+      {
+        type: 'user.message',
+        content: await scheduleTaskText({
+          task: schedule.manifest.task,
+          owner: { tenant_id: schedule.tenant_id, created_by: schedule.created_by_subject.subject_id },
+          briefItems,
+          now: new Date(),
+        }),
+      },
+    ],
     previous_turn_id: 'none',
     userRef: schedule.created_by_subject.subject_id,
     agent: named,

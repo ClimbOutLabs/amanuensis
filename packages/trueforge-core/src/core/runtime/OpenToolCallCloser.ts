@@ -26,7 +26,7 @@ import {
   type ToolResultRemediation,
 } from '../events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMessage } from '../llm/LLMTypes';
-import { deniedToolCallText } from '../mcp/ToolSet';
+import { deniedToolCallRemediation, deniedToolCallText } from '../mcp/ToolSet';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
 import { mergeCurrentContextUsage } from './contextUsage';
@@ -203,7 +203,7 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
         ? {
             rawContent: deniedToolCallText(decision.reason),
             disposition: 'denied',
-            remediation: undefined,
+            remediation: deniedToolCallRemediation(decision.reason),
             admissionProvenance: {
               source: 'user_approval',
               decision: 'deny',

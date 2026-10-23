@@ -57,6 +57,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetGeneratedSessionTitleInput,
   SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
@@ -118,6 +119,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  setGeneratedSessionTitle as setGeneratedSessionTitleQuery,
   setPrivateFingerprints as setPrivateFingerprintsQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
@@ -240,6 +242,10 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   updateSession(input: UpdateSessionInput<SessionCustom>): Promise<void> {
     return updateSessionQuery(this.db, input);
+  }
+
+  setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean> {
+    return setGeneratedSessionTitleQuery(this.db, input);
   }
 
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {

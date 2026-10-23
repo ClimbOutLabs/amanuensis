@@ -95,11 +95,11 @@ describe('AmanTour gold fill', () => {
 });
 
 describe('AmanTour tickets', () => {
-  it('makes each of the three tickets a button whose prompt is its accessible description', () => {
+  it('makes each of the three tickets a button whose prompt, or the brief in plain words, is its description', () => {
     renderTour({ waiting: { count: 1, firstId: 'a1' } });
 
     expect(screen.getByRole('button', { name: /Your brief is ready/ })).toHaveAccessibleDescription(
-      MORNING_BRIEF.prompt,
+      'Asks for your morning brief: what to check first, decisions waiting on you, what is coming up, and what is due.',
     );
     expect(screen.getByRole('button', { name: /1 thing needs you/ })).toHaveAccessibleDescription(
       WAITING_PROMPT.prompt,

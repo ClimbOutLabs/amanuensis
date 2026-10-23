@@ -2,6 +2,7 @@ import { ToolPolicyBlockedError } from '../../../src/core/errors';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
@@ -153,7 +154,8 @@ describe('reply step budget', () => {
     const model = scriptedModel(step => {
       if (step === 1) return createEvent('create-1', 'Lunch');
       if (step === 2) return createEvent('create-2', 'Dinner');
-      return finalAnswerStream();
+      // No words of its own, so the host line shows.
+      return finalAnswerStream('');
     });
 
     const { events, thread } = await runThread({ toolSet, create: model.create });
@@ -263,17 +265,45 @@ describe('reply step budget', () => {
     expect(shared.stepsByThread.has('main')).toBe(false);
   });
 
-  it('an incomplete reply carries the Not finished notice', async () => {
+  it('an incomplete reply with no words of its own carries the Not finished notice', async () => {
     const toolSet = makeBudgetToolSet({ refuse: false, runFails: true });
     const model = scriptedModel(step =>
       step === 1
         ? toolCallStream({ id: 'run-1', name: 'run', args: { command: 'python3 a.py' } })
-        : finalAnswerStream(),
+        : finalAnswerStream(''),
     );
 
     const { events } = await runThread({ toolSet, create: model.create });
 
     expect(JSON.stringify(doneEvents(events))).toContain(escaped(unfinishedNotice('failed')));
+  });
+
+  it('an incomplete reply that says why in its own words gets no host line', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: true });
+    const model = scriptedModel(step =>
+      step === 1
+        ? toolCallStream({ id: 'run-1', name: 'run', args: { command: 'python3 a.py' } })
+        : finalAnswerStream('The script failed, so I could not finish. Want me to try again?'),
+    );
+
+    const { events } = await runThread({ toolSet, create: model.create });
+
+    const done = JSON.stringify(doneEvents(events));
+    expect(done).toContain('The script failed, so I could not finish. Want me to try again?');
+    expect(done).not.toContain(escaped(unfinishedNotice('failed')));
+  });
+
+  it('a reply that claims a blocked step as done still gets the nothing-was-changed line', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: true, runFails: false });
+    const model = scriptedModel(step =>
+      step === 1
+        ? toolCallStream({ id: 'c-1', name: 'create_event', args: { title: 'Lunch' } })
+        : finalAnswerStream("I've created the event for you."),
+    );
+
+    const { events } = await runThread({ toolSet, create: model.create });
+
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTE));
   });
 
   it('a retryable error gets one retry, then becomes final', async () => {
@@ -321,7 +351,7 @@ describe('reply step budget', () => {
     const ledger = ledgerWithRemoved('create_event');
     ledger.unfinishedByThread.set('main', 'declined');
     const createEvent = (id: string) => toolCallStream({ id, name: 'create_event', args: { title: 'Lunch' } });
-    const model = scriptedModel(step => (step === 1 ? createEvent('create-1') : finalAnswerStream()));
+    const model = scriptedModel(step => (step === 1 ? createEvent('create-1') : finalAnswerStream('')));
 
     const { events } = await runThread({ toolSet, create: model.create, ledger });
 

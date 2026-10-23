@@ -9,7 +9,7 @@ import {
 import type { ExtendedChatCompletionChunk, ILLM, RawAssistantMessageWithUsage } from '@truefoundry/trueforge-core/core';
 import { Writable } from 'stream';
 import winston from 'winston';
-import { drainTurnEvents, waitForPreviousTurnArtifacts } from '../../../src/apis/turns';
+import { armTurnExecution, drainTurnEvents } from '../../../src/apis/turns';
 import configuration from '../../../src/config';
 import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import type { ISandboxProviderStore } from '../../../src/db/sandboxProviderStore';
@@ -194,14 +194,13 @@ async function chatWithTwoTurns() {
       turn_id: turn.id,
       sandbox_info: { sandbox_id: 'sandbox-1' },
     });
-    // Same place as in beginTurnExecution: after the previous turn is frozen, before any tool runs.
-    await waitForPreviousTurnArtifacts({ turnDrains, sessionId: session.session_id, logger });
     const executionDeadline = new TurnExecutionDeadline({
       abortController,
       default_timeout_ms: 60_000,
       finalization_buffer_ms: 1_000,
     });
-    executionDeadline.arm();
+    // The step every server path takes after createTurn, before any tool runs.
+    await armTurnExecution({ turnDrains, sessionId: session.session_id, executionDeadline, logger });
     const doneSeen = Promise.withResolvers<void>();
     const drain = drainTurnEvents({
       trackedStream: turn.stream(),
@@ -397,9 +396,19 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     turnDrains.trackArtifactCapture({ sessionId: 'session-next-turn', turnId: 'turn-1', capture: capture.promise });
 
     jest.useFakeTimers();
+    const executionDeadline = new TurnExecutionDeadline({
+      abortController: new AbortController(),
+      default_timeout_ms: 60_000,
+      finalization_buffer_ms: 1_000,
+    });
     try {
       let started = false;
-      const waiting = waitForPreviousTurnArtifacts({ turnDrains, sessionId: 'session-next-turn', logger }).then(() => {
+      const waiting = armTurnExecution({
+        turnDrains,
+        sessionId: 'session-next-turn',
+        executionDeadline,
+        logger,
+      }).then(() => {
         started = true;
       });
       await jest.advanceTimersByTimeAsync(9_999);
@@ -408,6 +417,7 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
       await waiting;
       expect(started).toBe(true);
     } finally {
+      executionDeadline.dispose();
       jest.useRealTimers();
       capture.resolve();
     }

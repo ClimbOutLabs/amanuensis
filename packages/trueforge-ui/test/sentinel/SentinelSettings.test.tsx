@@ -17,6 +17,9 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
     listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => ({
       offline_mode: false,
