@@ -8,6 +8,7 @@ import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { answerHeldAction, reload, server } = vi.hoisted(() => {
@@ -264,8 +265,24 @@ describe('NeedsYourOkContainer', () => {
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('This chat is still busy. Try again in a moment.')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `${DEFAULT_ASSISTANT_NAME} is still working on your last message. Wait for it to finish, or press Cancel, then send again.`,
+        ),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+  });
+
+  it('keeps the buttons when the reply could not start, since nothing was recorded', async () => {
+    answerHeldAction.mockRejectedValue(refusal(409, 'turn_could_not_start'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderBrief();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => {
+      expect(screen.getByText('That reply could not start, so nothing was done. Answer again.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/already answered/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 

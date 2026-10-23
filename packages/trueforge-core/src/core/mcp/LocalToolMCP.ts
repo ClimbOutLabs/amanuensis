@@ -91,7 +91,7 @@ export abstract class LocalToolMCP implements IToolSet {
   readonly preload: boolean = true;
   readonly hasPreloadedTools: boolean = true;
   readonly tracingEnabled: boolean = true;
-  /** The bundle every tool of this set is sent with; undefined sends them on every request. */
+  /** The guidance topic every tool of this set is grouped under; undefined groups them under none. */
   protected readonly bundle: ToolBundleName | undefined = undefined;
 
   private readonly tracing: AgentTracing;

@@ -817,6 +817,14 @@ export class InMemorySessionStore<
     if (input.require_previous_turn_is_tip && previousTurnId !== stored.record.last_turn_id) {
       throw new StaleApprovalContinuationError(previousTurnId, stored.record.last_turn_id);
     }
+    // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+    const tipTurnId = stored.record.last_turn_id;
+    if (tipTurnId !== null) {
+      const tip = this.turns.get(turnKey({ session_id: input.turn.session_id, turn_id: tipTurnId }));
+      if (tip?.state.status === 'running') {
+        throw new PreviousTurnRunningError(tipTurnId);
+      }
+    }
     let previousSnapshot: TurnSnapshot | undefined;
     if (previousTurnId !== null) {
       const prevKey = turnKey({ session_id: input.turn.session_id, turn_id: previousTurnId });

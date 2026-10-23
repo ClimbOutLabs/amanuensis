@@ -52,7 +52,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallRemediation, deniedToolCallResponse } from './ToolSet';
+import { deniedToolCallRemediation, deniedToolCallResponse, REPEATED_DENIAL_REMEDIATION } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -140,7 +140,7 @@ export function selectRepeatedActionStopMessage(input: {
   repeatedGithubFileRead: boolean;
 }): string {
   if (input.repeatedDeniedApproval) {
-    return 'The model repeated an action the user already denied or that is waiting for their OK, so the turn was stopped. Change strategy or explain why a different action is needed.';
+    return 'Stopped because the assistant kept asking for something you said no to, or something still waiting for your OK. Tell it what you want instead.';
   }
   if (input.repeatedSideEffects) {
     return 'The model attempted a side-effecting action whose dependent precondition was violated (a preceding workspace mutation did not complete as expected, or the durable execution marker was missing), so the turn was stopped and the action was not retried.';
@@ -1569,27 +1569,19 @@ export async function executeToolCalls({
         memoState.deniedApprovalIdentities.has(approvalGrantKey(toolCall.tool_info))
       ) {
         memoState.repeatedDeniedApproval = true;
+        // A repeat of a "no" from earlier in this turn is that same "no": no new card, and the same firm result.
         return {
           toolCall,
           toolInfo,
-          response: toolResultResponse({
-            text: JSON.stringify({
-              error: 'This exact action was already denied in this turn. Change strategy or explain what you need.',
-            }),
-            isError: true,
-          }),
+          response: deniedToolCallResponse(undefined),
           failure: true,
           completedAt: new Date().toISOString(),
           memoized: false,
           repeatCount: 1,
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
-          disposition: 'policy_blocked',
-          remediation: {
-            reason_code: 'repeated_denied_action',
-            message: 'Change strategy or explain why a different action is needed.',
-            suggested_action: 'change_strategy',
-          },
+          disposition: 'denied',
+          remediation: REPEATED_DENIAL_REMEDIATION,
           admissionProvenance: admission,
         };
       }

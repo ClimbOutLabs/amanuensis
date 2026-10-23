@@ -404,7 +404,7 @@ export class SessionHandle<
    *
    * `previous_turn_id`: omitted/`'auto'` → session tip; `'none'` → new root
    * (no parent, even on a non-empty session); string → fork from that turn
-   * (must exist). Concurrent `'auto'` forks both succeed.
+   * (must exist). While the chat's latest turn runs, any new turn is refused.
    */
   async createTurn(input: {
     turn_id: string;
@@ -438,9 +438,7 @@ export class SessionHandle<
       throw new ApprovalRequestEndedError();
     }
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
-    // Read, do not freeze: cancelling here would make a submission that then fails
-    // validation kill a running turn on its way out. The freeze happens below, once
-    // nothing is left that can reject.
+    // Read, never frozen: a new submission does not end a running turn.
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
@@ -651,16 +649,8 @@ export class SessionHandle<
         },
       };
 
-      // Last point of no return. Everything that could reject this submission has run,
-      // so cancelling the predecessor is now a consequence of a turn that is definitely
-      // being created. store.createTurn's PreviousTurnRunningError backstops a race here.
-      if (previousTurnId !== null) {
-        await this.freezeTurn({
-          turn_id: previousTurnId,
-          reason: CancellationReason.CancelledForNextTurn,
-        });
-      }
-
+      // A new message never ends a running reply; only Cancel does. The store refuses this
+      // turn with PreviousTurnRunningError while the chat's latest turn still runs.
       await this.store.createTurn({
         turn: turnInit,
         sandbox_info: sandbox?.getCurrentSandboxInfo() ?? previous?.snapshot.sandbox_info ?? null,

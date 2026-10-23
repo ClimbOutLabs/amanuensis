@@ -269,8 +269,8 @@ describe('a chat with "Allow searches in this chat"', () => {
   });
 });
 
-describe('a turn that starts while a profile-only turn is still running', () => {
-  it('keeps the chat record whole, so a later public search runs without asking', async () => {
+describe('a turn that follows a profile-only turn', () => {
+  it('waits for that turn, then keeps the chat record whole, so a later public search runs without asking', async () => {
     const { session_id, store, loadChat, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const first = resolverForTurn();
     let recorded: () => void = () => undefined;
@@ -298,6 +298,18 @@ describe('a turn that starts while a profile-only turn is still running', () => 
     const runningDrained = drain(running).catch(() => undefined);
     await profileKept;
 
+    // A chat answers one message at a time, so a second turn is refused until the first ends.
+    await expect(
+      (await loadChat()).createTurn({
+        turn_id: mintTestTurnId(),
+        input: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }],
+        signal: new AbortController().signal,
+        resolver: resolverForTurn(),
+      }),
+    ).rejects.toThrow('is still running');
+    release();
+    await runningDrained;
+
     const second = resolverForTurn();
     create.mockImplementationOnce(async function* () {
       recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, source: 'each_turn' });
@@ -312,9 +324,7 @@ describe('a turn that starts while a profile-only turn is still running', () => 
       signal: new AbortController().signal,
       resolver: second,
     });
-    const nextDrained = drain(next);
-    release();
-    await Promise.all([runningDrained, nextDrained]);
+    await drain(next);
 
     expect(callTool).toHaveBeenCalledTimes(1);
     const saved = await store.getSession({ tenant_id: 't', session_id });

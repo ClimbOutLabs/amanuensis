@@ -64,6 +64,22 @@ function appendTerminalText(content: ThreadMessageLike['content'], text: string)
   return typeof content === 'string' ? [{ type: 'text', text: content }, terminalPart] : [...content, terminalPart];
 }
 
+/** What a stopped turn says, in plain words: that it stopped, and why when the reason is known. */
+function stoppedTurnText(reason: string): string {
+  switch (reason) {
+    case 'client-cancelled':
+      return 'Stopped. You pressed Cancel.';
+    case 'cancelled-for-next-turn':
+      return 'Stopped. A new message started the next reply.';
+    case 'server-execution-timeout':
+      return 'Stopped. This reply ran past its time limit.';
+    case 'abandoned':
+      return 'Stopped. The app restarted while this reply was running.';
+    default:
+      return 'Stopped.';
+  }
+}
+
 function applyTerminalState(messages: ThreadMessageLike[], turn: SessionTurnView): ThreadMessageLike[] {
   const state = turn.done?.state;
   if (state?.status !== 'error' && state?.status !== 'cancelled') return messages;
@@ -91,7 +107,7 @@ function applyTerminalState(messages: ThreadMessageLike[], turn: SessionTurnView
             createdAt: new Date(turn.done?.createdAt ?? turn.created.createdAt),
             metadata: { custom: { turnId: turn.turnId } },
           }),
-          content: appendTerminalText(assistant?.content ?? [], `Cancelled: ${state.reason}`),
+          content: appendTerminalText(assistant?.content ?? [], stoppedTurnText(state.reason)),
           status: { type: 'incomplete', reason: 'cancelled' },
         };
 

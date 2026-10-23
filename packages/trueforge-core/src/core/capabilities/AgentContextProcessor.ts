@@ -1,5 +1,9 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
-import type { ContextCompactionEvent, ThreadOverwriteContextEvent } from '../events/schema';
+import type {
+  ContextCompactionEvent,
+  ContextCompactionStartedEvent,
+  ThreadOverwriteContextEvent,
+} from '../events/schema';
 import type {
   AgentThreadAppendContext,
   ContextMessage,
@@ -31,6 +35,8 @@ export type AgentContextProcessorOverwriteContext = Omit<ThreadOverwriteContextE
 /** Processors omit thread_id, since AgentThread stamps it (same as append/overwrite). */
 export type AgentContextProcessorCompactionEvent = Omit<ContextCompactionEvent, 'thread_id'>;
 
+export type AgentContextProcessorCompactionStartedEvent = Omit<ContextCompactionStartedEvent, 'thread_id'>;
+
 export type AgentContextProcessorAppendContext = Omit<AgentThreadAppendContext, 'thread_id'>;
 
 /** Processors omit thread_id — AgentThread stamps it (same as append/overwrite). */
@@ -45,7 +51,8 @@ export type AgentContextProcessorOutput =
   | InternalPassthroughEvent
   | AgentContextProcessorCapabilityState
   | AgentContextProcessorModelUsage
-  | AgentContextProcessorCompactionEvent;
+  | AgentContextProcessorCompactionEvent
+  | AgentContextProcessorCompactionStartedEvent;
 
 export interface PreSendContextProcessor {
   processPreSend(execution: Readonly<AgentThreadExecutionContext>): AsyncIterable<AgentContextProcessorAppendContext>;

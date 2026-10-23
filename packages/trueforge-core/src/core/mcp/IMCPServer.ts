@@ -186,7 +186,7 @@ export interface IToolSet {
    */
   liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
 
-  /** The bundle a tool is sent with. Absent or undefined: the tool is sent on every request. */
+  /** The guidance topic a tool is grouped under. Every tool is sent on every request either way. */
   bundleOf?(toolName: string): ToolBundleName | undefined;
 
   // Existing synchronous Code Mode allow-list. Optional implementations fall
