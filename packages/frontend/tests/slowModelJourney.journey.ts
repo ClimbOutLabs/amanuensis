@@ -1097,3 +1097,39 @@ journey('20. still asks: creating a calendar event with a guest', SCENARIO_LIMIT
     held: connectorTool('create_event'),
   }),
 );
+
+journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () => {
+  const searchesBefore = api.mcp.webSearchInvocations();
+  const { page, sessionId, cards } = await askAsThePerson({
+    message: 'Make a space about dog breeds',
+    plan: results => {
+      if (results.length < 3) return search('popular dog breeds');
+      if (results.length === 3) {
+        return {
+          match: 'create_space',
+          argumentsJson: JSON.stringify({
+            name: 'Dog breeds',
+            purpose: 'Compare popular dog breeds',
+            status: 'active',
+            format: 'markdown',
+            body: ['# Dog breeds', '', 'A few popular breeds to compare.'],
+          }),
+        };
+      }
+      return undefined;
+    },
+  });
+  assert.deepEqual(cards, [], '"Make a space about dog breeds" showed an approval card');
+  await waitForReplyText(page, '"Make a space about dog breeds"', 1);
+  await waitForIdle(page, '"Make a space about dog breeds"');
+  assert.equal(await lastTurnStatus(sessionId), 'done', 'the server stores the reply as done');
+  assert.ok(
+    api.mcp.webSearchInvocations() - searchesBefore >= 3,
+    'the searches ran before the space was made',
+  );
+  const spaces = readField(await apiJson('/api/v1/spaces'), 'data', 'spaces');
+  assert.ok(
+    Array.isArray(spaces) && spaces.some(space => readField(space, 'name') === 'Dog breeds'),
+    'the Dog breeds space exists',
+  );
+});
