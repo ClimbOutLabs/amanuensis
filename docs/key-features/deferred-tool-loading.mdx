@@ -60,15 +60,15 @@ The meta tools are only sent while at least one connector has `preload` off. The
 
 ## Built-in tool bundles
 
-Built-in tools are grouped in bundles: `google` (email and calendar), `web`, `maps`, `sandbox`, `spaces`, `documents`, `schedules`, `sub_agents` and `extras`. The system prompt lists each bundle in one short line. A few built-in tools, such as `ask_user_question`, go out on every turn. Connector tools follow their `preload` setting, except that the search connector goes with `web` and the first-party email and calendar accounts go with `google`.
+Every built-in tool for the features that are on goes out from the first model call of a chat. That includes the sandbox when it is on, maps, web search, and the email and calendar accounts. The model never has to load a tool before it can call it, so a reply does not spend an extra model call on loading. Connector tools follow their `preload` setting.
 
-Before the first model call of a turn, a router picks the bundles the message needs. It reads the message's words (a link or a question picks `web`, an email or a meeting picks `google`, and so on) and whether files are attached. It includes a bundle when unsure. The guidance for the bundles it picks goes in the block sent with that message.
+Built-in tools are grouped by topic: `google` (email and calendar), `web`, `maps`, `sandbox`, `spaces`, `documents`, `schedules`, `sub_agents` and `extras`. Some topics have longer guidance, such as how to cite web sources or how to build a space. That guidance stays out of the system prompt. The system prompt lists one short line per topic, and the model can call `load_bundle` with a topic's name to read the guidance. Reading it is optional. A short rule a tool needs to be used safely stays in that tool's own description, so it is never skipped.
 
-The model can call `load_bundle` with a bundle name to add a bundle in the middle of a reply. The bundle's guidance comes back in the tool result. Its tools are ready from the next step.
+Two things always go out. The list of skills stays in the system prompt, so the model knows which skills exist. In a chat bound to a repository, the sandbox guidance with the branch and commands goes in the block sent with each message, because the model needs it on every reply.
 
-A bundle stays for the rest of the chat, whether the router picked it or the model loaded it. Its tools go at the end of the tool list, in the order the bundles were first added, and the chat saves that order. The system prompt and the bundle list in it never change during a chat. So a model server that caches the start of a request can reuse that cache on every step and every reply. The cost is that a long chat keeps sending the tools of every bundle it has used.
+The tool list and the system prompt are the same on every step and every reply of a chat. So a model server that caches the start of a request can reuse that cache every time, and the fixed prefix costs little after the first call.
 
-Each tool keeps its own name in every bundle, so its permission check, approval card and audit record are the same however it was loaded.
+Each tool keeps its own name, so its permission check, approval card and audit record do not depend on whether the model read the guidance.
 
 ## Selective preloading
 

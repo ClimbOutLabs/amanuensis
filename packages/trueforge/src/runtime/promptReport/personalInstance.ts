@@ -47,7 +47,7 @@ export const PERSONAL_INSTANCE_NAMES = [
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
 
-/** Typical turns, each a message the person sends: what it asks for decides which tool bundles go out. */
+/** Typical turns, each a message the person sends; every turn sends the same prompt and tools. */
 export const PROMPT_REPORT_TURNS: Record<PromptReportTurn, string> = {
   'core-only': 'Thanks, that is all for now.',
   calendar: 'Add a reminder to my calendar for Thursday at 9:00: dentist.',

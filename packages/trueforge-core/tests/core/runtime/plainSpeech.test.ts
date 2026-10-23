@@ -2,14 +2,23 @@ import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM'
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { PLAIN_SPEECH_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { finalAnswerStream, makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
+import {
+  finalAnswerStream,
+  hostText,
+  makeSilentLogger,
+  makeStubPublicSandbox,
+  readGuidanceModel,
+} from '../harnessMocks';
 
 async function systemPrompt(input: {
   instruction: string;
   network?: 'none' | undefined;
   message?: string | undefined;
+  /** A topic whose guidance the model reads first. */
+  reads?: string | undefined;
 }): Promise<string> {
-  const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+  const reader = input.reads === undefined ? undefined : readGuidanceModel(input.reads);
+  const create = reader?.create ?? jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
@@ -35,10 +44,7 @@ async function systemPrompt(input: {
     // Draining is enough; the assertion is on the request sent to the model.
   }
 
-  // The system prompt and the per-reply block, where routed bundles bring their guidance.
-  return (create.mock.calls[0]?.[0].messages ?? [])
-    .flatMap(message => (message.role === 'system' && typeof message.content === 'string' ? [message.content] : []))
-    .join('\n');
+  return hostText(create);
 }
 
 describe('host-owned plain speech rule', () => {
@@ -54,17 +60,17 @@ describe('host-owned plain speech rule', () => {
   );
 
   it('keeps the shell out of the source contract and tells the model the sandbox is offline', async () => {
-    const offline = await systemPrompt({ instruction: 'test', network: 'none' });
+    const offline = await systemPrompt({ instruction: 'test', network: 'none', reads: 'web' });
     expect(offline).not.toContain('the sandbox exec tool when it retrieves');
     expect(offline).not.toContain('curl');
     expect(offline).toContain('Retrieval capabilities include search, browsing, lookup, and fetch tools.');
 
-    // The exec tool is named only once the sandbox bundle is loaded: a message that routes to it loads it first.
-    const online = await systemPrompt({ instruction: 'test', message: 'Run a script to fetch https://example.com.' });
+    // The exec tool is always sent, so the web guidance names it whenever the sandbox can reach the network.
+    const online = await systemPrompt({ instruction: 'test', reads: 'web' });
     expect(online).toContain('the sandbox exec tool when it retrieves an already identified source');
     expect(online).toContain('curl');
 
-    const unrouted = await systemPrompt({ instruction: 'test' });
-    expect(unrouted).not.toContain('the sandbox exec tool when it retrieves');
+    const unread = await systemPrompt({ instruction: 'test' });
+    expect(unread).not.toContain('<source-discovery>');
   });
 });

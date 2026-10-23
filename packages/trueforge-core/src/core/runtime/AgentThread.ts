@@ -1522,9 +1522,9 @@ export class AgentThread {
   private postToolCallContextProcessor: PostToolCallAgentContextProcessor[];
 
   private instruction: string | undefined;
-  // Per-reply block (date, person, routed bundles' guidance). Rebuilt once after
-  // routing, before the first request, then fixed: a thread that crosses UTC
-  // midnight keeps the date its reply started with.
+  // Per-reply block (date, person, a bound repository's state). Built when the
+  // thread starts, then fixed: a thread that crosses UTC midnight keeps the date
+  // its reply started with.
   private replyContext: string;
   private readonly replyDate = new Date();
   private toolResponseProcessors: ToolResponseProcessor[];
@@ -1535,7 +1535,7 @@ export class AgentThread {
   }[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
-  // Built-in tools sent only when a turn needs them. Absent for a read-only definition, which offers no tools.
+  // Built-in tools' guidance, read on demand. Absent for a read-only definition, which offers no tools.
   private readonly toolBundles: ToolBundles | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
@@ -1686,8 +1686,11 @@ export class AgentThread {
       ? undefined
       : new ToolBundles({
           tracing: this.tracing,
-          sectionBundles: new Set((input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle]))),
-          routeSignals: () => ({ repositoryAttached: this.sandbox?.getBoundRepositoryContext() !== undefined }),
+          // The web guidance says how to treat current facts, which matters most when no tool can fetch them.
+          sectionBundles: new Set([
+            'web',
+            ...(input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle])),
+          ]),
           guidance: bundle => {
             const builder = new InstructionBuilder('bundle-guidance');
             this.addBundleGuidance(builder, bundle);
@@ -1771,17 +1774,10 @@ export class AgentThread {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
       builder.addSection('person', `The person you work for is ${personName}.`, true);
     }
-    // The router's bundles have no load_bundle result to carry their guidance, so it rides here,
-    // at the end of the request, where it leaves the cached prefix untouched.
-    const toolBundles = this.toolBundles;
-    if (toolBundles !== undefined) {
-      const guidance = toolBundles.guidanceDue(this.context);
-      if (guidance.length > 0) {
-        const bundles = builder.beginSection('loaded-bundles');
-        for (const bundle of guidance) {
-          this.addBundleGuidance(bundles, bundle);
-        }
-      }
+    // A chat bound to a repository needs its live branch and commands on every reply, not only
+    // when the model reads the sandbox guidance; here it leaves the cached prefix untouched.
+    if (this.toolBundles !== undefined && this.sandbox?.getBoundRepositoryContext() !== undefined) {
+      this.addBundleGuidance(builder.beginSection('repository-context'), 'sandbox');
     }
     return builder.build();
   }
@@ -1792,8 +1788,7 @@ export class AgentThread {
       builder.addSection(
         'source-discovery',
         createSourceDiscoveryContract({
-          // The exec tool is named only when it is sent: guidance written before the sandbox loads leaves it out.
-          shellCanFetch: this.sandbox?.hasNetwork() === true && this.toolBundles?.isLoaded('sandbox') !== false,
+          shellCanFetch: this.sandbox?.hasNetwork() === true,
         }),
       );
       builder.addSection('web-images', WEB_IMAGES_PROMPT);
@@ -1861,6 +1856,7 @@ export class AgentThread {
       }
     }
     this.toolBundles?.buildInstruction(capabilities);
+    this.sandbox?.buildSkillsInstruction(capabilities);
     if (this.deferredTool) {
       this.deferredTool.buildInstruction(capabilities);
     }
@@ -1869,8 +1865,8 @@ export class AgentThread {
         build(capabilities);
       }
     }
-    // With bundles, a bundle's guidance goes out at the end of the chat when it loads, so this
-    // prompt stays byte-identical for the whole chat. A thread without bundles sends it all here.
+    // With bundles, a bundle's guidance goes out at the end of the chat when the model reads it, so
+    // this prompt stays byte-identical for the whole chat. A thread without bundles sends it all here.
     if (this.toolBundles === undefined) {
       for (const bundle of TOOL_BUNDLE_NAMES) {
         this.addBundleGuidance(capabilities, bundle);
@@ -3355,6 +3351,7 @@ export class AgentThread {
       } satisfies ModelMessageEvent;
 
       let firstDeltaTimestamped = false;
+      let firstTokenMs: number | null = null;
       const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
@@ -3391,7 +3388,8 @@ export class AgentThread {
           if (event) {
             if (!firstDeltaTimestamped) {
               firstDeltaTimestamped = true;
-              this.metrics.time_to_first_token_ms ??= Date.now() - modelRequestStartedAt;
+              firstTokenMs = Date.now() - modelRequestStartedAt;
+              this.metrics.time_to_first_token_ms ??= firstTokenMs;
               yield { ...event, created_at: new Date().toISOString() };
             } else {
               yield event;
@@ -3412,6 +3410,15 @@ export class AgentThread {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         result = attemptResult;
+        // One line per model step, so a slow step shows in the logs without a trace viewer.
+        this.logger.info('Model step finished', {
+          threadId: this.threadId,
+          step: this.metrics.iterations,
+          attempt,
+          firstTokenMs,
+          durationMs: Date.now() - modelRequestStartedAt,
+          toolCount: tools.length,
+        });
         break;
       } catch (error) {
         // Cancellation and every non-stream-fault error keep their existing handling
@@ -3555,7 +3562,7 @@ export class AgentThread {
               tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
             }),
       },
-      // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
+      // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
     });
@@ -5092,10 +5099,6 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            if (this.toolBundles?.route(this.context) === true) {
-              // The router's bundles bring their guidance in the per-reply block, never the system prompt.
-              this.replyContext = this.buildReplyContext();
-            }
             const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
             const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;

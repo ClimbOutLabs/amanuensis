@@ -146,7 +146,7 @@ export async function measurePromptRequest(input: PromptReportInput): Promise<Pr
   }
 
   // The first system message is the system prompt; the later one is the per-reply block, which
-  // carries the date and the guidance of the bundles the router picked.
+  // carries the date and, in a chat bound to a repository, its state.
   const sections = request.messages.flatMap(message =>
     message.role === 'system' && typeof message.content === 'string' ? sectionRows(message.content) : [],
   );

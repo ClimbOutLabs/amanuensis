@@ -1,6 +1,6 @@
 import type { Logger } from 'winston';
 import winston from 'winston';
-import type { ILLM } from '../../src/core/llm/ILLM';
+import type { ILLM, LLMCreateParamsStreaming } from '../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import type { AgentToolSchema, IToolSet, ListToolsResponse } from '../../src/core/mcp/IMCPServer';
@@ -178,4 +178,28 @@ export function mcpServerNamesFromTools(tools: unknown): string[] {
     }
   }
   return names;
+}
+
+/** A model client that reads one topic's guidance with load_bundle on its first call, then answers. */
+export function readGuidanceModel(topic: string) {
+  let calls = 0;
+  const create = jest.fn((request: LLMCreateParamsStreaming) => {
+    void request;
+    calls += 1;
+    return calls === 1
+      ? unknownToolStream({ toolName: 'load_bundle', callId: 'read-guidance', args: JSON.stringify({ name: topic }) })
+      : finalAnswerStream();
+  });
+  return { create, createNonStream: jest.fn() };
+}
+
+/** What the host told the model: the system messages of its first request, then the guidance it read. */
+export function hostText(create: { mock: { calls: [LLMCreateParamsStreaming][] } }): string {
+  const system = (create.mock.calls[0]?.[0].messages ?? []).flatMap(message =>
+    message.role === 'system' && typeof message.content === 'string' ? [message.content] : [],
+  );
+  const guidance = (create.mock.calls[1]?.[0].messages ?? []).flatMap(message =>
+    message.role === 'tool' && typeof message.content === 'string' ? [message.content] : [],
+  );
+  return [...system, ...guidance].join('\n');
 }

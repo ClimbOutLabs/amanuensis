@@ -1356,7 +1356,7 @@ function execNetworkSentences({ offline }: { offline: boolean }): string {
 }
 
 export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables.
+  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
 Python and Node go to run_code; interpreter invocations are rejected.
@@ -3122,7 +3122,6 @@ export class Sandbox extends LocalToolMCP {
     }
 
     this.buildSchemaSection(sandboxInstructions);
-    this.buildSkillsSection(sandboxInstructions);
     this.buildMCPSection(sandboxInstructions);
     this.buildFileUploadsSection(sandboxInstructions);
 
@@ -3178,7 +3177,8 @@ export class Sandbox extends LocalToolMCP {
     );
   }
 
-  private buildSkillsSection(builder: InstructionBuilder): void {
+  /** The skills index: kept out of the sandbox guidance, so the model always knows which skills exist. */
+  buildSkillsInstruction(builder: InstructionBuilder): void {
     builder.addContent(this.renderSkillsSection());
   }
 

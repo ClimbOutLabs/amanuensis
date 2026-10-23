@@ -60,7 +60,7 @@ async function hostMessages(sandbox: Sandbox | undefined): Promise<string | unde
     // Draining is enough; the assertion is on the request sent to the model.
   }
 
-  // The system prompt and the per-reply block, where the routed sandbox bundle brings its guidance.
+  // The system prompt, where the skills index always goes, and the per-reply block.
   const request = create.mock.calls[0]?.[0];
   const system = request?.messages.flatMap(m =>
     m.role === 'system' && typeof m.content === 'string' ? [m.content] : [],
