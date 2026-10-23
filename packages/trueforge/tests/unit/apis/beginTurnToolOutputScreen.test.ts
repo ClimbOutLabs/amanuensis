@@ -42,7 +42,6 @@ import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../.
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/toolOutputScreenSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /**
@@ -175,7 +174,6 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
-        sentinelSettingsStore: new InMemorySentinelSettingsStore(),
         mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,

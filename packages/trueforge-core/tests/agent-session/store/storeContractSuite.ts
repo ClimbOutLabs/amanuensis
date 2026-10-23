@@ -2495,68 +2495,11 @@ export function runStoreContractSuite<
       expect(mustGet(afterSecond).metrics.total_turns).toBe(2);
     });
 
-    it('generated title replaces only a first-message title, once', async () => {
-      const store = createStore();
-      await seedSession(store);
-      await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Give me my morning brief', source: 'first_message' },
-        }),
-      );
-      await finishTurn(store, 'turn-1');
-
-      const first = await store.setGeneratedSessionTitle({
-        tenant_id: tenant,
-        session_id: sessionId,
-        title: 'Morning brief',
-      });
-      const second = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'Other' });
-      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(first).toBe(true);
-      expect(second).toBe(false);
-      expect(mustGet(session).title).toBe('Morning brief');
-      expect(mustGet(session).title_source).toBe('auto');
-    });
-
-    it('a person title and a fixed schedule title are never replaced by the generated title', async () => {
-      const store = createStore();
-      await seedSession(store);
-      await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Morning brief · Thu 22 Oct', source: 'auto' },
-        }),
-      );
-      await finishTurn(store, 'turn-1');
-      const scheduled = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'X' });
-
-      await store.updateSession({
-        tenant_id: tenant,
-        session_id: sessionId,
-        agent: undefined,
-        title: 'Renamed by me',
-        metadata: undefined,
-      });
-      const renamed = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'Y' });
-      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(scheduled).toBe(false);
-      expect(renamed).toBe(false);
-      expect(mustGet(session).title).toBe('Renamed by me');
-      expect(mustGet(session).title_source).toBe('person');
-    });
-
     it('update_session_title_if_not_exist sets once and never overwrites', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'First title', source: 'first_message' },
-        }),
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'First title' }),
       );
       await finishTurn(store, 'turn-1');
       await store.createTurn(
@@ -2565,11 +2508,34 @@ export function runStoreContractSuite<
           turnId: 'turn-2',
           previousTurnId: 'turn-1',
           firstTurnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Second title', source: 'first_message' },
+          update_session_title_if_not_exist: 'Second title',
         }),
       );
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).title).toBe('First title');
+    });
+
+    it('a first-message title is replaced only by a rename, and the record tracks no title source', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Plan my week' }),
+      );
+      await finishTurn(store, 'turn-1');
+      const titled = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(titled.title).toBe('Plan my week');
+      expect(titled).not.toHaveProperty('title_source');
+
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'Renamed by me',
+        metadata: undefined,
+      });
+      const renamed = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(renamed.title).toBe('Renamed by me');
+      expect(renamed).not.toHaveProperty('title_source');
     });
 
     it('fork from any existing turn succeeds and advances tip', async () => {

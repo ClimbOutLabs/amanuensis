@@ -37,7 +37,6 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const SESSION_ID = 's1';
@@ -262,7 +261,6 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
-      sentinelSettingsStore: new InMemorySentinelSettingsStore(),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

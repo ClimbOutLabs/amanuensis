@@ -2,7 +2,6 @@ import {
   CreatedBySubjectSchema,
   SessionMetadataSchema,
   SessionSourceSchema,
-  SessionTitleSourceSchema,
   type AgentSpec,
   type CreatedBySubject,
   type SessionMetadata,
@@ -22,7 +21,6 @@ import type {
   GetSessionByExternalIdInput,
   GetSessionInput,
   ListSessionsInput,
-  SetGeneratedSessionTitleInput,
   SetPrivateFingerprintsInput,
   StampImportedSessionInput,
   UpdateSessionInput,
@@ -79,7 +77,6 @@ function mapRowToSessionRecord(row: {
   agent_name: string | null;
   agent_spec: AgentSpec | null;
   title: string | null;
-  title_source: string | null;
   folder_id: string | null;
   repository_id: string | null;
   workspace_cwd: string | null;
@@ -107,7 +104,6 @@ function mapRowToSessionRecord(row: {
       agent_spec: row.agent_spec,
     }),
     title: row.title,
-    title_source: SessionTitleSourceSchema.nullable().parse(row.title_source),
     folder_id: row.folder_id,
     repository_id: row.repository_id,
     workspace_cwd: row.workspace_cwd,
@@ -135,7 +131,6 @@ function sessionSelectColumns() {
     'agent_name' as const,
     jsonText<AgentSpec | null>(sql.ref('agent_spec')).as('agent_spec'),
     'title' as const,
-    'title_source' as const,
     'folder_id' as const,
     'repository_id' as const,
     'workspace_cwd' as const,
@@ -169,7 +164,6 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         agent_name: columns.agent_name,
         agent_spec: columns.agent_spec !== null ? jsonbBind(columns.agent_spec) : null,
         title: null,
-        title_source: null,
         folder_id: null,
         approval_grants: jsonbBind([]),
         task_checklist: jsonbBind(emptyTaskChecklist()),
@@ -297,20 +291,6 @@ export async function getSessionByExternalId(
   return mapRowToSessionRecord(row);
 }
 
-export async function setGeneratedSessionTitle(
-  db: Kysely<Database>,
-  input: SetGeneratedSessionTitleInput,
-): Promise<boolean> {
-  const result = await db
-    .updateTable('session')
-    .set({ title: input.title, title_source: 'auto' })
-    .where('tenant_id', '=', input.tenant_id)
-    .where('session_id', '=', input.session_id)
-    .where('title_source', '=', 'first_message')
-    .executeTakeFirst();
-  return Number(result.numUpdatedRows) > 0;
-}
-
 export async function updateSession(db: Kysely<Database>, input: UpdateSessionInput<SessionCustom>): Promise<void> {
   const agent = input.agent;
   const title = input.title;
@@ -339,8 +319,7 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
     qb = qb.set({ agent_spec: jsonbBind(agent.spec) });
   }
   if (title !== undefined) {
-    // A title set through the store is a person's choice; the generated title never replaces it.
-    qb = qb.set({ title, title_source: 'person' });
+    qb = qb.set({ title });
   }
   if (metadata !== undefined) {
     qb = qb.set({ metadata: jsonbBind(metadata) });

@@ -37,7 +37,6 @@ import { ensureEnvManagedTokenFactoryProvider } from '../../../src/runtime/token
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import type { ModelUsagePersistedEvent } from '../../../src/schemas/modelUsageEvents';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
 
 /** Constructor args of the replaced resolver: the first one carries the `llm` factory the cap guards. */
@@ -156,7 +155,6 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     previous_turn_id: undefined,
     userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
     deps: {
-      sentinelSettingsStore: new InMemorySentinelSettingsStore(),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: options.cap, now: () => NOW }),

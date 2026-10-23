@@ -59,7 +59,6 @@ function sessionRecord(overrides: Partial<Pick<SessionRecord, 'repository_id' | 
     created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
     agent: { type: 'reference', id: 'agent-1', name: 'test-agent' },
     title: null,
-    title_source: null,
     folder_id: null,
     repository_id: null,
     workspace_cwd: null,

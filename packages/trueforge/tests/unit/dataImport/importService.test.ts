@@ -1814,7 +1814,7 @@ describe('runDataImport at scale', () => {
           makeCreateTurnInput({
             sessionId,
             turnId,
-            update_session_title_if_not_exist: { title: `Bulk chat ${String(index)}`, source: 'first_message' },
+            update_session_title_if_not_exist: `Bulk chat ${String(index)}`,
             new_context_appends: [
               {
                 thread_id: 'main',
@@ -2454,6 +2454,31 @@ describe('runDataImport keeps permission history and persona choices', () => {
     }
   });
 
+  it('imports an export whose chats say who set their title, keeping each title', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-title-source');
+    try {
+      const titles: (string | null)[] = [];
+      const withTitleSource = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        // Exports made while chats were named after their first reply carry this field.
+        for (const [index, item] of sessions.entries()) {
+          const session = recordAt(recordAt(item, 'chat')['session'], 'session');
+          session['title_source'] = ['first_message', 'auto', 'person'][index % 3];
+          titles.push(typeof session['title'] === 'string' ? session['title'] : null);
+        }
+        setLegacySessions(entries, sessions);
+      });
+      const result = await runDataImport(importDeps(target), importRequest(withTitleSource));
+      expect(result.chats).toBe(3);
+      const imported = await chatsOf(target, 'bob');
+      expect(imported.map(chat => chat.title).sort()).toEqual([...titles].sort());
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an audit row with a tier or outcome the app never writes, and writes nothing', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-bad-audit');
@@ -3028,9 +3053,7 @@ async function seedLongChat(
       makeCreateTurnInput({
         sessionId,
         turnId,
-        ...(previousTurnId === undefined
-          ? { update_session_title_if_not_exist: { title: 'Long chat', source: 'first_message' } }
-          : { previousTurnId }),
+        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
         new_context_appends: [
           {
             thread_id: MAIN_THREAD_ID,
