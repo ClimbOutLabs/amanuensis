@@ -152,6 +152,7 @@ describe('SpokenReplyContainer', () => {
     const typed = [userMessage('Typed instead')];
 
     rerender(thread({ messages: typed, running: true }));
+    await settle();
     rerender(
       thread({ messages: [...typed, assistantMessage([{ type: 'text', text: 'Typed answer.' }])], running: false }),
     );

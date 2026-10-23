@@ -54,6 +54,13 @@ describe('voice turn tracking', () => {
     expect(takeSpokenReply('user-2')).toBe(false);
   });
 
+  it('does not read the reply to a different message that arrives after a voice send', () => {
+    armSpokenReply({ fromVoice: true, text: 'spoken words' });
+    noteUserMessage({ id: 'user-2', text: 'Edited answer' });
+
+    expect(takeSpokenReply('user-2')).toBe(false);
+  });
+
   it('ends a voice send that is still waiting when another message arrives first', () => {
     armSpokenReply({ fromVoice: true, text: 'spoken words' });
     noteUserMessage({ id: 'user-2', text: 'Edited answer' });
