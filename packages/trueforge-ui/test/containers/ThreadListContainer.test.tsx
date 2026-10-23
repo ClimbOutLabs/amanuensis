@@ -868,6 +868,74 @@ describe('ThreadListContainer', () => {
     expect(within(archive).getByText('35')).toBeInTheDocument();
   });
 
+  describe('deleting a chat loaded only by its folder', () => {
+    const folderChat = {
+      sessionId: 'folder-only-session',
+      title: 'Lease notes',
+      updatedAt: new Date(Date.UTC(2026, 9, 20, 12, 0, 0)),
+      agentName: null,
+      isMutable: true,
+    };
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-home', name: 'Home' }],
+        assignments: [{ sessionId: folderChat.sessionId, folderId: 'folder-home' }],
+        folderSessions: [{ folderId: 'folder-home', sessions: [folderChat] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+    };
+
+    async function openFolderChatDelete(deleteSession: (request: { sessionId: string }) => Promise<void>) {
+      render(
+        <ServerProvider server={createMockAgentUIServer({ deleteSession })}>
+          <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
+            <ThreadListRuntimeHarness threadList={{ threadId: 'thread-1', threads: [] }}>
+              <CompactLayoutProvider>
+                <ChatFolderProvider store={chatFolders}>
+                  <ThreadListContainer />
+                </ChatFolderProvider>
+              </CompactLayoutProvider>
+            </ThreadListRuntimeHarness>
+          </SlotsProvider>
+        </ServerProvider>,
+      );
+      const row = await screen.findByTestId('thread-row-Lease notes');
+      fireEvent.click(within(row).getByRole('button', { name: 'Session actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      return screen.getByRole('dialog', { name: 'Delete chat' });
+    }
+
+    it('asks first, then deletes it through the server once and removes the row', async () => {
+      const deleteSession = vi.fn(async (_request: { sessionId: string }) => {});
+      const dialog = await openFolderChatDelete(deleteSession);
+      expect(deleteSession).not.toHaveBeenCalled();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('thread-row-Lease notes')).not.toBeInTheDocument();
+      });
+      expect(deleteSession).toHaveBeenCalledTimes(1);
+      expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'folder-only-session' });
+    });
+
+    it('says so in the dialog and keeps the row when the delete fails', async () => {
+      const deleteSession = vi.fn(async (_request: { sessionId: string }) => {
+        throw new Error('offline');
+      });
+      const dialog = await openFolderChatDelete(deleteSession);
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+      expect(await within(dialog).findByText('Could not delete this chat. Try again.')).toBeInTheDocument();
+      expect(screen.getByTestId('thread-row-Lease notes')).toBeInTheDocument();
+    });
+  });
+
   it('moves a chat loaded by folder into another folder without a reload', async () => {
     const setSessionFolder = vi.fn(async () => {});
     const session = {
