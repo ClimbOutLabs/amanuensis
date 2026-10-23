@@ -12,7 +12,7 @@ export const REPEATED_ACTION_RESULT =
 export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the maximum of ${String(MAX_WRITE_CALLS_PER_TURN)} changes. Do not make more changes; tell the person what was changed.`;
 
 /** Ends the turn, shown to the person, when the write cap stopped a call. */
-export const WRITE_CAP_STOP_MESSAGE = `Aman stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
+export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
 
 /**
  * Past-tense action claims in first person or as a finished state. Kept short on purpose: a claim

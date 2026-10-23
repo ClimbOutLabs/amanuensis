@@ -75,7 +75,7 @@
     "generate-test-mailbox": "node demo/fixtures/mailbox/generate-fixtures.mjs",
     "send-test-mailbox": "node demo/scripts/send-test-mailbox.mjs",
     "demo:import-mailbox": "node demo/scripts/import-demo-mailbox.mjs",
-    "test:test-mailbox": "node --test tests/assistant-mailbox-fixtures.test.mjs tests/import-demo-mailbox.test.mjs tests/send-test-mailbox.test.mjs",
+    "test:test-mailbox": "node --test tests/assistant-mailbox-fixtures.test.mjs tests/import-demo-mailbox.test.mjs tests/send-test-mailbox.test.mjs tests/demo-deploy-guide.test.mjs",
     "test:eval-tokens": "node --test tests/eval-tokens-set.test.mjs tests/eval-tokens-run.test.mjs",
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs tests/slots-live.test.mjs",
     "test:slots-live": "node scripts/slots-live.mjs",

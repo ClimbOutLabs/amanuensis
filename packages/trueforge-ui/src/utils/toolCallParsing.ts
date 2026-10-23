@@ -1,4 +1,5 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import { APPROVAL_EXPIRED_REASON_CODE } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
 import {
   DEFAULT_MAPS_TRAVEL_MODE,
@@ -121,6 +122,17 @@ export function parseToolRefusalNotice(content: unknown): string | undefined {
   return action === 'contact_user' && typeof message === 'string' ? message : undefined;
 }
 
+/** True for a call whose request for the person's OK expired unanswered: not their "no". */
+function isExpiredApprovalResult(content: unknown): boolean {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  return (
+    isUnknownRecord(outcome) &&
+    outcome.disposition === 'denied' &&
+    isUnknownRecord(outcome.remediation) &&
+    outcome.remediation.reason_code === APPROVAL_EXPIRED_REASON_CODE
+  );
+}
+
 const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
 
 /**
@@ -131,7 +143,7 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
   const disposition = parseToolResultDisposition(content);
   switch (disposition?.disposition) {
     case 'denied':
-      return 'you said no';
+      return isExpiredApprovalResult(content) ? 'nobody answered in time' : 'you said no';
     case 'policy_blocked':
       return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
     case 'never_ran':
@@ -158,7 +170,7 @@ export function parseToolResultDisposition(content: unknown): ToolDispositionVie
     case 'denied':
       return {
         disposition: outcome.disposition,
-        label: 'Denied',
+        label: isExpiredApprovalResult(content) ? 'Expired' : 'Denied',
         tone: 'muted',
         ...(remediation ? { remediation } : {}),
       };

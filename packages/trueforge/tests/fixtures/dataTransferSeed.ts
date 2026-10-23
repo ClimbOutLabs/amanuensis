@@ -272,7 +272,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
       sessionId: SEED_IDS.sessionMain,
       turnId: 'session-1-turn-1',
       approval_grants: ['reporter-server:search'],
-      update_session_title_if_not_exist: 'First chat',
+      update_session_title_if_not_exist: { title: 'First chat', source: 'first_message' },
       new_context_appends: [
         {
           thread_id: MAIN_THREAD_ID,
@@ -396,7 +396,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     makeCreateTurnInput({
       sessionId: SEED_IDS.sessionScheduled,
       turnId: 'session-2-turn-1',
-      update_session_title_if_not_exist: 'Morning digest',
+      update_session_title_if_not_exist: { title: 'Morning digest', source: 'first_message' },
       new_context_appends: [
         {
           thread_id: MAIN_THREAD_ID,
@@ -431,7 +431,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     makeCreateTurnInput({
       sessionId: SEED_IDS.sessionRunning,
       turnId: 'session-3-turn-1',
-      update_session_title_if_not_exist: 'Unfinished chat',
+      update_session_title_if_not_exist: { title: 'Unfinished chat', source: 'first_message' },
       new_context_appends: [
         {
           thread_id: MAIN_THREAD_ID,

@@ -6,10 +6,13 @@ import { useEffect, useRef } from 'react';
 import { useAui, useAuiState } from '../assistant-ui.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 
+/** The server writes its generated title shortly after a turn ends; one re-check picks it up. */
+const TITLE_RECHECK_DELAY_MS = 5_000;
+
 /**
  * After a turn ends, read `session.title` from GET /sessions/{id} and rename the
- * thread-list row. Initialize only stores `remoteId`, so first chats stay
- * "New Chat" until this runs.
+ * thread-list row when the server title is non-empty and differs. If it did not change,
+ * read once more after a short delay, since the server may write its title a moment later.
  */
 export function useSyncSessionTitle(): void {
   const server = useOptionalServer();
@@ -18,11 +21,11 @@ export function useSyncSessionTitle(): void {
   const title = useAuiState(s => s.threadListItem.title);
   const isRunning = useThreadIsRunning();
   const wasRunningRef = useRef(false);
-  const syncedRemoteIdRef = useRef<string | undefined>(undefined);
+  const titleRef = useRef(title);
 
   useEffect(() => {
-    syncedRemoteIdRef.current = undefined;
-  }, [remoteId]);
+    titleRef.current = title;
+  }, [title]);
 
   useEffect(() => {
     const finishedTurn = wasRunningRef.current && !isRunning;
@@ -31,29 +34,33 @@ export function useSyncSessionTitle(): void {
     if (!finishedTurn || server == null || remoteId == null) {
       return;
     }
-    if (syncedRemoteIdRef.current === remoteId) {
-      return;
-    }
-    // History rows already carry a title; only fill blank / "new" local rows.
-    if (title != null && title.trim() !== '') {
-      syncedRemoteIdRef.current = remoteId;
-      return;
-    }
 
     let cancelled = false;
-    void server
-      .getSession({ sessionId: remoteId })
-      .then(session => {
-        if (cancelled) return;
-        const nextTitle = typeof session.title === 'string' ? session.title.trim() : '';
-        if (nextTitle.length === 0) return;
-        syncedRemoteIdRef.current = remoteId;
-        return aui.threadListItem().rename(nextTitle);
-      })
-      .catch(() => undefined);
+    let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // Resolves true when the row was renamed or the read is no longer needed.
+    const syncOnce = async (): Promise<boolean> => {
+      const session = await server.getSession({ sessionId: remoteId });
+      if (cancelled) return true;
+      const nextTitle = typeof session.title === 'string' ? session.title.trim() : '';
+      const currentTitle = titleRef.current?.trim() ?? '';
+      if (nextTitle.length === 0 || nextTitle === currentTitle) return false;
+      await aui.threadListItem().rename(nextTitle);
+      return true;
+    };
+
+    void syncOnce()
+      .catch(() => false)
+      .then(changed => {
+        if (cancelled || changed) return;
+        recheckTimer = setTimeout(() => {
+          void syncOnce().catch(() => undefined);
+        }, TITLE_RECHECK_DELAY_MS);
+      });
 
     return () => {
       cancelled = true;
+      clearTimeout(recheckTimer);
     };
-  }, [aui, isRunning, remoteId, server, title]);
+  }, [aui, isRunning, remoteId, server]);
 }

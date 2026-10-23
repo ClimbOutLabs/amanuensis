@@ -2,13 +2,15 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import {
+  APPROVAL_EXPIRY_MINUTES,
+  approvalExpiredReason,
+} from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import type { ReactNode } from 'react';
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useToasterOptional } from '../containers/ToasterContainer.js';
 import {
-  APPROVAL_AUTO_DENY_MINUTES,
-  approvalAutoDenyReason,
   subscribeToBlockedSend,
   type HarnessChatServerExtensions,
   type SessionTipInfo,
@@ -164,10 +166,10 @@ function createChatSync({
         server != null &&
         hasSessionResync(server) &&
         Number.isFinite(oldestMs) &&
-        Date.now() - oldestMs > APPROVAL_AUTO_DENY_MINUTES * 60_000
+        Date.now() - oldestMs > APPROVAL_EXPIRY_MINUTES * 60_000
       ) {
         const result = await server
-          .dismissPendingApprovals({ sessionId, reason: approvalAutoDenyReason() })
+          .dismissPendingApprovals({ sessionId, reason: approvalExpiredReason() })
           .catch((error: unknown) => {
             // The chat moved on while we looked; nothing to deny. A background cleanup
             // must not surface an error the user did not cause.
@@ -175,18 +177,17 @@ function createChatSync({
             throw error;
           });
         if (!result.alreadyResolved) {
-          const plural = result.dismissed === 1 ? '' : 's';
+          const one = result.dismissed === 1;
           toaster?.showSuccess({
-            title: 'Expired approvals denied',
+            title: one ? 'A request for your OK expired' : 'Requests for your OK expired',
             description:
-              `${result.dismissed} tool approval${plural} went unanswered for ` +
-              `${APPROVAL_AUTO_DENY_MINUTES} minutes and ` +
-              `${result.dismissed === 1 ? 'was' : 'were'} automatically denied.`,
+              `${one ? 'It' : 'They'} went unanswered for ${APPROVAL_EXPIRY_MINUTES} minutes, so nothing was done. ` +
+              'Ask again in the chat if you still want it.',
           });
         }
       }
       // Surface the approval card (or the turn the decision started) even
-      // when nothing was old enough to auto-deny.
+      // when nothing was old enough to expire.
       reload();
     } else if (tip.status === 'running' || ports.isRunning || (lastTip !== undefined && tip.turnId !== lastTip)) {
       // A reply still running may have lost its stream without an error while the page slept, and one

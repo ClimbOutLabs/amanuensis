@@ -18,6 +18,7 @@ import { McpCatalog } from '../../src/catalog/McpCatalog';
 import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
+import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
@@ -289,6 +290,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -383,6 +385,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
