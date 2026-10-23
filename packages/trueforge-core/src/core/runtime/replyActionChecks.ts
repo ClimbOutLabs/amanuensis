@@ -31,8 +31,8 @@ const SANDBOX_COMMAND_TOOLS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
 ]);
 
-/** Connector tools that fetch a repository or its files. */
-const GIT_TOOL_NAME = /git|clone|repo/i;
+/** Connector tools that clone or download, as opposed to ones that only search or list repositories. */
+const GIT_TOOL_NAME = /clone|download/i;
 
 /** Read-only tools that read a file, page, message, or record, as opposed to helpers like the clock. */
 const READ_TOOL_NAME = /read|fetch|get_|list|search|open|view|browse|scrape|file|content|page|document|repo|git/i;
@@ -58,6 +58,8 @@ export function stepKindsOf(info: InternalToolCallInfo): TurnStepKind[] {
 const ADVERB = String.raw`(?:just\s+|now\s+|already\s+|successfully\s+)?`;
 /** "I cloned", "I've cloned", "I have just cloned". */
 const FIRST_PERSON = String.raw`\bI(?:['’]ve|\s+have)?\s+${ADVERB}`;
+/** "I've run", "I have run": "run" is a claim only as a perfect, since "I run" is present or an offer. */
+const FIRST_PERSON_PERFECT = String.raw`\bI(?:['’]ve|\s+have)\s+${ADVERB}`;
 /** "has been cloned", "was cloned", "were downloaded". */
 const PASSIVE = String.raw`\b(?:(?:has|have)\s+${ADVERB}been|was|were)\s+${ADVERB}`;
 
@@ -78,7 +80,12 @@ const CLAIMS: readonly { kind: Exclude<UnbackedClaimKind, 'workspace'>; patterns
   },
   {
     kind: 'run',
-    patterns: [...claim(String.raw`executed|run`), new RegExp(`${FIRST_PERSON}ran\\b(?!\\s+into\\b)`, 'i')],
+    patterns: [
+      ...claim(String.raw`executed`),
+      new RegExp(`${FIRST_PERSON_PERFECT}run\\b`, 'i'),
+      new RegExp(`${PASSIVE}run\\b`, 'i'),
+      new RegExp(`${FIRST_PERSON}ran\\b(?!\\s+into\\b)`, 'i'),
+    ],
   },
   {
     kind: 'read',
@@ -93,18 +100,37 @@ const CLAIMS: readonly { kind: Exclude<UnbackedClaimKind, 'workspace'>; patterns
   },
 ];
 
-const WORKSPACE_PLACE = /\b(?:in|into|inside|to)\s+(?:your|the)\s+(?:workspace|sandbox)\b/i;
-/** "It is now in your workspace", "the repo is checked out". */
-const DONE_STATE = /\b(?:is|are)\s+(?:now\s+)?(?:in|inside|checked\s+out)\b/i;
-/** Words that make a state sentence an offer or a condition rather than a report. */
-const NOT_YET = /\b(?:if|once|when|after|until|unless|would|could|can|will|should|might)\b|['’]ll\b/i;
+/** Naming the workspace or sandbox as a place is a claim that something is there. */
+const WORKSPACE_PLACES: readonly RegExp[] = [
+  /\b(?:in|into|inside|to)\s+(?:your|the)\s+(?:workspace|sandbox)\b/i,
+  /\byour\s+(?:workspace|sandbox)\s+(?:now\s+|already\s+)?(?:has|contains|holds)\b/i,
+];
+/** "The repo is checked out". */
+const CHECKED_OUT_STATE = /\b(?:is|are)\s+(?:now\s+)?checked\s+out\b/i;
+/** Words that make a clause an offer or a condition rather than a report. */
+const NOT_YET = /\b(?:if|once|when|after|before|until|unless|would|could|can|will|shall|should|might|want)\b|['’]ll\b/i;
 
 /** Words that, earlier in the sentence, turn a claim into a denial: "No repository was cloned". */
 const NEGATION = /\b(?:no|not|nothing|never|none)\b|n['’]t\b/i;
 
+const QUESTION_END = /\?["'”’)\]]*\s*$/;
+
+/**
+ * Whether the sentence reports the match as done. A question is never a report, and neither is a
+ * match whose clause (from the last comma before it) opens as an offer or condition, so "When you
+ * asked, I cloned it" still counts. A denial anywhere before the match cancels it.
+ */
 function affirms(pattern: RegExp, sentence: string): boolean {
+  if (QUESTION_END.test(sentence)) {
+    return false;
+  }
   const match = pattern.exec(sentence);
-  return match !== null && !NEGATION.test(sentence.slice(0, match.index));
+  if (match === null) {
+    return false;
+  }
+  const before = sentence.slice(0, match.index);
+  const clause = before.slice(before.lastIndexOf(',') + 1);
+  return !NEGATION.test(before) && !NOT_YET.test(clause);
 }
 
 function sentencesOf(text: string): string[] {
@@ -114,16 +140,12 @@ function sentencesOf(text: string): string[] {
 function claimedKinds(text: string): Set<UnbackedClaimKind> {
   const kinds = new Set<UnbackedClaimKind>();
   for (const sentence of sentencesOf(text)) {
-    let claimsDoneWork = false;
     for (const { kind, patterns } of CLAIMS) {
       if (patterns.some(pattern => affirms(pattern, sentence))) {
         kinds.add(kind);
-        claimsDoneWork = true;
       }
     }
-    const statesDone = affirms(DONE_STATE, sentence) && !NOT_YET.test(sentence);
-    const checkedOut = /\bchecked\s+out\b/i.test(sentence);
-    if ((WORKSPACE_PLACE.test(sentence) || checkedOut) && (claimsDoneWork || statesDone)) {
+    if ([...WORKSPACE_PLACES, CHECKED_OUT_STATE].some(pattern => affirms(pattern, sentence))) {
       kinds.add('workspace');
     }
   }

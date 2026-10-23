@@ -77,6 +77,20 @@ describe('findUnbackedClaim', () => {
     expect(check("Done, I've set a 9:10 reminder.", { successfulWrites: 1 })).toBeUndefined();
   });
 
+  it('keeps a claim after a leading condition clause', () => {
+    expect(check('When you asked, I cloned it.')).toBe('clone');
+  });
+
+  it.each([
+    "I've put the repository in your workspace.",
+    'I copied the project into your workspace.',
+    'Your workspace now has the repo with src/, docs/ and tests/.',
+    'The repo is in your workspace, and you can open it there.',
+  ])('treats "%s" as a workspace claim only with the sandbox off', text => {
+    expect(check(text)).toBe('workspace');
+    expect(check(text, { sandboxOn: true })).toBeUndefined();
+  });
+
   it('leaves workspace claims alone with the sandbox on', () => {
     expect(check('Your notes file is now in your workspace.', { sandboxOn: true })).toBeUndefined();
   });
@@ -99,6 +113,12 @@ describe('findUnbackedClaim', () => {
     'Would you like me to set a reminder?',
     'Your reminder is at 9:10.',
     'The meeting was moved to Thursday.',
+    'Should I run the tests now?',
+    'Before I run anything, can you confirm the branch?',
+    'If I run it with the sandbox off, nothing will happen.',
+    'Want me to clone it? Once it has been cloned, I will list the folders.',
+    'After the repo has been cloned into your workspace, I can show its folders.',
+    "Code execution is off, so I can't put anything in your workspace.",
   ])('leaves "%s" alone', text => {
     expect(check(text)).toBeUndefined();
   });
@@ -114,10 +134,16 @@ describe('stepKindsOf', () => {
     expect(stepKindsOf(info({ server: 'sandbox', tool: 'write_file' }))).toEqual(['sandbox']);
   });
 
-  it('counts read-only connector reads, and git tools as git steps', () => {
+  it('counts read-only connector reads, and clone or download tools as git steps', () => {
     expect(stepKindsOf(info({ server: 'drive', tool: 'read_file', readOnly: true }))).toEqual(['read']);
     expect(stepKindsOf(info({ server: 'github', tool: 'get_file_contents', readOnly: true }))).toEqual(['read']);
     expect(stepKindsOf(info({ server: 'github', tool: 'clone_repository' }))).toEqual(['git']);
+    expect(stepKindsOf(info({ server: 'drive', tool: 'download_file' }))).toEqual(['git']);
+  });
+
+  it('does not let a repository search or list back a clone', () => {
+    expect(stepKindsOf(info({ server: 'github', tool: 'search_repositories', readOnly: true }))).toEqual(['read']);
+    expect(stepKindsOf(info({ server: 'github', tool: 'list_git_branches', readOnly: true }))).toEqual(['read']);
   });
 
   it('does not count the clock or a bundle load as a read', () => {
