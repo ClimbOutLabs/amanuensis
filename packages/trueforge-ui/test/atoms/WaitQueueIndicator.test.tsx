@@ -21,7 +21,7 @@ function snapshot(overrides: Partial<WaitQueueSnapshot> = {}): WaitQueueSnapshot
 
 describe('WaitQueueIndicator', () => {
   it('renders the station track, the state sprite, and the live microcopy', () => {
-    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} reducedMotion={false} />);
+    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} quietMs={0} reducedMotion={false} />);
 
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Searching the web…');
@@ -36,7 +36,7 @@ describe('WaitQueueIndicator', () => {
   });
 
   it('keeps the ticking clock out of the live region', () => {
-    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={20_000} reducedMotion={false} />);
+    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={20_000} quietMs={20_000} reducedMotion={false} />);
 
     // The long-wait show is visible…
     expect(screen.getByText(/Still searching the web — 20s so far\./)).toBeInTheDocument();
@@ -48,14 +48,43 @@ describe('WaitQueueIndicator', () => {
     expect(document.querySelector('.aui-wait-queue__longwait')?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('stays silent on a long turn while things keep arriving', () => {
+    render(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: null, microcopy: 'Reasoning… 1,240 words so far', ticks: [] })}
+        elapsedMs={60_000}
+        quietMs={2_000}
+        reducedMotion={false}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Reasoning… 1,240 words so far');
+    expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
+    expect(screen.queryByText(/taking longer than usual/)).not.toBeInTheDocument();
+  });
+
+  it('says it is taking longer than usual once nothing has arrived for a while', () => {
+    render(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: null, microcopy: 'Thinking it through…', ticks: [] })}
+        elapsedMs={60_000}
+        quietMs={16_000}
+        reducedMotion={false}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('this is taking longer than usual');
+    expect(screen.getByText(/Still thinking it through — 1m 0s so far\./)).toBeInTheDocument();
+  });
+
   it('stays silent before the long-wait threshold', () => {
-    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={14_999} reducedMotion={false} />);
+    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={14_999} quietMs={14_999} reducedMotion={false} />);
 
     expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
   });
 
   it('renders the static show for reduced-motion users', () => {
-    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} reducedMotion />);
+    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} quietMs={0} reducedMotion />);
 
     expect(document.querySelector('.aui-wait-queue')).toHaveClass('aui-wait-queue--static');
   });
@@ -74,6 +103,7 @@ describe('WaitQueueIndicator', () => {
           ticks: [],
         })}
         elapsedMs={0}
+        quietMs={0}
         reducedMotion={false}
       />,
     );

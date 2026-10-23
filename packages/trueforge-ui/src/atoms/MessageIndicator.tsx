@@ -14,13 +14,13 @@ export type MessageIndicatorProps = {
  * events; host slot overrides keep working unchanged.
  */
 export function MessageIndicator({ className }: MessageIndicatorProps) {
-  const { snapshot, elapsedMs, reducedMotion } = useWaitQueue();
+  const { snapshot, elapsedMs, quietMs, reducedMotion } = useWaitQueue();
   return (
     <span
       data-slot="aui_assistant-message-indicator"
       className={cn('inline-flex items-center font-sans text-sm text-text-secondary', className)}
     >
-      <WaitQueueIndicator snapshot={snapshot} elapsedMs={elapsedMs} reducedMotion={reducedMotion} />
+      <WaitQueueIndicator snapshot={snapshot} elapsedMs={elapsedMs} quietMs={quietMs} reducedMotion={reducedMotion} />
     </span>
   );
 }

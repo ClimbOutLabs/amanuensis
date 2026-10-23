@@ -7,6 +7,7 @@ import { AssistantMessageContainer } from '@/containers/AssistantMessageContaine
 import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
+import { answerRefusalText } from '@/utils/turnRefusal.js';
 import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -266,9 +267,7 @@ describe('NeedsYourOkContainer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
       expect(
-        screen.getByText(
-          `${DEFAULT_ASSISTANT_NAME} is still working on your last message. Wait for it to finish, or press Cancel, then send again.`,
-        ),
+        screen.getByText(answerRefusalText({ code: 'previous_turn_running', assistantName: DEFAULT_ASSISTANT_NAME })),
       ).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
@@ -280,7 +279,9 @@ describe('NeedsYourOkContainer', () => {
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('That reply could not start, so nothing was done. Answer again.')).toBeInTheDocument();
+      expect(
+        screen.getByText(answerRefusalText({ code: 'turn_could_not_start', assistantName: DEFAULT_ASSISTANT_NAME })),
+      ).toBeInTheDocument();
     });
     expect(screen.queryByText(/already answered/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();

@@ -104,6 +104,7 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     policy_blocked_calls_this_turn: 0,
     write_calls_this_turn: 0,
     successful_writes_this_turn: 0,
+    step_kinds_this_turn: [],
     last_call_signature: undefined,
     tool_markup_leaks_this_turn: 0,
     tool_markup_retries_this_turn: 0,

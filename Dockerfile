@@ -47,8 +47,10 @@ RUN groupadd --gid 10001 trueforge \
 # written here is lost when the container is recreated, so real deployments
 # must still mount persistent volumes. Without these dirs, the cwd-relative
 # storage defaults resolve under the root-owned workdir and die with EACCES at
-# first write.
-RUN mkdir -p /data/memory /data/persona-knowledge /data/app \
+# first write. The Email send list volume mounts at /data/mail-policy and the
+# server is its only writer, so the dir is created here the same way; without
+# it the fresh volume starts out owned by root and the first write fails.
+RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
   && chown -R 10001:10001 /data
 
 # Image-level defaults so either image works without deploy-specific env: the

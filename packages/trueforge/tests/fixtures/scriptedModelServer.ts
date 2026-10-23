@@ -46,6 +46,8 @@ export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
 /** Searches the web like `STALL_AFTER_TOOL_DIRECTIVE`, then starts its answer and goes silent mid-sentence. */
 export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
 export const STALLED_ANSWER_START = 'Here is what I found so far';
+/** Starts the answer with `STALLED_ANSWER_START` right away, with no tool first, then never says more. */
+export const STALL_AT_ONCE_DIRECTIVE = 'stall_at_once';
 /**
  * Calls the write tool; once it has answered (a denial counts), the model thinks out loud a little at a
  * time and never finishes, the shape of a self-hosted model that thinks for minutes per step.
@@ -656,7 +658,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     });
     const stalls =
       progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE;
-    if (toolCalls.length === 0 && stalls && progress.toolResults > 0) {
+    const stallsAtOnce = progress.directive === STALL_AT_ONCE_DIRECTIVE;
+    if (toolCalls.length === 0 && ((stalls && progress.toolResults > 0) || stallsAtOnce)) {
       const opening =
         progress.directive === STALL_AFTER_TOOL_DIRECTIVE
           ? chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null })

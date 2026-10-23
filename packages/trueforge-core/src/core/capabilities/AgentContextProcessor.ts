@@ -24,8 +24,8 @@ export interface AgentThreadExecutionContext {
   context: ContextMessage[];
   /**
    * Set only when the host is forcing this preLLM pass to run compaction regardless of the
-   * configured token threshold (currently after a ModelStreamFault), so the retry attempt runs
-   * against a shorter context. A processor with no notion of a threshold ignores this.
+   * configured token threshold (when the request would not fit the model, or after a fault the
+   * provider says is about context length), so the next attempt runs against a shorter context. A processor with no notion of a threshold ignores this.
    */
   forceCompaction?: boolean;
 }

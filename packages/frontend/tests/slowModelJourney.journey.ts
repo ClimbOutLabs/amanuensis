@@ -55,7 +55,7 @@ before(async () => {
   vite = await createServer({
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
-    plugins: [inProcessApi(api, openApiResponses)],
+    plugins: [inProcessApi(api, { openResponses: openApiResponses })],
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   await vite.listen();

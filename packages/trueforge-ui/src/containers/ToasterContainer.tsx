@@ -13,7 +13,6 @@ import {
   DAILY_BUDGET_TITLE,
   isTokenFactoryDailyCapError,
 } from '../utils/tokenFactoryBudget.js';
-import { TurnRefusedError } from '../utils/turnRefusal.js';
 
 const MAX_TOAST_DESCRIPTION_CHARS = 480;
 const MAX_VISIBLE_TOASTS = 5;
@@ -47,9 +46,6 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
 }
 
 function normalizeError(error: unknown): ToastContent {
-  if (error instanceof TurnRefusedError) {
-    return { title: error.title, description: error.message };
-  }
   if (isStaleApprovalError(error)) {
     return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
   }
