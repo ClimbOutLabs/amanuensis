@@ -73,6 +73,16 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
       }
     }
 
+    // The generic ticket shows who a draft goes to without opening Details.
+    const recipient = plain.getByText(/to: robin@example\.test/);
+    assert.equal(await recipient.isVisible(), true, 'the recipient is not visible');
+    const recipientBox = await recipient.boundingBox();
+    assert.ok(recipientBox !== null, 'the recipient has no box');
+    assert.ok(
+      recipientBox.x >= 0 && recipientBox.x + recipientBox.width <= PHONE.width,
+      'the recipient runs off the screen',
+    );
+
     const dir = await screenshotDir();
     await ticket.screenshot({ path: join(dir, 'approval-ticket-390.png') });
     await plain.screenshot({ path: join(dir, 'approval-plain-390.png') });

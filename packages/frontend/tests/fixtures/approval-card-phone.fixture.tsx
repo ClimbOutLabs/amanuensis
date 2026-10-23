@@ -63,6 +63,7 @@ createRoot(rootElement).render(
           onApprove={noop}
           onApproveForChat={noop}
           onDeny={noop}
+          outboundOpen
         />
       </section>
     </main>

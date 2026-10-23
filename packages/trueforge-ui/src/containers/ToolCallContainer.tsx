@@ -325,6 +325,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
       onDeny={onDeny}
       disabled={!canManageSession}
+      outboundOpen
     />
   );
 }

@@ -18,10 +18,10 @@ import type { AgentDetailsVisibility } from '@/server/AgentDetailsPreferenceCont
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
-const { respondToToolApproval, details } = vi.hoisted(() => ({
-  respondToToolApproval: vi.fn(),
-  details: { visibility: 'collapsed' as AgentDetailsVisibility },
-}));
+const { respondToToolApproval, details } = vi.hoisted(() => {
+  const details: { visibility: AgentDetailsVisibility } = { visibility: 'collapsed' };
+  return { respondToToolApproval: vi.fn(), details };
+});
 
 vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
   const actual = await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>();
@@ -140,6 +140,9 @@ function sentinelApi(saved: SentinelApprovalInfo[]): SentinelApi {
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings: vi.fn(async () => settings),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: saved })),
+    listBriefItemCompletions: vi.fn(async () => []),
+    markBriefItemDone: vi.fn(async () => undefined),
+    unmarkBriefItemDone: vi.fn(async () => undefined),
   };
 }
 
@@ -263,6 +266,16 @@ describe('every waiting approval uses the new card family', () => {
     renderChat({ message: waitingMessage([draftCall('call-mcp', 'connector')]) });
     await expectStandInTicket('Allow "draft email" on email-mcp?');
     expect(screen.getByText(/subject: Picnic plans/)).toBeInTheDocument();
+  });
+
+  it('a waiting draft with no card yet shows who it goes to, first and open, before any click', async () => {
+    renderChat({ message: waitingMessage([draftCall('call-mcp', 'connector')]) });
+    await expectStandInTicket('Allow "draft email" on email-mcp?');
+    const request = screen.getByText(/to: robin@example\.test/);
+    // Fails inside a closed Details section, which a person would have to open first.
+    expect(request).toBeVisible();
+    expect(request.textContent?.split('\n')[0]).toBe('to: robin@example.test');
+    expect(respondToToolApproval).not.toHaveBeenCalled();
   });
 
   it('a mail connector (MCP) draft with its server card shows the mail card', async () => {
