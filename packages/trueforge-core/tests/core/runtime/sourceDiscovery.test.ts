@@ -1,13 +1,12 @@
-import type { LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { createSourceDiscoveryContract } from '../../../src/core/runtime/contextUtils';
 import { createSandboxExecDescription } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { finalAnswerStream, makeSilentLogger } from '../harnessMocks';
+import { hostText, makeSilentLogger, readGuidanceModel } from '../harnessMocks';
 
 describe('source discovery contract at the model request boundary', () => {
-  it('is present in the host-owned system prompt without restricting coding URLs', async () => {
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+  it('is in the web guidance, out of the system prompt, without restricting coding URLs', async () => {
+    const modelClient = readGuidanceModel('web');
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -20,7 +19,7 @@ describe('source discovery contract at the model request boundary', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient,
         instruction: 'test',
         toolSets: [],
       },
@@ -32,9 +31,11 @@ describe('source discovery contract at the model request boundary', () => {
       // Drain the real request so the assertion observes the sent system prompt.
     }
 
-    const request = create.mock.calls[0]?.[0];
-    const systemMessage = request?.messages.find(message => message.role === 'system');
-    expect(systemMessage?.content).toContain('<source-discovery>');
+    const firstSystem = modelClient.create.mock.calls[0]?.[0].messages.find(message => message.role === 'system');
+    expect(firstSystem?.content).not.toContain('<source-discovery>');
+    expect(firstSystem?.content).toContain('- web: finding and citing sources');
+    const systemMessage = { content: hostText(modelClient.create) };
+    expect(systemMessage.content).toContain('<source-discovery>');
     // No sandbox in this chat or on the server: the contract must not name an exec tool, and the server-level
     // no-sandbox line says the server has no place to run commands.
     expect(systemMessage?.content).toContain(createSourceDiscoveryContract({ shellCanFetch: false }).trim());
@@ -62,7 +63,7 @@ describe('source discovery contract at the model request boundary', () => {
     expect(systemMessage?.content).not.toContain(
       'the sandbox exec tool when it retrieves an already identified source',
     );
-    const execDescription = createSandboxExecDescription({ offline: false });
+    const execDescription = createSandboxExecDescription({ offline: false, fileDownload: false });
     expect(execDescription).toContain('provides retrieval');
     expect(execDescription).toContain('already identified public source');
     expect(execDescription).toContain('does not provide search or discovery');

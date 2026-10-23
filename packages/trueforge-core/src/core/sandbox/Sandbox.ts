@@ -1355,13 +1355,24 @@ function execNetworkSentences({ offline }: { offline: boolean }): string {
     : 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
 }
 
-export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables.
+/** Sent with the tools that make files: the UI downloads only files listed in this block. */
+const SANDBOX_FILE_OUTPUT_RULE =
+  'To give the user a file, list it in a sandbox_artifacts block as [name](/absolute/path); a file named only in prose never reaches them.';
+
+export function createSandboxExecDescription({
+  offline,
+  fileDownload,
+}: {
+  offline: boolean;
+  fileDownload: boolean;
+}): string {
+  const fileOutput = fileDownload ? `\n${SANDBOX_FILE_OUTPUT_RULE}` : '';
+  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
 Python and Node go to run_code; interpreter invocations are rejected.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
-${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
+${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
 `;
 }
 
@@ -1414,8 +1425,14 @@ export const SANDBOX_APPLY_PATCH_DESCRIPTION =
 export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
   'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
-export const SANDBOX_WRITE_FILE_DESCRIPTION =
+const SANDBOX_WRITE_FILE_DESCRIPTION =
   'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
+
+export function createSandboxWriteFileDescription({ fileDownload }: { fileDownload: boolean }): string {
+  return fileDownload
+    ? `${SANDBOX_WRITE_FILE_DESCRIPTION} ${SANDBOX_FILE_OUTPUT_RULE}`
+    : SANDBOX_WRITE_FILE_DESCRIPTION;
+}
 
 export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
@@ -2871,7 +2888,16 @@ export class Sandbox extends LocalToolMCP {
     // tool-list read so newly staged attachments are advertised.
     return base.map(tool => {
       if (tool.name === SANDBOX_EXEC_TOOL_NAME) {
-        return { ...tool, description: createSandboxExecDescription({ offline: !this.hasNetwork() }) };
+        return {
+          ...tool,
+          description: createSandboxExecDescription({
+            offline: !this.hasNetwork(),
+            fileDownload: this.fileDownloadEnabled,
+          }),
+        };
+      }
+      if (tool.name === SANDBOX_WRITE_FILE_TOOL_NAME) {
+        return { ...tool, description: createSandboxWriteFileDescription({ fileDownload: this.fileDownloadEnabled }) };
       }
       return tool.name === SANDBOX_RUN_CODE_TOOL_NAME
         ? { ...tool, description: this.renderRunCodeDescription() }
@@ -3122,7 +3148,6 @@ export class Sandbox extends LocalToolMCP {
     }
 
     this.buildSchemaSection(sandboxInstructions);
-    this.buildSkillsSection(sandboxInstructions);
     this.buildMCPSection(sandboxInstructions);
     this.buildFileUploadsSection(sandboxInstructions);
 
@@ -3178,7 +3203,8 @@ export class Sandbox extends LocalToolMCP {
     );
   }
 
-  private buildSkillsSection(builder: InstructionBuilder): void {
+  /** The skills index: kept out of the sandbox guidance, so the model always knows which skills exist. */
+  buildSkillsInstruction(builder: InstructionBuilder): void {
     builder.addContent(this.renderSkillsSection());
   }
 

@@ -30,7 +30,6 @@ import {
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
@@ -84,7 +83,6 @@ function stubTurnExecutionDeps(
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
     mcpCatalog: McpCatalog.loadShipped(),
-    sentinelSettingsStore: new InMemorySentinelSettingsStore(),
     scheduleStore,
     briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
@@ -577,6 +575,35 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
+  });
+
+  it('lets a scheduled chat take its title from its task, with no fixed schedule title', async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-title',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+      persona: undefined,
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledTimes(1);
+    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).not.toHaveProperty('title_seed');
   });
 
   it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {

@@ -948,7 +948,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(document.querySelector('.aui-wait-queue__station--arriving')).not.toBeNull();
   });
 
-  it('keeps one elapsed clock across a text→tool→text turn with remounts', () => {
+  it('keeps one turn clock across a text→tool→text turn with remounts, noting only quiet spells', () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-09-21T19:00:00.000Z'));
@@ -969,18 +969,29 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
         vi.advanceTimersByTime(6_000);
       });
 
-      // 16s into the same turn: the long-wait note must carry the turn's
-      // clock, not the 6s since the remount.
+      // The tool call arrived 6s ago, so the turn is not quiet yet: no long-wait note.
+      expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+
+      // 16s of quiet, 26s into the same turn: the note carries the turn's
+      // clock, not the time since the remount.
       const longWait = document.querySelector('.aui-wait-queue__longwait');
       expect(longWait).not.toBeNull();
-      expect(longWait?.textContent).toMatch(/16s so far/);
+      expect(longWait?.textContent).toMatch(/26s so far/);
 
-      // …and back to text: still the same turn clock.
+      // …and back to text: the new tokens end the quiet spell, and the clock is still the turn's.
       rerender(turnTree('phase-text-2', 'more tokens'));
       act(() => {
         vi.advanceTimersByTime(2_000);
       });
-      expect(document.querySelector('.aui-wait-queue__longwait')?.textContent).toMatch(/18s so far/);
+      expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(15_000);
+      });
+      expect(document.querySelector('.aui-wait-queue__longwait')?.textContent).toMatch(/43s so far/);
     } finally {
       vi.useRealTimers();
     }

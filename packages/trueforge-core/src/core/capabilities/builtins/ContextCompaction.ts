@@ -275,12 +275,6 @@ const ESSENTIAL_SUMMARY_SECTIONS: Record<CompactionSessionMode, readonly string[
 /** Not "none": that already means "checked, nothing there", which would erase what the model dropped. */
 const MISSING_SECTION_NOTE = 'not captured; earlier details may be missing';
 
-/** Appended to the normal prompt for the second try; overrides its length limit. */
-const RETRY_PROMPT_SUFFIX = `
-
-Your previous reply could not be used. Reply with the <summary> block only: every heading exactly once, plain short facts under each (or none), no thinking, no preface, under 600 words.`;
-const RETRY_MAX_OUTPUT_TOKENS = 2048;
-
 /**
  * One sentence that must precede every persisted summary, whichever mode produced it: it tells
  * the model plainly that what follows is a host-written note about earlier conversation, not
@@ -1152,15 +1146,14 @@ function repeatsChatText(input: { envelopeBody: string; bodies: Map<string, stri
  * Judges one model reply. A summary is accepted only when the whole visible answer is one
  * <summary> block that is not a copy of text already in the chat: text around it, reasoning markup,
  * or a reply cut off at the output limit could carry content quoted from the transcript. A partial
- * summary (an optional section left out) is accepted only when `allowPartial` is set. Thinking is
- * never a source of summaries.
+ * summary (an optional section left out, every essential one present) is accepted, with the rest
+ * marked as not captured. Thinking is never a source of summaries.
  */
 function evaluateSummaryReply(input: {
   output: RawAssistantMessage;
   finishReason: FinishReason | null;
   requiredSections: readonly string[];
   essentialSections: readonly string[];
-  allowPartial: boolean;
   sourceText: string;
   userText: string;
 }): SummaryEvaluation {
@@ -1187,7 +1180,7 @@ function evaluateSummaryReply(input: {
   // Every check runs again on the rebuilt block, so a self-referential goal is still rejected.
   // A partial summary whose essential sections only say "none" would replace the context with nothing.
   const essentialIsNone = input.essentialSections.some(name => isNoneSectionBody(rebuilt.bodies.get(name)));
-  if (input.allowPartial && !essentialIsNone) {
+  if (!essentialIsNone) {
     const revalidated = validateCompactionSummary(rebuilt.block, input.requiredSections, input.userText);
     if (revalidated.reason === undefined) {
       return { summary: revalidated.summary, missingSections: rebuilt.missing };
@@ -1451,6 +1444,13 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // is wired into every non-child agent regardless of whether the conversation is engineering
     // work. Conversation mode otherwise. See CompactionSessionMode.
     const mode: CompactionSessionMode = boundOrSandboxCoding ? 'coding' : 'conversation';
+    yield {
+      type: EventType.AGENT_CONTEXT_COMPACTION_STARTED,
+      id: newEventId(),
+      created_at: new Date().toISOString(),
+      mode,
+      tokens_before: contextTokens,
+    };
 
     // An explicit threshold above the model's usable window must not size a tail that alone
     // overflows it, so the tail is sized from the threshold the window can actually reach.
@@ -1527,107 +1527,84 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       .join('\n');
     const transcriptMessage = { role: 'user' as const, content: `<transcript>\n${transcript}\n</transcript>` };
 
-    // One steady model serves both chat and compaction, so an unusable reply gets a single retry
-    // with a shorter, stricter prompt and thinking off before the truncation fallback.
+    // One summary call only: on a slow model a second full call can add minutes before the reply
+    // starts, so an unusable reply goes straight to the truncation fallback below.
     let summary = '';
     let missingSections: string[] = [];
     let validationReason: ContextCompactionEvent['reason'];
     let modelOutput = '';
-    // Usage of the latest reply only: an unusable first reply is reported as soon as it is judged.
-    let callUsage = getEmptyUsage();
-    for (const isRetry of [false, true]) {
-      const messages: LLMCreateParams['messages'] = [
-        { role: 'system', content: isRetry ? `${systemContent}${RETRY_PROMPT_SUFFIX}` : systemContent },
-        transcriptMessage,
-      ];
+    const messages: LLMCreateParams['messages'] = [{ role: 'system', content: systemContent }, transcriptMessage];
 
-      // Model identity is owned by modelClient — omit OpenAI's required `model` field.
-      const body: LLMCreateParams = {
-        messages,
-        stream: false,
-        max_tokens: MAX_COMPACTION_OUTPUT_TOKENS,
-        temperature: 0,
-      };
-      applySafeCompactionModelParams(body, this.modelParams);
-      body.messages = messages;
-      body.stream = false;
-      const maxTokens = boundedCompactionOutputTokens(this.modelParams);
-      Reflect.set(body, 'max_tokens', isRetry ? Math.min(maxTokens, RETRY_MAX_OUTPUT_TOKENS) : maxTokens);
-      if (isRetry) {
-        Reflect.set(body, 'enable_thinking', false);
-      }
+    // Model identity is owned by modelClient — omit OpenAI's required `model` field.
+    const body: LLMCreateParams = {
+      messages,
+      stream: false,
+      max_tokens: MAX_COMPACTION_OUTPUT_TOKENS,
+      temperature: 0,
+    };
+    applySafeCompactionModelParams(body, this.modelParams);
+    body.messages = messages;
+    body.stream = false;
+    Reflect.set(body, 'max_tokens', boundedCompactionOutputTokens(this.modelParams));
 
-      let response;
-      try {
-        response = await awaitWithAbort({
-          operation: this.modelClient.createNonStream(body),
-          signal: execution.signal,
-        });
-      } catch (error) {
-        // Compaction was interrupted by cancellation. Emit a blocked event to make the
-        // cancellation visible in the audit trail.
-        if (execution.signal?.aborted) {
-          yield this.compactionEvent({
-            mode,
-            tokensBefore: contextTokens,
-            tokensAfter: contextTokens,
-            summaryChars: 0,
-            outcome: 'skipped_blocked',
-          });
-          throw error;
-        }
-        // A failing summarizer must not kill the turn: the main model call may still succeed on the
-        // shortened context. Only the error name is logged; provider messages can echo request text.
-        this.logger?.warn(
-          `Compaction summarizer call failed (mode: ${mode}, error: ${error instanceof Error ? error.name : typeof error}); falling back to truncation`,
-        );
-        yield* this.truncationFallback({
-          mode,
-          context: execution.context,
-          recentTail,
-          activeRequestChars,
-          contextTokens,
-          reason: 'summarizer_failed',
-          discardedUsage: undefined,
-        });
-        return;
-      }
-      callUsage = response.usage;
-
-      const evaluation = evaluateSummaryReply({
-        output: response.output,
-        finishReason: response.finish_reason,
-        requiredSections,
-        essentialSections,
-        allowPartial: isRetry,
-        sourceText,
-        userText,
+    let response;
+    try {
+      response = await awaitWithAbort({
+        operation: this.modelClient.createNonStream(body),
+        signal: execution.signal,
       });
-      if ('reason' in evaluation) {
-        validationReason = evaluation.reason;
-        modelOutput = evaluation.modelOutput;
-      } else if (mode === 'conversation' && evaluation.summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
-        // Judged like any other unusable reply, so the retry (shorter by design) runs before the fallback.
-        validationReason = 'over_length';
-        modelOutput = answerText(response.output.content);
-      } else {
-        summary = evaluation.summary;
-        missingSections = evaluation.missingSections;
-        validationReason = undefined;
-        // Section names only, never their content.
-        if (evaluation.missingSections.length > 0 || isRetry) {
-          this.logger?.warn(
-            `Compaction summary accepted (mode: ${mode}, retry: ${String(isRetry)}, missing_sections: [${evaluation.missingSections.join(',')}])`,
-          );
-        }
-        break;
+    } catch (error) {
+      // Compaction was interrupted by cancellation. Emit a blocked event to make the
+      // cancellation visible in the audit trail.
+      if (execution.signal?.aborted) {
+        yield this.compactionEvent({
+          mode,
+          tokensBefore: contextTokens,
+          tokensAfter: contextTokens,
+          summaryChars: 0,
+          outcome: 'skipped_blocked',
+        });
+        throw error;
       }
-      if (!isRetry) {
-        // Billed even though the reply is discarded, and reported before the retry can be cancelled.
-        yield { type: InternalEventType.MODEL_USAGE, usage: callUsage };
-        callUsage = getEmptyUsage();
+      // A failing summarizer must not kill the turn: the main model call may still succeed on the
+      // shortened context. Only the error name is logged; provider messages can echo request text.
+      this.logger?.warn(
+        `Compaction summarizer call failed (mode: ${mode}, error: ${error instanceof Error ? error.name : typeof error}); falling back to truncation`,
+      );
+      yield* this.truncationFallback({
+        mode,
+        context: execution.context,
+        recentTail,
+        activeRequestChars,
+        contextTokens,
+        reason: 'summarizer_failed',
+        discardedUsage: undefined,
+      });
+      return;
+    }
+    const callUsage = response.usage;
+
+    const evaluation = evaluateSummaryReply({
+      output: response.output,
+      finishReason: response.finish_reason,
+      requiredSections,
+      essentialSections,
+      sourceText,
+      userText,
+    });
+    if ('reason' in evaluation) {
+      validationReason = evaluation.reason;
+      modelOutput = evaluation.modelOutput;
+    } else if (mode === 'conversation' && evaluation.summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
+      validationReason = 'over_length';
+      modelOutput = answerText(response.output.content);
+    } else {
+      summary = evaluation.summary;
+      missingSections = evaluation.missingSections;
+      // Section names only, never their content.
+      if (evaluation.missingSections.length > 0) {
         this.logger?.warn(
-          `Compaction summary unusable, retrying once (reason: ${validationReason}, mode: ${mode}, fingerprint: ${compactionValidationFingerprint(modelOutput, requiredSections)})`,
+          `Compaction summary accepted (mode: ${mode}, missing_sections: [${evaluation.missingSections.join(',')}])`,
         );
       }
     }
@@ -1641,7 +1618,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     }
 
     if (validationReason !== undefined) {
-      // The summary is unusable after the retry. Fall back to deterministic
+      // The summary is unusable. Fall back to deterministic
       // old-turn truncation instead of skipping: skipping leaves the context
       // over threshold, so the next turn retries (and bills) another doomed
       // summarization while the prompt grows unbounded. Truncation drops the

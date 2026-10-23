@@ -15,6 +15,7 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { isNewChatView } from '../utils/isNewChatView.js';
 import { ApprovalFocusProvider } from './approvalFocus.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
+import { ChatNoticeContainer } from './ChatNoticeContainer.js';
 import { ConnectionStatusContainer } from './ConnectionStatusContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
@@ -149,6 +150,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                                     )}
                                   </ThreadPrimitive.Messages>
                                   <TerminalErrorContainer />
+                                  <ChatNoticeContainer />
                                   <ResumeUnavailableContainer />
                                   <ConnectionStatusContainer />
                                 </MessageGroup>

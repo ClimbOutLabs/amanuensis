@@ -5,7 +5,6 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type {
   ISessionStore,
   Sessions,
-  SessionTitleSeed,
   TerminalTurnState,
   Turn,
   TurnStreamingEvent,
@@ -33,6 +32,7 @@ import {
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
+  newEventId,
   rawSandboxId,
   redisKey,
   SandboxError,
@@ -62,7 +62,6 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -82,13 +81,14 @@ import {
   listTurnsRoute,
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { mailAccountDirectory } from '../runtime/mailConnector';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -99,9 +99,9 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
-import { resolveSummarizationModelFqn } from '../runtime/memory/memorySummarize';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import { resolveModelContextLength } from '../runtime/modelContextLength';
 import {
   flushModelUsage,
   modelIdentity,
@@ -138,7 +138,6 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import { applyAutoSessionTitle, truncateSessionTitle, type AutoSessionTitleTarget } from '../runtime/sessionTitle';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -146,10 +145,15 @@ import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import {
+  raceTurnSetup,
+  TURN_COULD_NOT_START_MESSAGE,
+  TurnCouldNotStartError,
+  TurnStartBound,
+} from '../runtime/turnStartBound';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { TENANT_ID } from '../tenancy';
 import { canReadAgentBoundResource } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
 
@@ -226,7 +230,12 @@ export const TurnConflictCode = {
   TURN_ALREADY_EXISTS: 'turn_already_exists',
   APPROVAL_CONFLICT: 'approval_conflict',
   APPROVAL_REQUEST_ENDED: 'approval_request_ended',
+  TURN_COULD_NOT_START: 'turn_could_not_start',
 } as const;
+
+/** What a person reads when the chat refuses a new message because its last reply is still running. */
+const PREVIOUS_TURN_RUNNING_MESSAGE =
+  'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.';
 
 /** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
 export type HeldActionConflictCode = `held_action_${HeldRefusalReason}`;
@@ -259,8 +268,6 @@ export interface TurnsRouterDeps {
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
   turnDrains: TurnDrainRegistry;
-  /** Offline mode gates the chat title call. */
-  sentinelSettingsStore: ISentinelSettingsStore;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
@@ -307,7 +314,6 @@ export type BeginTurnExecutionDeps = Pick<
   | 'globalSettingsStore'
   | 'mcpCatalog'
   | 'tokenFactoryBudget'
-  | 'sentinelSettingsStore'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -529,6 +535,15 @@ function createTurnResolver(deps: {
           modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
+          // Sizes compaction and the request guard; unknown leaves both on their fixed fallbacks.
+          // The configured limit belongs to the configured model, not to a forced Token Factory one.
+          modelProperties: {
+            contextLength: await resolveModelContextLength({
+              providerConfig: routed.providerConfig,
+              configuredContextLength:
+                routed.providerConfig === resolved.providerConfig ? resolved.modelProperties.context_length : undefined,
+            }),
+          },
         };
       },
       mcp: async name => {
@@ -558,6 +573,9 @@ function createTurnResolver(deps: {
               : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
+      setUpConnectorNames: async () =>
+        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+      mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
@@ -841,6 +859,29 @@ function createTurnResolver(deps: {
   );
 }
 
+const MAX_SESSION_TITLE_LENGTH = 50;
+
+/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
+const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
+ * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
+ * ZWJ sequences, which read as one unit but span several) are dropped whole.
+ */
+function truncateSessionTitle(title: string): string {
+  let truncated = '';
+  let length = 0;
+  for (const { segment } of titleSegmenter.segment(title)) {
+    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
+      break;
+    }
+    truncated += segment;
+    length += segment.length;
+  }
+  return truncated;
+}
+
 /**
  * Derives a session title from the first user message of the first turn. Returns the
  * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
@@ -871,77 +912,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/** A chat's first-message title, or null when the message has no usable text. */
-export function firstMessageTitleSeed(input: TurnInputItem[] | undefined): SessionTitleSeed | null {
-  const title = deriveSessionTitle(input);
-  return title === undefined ? null : { title, source: 'first_message' };
-}
-
-/**
- * The chat-title target for a turn: present only for a chat's first interactive turn with a
- * text message, when the chat is online and a helper model resolves. Scheduled turns never get a
- * generated title; their fixed title is seeded at create time instead.
- */
-async function resolveAutoSessionTitleTarget(params: {
-  session: SessionHandle<SessionCustom, TurnCustom>;
-  input: TurnInputItem[] | undefined;
-  unattended: boolean | undefined;
-  subjectId: string;
-  personaModelName: string | undefined;
-  modelProviderStore: IModelProviderStore;
-  agentStore: IAgentStore;
-  sentinelSettingsStore: ISentinelSettingsStore;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
-  tokenFactoryBudget: TokenFactoryBudget;
-  modelUsage: TurnModelUsage;
-  logger: Logger;
-}): Promise<AutoSessionTitleTarget | undefined> {
-  const { session, input, unattended, subjectId, logger } = params;
-  if (unattended === true || session.record.source !== null || session.record.last_turn_id !== null) {
-    return undefined;
-  }
-  const userText = extractUserMessageText(input ?? []);
-  if (userText.trim() === '') {
-    return undefined;
-  }
-  // A failed lookup only costs the chat its generated title; the turn itself must still run.
-  let modelFqn: string | undefined;
-  try {
-    const sentinel = await params.sentinelSettingsStore.get({ tenant_id: TENANT_ID, created_by: subjectId });
-    if (sentinel.offline_mode) {
-      logger.info('Chat title not generated: offline mode is on', { sessionId: session.session_id });
-      return undefined;
-    }
-    modelFqn = await resolveSummarizationModelFqn({
-      tenantId: session.tenant_id,
-      personaModelName: params.personaModelName,
-      sessionAgent: session.record.agent,
-      agentStore: params.agentStore,
-      helperFqn: turnHelperModelFqn(),
-    });
-  } catch (error) {
-    logger.info('Chat title not generated: the helper model did not resolve', {
-      sessionId: session.session_id,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
-  if (modelFqn === undefined || modelFqn.trim() === '') {
-    return undefined;
-  }
-  return {
-    store: params.sessionStore,
-    tenantId: session.tenant_id,
-    sessionId: session.session_id,
-    userText,
-    modelFqn,
-    modelProviderStore: params.modelProviderStore,
-    tokenFactoryBudget: params.tokenFactoryBudget,
-    modelUsage: params.modelUsage,
-    logger,
-  };
 }
 
 /** True when any user message in a create-turn input carries an attached file. */
@@ -1139,6 +1109,8 @@ export interface DrainTurnEventsInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  /** Released by the turn's first model work. */
+  startBound?: TurnStartBound | undefined;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
@@ -1162,8 +1134,6 @@ export interface DrainTurnEventsInput {
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
   modelUsage?: ModelUsageDrainMember | undefined;
-  /** Present only for a chat's first interactive turn; the drain names the chat after its reply. */
-  auto_title?: AutoSessionTitleTarget | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
@@ -1181,6 +1151,15 @@ export interface DrainTurnEventsInput {
       }
     | undefined;
 }
+
+/** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
+const MODEL_WORK_EVENT_TYPES: ReadonlySet<string> = new Set([
+  EventType.MODEL_MESSAGE_DELTA,
+  EventType.MODEL_MESSAGE,
+  EventType.TOOL_EXECUTION_STARTED,
+  EventType.TOOL_RESPONSE,
+  EventType.TOOL_RESPONSE_V2,
+]);
 
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
   // Registered before the stream runs so the chat's next turn, which freezes this one first,
@@ -1207,7 +1186,8 @@ async function runTurnEventDrain(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, markArtifactsCaptured } = params;
-  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
+    input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1218,6 +1198,9 @@ async function runTurnEventDrain(params: {
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
+      if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
+        startBound?.markStarted();
+      }
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
         ingestedToolOutput = true;
       }
@@ -1254,11 +1237,12 @@ async function runTurnEventDrain(params: {
       markArtifactsCaptured();
     }
     executionDeadline.dispose();
+    startBound?.dispose();
   }
 }
 
 /**
- * The work a finished turn does after its answer: artifacts, usage, title, memory, profile learning.
+ * The work a finished turn does after its answer: artifacts, usage, memory, profile learning.
  * Never throws; a failure is logged.
  */
 async function runTurnFollowUp(params: {
@@ -1268,8 +1252,7 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, auto_title } =
-    input;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1293,13 +1276,6 @@ async function runTurnFollowUp(params: {
       }
     };
     await flushUsage();
-    if (auto_title !== undefined) {
-      // Never blocks the reply: the reply is already complete on the stream.
-      await applyAutoSessionTitle({
-        ...auto_title,
-        assistantText: formatAssistantMessageText(state.output?.content),
-      });
-    }
     if (memory !== undefined) {
       // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
@@ -1335,7 +1311,7 @@ async function runTurnFollowUp(params: {
         logger,
       });
     }
-    // The title, summarization and profile learning calls above record after the first flush.
+    // The summarization and profile learning calls above record after the first flush.
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
@@ -1377,18 +1353,16 @@ async function waitForTurnFollowUp(params: {
 const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
 
 /**
- * Starts a created turn's clock. Every path that runs a turn calls this after createTurn froze the
- * previous turn and before any tool runs: it first waits, up to a short limit, for the chat's
- * previous turn to save its sandbox files, since this turn reuses that sandbox. The wait never
- * covers that turn's model calls, and it does not count against this turn's deadline.
+ * Every path that runs a turn calls this after createTurn froze the previous turn and before any
+ * tool runs: it waits, up to a short limit, for the chat's previous turn to save its sandbox files,
+ * since this turn reuses that sandbox. The wait never covers that turn's model calls.
  */
 export async function armTurnExecution(params: {
   turnDrains: TurnDrainRegistry;
   sessionId: string;
-  executionDeadline: TurnExecutionDeadline;
   logger: Logger;
 }): Promise<void> {
-  const { turnDrains, sessionId, executionDeadline, logger } = params;
+  const { turnDrains, sessionId, logger } = params;
   const stillRunning = await turnDrains.waitForArtifactCapture({
     sessionId,
     timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
@@ -1400,7 +1374,103 @@ export async function armTurnExecution(params: {
       timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
     });
   }
+}
+
+/**
+ * A turn's clocks, started when its request is accepted: the execution deadline and the limit on
+ * reaching its first sign of work. Both run before the turn exists, so no setup wait is unbounded.
+ */
+interface TurnClocks {
+  abortController: AbortController;
+  executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
+}
+
+/** A chat request's turn from arrival: its clocks, its admission, and the hand-off of both clocks to the drain. */
+interface AcceptedTurn extends TurnClocks {
+  admission: TurnAdmission;
+  handOffToDrain: () => void;
+}
+
+function startTurnClocks(input: { sessionId: string; logger: Logger }): TurnClocks {
+  const abortController = new AbortController();
+  const executionDeadline = new TurnExecutionDeadline({
+    abortController,
+    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
+    finalization_buffer_ms: 30_000,
+  });
+  const startBound = new TurnStartBound({
+    abortController,
+    timeoutMs: configuration.TURN_START_TIMEOUT_MS,
+    logger: input.logger,
+    sessionId: input.sessionId,
+  });
   executionDeadline.arm();
+  startBound.arm();
+  return { abortController, executionDeadline, startBound };
+}
+
+/**
+ * Ends a created turn that never showed work: records the plain error first, so the chat is free
+ * even if the step it is stuck on ignores the abort, then aborts it. When the run still has not
+ * settled, open views are told the turn is over.
+ */
+async function endTurnThatCouldNotStart(input: {
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  activeTurns: ActiveTurnRegistry;
+  turn: TurnHandle<TurnCustom>;
+  turnEventStream: EventSubscription<TurnStreamingEvent>;
+  sessionId: string;
+}): Promise<void> {
+  const { sessionStore, activeTurns, turn, turnEventStream, sessionId } = input;
+  const completedAt = new Date().toISOString();
+  const state: TerminalTurnState = {
+    status: 'error',
+    message: TURN_COULD_NOT_START_MESSAGE,
+    completed_at: completedAt,
+  };
+  const turnDone: TurnStreamingEvent = {
+    type: EventType.TURN_DONE,
+    id: newEventId(),
+    created_at: completedAt,
+    state,
+    thread_id: null,
+  };
+  try {
+    await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turn.id, state, turn_done_event: turnDone });
+  } catch (error) {
+    if (!(error instanceof SessionStoreConflictError)) {
+      throw error;
+    }
+    // It ended on its own in the meantime; nothing to record.
+    return;
+  }
+  await turn.cancelAndSettle(CancellationReason.ServerExecutionTimeout);
+  if (
+    activeTurns.cancelIfRunning({ sessionId, turnId: turn.id, abortReason: CancellationReason.ServerExecutionTimeout })
+  ) {
+    await turnEventStream.put(turnDone, { streamTTLSeconds: streamTTLSecondsFor(turnDone) });
+  }
+}
+
+/** Ends a turn whose setup finished only after the reply was refused as unable to start. */
+async function abandonTurnThatCouldNotStart(input: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  turn: TurnHandle<TurnCustom>;
+  resolver: { close(): Promise<void> };
+  abortController: AbortController;
+  logger: Logger;
+}): Promise<void> {
+  input.abortController.abort(CancellationReason.Abandoned);
+  input.turn.forgetUnstarted();
+  await input.resolver.close().catch((closeError: unknown) => {
+    input.logger.warn('Failed to close turn resources for a turn that could not start', {
+      sessionId: input.session.session_id,
+      turnId: input.turn.id,
+      ...extractErrorLogFields(closeError),
+    });
+  });
+  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.Abandoned });
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1410,11 +1480,11 @@ export interface TurnEventDrainInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
-  auto_title?: AutoSessionTitleTarget | undefined;
 }
 
 /**
@@ -1429,131 +1499,151 @@ export async function beginTurnExecution(params: {
   deps: BeginTurnExecutionDeps;
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
-  /** A scheduled chat's fixed title; interactive chats use their first message. */
-  title_seed?: SessionTitleSeed | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
+  const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
+  try {
+    return await beginAcceptedTurnExecution({ ...params, clocks });
+  } catch (error) {
+    clocks.executionDeadline.dispose();
+    clocks.startBound.dispose();
+    throw error;
+  }
+}
+
+async function beginAcceptedTurnExecution(
+  params: Parameters<typeof beginTurnExecution>[0] & { clocks: TurnClocks },
+): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
+  const { abortController, executionDeadline, startBound } = params.clocks;
   const sessionId = session.session_id;
   const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
 
-  const abortController = new AbortController();
-  const executionDeadline = new TurnExecutionDeadline({
-    abortController,
-    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-    finalization_buffer_ms: 30_000,
-  });
   const tenant_id = session.tenant_id;
   const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
-  // One read per turn: the persisted override (or env default) applies to the whole turn.
-  const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
-    globalSettingsStore: deps.globalSettingsStore,
-    logger: deps.logger,
-  });
-  // Same one-read-per-turn contract for turn summarization: resolved once here and shared
-  // with the drain hook, so an off flag costs nothing and every non-running outcome is
-  // logged instead of silently retaining verbatim.
-  const memorySummarize = await resolveTurnSummarizeContext({
-    globalSettingsStore: deps.globalSettingsStore,
+  const setup = await raceTurnSetup({
+    signal: abortController.signal,
+    setup: async () => {
+      // One read per turn: the persisted override (or env default) applies to the whole turn.
+      const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
+      // Same one-read-per-turn contract for turn summarization: resolved once here and shared
+      // with the drain hook, so an off flag costs nothing and every non-running outcome is
+      // logged instead of silently retaining verbatim.
+      const memorySummarize = await resolveTurnSummarizeContext({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+        sessionId,
+        tenantId: tenant_id,
+        modelProviderStore: deps.modelProviderStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+        agentStore: deps.agentStore,
+        personaModelName: deps.personaContext?.model_name,
+        sessionAgent: session.record.agent,
+        memoryClientPresent: deps.memoryClient !== undefined,
+        helperFqn: turnHelperModelFqn(),
+      });
+      // Same one-read-per-turn contract for the recall screen: the Settings toggle's
+      // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
+      const memoryScreenSetting = await readMemoryScreenSetting({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
+      const effectiveMemorySettings = applyMemoryScreenOverride(
+        deps.memorySettings,
+        memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
+      );
+      const internalSources = await resolveTurnInternalSources({
+        session,
+        previousTurnId,
+        persona:
+          deps.personaContext === undefined
+            ? undefined
+            : { id: deps.personaContext.persona_id, modelName: deps.personaContext.model_name },
+        turnInput: input,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+        modelProviderStore: deps.modelProviderStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+        helperFqn: turnHelperModelFqn(),
+        logger: deps.logger,
+      });
+      const resolver = createTurnResolver({
+        mcpCatalog: deps.mcpCatalog,
+        mcpServerStore: deps.mcpServerStore,
+        tokenStore: deps.tokenStore,
+        skillStore: deps.skillStore,
+        sandboxProviderStore: deps.sandboxProviderStore,
+        sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+        agentStore: deps.agentStore,
+        modelProviderStore: deps.modelProviderStore,
+        repositoryStore: deps.repositoryStore,
+        sessionStore: deps.sessionStore,
+        spaceStore: deps.spaceStore,
+        googleConnectionStore: deps.googleConnectionStore,
+        logger: deps.logger,
+        signal: abortController.signal,
+        userRef,
+        session,
+        turnId,
+        startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
+        boundRepository: deps.boundRepository,
+        serverSandboxAvailable: await readServerSandboxAvailable({
+          store: deps.sandboxProviderStore,
+          tenant_id: session.tenant_id,
+          logger: deps.logger,
+        }),
+        personalizationProfile: deps.personalizationProfile,
+        personaContext: deps.personaContext,
+        personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
+        personaKnowledgeHits: internalSources.personaKnowledgeHits,
+        internalSourceState: internalSources.internalSourceState,
+        memoryClient: deps.memoryClient,
+        memoryProviderServerName: deps.memoryProviderServerName,
+        memorySettings: effectiveMemorySettings,
+        previousTurnId: deps.previousTurnId ?? null,
+        sessionTitle: deps.sessionTitle,
+        clientTimezone: deps.clientTimezone,
+        toolOutputScreenEnabled,
+        turnArtifactStore: deps.turnArtifactStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+      });
+
+      // First turn only: derive the title from the first user message. The store
+      // never overwrites an existing title.
+      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+
+      const turn = await session.createTurn({
+        turn_id: turnId,
+        input,
+        previous_turn_id: previousTurnId,
+        signal: abortController.signal,
+        resolver,
+        custom: { library_near_miss: internalSources.libraryNearMiss },
+        update_session_title_if_not_exist: title,
+        on_command_execution_started: execution => {
+          executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
+        },
+        command_execution_owner_id: configuration.EXECUTOR_ID,
+        unattended: params.unattended,
+      });
+      return { turn, resolver, memorySummarize };
+    },
+    discard: ({ turn, resolver }) =>
+      abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
     logger: deps.logger,
     sessionId,
-    tenantId: tenant_id,
-    modelProviderStore: deps.modelProviderStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    agentStore: deps.agentStore,
-    personaModelName: deps.personaContext?.model_name,
-    sessionAgent: session.record.agent,
-    memoryClientPresent: deps.memoryClient !== undefined,
-    helperFqn: turnHelperModelFqn(),
   });
-  // Same one-read-per-turn contract for the recall screen: the Settings toggle's
-  // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
-  const memoryScreenSetting = await readMemoryScreenSetting({
-    globalSettingsStore: deps.globalSettingsStore,
-    logger: deps.logger,
-  });
-  const effectiveMemorySettings = applyMemoryScreenOverride(
-    deps.memorySettings,
-    memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-  );
-  const internalSources = await resolveTurnInternalSources({
-    session,
-    previousTurnId,
-    persona:
-      deps.personaContext === undefined
-        ? undefined
-        : { id: deps.personaContext.persona_id, modelName: deps.personaContext.model_name },
-    turnInput: input,
-    knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-    modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-    modelProviderStore: deps.modelProviderStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    helperFqn: turnHelperModelFqn(),
-    logger: deps.logger,
-  });
-  const resolver = createTurnResolver({
-    mcpCatalog: deps.mcpCatalog,
-    mcpServerStore: deps.mcpServerStore,
-    tokenStore: deps.tokenStore,
-    skillStore: deps.skillStore,
-    sandboxProviderStore: deps.sandboxProviderStore,
-    sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
-    agentStore: deps.agentStore,
-    modelProviderStore: deps.modelProviderStore,
-    repositoryStore: deps.repositoryStore,
-    sessionStore: deps.sessionStore,
-    spaceStore: deps.spaceStore,
-    googleConnectionStore: deps.googleConnectionStore,
-    logger: deps.logger,
-    signal: abortController.signal,
-    userRef,
-    session,
-    turnId,
-    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
-    boundRepository: deps.boundRepository,
-    serverSandboxAvailable: await readServerSandboxAvailable({
-      store: deps.sandboxProviderStore,
-      tenant_id: session.tenant_id,
-      logger: deps.logger,
-    }),
-    personalizationProfile: deps.personalizationProfile,
-    personaContext: deps.personaContext,
-    personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
-    personaKnowledgeHits: internalSources.personaKnowledgeHits,
-    internalSourceState: internalSources.internalSourceState,
-    memoryClient: deps.memoryClient,
-    memoryProviderServerName: deps.memoryProviderServerName,
-    memorySettings: effectiveMemorySettings,
-    previousTurnId: deps.previousTurnId ?? null,
-    sessionTitle: deps.sessionTitle,
-    clientTimezone: deps.clientTimezone,
-    toolOutputScreenEnabled,
-    turnArtifactStore: deps.turnArtifactStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-  });
+  if (setup.status === 'could_not_start') {
+    throw new TurnCouldNotStartError();
+  }
+  const { turn, memorySummarize } = setup.value;
 
-  // First turn only: a scheduled chat's fixed title, else the first message. The store
-  // never overwrites an existing title.
-  const titleSeed = session.record.last_turn_id === null ? (params.title_seed ?? firstMessageTitleSeed(input)) : null;
-
-  const turn = await session.createTurn({
-    turn_id: turnId,
-    input,
-    previous_turn_id: previousTurnId,
-    signal: abortController.signal,
-    resolver,
-    custom: { library_near_miss: internalSources.libraryNearMiss },
-    update_session_title_if_not_exist: titleSeed,
-    on_command_execution_started: execution => {
-      executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
-    },
-    command_execution_owner_id: configuration.EXECUTOR_ID,
-    unattended: params.unattended,
-  });
-
-  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
+  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
   const trackedStream = deps.activeTurns.track({
     sessionId,
@@ -1564,20 +1654,15 @@ export async function beginTurnExecution(params: {
 
   // Held for the whole turn; the stream's sequence counter dies with it.
   const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenant_id, sessionId, turn.id));
-  const autoTitle = await resolveAutoSessionTitleTarget({
-    session,
-    input,
-    unattended: params.unattended,
-    subjectId: userRef,
-    personaModelName: deps.personaContext?.model_name,
-    modelProviderStore: deps.modelProviderStore,
-    agentStore: deps.agentStore,
-    sentinelSettingsStore: deps.sentinelSettingsStore,
-    sessionStore: deps.sessionStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    logger: deps.logger,
-  });
+  await startBound.whenExpired(() =>
+    endTurnThatCouldNotStart({
+      sessionStore: deps.sessionStore,
+      activeTurns: deps.activeTurns,
+      turn,
+      turnEventStream,
+      sessionId,
+    }),
+  );
 
   return {
     turn,
@@ -1587,10 +1672,10 @@ export async function beginTurnExecution(params: {
       sessionId,
       turnId: turn.id,
       executionDeadline,
+      startBound,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-      auto_title: autoTitle,
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1616,7 +1701,6 @@ export async function startTurnInProcess(params: {
   userRef: string;
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
-  title_seed?: SessionTitleSeed | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2022,7 +2106,27 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
   };
 
-  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+  const couldNotStartResponse = (c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0]) =>
+    c.json(
+      {
+        error: {
+          message: TURN_COULD_NOT_START_MESSAGE,
+          type: 'conflict',
+          code: TurnConflictCode.TURN_COULD_NOT_START,
+        },
+      },
+      409,
+    );
+
+  /**
+   * Everything before the turn runs, its creation included. Resolves to an early answer, or to the
+   * created turn with the step that runs it.
+   */
+  const prepareChatTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    accepted: AcceptedTurn,
+  ) => {
+    const { abortController, executionDeadline, startBound, admission, handOffToDrain } = accepted;
     const { session_id: sessionId } = c.req.valid('param');
     const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
@@ -2326,12 +2430,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       helperFqn: turnHelperModelFqn(),
     });
 
-    const abortController = new AbortController();
-    const executionDeadline = new TurnExecutionDeadline({
-      abortController,
-      default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-      finalization_buffer_ms: 30_000,
-    });
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
     const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
@@ -2428,7 +2526,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
     // First turn only: derive the title from the first user message. The store
     // never overwrites an existing title.
-    const titleSeed = session.record.last_turn_id === null ? firstMessageTitleSeed(body.input) : null;
+    const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
@@ -2436,6 +2534,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previous_turn_id: body.previous_turn_id,
       input: body.input,
     });
+
+    // The reply was already refused as unable to start; do not create it now.
+    if (abortController.signal.aborted) {
+      await resolver.close().catch((closeError: unknown) => {
+        deps.logger.warn('Failed to close turn resources for a reply that could not start', {
+          sessionId,
+          ...extractErrorLogFields(closeError),
+        });
+      });
+      return couldNotStartResponse(c);
+    }
 
     let turn;
     try {
@@ -2446,7 +2555,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         signal: abortController.signal,
         resolver,
         custom: turnCustom,
-        update_session_title_if_not_exist: titleSeed,
+        update_session_title_if_not_exist: title,
         on_command_execution_started: execution => {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
@@ -2477,7 +2586,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             }
           }
         }
-        return c.json({ error: { message: error.message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
+        // The store's own text names turn ids; a person reads this one.
+        const message = error instanceof PreviousTurnRunningError ? PREVIOUS_TURN_RUNNING_MESSAGE : error.message;
+        return c.json({ error: { message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
       }
       if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
         switch (error.code) {
@@ -2684,105 +2795,158 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
     }
 
-    await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
+    const createdTurn = turn;
+    return {
+      abandon: () => abandonUnstartedTurn('the reply could not start in time'),
+      run: async () => {
+        await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
-    const trackedStream = deps.activeTurns.track({
-      sessionId,
-      turnId: turn.id,
-      abortController,
-      stream: turn.stream(),
-    });
+        const trackedStream = deps.activeTurns.track({
+          sessionId,
+          turnId: createdTurn.id,
+          abortController,
+          stream: createdTurn.stream(),
+          admission,
+        });
 
-    // Held for the whole turn; the stream's sequence counter dies with it.
-    const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turn.id));
-    const autoTitle = await resolveAutoSessionTitleTarget({
-      session,
-      input: body.input,
-      unattended: undefined,
-      subjectId: requestContext.subject.id,
-      personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-      modelProviderStore,
-      agentStore,
-      sentinelSettingsStore: deps.sentinelSettingsStore,
-      sessionStore: deps.sessionStore,
-      tokenFactoryBudget: deps.tokenFactoryBudget,
-      modelUsage,
-      logger: deps.logger,
-    });
-    const drainInput = {
-      trackedStream,
-      turnEventStream,
-      sessionId,
-      turnId: turn.id,
-      executionDeadline,
-      logger: deps.logger,
-      turnDrains: deps.turnDrains,
-      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-      auto_title: autoTitle,
-      memory:
-        memoryClient === undefined
-          ? undefined
-          : {
-              client: memoryClient,
-              userText: extractUserMessageText(body.input),
-              attachedFiles: inputAttachesFiles(body.input ?? []),
-              sessionTitle: sessionTitleForMemory,
-              // Resolved once on the create-turn path above; absent means verbatim.
-              summarize: memorySummarize,
-              outcomeLog: {
-                personaName: vaultScope?.personaName ?? 'shared',
-                personaStore: deps.personaStore,
-                tenantId: requestContext.tenant_id,
-              },
+        // Held for the whole turn; the stream's sequence counter dies with it.
+        const turnEventStream = deps.eventSubscriptions.get(
+          turnStreamId(requestContext.tenant_id, sessionId, createdTurn.id),
+        );
+        await startBound.whenExpired(() =>
+          endTurnThatCouldNotStart({
+            sessionStore: deps.sessionStore,
+            activeTurns: deps.activeTurns,
+            turn: createdTurn,
+            turnEventStream,
+            sessionId,
+          }),
+        );
+        const drainInput = {
+          trackedStream,
+          turnEventStream,
+          sessionId,
+          turnId: createdTurn.id,
+          executionDeadline,
+          startBound,
+          logger: deps.logger,
+          turnDrains: deps.turnDrains,
+          modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          memory:
+            memoryClient === undefined
+              ? undefined
+              : {
+                  client: memoryClient,
+                  userText: extractUserMessageText(body.input),
+                  attachedFiles: inputAttachesFiles(body.input ?? []),
+                  sessionTitle: sessionTitleForMemory,
+                  // Resolved once on the create-turn path above; absent means verbatim.
+                  summarize: memorySummarize,
+                  outcomeLog: {
+                    personaName: vaultScope?.personaName ?? 'shared',
+                    personaStore: deps.personaStore,
+                    tenantId: requestContext.tenant_id,
+                  },
+                },
+          profileLearning,
+          artifacts: {
+            turnArtifactStore: deps.turnArtifactStore,
+            sandboxProviderStore,
+            sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+            sessions: deps.sessions,
+            tenantId: requestContext.tenant_id,
+          },
+        };
+
+        // From here the drain ends both clocks.
+        handOffToDrain();
+
+        // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
+        // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
+        // cannot 412 before the resumable stream exists.
+        if (!body.stream) {
+          const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } =
+            Promise.withResolvers<undefined>();
+          void drainTurnEvents({
+            ...drainInput,
+            onEvent: () => {
+              markFirstEventDualWritten(undefined);
+              return Promise.resolve();
             },
-      profileLearning,
-      artifacts: {
-        turnArtifactStore: deps.turnArtifactStore,
-        sandboxProviderStore,
-        sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
-        sessions: deps.sessions,
-        tenantId: requestContext.tenant_id,
+          }).finally(() => {
+            markFirstEventDualWritten(undefined);
+          });
+          await firstEventDualWritten;
+          return c.json({ data: toWireTurn(createdTurn.record) }, 200);
+        }
+
+        let shouldWriteToSSEStream = true;
+        return streamSSE(c, async stream => {
+          stream.onAbort(() => {
+            shouldWriteToSSEStream = false;
+          });
+          await drainTurnEvents({
+            ...drainInput,
+            onEvent: async (event, sequenceNumber) => {
+              if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
+                try {
+                  await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
+                } catch (error) {
+                  deps.logger.error('SSE stream write error', extractErrorLogFields(error));
+                  shouldWriteToSSEStream = false;
+                }
+              }
+            },
+          });
+          await stream.close();
+        });
       },
     };
+  };
 
-    // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
-    // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
-    // cannot 412 before the resumable stream exists.
-    if (!body.stream) {
-      const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
-      void drainTurnEvents({
-        ...drainInput,
-        onEvent: () => {
-          markFirstEventDualWritten(undefined);
-          return Promise.resolve();
-        },
-      }).finally(() => {
-        markFirstEventDualWritten(undefined);
-      });
-      await firstEventDualWritten;
-      return c.json({ data: toWireTurn(turn.record) }, 200);
-    }
-
-    let shouldWriteToSSEStream = true;
-    return streamSSE(c, async stream => {
-      stream.onAbort(() => {
-        shouldWriteToSSEStream = false;
-      });
-      await drainTurnEvents({
-        ...drainInput,
-        onEvent: async (event, sequenceNumber) => {
-          if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
-            try {
-              await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
-            } catch (error) {
-              deps.logger.error('SSE stream write error', extractErrorLogFields(error));
-              shouldWriteToSSEStream = false;
-            }
-          }
-        },
-      });
-      await stream.close();
+  const executeAcceptedTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    accepted: AcceptedTurn,
+  ) => {
+    const setup = await raceTurnSetup({
+      signal: accepted.abortController.signal,
+      setup: () => prepareChatTurn(c, accepted),
+      discard: async prepared => {
+        if (!(prepared instanceof Response)) {
+          await prepared.abandon();
+        }
+      },
+      logger: deps.logger,
+      sessionId: c.req.valid('param').session_id,
     });
+    if (setup.status === 'could_not_start') {
+      return couldNotStartResponse(c);
+    }
+    return setup.value instanceof Response ? setup.value : setup.value.run();
+  };
+
+  // From arrival the turn is registered, so a Cancel that comes before it exists still stops it, and
+  // its clocks run, so it is bounded from the moment it is accepted.
+  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+    const sessionId = c.req.valid('param').session_id;
+    const admission = deps.activeTurns.admit({ sessionId });
+    const clocks = startTurnClocks({ sessionId, logger: deps.logger });
+    const ownership = { drainOwnsClocks: false };
+    try {
+      return await executeAcceptedTurn(c, {
+        ...clocks,
+        admission,
+        handOffToDrain: () => {
+          ownership.drainOwnsClocks = true;
+        },
+      });
+    } finally {
+      admission.release();
+      if (!ownership.drainOwnsClocks) {
+        clocks.executionDeadline.dispose();
+        clocks.startBound.dispose();
+      }
+    }
   };
 
   const subscribeTurnHandler: RouteHandler<typeof subscribeTurnRoute> = async c => {

@@ -4,12 +4,7 @@ import { MAIN_THREAD_ID, type TurnRecord } from '../../src/agent-session/models/
 import { AgentSpecSchema, type AgentSpec } from '../../src/agent-session/schemas/agentSpec';
 import { EventType } from '../../src/agent-session/schemas/events';
 import { CancellationReason, type TerminalTurnState } from '../../src/agent-session/schemas/turn';
-import type {
-  CreateTurnInput,
-  NewThreadInit,
-  SessionTitleSeed,
-  TurnContextAppend,
-} from '../../src/agent-session/store/ISessionStore';
+import type { CreateTurnInput, NewThreadInit, TurnContextAppend } from '../../src/agent-session/store/ISessionStore';
 import { TurnResourceResolver } from '../../src/agent-session/TurnResourceResolver';
 import type { AgentCapability } from '../../src/core/capabilities/AgentCapability';
 import { newEventId } from '../../src/core/events/schema';
@@ -36,7 +31,7 @@ export function mintTestTurnId(): string {
 export function makeAgentSpec(
   overrides: {
     instructions?: string;
-    model?: { name: string };
+    model?: { name: string; params?: Record<string, unknown> };
     auxiliary_models?: {
       compaction?: { name: string; params?: Record<string, unknown> };
       delegation?: { name: string; params?: Record<string, unknown> };
@@ -206,7 +201,7 @@ export interface MakeCreateTurnInputOptions<TTurnCustom extends object = Record<
   task_states?: CreateTurnInput<TTurnCustom>['task_states'];
   approval_grants?: string[];
   require_previous_turn_is_tip?: boolean;
-  update_session_title_if_not_exist?: SessionTitleSeed;
+  update_session_title_if_not_exist?: string;
   sandbox_info?: CreateTurnInput<TTurnCustom>['sandbox_info'];
 }
 

@@ -29,7 +29,6 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ListSessionsResponseSchema } from '../../../src/schemas/session';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 describe('public CRUD after session deletion', () => {
@@ -78,7 +77,6 @@ describe('public CRUD after session deletion', () => {
     app.route(
       '/',
       createTurnsRouter({
-        sentinelSettingsStore: new InMemorySentinelSettingsStore(),
         mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
         tokenFactoryBudget: uncappedTokenFactoryBudget,

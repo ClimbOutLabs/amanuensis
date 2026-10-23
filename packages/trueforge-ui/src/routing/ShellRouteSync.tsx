@@ -214,7 +214,10 @@ export function ShellRouteSync({
           return;
         case 'session':
           shell.setLibraryOpen(false);
-          if (shell.pendingSessionId === target.sessionId || activeRemoteId === target.sessionId) return;
+          // Only the chat on screen is already there. A sidebar switch leaves `pendingSessionId` on the
+          // session the shell last opened, so it counts only while that open is still in flight.
+          if (activeRemoteId === target.sessionId) return;
+          if (activeRemoteId == null && shell.pendingSessionId === target.sessionId) return;
           openSession(target.sessionId);
           return;
         case 'agent':
