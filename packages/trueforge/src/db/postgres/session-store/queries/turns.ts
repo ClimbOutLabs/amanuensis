@@ -9,6 +9,7 @@ import { assertCreateTurnThreadDelta } from '@truefoundry/trueforge-core/agent-s
 import type {
   FreezeAndGetTurnInput,
   NewThreadInit,
+  SessionTitleSeed,
   ThreadTaskStateInit,
   ThreadToolCallMemoInit,
   TurnRecordWithoutSnapshot,
@@ -150,7 +151,7 @@ export interface CreateTurnInput {
   tool_call_memos: ThreadToolCallMemoInit[];
   task_states: ThreadTaskStateInit[];
   last_activity_timestamp_ms: number;
-  update_session_title_if_not_exist: string | null;
+  update_session_title_if_not_exist: SessionTitleSeed | null;
   mcp_servers: Record<string, MCPServerInitInfo> | null;
   sandbox_info: SandboxInfo | null;
 }
@@ -510,7 +511,8 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
           metrics: incrementSessionTotalTurns(),
           ...(input.update_session_title_if_not_exist !== null
             ? {
-                title: sql`COALESCE(title, ${input.update_session_title_if_not_exist})`,
+                title: sql`COALESCE(title, ${input.update_session_title_if_not_exist.title})`,
+                title_source: sql`CASE WHEN title IS NULL THEN ${input.update_session_title_if_not_exist.source} ELSE title_source END`,
               }
             : {}),
         })

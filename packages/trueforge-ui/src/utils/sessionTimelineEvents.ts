@@ -1,3 +1,5 @@
+import { isApprovalExpiredReason } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+
 import { MAIN_THREAD_ID } from './sessionEventTimeline.js';
 import type { SessionTurnView } from './sessionTurnViews.js';
 import { parseSandboxArgs, SANDBOX_TOOL_NAMES } from './toolCallParsing.js';
@@ -114,6 +116,7 @@ export function getTurnInputSummary(turn: SessionTurnView): string {
   if (item.type === 'user.tool_approval') {
     const approval = isRecord(item.approval) ? item.approval : undefined;
     const reason = typeof approval?.reason === 'string' ? approval.reason.trim() : '';
+    if (approval?.status === 'deny' && isApprovalExpiredReason(reason)) return 'Expired: nobody answered in time';
     if (approval?.status === 'deny') return reason.length > 0 ? `Denied: ${reason}` : 'Denied';
     if (approval?.status === 'allow') return 'Approved';
     return 'Tool approval';

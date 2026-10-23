@@ -287,7 +287,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task; it runs as the assistant here. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
+          "The only way to make a recurring task; it runs as the assistant here. It cannot make a one-time reminder: say so instead of making a repeating one. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -684,7 +684,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
 const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
 const SCHEDULE_INSTRUCTION =
-  'Schedules can only be made with create_schedule. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
+  'Schedules can only be made with create_schedule, and only repeating ones: a one-time reminder or check-in later cannot be set. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
 
 function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);

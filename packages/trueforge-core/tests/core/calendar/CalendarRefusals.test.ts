@@ -138,7 +138,7 @@ describe('a refusal the reply guard makes before dispatch', () => {
       services: auditingServices(rows),
     });
     const owner =
-      'Aman could not run one of the actions in this reply: the title was missing. Ask again to try it once more.';
+      'One of the actions in this reply could not run: the title was missing. Ask again to try it once more.';
     const result = await runCalls({
       built,
       calls: [{ id: 'c1', name: 'create_event', arguments: NO_START }],

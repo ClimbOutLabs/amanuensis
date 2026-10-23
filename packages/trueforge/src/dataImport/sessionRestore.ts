@@ -193,7 +193,9 @@ async function restoreTurn(
       thread_id: thread.thread_id,
       task_state: thread.task_state,
     })),
-    update_session_title_if_not_exist: isFirstTurn ? session.title : null,
+    // An imported title is the person's own; the chat is never retitled automatically.
+    update_session_title_if_not_exist:
+      isFirstTurn && session.title !== null ? { title: session.title, source: 'person' } : null,
   });
 
   for (const threadId of divergentThreadIds) {

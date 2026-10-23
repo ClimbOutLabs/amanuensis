@@ -6795,13 +6795,13 @@
         "description": "Optional per-provider override of the server-wide stream progress deadlines.",
         "properties": {
           "chunk_ms": {
-            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.",
+            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
           },
           "first_chunk_ms": {
-            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.",
+            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
