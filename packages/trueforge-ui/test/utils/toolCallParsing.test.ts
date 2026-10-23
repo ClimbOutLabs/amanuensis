@@ -270,18 +270,23 @@ describe('toolCallParsing', () => {
 
   it('builds default approval options when none declared', () => {
     expect(buildApprovalOptions(undefined)).toEqual([
-      { id: 'allow-once', label: 'Approve', hint: 'Allow this one call only.', isAllow: true },
-      { id: 'deny', label: 'Deny', hint: 'Do not run this call.', isAllow: false, confirm: {} },
+      { id: 'allow-once', isAllow: true },
+      { id: 'deny', isAllow: false },
     ]);
   });
 
-  it('labels declared options with the approval verbs, whatever label the server sent', () => {
-    const labels = buildApprovalOptions([
-      { id: 'deny', kind: 'reject-once' },
-      { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
-      { id: 'allow-once', kind: 'allow-once' },
-    ]).map(option => option.label);
-    expect(labels).toEqual(['Approve', 'Approve for this chat', 'Deny']);
+  it('puts the single-use allow first, then the chat allow, then deny', () => {
+    expect(
+      buildApprovalOptions([
+        { id: 'deny', kind: 'reject-once' },
+        { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+        { id: 'allow-once', kind: 'allow-once' },
+      ]),
+    ).toEqual([
+      { id: 'allow-once', isAllow: true },
+      { id: 'allow-chat', isAllow: true },
+      { id: 'deny', isAllow: false },
+    ]);
   });
 });
 
