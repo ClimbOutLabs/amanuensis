@@ -124,6 +124,25 @@ describe('ReasoningContainer', () => {
     expect(screen.queryByText('Completed private notes')).not.toBeInTheDocument();
   });
 
+  it('gives the card slot no reasoning text once the reply has finished', async () => {
+    render(
+      <TestSubject
+        message={{
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'Finished private notes' },
+            { type: 'text', text: 'Here is your plan.' },
+          ],
+          status: { type: 'complete', reason: 'stop' },
+        }}
+      />,
+    );
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('reasoning-probe')).not.toBeInTheDocument();
+    expect(screen.queryByText('Finished private notes')).not.toBeInTheDocument();
+  });
+
   it('shows no reasoning progress while agent details are off', async () => {
     render(
       <TestSubject

@@ -165,6 +165,33 @@ describe('useWaitQueue', () => {
       expect(latest().quietMs).toBeGreaterThanOrEqual(15_000);
       expect(latest().longWait).toBe(true);
     });
+
+    it('drops the slow note on the very render a new token arrives', async () => {
+      const captured: Captured[] = [];
+      const harness = (text: string) => (
+        <RuntimeHarness messages={reasoningTurn(text)} isRunning>
+          <ThreadPrimitive.Messages>{() => <Probe captured={captured} />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>
+      );
+      const view = render(harness('Start.'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(captured.filter(entry => entry.role === 'assistant').at(-1)?.view.longWait).toBe(true);
+
+      const before = captured.length;
+      await act(async () => {
+        view.rerender(harness('Start. More words.'));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const withNewText = captured
+        .slice(before)
+        .filter(entry => entry.role === 'assistant' && entry.view.snapshot.microcopy === 'Reasoning… 3 words so far');
+      expect(withNewText.length).toBeGreaterThan(0);
+      for (const entry of withNewText) {
+        expect(entry.view.longWait).toBe(false);
+      }
+    });
   });
 
   describe('the long-wait clock', () => {

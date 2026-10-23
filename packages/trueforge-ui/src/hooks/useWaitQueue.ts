@@ -67,14 +67,13 @@ function pruneStaleTurnClocks(now: number): void {
   }
 }
 
+type TurnClock = { start: number; lastArrival: number; signature: string };
+
 /**
  * Returns the turn's start and when anything last arrived, recording both on first sight and
  * resuming them on remount. A new signature means something arrived now.
  */
-function resumeTurnClock({ key, signature, now }: { key: string; signature: string; now: number }): {
-  start: number;
-  lastArrival: number;
-} {
+function resumeTurnClock({ key, signature, now }: { key: string; signature: string; now: number }): TurnClock {
   const existing = turnStartMs.get(key);
   if (existing !== undefined) {
     existing.lastSeen = now;
@@ -82,11 +81,11 @@ function resumeTurnClock({ key, signature, now }: { key: string; signature: stri
       existing.signature = signature;
       existing.lastArrival = now;
     }
-    return { start: existing.start, lastArrival: existing.lastArrival };
+    return { start: existing.start, lastArrival: existing.lastArrival, signature };
   }
   pruneStaleTurnClocks(now);
   turnStartMs.set(key, { start: now, lastSeen: now, signature, lastArrival: now });
-  return { start: now, lastArrival: now };
+  return { start: now, lastArrival: now, signature };
 }
 
 /** Test support: drops all recorded turn starts (module state is shared across tests). */
@@ -132,7 +131,7 @@ export function useWaitQueue(): WaitQueueView {
   const messageId = useAuiState(s => s.message.id);
   const clockKey = turnId ?? messageId;
   const signature = useMemo(() => arrivalSignature({ parts: queueParts, memory }), [queueParts, memory]);
-  const [clock, setClock] = useState<{ start: number; lastArrival: number } | null>(null);
+  const [clock, setClock] = useState<TurnClock | null>(null);
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!isRunning) {
@@ -156,7 +155,10 @@ export function useWaitQueue(): WaitQueueView {
   // a busy or hidden tab delivered late) still shows the real time waited, and a settled turn none.
   const now = Date.now();
   const elapsedMs = !isRunning || clock === null ? 0 : Math.max(0, now - clock.start);
-  const quietMs = !isRunning || clock === null ? 0 : Math.max(0, now - clock.lastArrival);
+  // The clock records an arrival only after commit, so a render whose signature it has not seen yet
+  // is the arrival itself: count it as quiet for 0ms rather than flash the long-wait note.
+  const lastArrival = clock === null || clock.signature !== signature ? now : clock.lastArrival;
+  const quietMs = !isRunning || clock === null ? 0 : Math.max(0, now - lastArrival);
 
   const snapshot = useMemo(
     () => deriveWaitQueue({ isRunning, parts: queueParts, memory }),
