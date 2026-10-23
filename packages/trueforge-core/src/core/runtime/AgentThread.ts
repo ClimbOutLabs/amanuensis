@@ -69,7 +69,9 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
+import { type StreamDeadlineDetails, streamDeadlineDetailsOf } from '../llm/streamDeadline';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -2506,13 +2508,26 @@ export class AgentThread {
     };
   }
 
-  /** Ends the step after the model went silent; the steps already done stay in the turn. */
-  private *endStepModelSilent(): Generator<AgentThreadEvent, void, unknown> {
+  /**
+   * Ends the step after the model went silent twice in a row; the steps already done stay in
+   * the turn. The log line names which deadline fired, on which step, and how large the request
+   * was, so one line answers what happened without a second log to compare against.
+   */
+  private *endStepModelSilent(input: {
+    deadline: 'first_chunk' | 'chunk' | 'unknown';
+    requestTokens: number;
+    details: StreamDeadlineDetails | undefined;
+  }): Generator<AgentThreadEvent, void, unknown> {
     this.logger.warn('Model went silent; ending the step', {
       threadId: this.threadId,
       model: this.definition.modelId ?? 'unknown',
+      deadline: input.deadline,
+      step: this.metrics.iterations,
+      requestTokens: input.requestTokens,
       firstResponseTimeoutMs: this.modelFirstResponseTimeoutMs,
       idleTimeoutMs: this.modelIdleTimeoutMs,
+      lastProgressField: input.details?.lastProgressField ?? null,
+      msSinceLastProgress: input.details?.msSinceLastProgress ?? null,
     });
     yield this.generateErrorEvent(MODEL_STOPPED_ANSWERING_MESSAGE, undefined, 'model_response_timeout');
   }
@@ -3485,159 +3500,241 @@ export class AgentThread {
     const MAX_MODEL_STREAM_FAULT_ATTEMPTS = 2;
     let modelMessageUsage: ModelMessageUsage | undefined;
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
-    for (let attempt = 1; ; attempt++) {
-      const llmStream = this.definition.modelClient.create(requestBody);
-      const requestLLMStreamClose = createAsyncIteratorCloseRequest(llmStream);
-
-      // We start the delta stream with a model message event.
-      yield {
-        type: EventType.MODEL_MESSAGE,
-        thread_id: this.threadId,
-        created_at: new Date().toISOString(),
-        id: modelMessageEventId,
-      } satisfies ModelMessageEvent;
-
-      let firstDeltaTimestamped = false;
-      let firstTokenMs: number | null = null;
-      const modelRequestStartedAt = Date.now();
-      modelMessageUsage = undefined;
-      try {
-        // Every chunk waits behind a silence bound, so a provider that accepts the request and then
-        // goes quiet ends the step with a plain message instead of holding the turn open.
-        let attemptResult = await nextModelChunkWithin({
-          iterator: llmStream,
-          signal,
-          requestClose: requestLLMStreamClose,
-          timeoutMs: this.modelFirstResponseTimeoutMs,
-        });
-        while (
-          attemptResult !== ASYNC_ITERATOR_ABORTED &&
-          attemptResult !== MODEL_STREAM_SILENT &&
-          !attemptResult.done
-        ) {
-          const chunk = attemptResult.value;
-          if (chunk.usage) {
-            modelMessageUsage = this.computeAssistantMessageUsage({
-              requestBody,
-              usage: chunk.usage,
-              toolMapping,
+    // The request's size in tokens, estimated from the context it is built from; the silence
+    // report names it, so an oversized request is visible in the one line that reports the ending.
+    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    // A step that goes silent is retried once before the turn ends: the finished tool results
+    // behind it stay in the history the retry sends, and a partial tool call never runs because
+    // calls only execute from a completed step. Only a second silence ends the step.
+    let silenceRetried = false;
+    // Per-model request limit: take this model's place before the request is created, so the
+    // silence deadlines in the loop only ever measure a request that was actually sent. While
+    // the step waits, the chat shows the waiting line once.
+    const gateSpec = this.definition.modelRequestGate;
+    const modelSlot =
+      gateSpec === undefined ? undefined : gateSpec.gate.begin({ key: gateSpec.key, limit: gateSpec.limit });
+    try {
+      if (modelSlot !== undefined && modelSlot.queued) {
+        yield { type: InternalEventType.PASSTHROUGH, event: buildModelWaitingEvent() };
+        const granted = await new Promise<boolean>(resolve => {
+          if (signal === undefined) {
+            void modelSlot.granted.then(() => {
+              resolve(true);
             });
+            return;
           }
-          // On the forced answer no tool call is shown, since none of its calls will run.
-          const event = await buildModelMessageDeltaEvent({
-            chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
-            threadId: this.threadId,
-            toolMapping,
-            usage: modelMessageUsage,
-            id: modelMessageEventId,
-            logger: this.logger,
+          if (signal.aborted) {
+            resolve(false);
+            return;
+          }
+          const onAbort = () => {
+            resolve(false);
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+          void modelSlot.granted.then(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(!signal.aborted);
           });
-          if (event) {
-            if (!firstDeltaTimestamped) {
-              firstDeltaTimestamped = true;
-              firstTokenMs = Date.now() - modelRequestStartedAt;
-              this.metrics.time_to_first_token_ms ??= firstTokenMs;
-              yield { ...event, created_at: new Date().toISOString() };
-            } else {
-              yield event;
-            }
-          }
-          attemptResult = await nextModelChunkWithin({
+        });
+        if (!granted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+      }
+      for (let attempt = 1; ; attempt++) {
+        const llmStream = this.definition.modelClient.create(requestBody);
+        const requestLLMStreamClose = createAsyncIteratorCloseRequest(llmStream);
+
+        // We start the delta stream with a model message event.
+        yield {
+          type: EventType.MODEL_MESSAGE,
+          thread_id: this.threadId,
+          created_at: new Date().toISOString(),
+          id: modelMessageEventId,
+        } satisfies ModelMessageEvent;
+
+        let firstDeltaTimestamped = false;
+        let firstTokenMs: number | null = null;
+        const modelRequestStartedAt = Date.now();
+        modelMessageUsage = undefined;
+        try {
+          // Every chunk waits behind a silence bound, so a provider that accepts the request and then
+          // goes quiet ends the step with a plain message instead of holding the turn open.
+          // Which bound the pending wait is on, so a silence can name the deadline that fired.
+          let awaitedDeadline: 'first_chunk' | 'chunk' = 'first_chunk';
+          let attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
             requestClose: requestLLMStreamClose,
-            timeoutMs: this.modelIdleTimeoutMs,
+            timeoutMs: this.modelFirstResponseTimeoutMs,
           });
-        }
-        if (attemptResult === ASYNC_ITERATOR_ABORTED) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (attemptResult === MODEL_STREAM_SILENT) {
-          yield* this.endStepModelSilent();
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        result = attemptResult;
-        // One line per model step, so a slow step shows in the logs without a trace viewer.
-        this.logger.info('Model step finished', {
-          threadId: this.threadId,
-          step: this.metrics.iterations,
-          attempt,
-          firstTokenMs,
-          durationMs: Date.now() - modelRequestStartedAt,
-          toolCount: tools.length,
-        });
-        break;
-      } catch (error) {
-        // Cancellation and every non-stream-fault error keep their existing handling
-        // (ASYNC_ITERATOR_ABORTED above for cancellation; execute()'s outer catch, fatal_error,
-        // for anything else) rather than being retried here.
-        if (!signal?.aborted && isModelStreamDeadline(error)) {
-          yield* this.endStepModelSilent();
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (signal?.aborted || !(error instanceof ModelStreamFault)) {
-          throw error;
-        }
-        if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          // A repetition fault carries its own actionable guidance, and only a context-length
-          // fault is blamed on the chat's length; anything else would mislead the user.
-          const message =
-            error instanceof ModelOutputRepetitionError
-              ? error.message
-              : isContextLengthError(error)
-                ? CHAT_TOO_LONG_MESSAGE
-                : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
-          yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (!isContextLengthError(error)) {
-          this.logger.warn('Model stream fault; retrying the call once with the same history', {
+          while (
+            attemptResult !== ASYNC_ITERATOR_ABORTED &&
+            attemptResult !== MODEL_STREAM_SILENT &&
+            !attemptResult.done
+          ) {
+            const chunk = attemptResult.value;
+            if (chunk.usage) {
+              modelMessageUsage = this.computeAssistantMessageUsage({
+                requestBody,
+                usage: chunk.usage,
+                toolMapping,
+              });
+            }
+            // On the forced answer no tool call is shown, since none of its calls will run.
+            const event = await buildModelMessageDeltaEvent({
+              chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
+              threadId: this.threadId,
+              toolMapping,
+              usage: modelMessageUsage,
+              id: modelMessageEventId,
+              logger: this.logger,
+            });
+            if (event) {
+              if (!firstDeltaTimestamped) {
+                firstDeltaTimestamped = true;
+                firstTokenMs = Date.now() - modelRequestStartedAt;
+                this.metrics.time_to_first_token_ms ??= firstTokenMs;
+                yield { ...event, created_at: new Date().toISOString() };
+              } else {
+                yield event;
+              }
+            }
+            awaitedDeadline = 'chunk';
+            attemptResult = await nextModelChunkWithin({
+              iterator: llmStream,
+              signal,
+              requestClose: requestLLMStreamClose,
+              timeoutMs: this.modelIdleTimeoutMs,
+            });
+          }
+          if (attemptResult === ASYNC_ITERATOR_ABORTED) {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (attemptResult === MODEL_STREAM_SILENT) {
+            if (!silenceRetried) {
+              silenceRetried = true;
+              this.logger.warn('Model went silent; retrying the step once', {
+                threadId: this.threadId,
+                model: this.definition.modelId ?? 'unknown',
+                deadline: awaitedDeadline,
+                step: this.metrics.iterations,
+                requestTokens: requestTokenEstimate,
+              });
+              continue;
+            }
+            yield* this.endStepModelSilent({
+              deadline: awaitedDeadline,
+              requestTokens: requestTokenEstimate,
+              details: undefined,
+            });
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          result = attemptResult;
+          // One line per model step, so a slow step shows in the logs without a trace viewer.
+          this.logger.info('Model step finished', {
+            threadId: this.threadId,
+            step: this.metrics.iterations,
+            attempt,
+            firstTokenMs,
+            durationMs: Date.now() - modelRequestStartedAt,
+            toolCount: tools.length,
+          });
+          break;
+        } catch (error) {
+          // Cancellation and every non-stream-fault error keep their existing handling
+          // (ASYNC_ITERATOR_ABORTED above for cancellation; execute()'s outer catch, fatal_error,
+          // for anything else) rather than being retried here.
+          if (!signal?.aborted && isModelStreamDeadline(error)) {
+            const details = streamDeadlineDetailsOf(error);
+            if (!silenceRetried) {
+              silenceRetried = true;
+              this.logger.warn('Model went silent; retrying the step once', {
+                threadId: this.threadId,
+                model: this.definition.modelId ?? 'unknown',
+                deadline: details?.deadline ?? 'unknown',
+                step: this.metrics.iterations,
+                requestTokens: requestTokenEstimate,
+                lastProgressField: details?.lastProgressField ?? null,
+                msSinceLastProgress: details?.msSinceLastProgress ?? null,
+              });
+              continue;
+            }
+            yield* this.endStepModelSilent({
+              deadline: details?.deadline ?? 'unknown',
+              requestTokens: requestTokenEstimate,
+              details,
+            });
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (signal?.aborted || !(error instanceof ModelStreamFault)) {
+            throw error;
+          }
+          if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
+            // A repetition fault carries its own actionable guidance, and only a context-length
+            // fault is blamed on the chat's length; anything else would mislead the user.
+            const message =
+              error instanceof ModelOutputRepetitionError
+                ? error.message
+                : isContextLengthError(error)
+                  ? CHAT_TOO_LONG_MESSAGE
+                  : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
+            yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (!isContextLengthError(error)) {
+            this.logger.warn('Model stream fault; retrying the call once with the same history', {
+              ...extractErrorLogFields(error),
+              attempt,
+            });
+            continue;
+          }
+          this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
             ...extractErrorLogFields(error),
             attempt,
           });
-          continue;
-        }
-        this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
-          ...extractErrorLogFields(error),
-          attempt,
-        });
-        try {
-          for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
-            yield event;
-          }
-        } catch (error) {
-          if (!(error instanceof NoProgressTimeoutError)) {
-            throw error;
-          }
-          yield this.generateErrorEvent(
-            `${error.message}, so the turn was stopped instead of hanging. ` +
-              `A context processor stalled without producing output; try again, and if the ` +
-              `problem persists, start a new chat.`,
-            undefined,
-            'fatal_error',
-          );
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (signal?.aborted) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        try {
-          const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
-          if (retryFit === 'aborted') {
+          try {
+            for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
+              yield event;
+            }
+          } catch (error) {
+            if (!(error instanceof NoProgressTimeoutError)) {
+              throw error;
+            }
+            yield this.generateErrorEvent(
+              `${error.message}, so the turn was stopped instead of hanging. ` +
+                `A context processor stalled without producing output; try again, and if the ` +
+                `problem persists, start a new chat.`,
+              undefined,
+              'fatal_error',
+            );
             return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-        } catch (fitError) {
-          if (!(fitError instanceof RequestOverLimitError)) {
-            throw fitError;
+          if (signal?.aborted) {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-          this.logger.warn('Shortened history is still over the model limit; not retrying', {
-            ...extractErrorLogFields(fitError),
-          });
-          yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          try {
+            const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
+            if (retryFit === 'aborted') {
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+          } catch (fitError) {
+            if (!(fitError instanceof RequestOverLimitError)) {
+              throw fitError;
+            }
+            this.logger.warn('Shortened history is still over the model limit; not retrying', {
+              ...extractErrorLogFields(fitError),
+            });
+            yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          requestBody = this.transformToLLMRequest(tools);
         }
-        requestBody = this.transformToLLMRequest(tools);
       }
+    } finally {
+      // Hand the model's place back on every way out of the loop. cancel() also withdraws a
+      // wait that never got its place, so an abandoned wait cannot wedge the queue.
+      modelSlot?.release();
+      modelSlot?.cancel();
     }
 
     // If the stream was aborted mid-way, result.value.output is only a partial

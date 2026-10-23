@@ -48,6 +48,11 @@ import {
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
+import {
+  recordStreamDeadlineDetails,
+  type StreamDeadlineDetails,
+  streamDeadlineDetailsOf,
+} from './streamDeadline';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
 import { ToolMarkupGuard } from './toolMarkup';
@@ -983,6 +988,8 @@ export type StreamTextArgs = LanguageModelCallOptions & {
   tools?: ToolSet;
   providerOptions?: ProviderOptions;
   abortSignal?: AbortSignal;
+  /** Always on: the deadline counts progress from raw provider chunks the parser drops or holds back. */
+  includeRawChunks: boolean;
   maxRetries: number;
 };
 
@@ -1041,6 +1048,9 @@ export function buildStreamTextArgs(input: {
     ...(seed != null ? { seed } : {}),
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
     ...(abortSignal !== undefined ? { abortSignal } : {}),
+    // Raw provider chunks ride along so the deadline can count progress the SDK's parser drops
+    // or holds back (see scanRawChunk); without them that progress is invisible and reads as silence.
+    includeRawChunks: true,
     maxRetries: 0,
   };
 }
@@ -1422,12 +1432,131 @@ class StreamingRepetitionGuard {
   }
 }
 
+/** The field of a provider's raw chunk that carried its progress, named for logs and deadline reports. */
+export type RawProgressField = 'content' | 'reasoning' | 'reasoning_content' | 'reasoning_details' | 'tool_call_arguments';
+
+interface RawChunkScan {
+  /** The first field carrying nonempty progress text, when any field does. */
+  progressField: RawProgressField | undefined;
+  /**
+   * Progress the SDK parser also turns into parts of its own (answer text, reasoning under the
+   * fields it maps, a tool call whose name has arrived). When true, the mapped parts already
+   * reset both deadline layers, so the raw part needs no progress chunk of its own.
+   */
+  mappedProgress: boolean;
+  /** Reasoning under a field the parser maps (`reasoning` / `reasoning_content`) is present in this chunk. */
+  mappedReasoning: boolean;
+  /** Reasoning text the parser drops (it lives only under `reasoning_details`), when present. */
+  droppedReasoningText: string | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function nonemptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Text carried by a `reasoning_details` entry, across the shapes providers use for it. */
+function reasoningDetailText(entry: unknown): string | undefined {
+  if (!isRecord(entry)) {
+    return undefined;
+  }
+  return nonemptyString(entry['text']) ?? nonemptyString(entry['summary']) ?? nonemptyString(entry['content']);
+}
+
+/**
+ * Reads one raw provider chunk (an OpenAI-shaped chat-completion chunk) for progress the SDK
+ * parser may not surface. The parser drops some fields outright (reasoning carried only under
+ * `reasoning_details`) and holds others back (tool-call argument deltas are buffered until the
+ * call's name arrives, which a provider may send only in its last frame), so a model can be
+ * answering while no parsed part exists. A chunk whose delta carries nothing but a role, or no
+ * text at all, is a keepalive and scans as no progress. Non-OpenAI-shaped raw chunks (other
+ * providers' native events) scan as no progress: their parsers map their own reasoning, so the
+ * parsed parts remain the only signal there, exactly as before raw chunks were requested.
+ */
+export function scanRawChunk(rawValue: unknown): RawChunkScan {
+  const none: RawChunkScan = {
+    progressField: undefined,
+    mappedProgress: false,
+    mappedReasoning: false,
+    droppedReasoningText: undefined,
+  };
+  if (!isRecord(rawValue)) {
+    return none;
+  }
+  const choices: unknown = rawValue['choices'];
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return none;
+  }
+  const first: unknown = choices[0];
+  if (!isRecord(first)) {
+    return none;
+  }
+  const delta: unknown = first['delta'];
+  if (!isRecord(delta)) {
+    return none;
+  }
+
+  let droppedReasoningText: string | undefined;
+  const details: unknown = delta['reasoning_details'];
+  if (Array.isArray(details)) {
+    const texts = details.map(reasoningDetailText).filter(text => text !== undefined);
+    if (texts.length > 0) {
+      droppedReasoningText = texts.join('');
+    }
+  }
+
+  let toolArguments = false;
+  let toolNameArrived = false;
+  const toolCalls: unknown = delta['tool_calls'];
+  if (Array.isArray(toolCalls)) {
+    for (const call of toolCalls) {
+      if (!isRecord(call) || !isRecord(call['function'])) {
+        continue;
+      }
+      if (nonemptyString(call['function']['arguments']) !== undefined) {
+        toolArguments = true;
+      }
+      if (nonemptyString(call['function']['name']) !== undefined) {
+        toolNameArrived = true;
+      }
+    }
+  }
+
+  const content = nonemptyString(delta['content']) !== undefined;
+  const reasoning = nonemptyString(delta['reasoning']) !== undefined;
+  const reasoningContent = nonemptyString(delta['reasoning_content']) !== undefined;
+  const mappedReasoning = reasoning || reasoningContent;
+  const mappedProgress = content || mappedReasoning || toolNameArrived;
+  const progressField: RawProgressField | undefined = content
+    ? 'content'
+    : reasoningContent
+      ? 'reasoning_content'
+      : reasoning
+        ? 'reasoning'
+        : droppedReasoningText !== undefined
+          ? 'reasoning_details'
+          : toolArguments
+            ? 'tool_call_arguments'
+            : undefined;
+  return { progressField, mappedProgress, mappedReasoning, droppedReasoningText };
+}
+
+/** The progress field of a raw provider chunk, or undefined when the chunk carries no progress. */
+export function rawChunkProgressField(rawValue: unknown): RawProgressField | undefined {
+  return scanRawChunk(rawValue).progressField;
+}
+
 /**
  * True when a raw SDK stream part carries something a caller would notice: text, reasoning text,
- * a nonempty tool-call delta, a tool call/file/reasoning-file, or a step/turn finish. False for
- * bookkeeping and empty-heartbeat parts (role-only deltas, `start`/`start-step`, zero-length
- * deltas). Only substantive parts may satisfy the first-chunk deadline or reset the per-chunk
- * deadline — see {@link VercelAILLM}.
+ * a nonempty tool-call delta, a tool call/file/reasoning-file, or a step/turn finish. A raw
+ * provider chunk also counts when its delta carries nonempty text in any field, including fields
+ * the parser drops or holds back (see scanRawChunk). False for bookkeeping and
+ * empty-heartbeat parts (role-only deltas, `start`/`start-step`, zero-length deltas). Only
+ * substantive parts may satisfy the first-chunk deadline or reset the per-chunk deadline — see
+ * {@link VercelAILLM}.
  */
 export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
   switch (part.type) {
@@ -1436,6 +1565,8 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
       return part.text.length > 0;
     case 'tool-input-delta':
       return part.delta.length > 0;
+    case 'raw':
+      return rawChunkProgressField(part.rawValue) !== undefined;
     case 'tool-input-start':
     case 'tool-call':
     case 'file':
@@ -1457,7 +1588,6 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
     case 'tool-approval-request':
     case 'tool-approval-response':
     case 'start-step':
-    case 'raw':
     case 'error':
     case 'abort':
       return false;
@@ -1469,29 +1599,76 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
 }
 
 /**
+ * The field that carried a part's progress, for deadline reports: a raw chunk names the delta
+ * field its text arrived under; a parsed part names the harness field it feeds. Undefined when
+ * the part carries no progress (chunkHasSubstance is false for it).
+ */
+export function chunkSubstanceField(part: TextStreamPart<ToolSet>): string | undefined {
+  if (part.type === 'raw') {
+    return rawChunkProgressField(part.rawValue);
+  }
+  if (!chunkHasSubstance(part)) {
+    return undefined;
+  }
+  switch (part.type) {
+    case 'text-delta':
+      return 'content';
+    case 'reasoning-delta':
+      return 'reasoning';
+    case 'tool-input-delta':
+    case 'tool-input-start':
+    case 'tool-call':
+      return 'tool_call_arguments';
+    default:
+      return part.type;
+  }
+}
+
+/**
  * Re-arms the first-chunk and per-chunk deadlines from inside the harness rather than trusting the
  * SDK's own `timeout` option end to end. A chunk only satisfies the first-chunk deadline, and only
  * a chunk resets the per-chunk deadline, when {@link chunkHasSubstance} says it carries something —
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
  * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
- * so downstream error handling is unchanged, and rejects the pending read at once.
+ * so downstream error handling is unchanged, and rejects the pending read at once. The firing is
+ * recorded as StreamDeadlineDetails (which deadline, and the last progress before it) so the
+ * turn's one log line can say what actually happened.
  */
 export async function* enforceStreamDeadlines<T>({
   stream,
   timeout,
   hasSubstance,
+  substanceField,
   deadlineController,
 }: {
   stream: AsyncIterable<T>;
   timeout: { firstChunkMs: number; chunkMs: number };
   hasSubstance: (part: T) => boolean;
+  /** Names the field that carried a part's progress, for the deadline record; defaults to the part's kind. */
+  substanceField?: ((part: T) => string | undefined) | undefined;
   deadlineController: AbortController;
 }): AsyncGenerator<T, void, unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastProgress: { field: string; atMs: number } | undefined;
+  let firedDetails: StreamDeadlineDetails | undefined;
 
   const abortWithTimeout = (label: 'First chunk' | 'Chunk', ms: number) => {
-    deadlineController.abort(new DOMException(`${label} timeout of ${ms.toString()}ms exceeded`, 'TimeoutError'));
+    const now = Date.now();
+    const details: StreamDeadlineDetails = {
+      deadline: label === 'First chunk' ? 'first_chunk' : 'chunk',
+      timeoutMs: ms,
+      lastProgressField: lastProgress?.field ?? null,
+      msSinceLastProgress: lastProgress === undefined ? null : now - lastProgress.atMs,
+    };
+    firedDetails = details;
+    const progressNote =
+      lastProgress === undefined
+        ? 'no progress received'
+        : `last progress ${(now - lastProgress.atMs).toString()}ms ago via ${lastProgress.field}`;
+    const reason = new DOMException(`${label} timeout of ${ms.toString()}ms exceeded; ${progressNote}`, 'TimeoutError');
+    recordStreamDeadlineDetails(reason, details);
+    deadlineController.abort(reason);
   };
 
   const armFirstChunkTimer = () => {
@@ -1513,6 +1690,10 @@ export async function* enforceStreamDeadlines<T>({
       const reason: unknown = deadlineController.signal.reason;
       const expiredError = new Error(describeStreamError(reason), { cause: reason });
       expiredError.name = 'TimeoutError';
+      const details = firedDetails ?? streamDeadlineDetailsOf(reason);
+      if (details !== undefined) {
+        recordStreamDeadlineDetails(expiredError, details);
+      }
       reject(expiredError);
     };
     if (deadlineController.signal.aborted) {
@@ -1532,7 +1713,9 @@ export async function* enforceStreamDeadlines<T>({
         return;
       }
       const part = result.value;
-      if (hasSubstance(part)) {
+      const field = substanceField === undefined ? undefined : substanceField(part);
+      if (field !== undefined || hasSubstance(part)) {
+        lastProgress = { field: field ?? 'chunk', atMs: Date.now() };
         clearTimeout(timer);
         armChunkTimer();
       }
@@ -1610,6 +1793,9 @@ export async function* mapStreamToChunks({
   // false, which is what the post-loop check below uses to tell a genuinely silent 'stop' apart
   // from a stream that never finished at all.
   let sawFinishStep = false;
+  // Set when the parser surfaces reasoning itself; raw-chunk reasoning (a field the parser
+  // drops) is only mapped while this stays false, so mirrored reasoning is never shown twice.
+  let sawMappedReasoning = false;
 
   streamLoop: for await (const part of stream) {
     switch (part.type) {
@@ -1649,6 +1835,7 @@ export async function* mapStreamToChunks({
       }
 
       case 'reasoning-delta': {
+        sawMappedReasoning = true;
         // A delta with no preceding `reasoning-start` would otherwise drop the block and its
         // signature, breaking replay while the text still streams out.
         if (reasoningRepetition.push(part.text)) {
@@ -1821,9 +2008,45 @@ export async function* mapStreamToChunks({
       case 'tool-approval-response':
       case 'start-step':
       case 'finish':
-      case 'raw':
         // Structural/bookkeeping events — no harness chunk is emitted for these.
         break;
+
+      case 'raw': {
+        const scan = scanRawChunk(part.rawValue);
+        if (scan.droppedReasoningText !== undefined && !scan.mappedReasoning && !sawMappedReasoning) {
+          // Reasoning the parser dropped: surface it as reasoning, the way a mapped
+          // reasoning-delta is surfaced, so the person sees the thinking.
+          const text = scan.droppedReasoningText;
+          if (reasoningRepetition.push(text)) {
+            throw new ModelOutputRepetitionError();
+          }
+          currentThinkingBlock ??= openThinkingBlock(undefined);
+          currentThinkingBlock.thinking += text;
+          yield {
+            ...makeBase(),
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  thinking_blocks: [{ type: 'thinking', thinking: text }],
+                  reasoning_content: text,
+                } satisfies ExtendedChatCompletionChunk['choices'][0]['delta'],
+                finish_reason: null,
+                logprobs: null,
+              },
+            ],
+          };
+        } else if (scan.progressField !== undefined && !scan.mappedProgress) {
+          // Progress the parser cannot surface (tool-call arguments it is holding back):
+          // an empty delta still tells the harness layer the model is answering, the same
+          // shape 'finish-step' uses, so its silence clock resets too.
+          yield {
+            ...makeBase(),
+            choices: [{ index: 0, delta: {}, finish_reason: null, logprobs: null }],
+          };
+        }
+        break;
+      }
 
       default: {
         const _exhaustive: never = part;
@@ -2063,6 +2286,7 @@ export class VercelAILLM implements ILLM {
       stream: streamResult.stream,
       timeout: this.streamTimeout,
       hasSubstance: chunkHasSubstance,
+      substanceField: chunkSubstanceField,
       deadlineController,
     });
 

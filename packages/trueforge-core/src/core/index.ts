@@ -190,6 +190,17 @@ export {
   VercelAILLM,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
+export { ModelRequestGate } from './llm/ModelRequestGate';
+export type { ModelRequestSlot } from './llm/ModelRequestGate';
+export {
+  buildModelWaitingEvent,
+  MODEL_WAITING_EVENT_TYPE,
+  MODEL_WAITING_MESSAGE,
+  ModelWaitingEventSchema,
+} from './llm/modelWaitingEvent';
+export type { ModelWaitingEvent, ModelWaitingEventEnvelope } from './llm/modelWaitingEvent';
+export { streamDeadlineDetailsOf } from './llm/streamDeadline';
+export type { StreamDeadlineDetails } from './llm/streamDeadline';
 
 // Event contracts
 export {

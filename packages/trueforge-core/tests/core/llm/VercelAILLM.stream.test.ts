@@ -14,6 +14,7 @@ import { APICallError } from 'ai';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import {
   chunkHasSubstance,
+  chunkSubstanceField,
   describeStreamError,
   enforceStreamDeadlines,
   isContextLengthError,
@@ -22,6 +23,7 @@ import {
   ModelOutputRepetitionError,
   ModelStreamFault,
   normalizeUsage,
+  rawChunkProgressField,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
 
@@ -1115,6 +1117,59 @@ describe('chunkHasSubstance', () => {
 
   it('accepts a step or turn finish, regardless of any accompanying usage', () => {
     expect(chunkHasSubstance(makeFinishStep('stop'))).toBe(true);
+  });
+
+  it('accepts a raw chunk whose delta carries text under a field the parser drops', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', text: 'thinking' }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('reasoning_details');
+    expect(rawChunkProgressField(part.rawValue)).toBe('reasoning_details');
+  });
+
+  it('accepts a raw chunk whose tool-call arguments are streaming before the call has a name', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"body":"<div>' } }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('tool_call_arguments');
+  });
+
+  it('rejects a raw chunk that is only a role marker or an empty keepalive', () => {
+    const roleOnly: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { role: 'assistant' } }] },
+    };
+    const empty: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { choices: [{ delta: {} }] } };
+    const emptyText: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { content: '', reasoning_details: [] } }] },
+    };
+    expect(chunkHasSubstance(roleOnly)).toBe(false);
+    expect(chunkHasSubstance(empty)).toBe(false);
+    expect(chunkHasSubstance(emptyText)).toBe(false);
+    expect(chunkSubstanceField(roleOnly)).toBeUndefined();
+  });
+
+  it('rejects a raw chunk that is not an OpenAI-shaped chunk at all', () => {
+    const part: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { type: 'content_block_delta' } };
+    expect(chunkHasSubstance(part)).toBe(false);
+    expect(rawChunkProgressField('not a chunk')).toBeUndefined();
+    expect(rawChunkProgressField(null)).toBeUndefined();
+  });
+
+  it('names the field a parsed part carried its progress under', () => {
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: 'a' })).toBe('content');
+    expect(chunkSubstanceField({ type: 'reasoning-delta', id: 'r1', text: 'a' })).toBe('reasoning');
+    expect(chunkSubstanceField({ type: 'tool-input-delta', id: 'c1', delta: '{' })).toBe('tool_call_arguments');
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: '' })).toBeUndefined();
   });
 });
 
