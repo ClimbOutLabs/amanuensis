@@ -2593,9 +2593,36 @@ export function runStoreContractSuite<
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }));
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).last_turn_id).toBe('turn-root-2');
+    });
+
+    it('rejects a new root turn while the tip is still running', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await expect(store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }))).rejects.toMatchObject({
+        name: 'PreviousTurnRunningError',
+        previous_turn_id: 'turn-1',
+      });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-1');
+    });
+
+    it('concurrent first turns on a new chat: only the first commits', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const results = await Promise.allSettled([
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-a' })),
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-b' })),
+      ]);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
+      const turns = await store.listTurns({ session_id: sessionId, limit: 10, page_token: undefined });
+      expect(turns.data).toHaveLength(1);
     });
 
     it('rejects a fork while the tip is a different running turn', async () => {
@@ -4114,10 +4141,23 @@ export function runStoreContractSuite<
     it('recovers only explicitly selected owners with expired leases', async () => {
       const store = createStore();
       await seedSession(store);
+      // A chat runs one turn at a time, so the second running command lives in another chat.
+      const otherSessionId = `${sessionId}-other`;
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const sessionOf = (turnId: string): string => (turnId.endsWith('replica-a') ? sessionId : otherSessionId);
       for (const turnId of ['turn-a.replica-a', 'turn-b.replica-b']) {
-        await store.createTurn(makeCreateTurnInput({ sessionId, turnId }));
+        await store.createTurn(makeCreateTurnInput({ sessionId: sessionOf(turnId), turnId }));
         await store.appendCommandExecutionStarted({
-          session_id: sessionId,
+          session_id: sessionOf(turnId),
           turn_id: turnId,
           ownership: commandOwnership({
             leaseId: `lease-${turnId}`,
@@ -4162,14 +4202,14 @@ export function runStoreContractSuite<
       ).resolves.toMatchObject({ status: 'running', disposition: null });
       await expect(
         store.getCommandExecution({
-          session_id: sessionId,
+          session_id: otherSessionId,
           turn_id: 'turn-b.replica-b',
           thread_id: MAIN_THREAD_ID,
           tool_call_id: 'call-turn-b.replica-b',
         }),
       ).resolves.toMatchObject({ status: 'terminal', disposition: 'outcome_unknown' });
       const recoveredEvents = await store.listTurnEvents({
-        session_id: sessionId,
+        session_id: otherSessionId,
         turn_id: 'turn-b.replica-b',
         limit: 10,
         page_token: undefined,
@@ -4256,6 +4296,8 @@ export function runStoreContractSuite<
         expect(
           events.data.filter(event => event.type === EventType.TOOL_RESPONSE_V2 && event.tool_call_id === toolCallId),
         ).toHaveLength(recovered);
+        // The chat takes its next turn only once this one has ended.
+        await finishTurn(store, turnId);
       }
     });
 

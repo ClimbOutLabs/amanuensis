@@ -1,7 +1,7 @@
 import { EventType } from '../../src/agent-session/schemas/events';
-import { CancellationReason } from '../../src/agent-session/schemas/turn';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
+import { PreviousTurnRunningError } from '../../src/agent-session/store/SessionStoreErrors';
 import { makeAgentSpec, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 describe('SessionHandle.createTurn side effects on a rejected submission', () => {
@@ -56,18 +56,24 @@ describe('SessionHandle.createTurn side effects on a rejected submission', () =>
     expect(data).toHaveLength(1);
   });
 
-  it('freezes the previous turn once the submission is accepted', async () => {
+  it('refuses a new message while the previous turn runs, and leaves that turn running', async () => {
     const { store, session, running } = await sessionWithRunningTurn();
 
-    const next = await session.createTurn({
-      turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'interrupting' }],
-      signal: new AbortController().signal,
-      resolver: makeTestResolver(),
-    });
+    for (const previous_turn_id of ['auto', 'none', running.id]) {
+      await expect(
+        session.createTurn({
+          turn_id: mintTestTurnId(),
+          input: [{ type: EventType.USER_MESSAGE, content: 'interrupting' }],
+          previous_turn_id,
+          signal: new AbortController().signal,
+          resolver: makeTestResolver(),
+        }),
+      ).rejects.toBeInstanceOf(PreviousTurnRunningError);
+    }
 
     const previous = await store.getTurn({ session_id: 's1', turn_id: running.id });
-    expect(previous?.state).toMatchObject({ status: 'cancelled', reason: CancellationReason.CancelledForNextTurn });
-    expect(next.previous_turn_id).toBe(running.id);
+    expect(previous?.state.status).toBe('running');
+    const { data } = await store.listTurns({ session_id: 's1', limit: 10, page_token: undefined });
+    expect(data).toHaveLength(1);
   });
 });

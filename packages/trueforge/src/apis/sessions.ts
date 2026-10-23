@@ -170,9 +170,10 @@ export interface CancelTurnDeps {
  * Cancels the turn wherever it runs: locally or on the owning peer over Redis
  * request-reply. Callers state the motive; default is a plain client cancel.
  *
- * A confirmed abort (this process, or peer HTTP 200) lets TurnHandle persist
- * the terminal state. If abort cannot be confirmed, this replica freezes the
- * turn in the store so the session is not stuck `running`.
+ * On this process the run is aborted and the turn is then frozen, so a step
+ * that ignores the abort cannot keep it `running`. A peer's confirmed abort
+ * (HTTP 200) lets that peer's TurnHandle persist the terminal state. If the
+ * abort cannot be confirmed, this replica freezes the turn in the store.
  *
  * Redis timeout and Redis/transport failures are not a clean cancellation —
  * the owning replica may still be executing — but the turn is still frozen.

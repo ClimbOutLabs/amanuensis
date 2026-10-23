@@ -315,7 +315,7 @@ describe('"Allow searches in this chat" given during a reply', () => {
 });
 
 describe('a turn whose fingerprints the store may not hold yet', () => {
-  it('holds a search sent while the turn that read through a connector is still running', async () => {
+  it('holds a search sent after Cancel stops the turn that read through a connector', async () => {
     const {
       session,
       session_id,
@@ -331,7 +331,7 @@ describe('a turn whose fingerprints the store may not hold yet', () => {
     const searchesBefore = callTool.mock.calls.length;
     const saves = jest.spyOn(store, 'setPrivateFingerprints');
 
-    // The connector read happens, then the reply is still thinking when the owner sends a new message.
+    // The connector read happens, then the reply is still thinking when the owner stops it and sends a new message.
     const reading = resolverForTurn();
     let readDone: () => void = () => undefined;
     const read = new Promise<void>(resolve => {
@@ -358,6 +358,8 @@ describe('a turn whose fingerprints the store may not hold yet', () => {
     const outlookDrained = drain(outlookTurn).catch(() => undefined);
     await read;
 
+    // A new message waits for the reply to end, so the owner presses Cancel first.
+    await (await loadChat()).freezeTurn({ turn_id: outlookTurn.id, reason: CancellationReason.ClientCancelled });
     create.mockImplementationOnce(() => searchStream({ id: 'call-9', query: OUTLOOK_QUERY }));
     create.mockImplementation(() => textStream('Done.'));
     const next = await (
@@ -374,9 +376,9 @@ describe('a turn whose fingerprints the store may not hold yet', () => {
 
     expect((await session.getTurn(next.id))?.state).toMatchObject(HELD);
     expect(callTool.mock.calls.length).toBe(searchesBefore);
-    // The turn the new message stopped still saves what it read, so a later turn's record covers it.
+    // The cancelled turn saved what it read before the chat took the next message, and only it saved.
     expect((await session.getTurn(outlookTurn.id))?.state).toMatchObject({ status: 'cancelled' });
-    expect(saves).toHaveBeenCalledTimes(2);
+    expect(saves).toHaveBeenCalledTimes(1);
   });
 
   it('does not keep counting a turn that ended before it streamed', async () => {

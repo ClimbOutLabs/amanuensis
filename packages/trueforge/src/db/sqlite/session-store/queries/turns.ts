@@ -429,9 +429,8 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         throw new StaleApprovalContinuationError(input.turn.previous_turn_id, locked.last_turn_id);
       }
 
-      // A successor of another turn would leave the running tip with no runner to end it.
-      const forkedFrom = input.turn.previous_turn_id;
-      if (forkedFrom !== null && locked.last_turn_id !== null && locked.last_turn_id !== forkedFrom) {
+      // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+      if (locked.last_turn_id !== null) {
         const tip = await trx
           .selectFrom('turn')
           .select([jsonText<TurnState>(sql.ref('state')).as('state')])

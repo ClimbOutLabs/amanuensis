@@ -1,6 +1,6 @@
 import { CancellationReason } from '@truefoundry/trueforge-core/agent-session';
 import { createLogger } from 'winston';
-import { TurnStartBound } from '../../../src/runtime/turnStartBound';
+import { raceTurnSetup, TurnStartBound } from '../../../src/runtime/turnStartBound';
 
 const logger = createLogger({ silent: true });
 
@@ -20,7 +20,6 @@ describe('TurnStartBound', () => {
     startBound.arm();
 
     await jest.advanceTimersByTimeAsync(1_000);
-    expect(startBound.expired).toBe(true);
     expect(abortController.signal.reason).toBe(CancellationReason.ServerExecutionTimeout);
 
     const end = jest.fn(() => Promise.resolve());
@@ -53,8 +52,60 @@ describe('TurnStartBound', () => {
     startBound.markStarted();
 
     await jest.advanceTimersByTimeAsync(5_000);
-    expect(startBound.expired).toBe(false);
     expect(end).not.toHaveBeenCalled();
     expect(abortController.signal.aborted).toBe(false);
+  });
+});
+
+describe('raceTurnSetup', () => {
+  it('answers could_not_start as soon as the signal fires, and cleans up a setup that finishes later', async () => {
+    const abortController = new AbortController();
+    const finished = Promise.withResolvers<string>();
+    const discarded = Promise.withResolvers<string>();
+    const outcome = raceTurnSetup({
+      signal: abortController.signal,
+      // A setup step that ignores the abort.
+      setup: () => finished.promise,
+      discard: value => {
+        discarded.resolve(value);
+        return Promise.resolve();
+      },
+      logger,
+      sessionId: 'session-1',
+    });
+    abortController.abort(CancellationReason.ServerExecutionTimeout);
+    await expect(outcome).resolves.toEqual({ status: 'could_not_start' });
+
+    finished.resolve('created turn');
+    await expect(discarded.promise).resolves.toBe('created turn');
+  });
+
+  it('hands back the setup when it finishes first, and never discards it', async () => {
+    const abortController = new AbortController();
+    const discard = jest.fn(() => Promise.resolve());
+    await expect(
+      raceTurnSetup({
+        signal: abortController.signal,
+        setup: () => Promise.resolve('created turn'),
+        discard,
+        logger,
+        sessionId: 'session-1',
+      }),
+    ).resolves.toEqual({ status: 'ready', value: 'created turn' });
+    abortController.abort(CancellationReason.ServerExecutionTimeout);
+    await Promise.resolve();
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it('passes a setup failure through while time remains', async () => {
+    await expect(
+      raceTurnSetup({
+        signal: new AbortController().signal,
+        setup: () => Promise.reject(new Error('Session not found')),
+        discard: () => Promise.resolve(),
+        logger,
+        sessionId: 'session-1',
+      }),
+    ).rejects.toThrow('Session not found');
   });
 });

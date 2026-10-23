@@ -11,6 +11,7 @@ import type * as internalSources from '../../../src/runtime/turnInternalSources'
 import { TURN_COULD_NOT_START_MESSAGE } from '../../../src/runtime/turnStartBound';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { INERT_SERVER_NAME } from '../../fixtures/inertMcpServer';
 
 /**
  * The offline check runs inside the turn's own run, right before its model request. While a hang is
@@ -69,7 +70,15 @@ const AGENT_SPEC = {
   },
 };
 
-const ErrorMessageSchema = z.object({ error: z.object({ message: z.string() }).loose() });
+/** The same chat with a connector that starts before the model is asked, as most real chats have. */
+const AGENT_SPEC_WITH_CONNECTOR = {
+  ...AGENT_SPEC,
+  mcp_servers: [{ name: INERT_SERVER_NAME, preload: true }],
+};
+
+const ErrorMessageSchema = z.object({
+  error: z.object({ message: z.string(), code: z.string().nullable().optional() }).loose(),
+});
 
 function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -79,8 +88,8 @@ function message(text: string): TurnInputItem[] {
   return [{ type: 'user.message', content: text }];
 }
 
-async function createSession(server: ApprovalTestServer): Promise<string> {
-  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+async function createSession(server: ApprovalTestServer, spec: object = AGENT_SPEC): Promise<string> {
+  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec } }));
   const body: unknown = await response.json();
   if (response.status !== 201) {
     throw new Error(`session create failed (${String(response.status)}): ${JSON.stringify(body)}`);
@@ -184,6 +193,45 @@ describe('a reply that never reaches the model', () => {
     await expectNextMessageAnswered(server, sessionId);
   }, 60_000);
 
+  it('is not released by its connector starting: it still ends once its start limit passes', async () => {
+    configuration.TURN_START_TIMEOUT_MS = 1_000;
+    const sessionId = await createSession(server, AGENT_SPEC_WITH_CONNECTOR);
+    await sendStuckReply(server, sessionId);
+
+    const [ended] = await waitFor({
+      read: () => reloadTurns(server, sessionId),
+      ready: turns => turns.every(turn => turn.state.status !== 'running'),
+      budgetMs: SETTLE_BUDGET_MS,
+    });
+    expect(ended?.state).toMatchObject({ status: 'error', message: TURN_COULD_NOT_START_MESSAGE });
+    expect(server.model.requests()).toHaveLength(0);
+
+    configuration.TURN_START_TIMEOUT_MS = original.startTimeoutMs;
+    await expectNextMessageAnswered(server, sessionId);
+  }, 60_000);
+
+  it('answers "could not start" when a setup step never returns, and the chat takes the next message', async () => {
+    configuration.TURN_START_TIMEOUT_MS = 1_000;
+    const sessionId = await createSession(server);
+    // A setup step before the turn exists that never answers and ignores the abort.
+    admissionGate = new Promise(() => undefined);
+    const sentAt = Date.now();
+    const response = await server.request(
+      `/api/v1/sessions/${sessionId}/turns`,
+      jsonInit({ input: message('Hello there.'), stream: true }),
+    );
+    expect(Date.now() - sentAt).toBeLessThan(5_000);
+    expect(response.status).toBe(409);
+    expect(ErrorMessageSchema.parse(await response.json()).error).toMatchObject({
+      message: TURN_COULD_NOT_START_MESSAGE,
+      code: 'turn_could_not_start',
+    });
+    expect(await reloadTurns(server, sessionId)).toEqual([]);
+
+    configuration.TURN_START_TIMEOUT_MS = original.startTimeoutMs;
+    await expectNextMessageAnswered(server, sessionId);
+  }, 60_000);
+
   it('ends on Cancel, and the chat takes the next message', async () => {
     const sessionId = await createSession(server);
     await sendStuckReply(server, sessionId);
@@ -215,7 +263,10 @@ describe('a reply that never reaches the model', () => {
 
     const response = await pending;
     expect(response.status).toBe(409);
-    expect(ErrorMessageSchema.parse(await response.json()).error.message).toBe(TURN_COULD_NOT_START_MESSAGE);
+    expect(ErrorMessageSchema.parse(await response.json()).error).toMatchObject({
+      message: TURN_COULD_NOT_START_MESSAGE,
+      code: 'turn_could_not_start',
+    });
     expect(await reloadTurns(server, sessionId)).toEqual([]);
     expect(server.model.requests()).toHaveLength(0);
 

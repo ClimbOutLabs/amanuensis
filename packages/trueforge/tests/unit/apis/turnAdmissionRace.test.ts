@@ -73,7 +73,13 @@ const AGENT_SPEC = {
   },
 };
 
-const ErrorCodeSchema = z.object({ error: z.object({ code: z.string().nullable().optional() }).loose() });
+const ErrorCodeSchema = z.object({
+  error: z.object({ message: z.string(), code: z.string().nullable().optional() }).loose(),
+});
+
+/** The plain line a refused Send carries; the chat shows its own words for the code. */
+const STILL_WORKING_MESSAGE =
+  'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.';
 const TurnIdSchema = z.object({ data: z.object({ id: z.string() }).loose() });
 
 function jsonInit(body: unknown): RequestInit {
@@ -185,7 +191,7 @@ async function sendHeld({
   server: ApprovalTestServer;
   sessionId: string;
   input: TurnInputItem[];
-  previousTurnId: string;
+  previousTurnId: string | undefined;
 }): Promise<{ release: () => void; response: Promise<Response> }> {
   const { held, release } = holdNextAdmission();
   const response = server.request(
@@ -199,6 +205,30 @@ async function sendHeld({
 async function outcome(response: Response): Promise<{ status: number; code: string | null | undefined }> {
   const body: unknown = await response.json();
   return { status: response.status, code: response.status === 409 ? ErrorCodeSchema.parse(body).error.code : null };
+}
+
+/** Sends a message whose run reaches its connector, then hangs before the model; waits until its turn exists. */
+async function sendSlowStartingReply({
+  server,
+  sessionId,
+  hang,
+}: {
+  server: ApprovalTestServer;
+  sessionId: string;
+  hang: Promise<unknown>;
+}): Promise<Promise<Response>> {
+  const turnsBefore = (await reloadTurns(server, sessionId)).length;
+  offlineCheckHang = hang;
+  const response = server.request(
+    `/api/v1/sessions/${sessionId}/turns`,
+    jsonInit({ input: [{ type: 'user.message', content: 'Hello.' }], stream: false }),
+  );
+  await waitFor({
+    read: () => reloadTurns(server, sessionId),
+    ready: turns => turns.length === turnsBefore + 1,
+    budgetMs: SETTLE_BUDGET_MS,
+  });
+  return response;
 }
 
 describe('two replies for one chat accepted at the same time', () => {
@@ -249,6 +279,90 @@ describe('two replies for one chat accepted at the same time', () => {
     expect(turns.map(turn => turn.state.status)).toEqual(['done', 'done']);
   }, 60_000);
 
+  it('refuses a message sent while the last reply is still starting, in plain words, and keeps that reply', async () => {
+    // As on the owner's build: the reply had started its connector and was waiting before the
+    // model when the next message came, which then stopped it and waited for it to wind down.
+    const sessionId = await createSession(server);
+    const runHold = Promise.withResolvers<undefined>();
+    const firstReply = await sendSlowStartingReply({ server, sessionId, hang: runHold.promise });
+
+    const sentAt = Date.now();
+    const second = await server.request(
+      `/api/v1/sessions/${sessionId}/turns`,
+      jsonInit({ input: [{ type: 'user.message', content: 'Are you there?' }], stream: true }),
+    );
+    expect(Date.now() - sentAt).toBeLessThan(5_000);
+    expect(second.status).toBe(409);
+    expect(ErrorCodeSchema.parse(await second.json()).error).toMatchObject({
+      code: 'previous_turn_running',
+      message: STILL_WORKING_MESSAGE,
+    });
+    const [stillRunning] = await reloadTurns(server, sessionId);
+    expect(stillRunning?.state.status).toBe('running');
+
+    runHold.resolve(undefined);
+    expect((await firstReply).status).toBe(200);
+    const [answered] = await waitFor({
+      read: () => reloadTurns(server, sessionId),
+      ready: listed => listed.every(turn => turn.state.status !== 'running'),
+      budgetMs: SETTLE_BUDGET_MS,
+    });
+    expect(answered?.state.status).toBe('done');
+
+    // Once the first reply ends, the chat takes the next message.
+    const next = await server.request(
+      `/api/v1/sessions/${sessionId}/turns`,
+      jsonInit({ input: [{ type: 'user.message', content: 'Are you there?' }], stream: true }),
+    );
+    expect(next.status).toBe(200);
+    await next.text();
+    const turns = await reloadTurns(server, sessionId);
+    expect(turns.map(turn => turn.state.status)).toEqual(['done', 'done']);
+  }, 60_000);
+
+  it('refuses a message that names no parent while a reply runs', async () => {
+    const sessionId = await createSession(server);
+    const runHold = Promise.withResolvers<undefined>();
+    const firstReply = await sendSlowStartingReply({ server, sessionId, hang: runHold.promise });
+
+    const fresh = await server.request(
+      `/api/v1/sessions/${sessionId}/turns`,
+      jsonInit({ input: [{ type: 'user.message', content: 'Start over.' }], stream: false, previous_turn_id: 'none' }),
+    );
+    expect(await outcome(fresh)).toEqual({ status: 409, code: 'previous_turn_running' });
+
+    runHold.resolve(undefined);
+    expect((await firstReply).status).toBe(200);
+    await waitFor({
+      read: () => reloadTurns(server, sessionId),
+      ready: listed => listed.length === 1 && listed.every(turn => turn.state.status === 'done'),
+      budgetMs: SETTLE_BUDGET_MS,
+    });
+  }, 60_000);
+
+  it('runs only one reply when Send is pressed twice on a new chat', async () => {
+    const sessionId = await createSession(server);
+    const press: TurnInputItem[] = [{ type: 'user.message', content: 'Hello.' }];
+    const pressed = await sendHeld({ server, sessionId, input: press, previousTurnId: undefined });
+    const pressedAgain = await sendHeld({ server, sessionId, input: press, previousTurnId: undefined });
+
+    const runHold = Promise.withResolvers<undefined>();
+    offlineCheckHang = runHold.promise;
+    pressed.release();
+    expect((await pressed.response).status).toBe(200);
+    pressedAgain.release();
+
+    expect(await outcome(await pressedAgain.response)).toEqual({ status: 409, code: 'previous_turn_running' });
+    runHold.resolve(undefined);
+
+    const turns = await waitFor({
+      read: () => reloadTurns(server, sessionId),
+      ready: listed => listed.every(turn => turn.state.status !== 'running'),
+      budgetMs: SETTLE_BUDGET_MS,
+    });
+    expect(turns.map(turn => turn.state.status)).toEqual(['done']);
+  }, 60_000);
+
   it('answers a second press of the same approval from the record instead of running it twice', async () => {
     const sessionId = await createSession(server);
     const { turnId, approval } = await askForWrite(server, sessionId);
@@ -260,8 +374,8 @@ describe('two replies for one chat accepted at the same time', () => {
     second.release();
 
     expect((await first.response).status).toBe(200);
-    const again = await second.response;
-    expect([200, 409]).toContain(again.status);
+    // Answered from the record: the decision is already on the chat, so nothing runs twice.
+    expect((await second.response).status).toBe(200);
 
     const turns = await waitFor({
       read: () => reloadTurns(server, sessionId),
