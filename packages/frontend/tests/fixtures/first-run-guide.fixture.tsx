@@ -16,6 +16,7 @@ import {
 } from '@truefoundry/trueforge-ui';
 import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
+import '../../src/index.css';
 
 /**
  * Screens the first-run work adds, each in a known state, for the browser test to photograph:
@@ -34,7 +35,8 @@ export type FixtureState =
   | 'tour-focus'
   | 'tour-none'
   | 'shell'
-  | 'rail';
+  | 'rail'
+  | 'rail-name';
 export const FIXTURE_STATES: readonly FixtureState[] = [
   'fresh',
   'half',
@@ -48,6 +50,7 @@ export const FIXTURE_STATES: readonly FixtureState[] = [
   'tour-none',
   'shell',
   'rail',
+  'rail-name',
 ];
 const TOUR_HIDDEN_STORAGE_KEY = 'aman.hide_tour';
 
@@ -96,6 +99,7 @@ function setupFor(state: FixtureState): AmanSetupState {
     case 'tour-none':
     case 'shell':
     case 'rail':
+    case 'rail-name':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
   }
 }
@@ -139,6 +143,18 @@ function Screen({ state }: { state: FixtureState }) {
         <div className="w-72">
           <AmanRuntimeRail avatarSrc="/aman-avatar.png" status="ready" modelName="local/llama" version="0.4.2" />
         </div>
+      </div>
+    );
+  }
+  if (state === 'rail-name') {
+    // The panel inside the real shell, beside a plain section heading: the panel name must use that same size.
+    return (
+      <div className="aman-shell" style={{ height: '100vh' }}>
+        <div className="aman-chat-surface" />
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" status="ready" modelName="local/llama" version="0.4.2" />
+        <p className="aui-section-heading" data-testid="section-heading-reference">
+          Reference heading
+        </p>
       </div>
     );
   }

@@ -78,7 +78,6 @@ body {
   }
 
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card {
-    display: block;
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -94,10 +93,6 @@ body {
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__identity {
     flex: 1;
     padding: 0;
-  }
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__identity h2 {
-    margin: 0;
-    font-size: 0.9rem;
   }
 }
 

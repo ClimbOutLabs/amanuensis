@@ -76,8 +76,6 @@ const REQUIRED_TOKEN_KEYS: (keyof SemanticTokens)[] = [
   'goldInk',
   'goldSoft',
   'goldLine',
-  'pandaGlowFrom',
-  'pandaGlowTo',
   'radius',
   'composerRadius',
   'overlay',

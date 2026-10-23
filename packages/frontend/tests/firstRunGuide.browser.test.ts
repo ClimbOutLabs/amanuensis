@@ -282,3 +282,49 @@ test('first-run screens render in light and dark at desktop and phone width', { 
     await server.close();
   }
 });
+
+test('the panel name takes the section-heading size at tablet and phone width', { timeout: 120_000 }, async () => {
+  const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const server = await createServer({
+    configFile: false,
+    root: frontendRoot,
+    logLevel: 'silent',
+    resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
+    server: { host: '127.0.0.1', port: 0 },
+  });
+  let browser: Browser | undefined;
+
+  try {
+    await server.listen();
+    const address = server.httpServer?.address();
+    if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
+
+    browser = await chromium.launch({ executablePath: findChromiumExecutable(), headless: true });
+    for (const width of [830, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 1100 } });
+      await page.goto(
+        `http://127.0.0.1:${address.port}/tests/fixtures/first-run-guide.fixture.html?state=rail-name&theme=light`,
+        { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS },
+      );
+      await page.getByTestId('section-heading-reference').waitFor({ timeout: RENDER_TIMEOUT_MS });
+      const sizes = await page.evaluate(() => {
+        const name = document.querySelector('.aman-runtime-rail__identity h2');
+        const reference = document.querySelector('[data-testid="section-heading-reference"]');
+        return {
+          name: name == null ? null : getComputedStyle(name).fontSize,
+          heading: reference == null ? null : getComputedStyle(reference).fontSize,
+        };
+      });
+      assert.ok(sizes.name != null, `the panel name is on screen at ${width}px`);
+      assert.equal(
+        sizes.name,
+        sizes.heading,
+        `the panel name is ${sizes.name} at ${width}px, not the section-heading size ${sizes.heading}`,
+      );
+      await page.close();
+    }
+  } finally {
+    await browser?.close();
+    await server.close();
+  }
+});
