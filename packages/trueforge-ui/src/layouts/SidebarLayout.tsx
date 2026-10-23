@@ -368,7 +368,8 @@ export function SidebarLayout({ className }: { className?: string }) {
           }
         />
 
-        <div className="flex min-h-0 min-w-0 flex-1">
+        {/* A folded chat list lends the chat column part of its width. */}
+        <div className={cn('flex min-h-0 min-w-0 flex-1', !showRecentHistory && '[--thread-extra-left:8rem]')}>
           {showRecentHistory ? (
             <aside
               ref={chatListRef}
