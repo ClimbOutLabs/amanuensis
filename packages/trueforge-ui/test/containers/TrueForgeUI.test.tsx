@@ -708,7 +708,7 @@ describe('SidebarLayout', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('toggles theme from the footer and shows settings only when catalog is provided', async () => {
+  it('chooses an appearance from the More menu and shows settings only when catalog is provided', async () => {
     const { rerender } = render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme' } }}>
         <ServerProvider server={mockServer(stubCatalog)}>
@@ -726,14 +726,10 @@ describe('SidebarLayout', () => {
     openRailMenu();
     expect(await screen.findAllByRole('button', { name: 'Settings' })).toHaveLength(1);
     expect(await screen.findAllByRole('button', { name: 'Agents' })).not.toHaveLength(0);
-    const [themeButton] = screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ });
-    if (themeButton === undefined) {
-      throw new Error('Expected theme toggle');
-    }
-    fireEvent.click(themeButton);
-    // Choosing a theme closes the More menu, so reopen it to check the label flipped.
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+    // Choosing an appearance closes the More menu, so reopen it to check the choice moved.
     openRailMenu();
-    expect(screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ })).toHaveLength(1);
+    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
 
     // Settings stays available with a locked agentName when catalog is present.
     rerender(
