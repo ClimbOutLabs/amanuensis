@@ -2,6 +2,9 @@
  * The chat journeys a person takes on a slow self-hosted model, in a real browser against the real
  * server. The scripted model waits before its first word, thinks silently, then writes slowly, so
  * timing bugs that instant fake models hide show up here. Run with `pnpm journey:slow`.
+ *
+ * The no-friction section sets the person up as a real install is and checks that everyday requests
+ * never stop at an approval card, while the requests that must ask still do.
  */
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -14,8 +17,21 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 
+import { TENANT_ID } from '../../trueforge/src/apis/sessions.ts';
 import configuration from '../../trueforge/src/config.ts';
-import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import { registerCalendarConnector } from '../../trueforge/src/runtime/calendarConnector.ts';
+import { registerMailConnector } from '../../trueforge/src/runtime/mailConnector.ts';
+import {
+  MODEL_FQN,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import {
+  MAIL_CONTACT_EMAIL,
+  startPersonalConnectors,
+  type PersonalConnectors,
+} from '../../trueforge/tests/fixtures/personalConnectors.ts';
+import { AIRPORT, HOME_CITY, installRecordedMaps } from '../../trueforge/tests/fixtures/recordedMaps.ts';
 import {
   FINAL_TEXT,
   RESEARCH_DIRECTIVE,
@@ -23,8 +39,10 @@ import {
   RESEARCH_SEARCHES,
   RUN_DIRECTIVE_PREFIX,
   SEARCH_AGAIN_DIRECTIVE,
+  webSearchArgumentsJson,
   type ModelCall,
   type ModelPacing,
+  type PlannedToolCall,
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
@@ -734,3 +752,348 @@ function isShorteningCall(call: ModelCall): boolean {
     call.request.messages.some(message => JSON.stringify(message.content ?? '').includes('<transcript>'))
   );
 }
+
+// No friction: everyday requests on an install set up like a real one.
+
+const PROFILE_NAME = 'Rowan Ellery';
+const ADDRESS_AS = 'Rowan';
+const FORECAST_URL = `https://forecast.weather.gov/MapClick.php?lat=${HOME_CITY.lat}&lon=${HOME_CITY.lon}`;
+const NEWS_URLS = ['https://news.example.org/today/top-stories', 'https://news.example.org/today/local'];
+const TYPED_LINK = 'https://example.org/article';
+/** The person's saved Add-ons choice for new chats: Email and Calendar on. */
+const CHAT_PREFERENCES_KEY = 'tfy-aui-chat-draft-spec-preferences';
+const CHAT_PREFERENCES = {
+  version: 1,
+  spec: { model: { name: MODEL_FQN }, mcpServers: [{ name: 'Email' }, { name: 'Calendar' }] },
+};
+
+let connectors: PersonalConnectors | undefined;
+let maps: ReturnType<typeof installRecordedMaps> | undefined;
+let personalInstall: Promise<void> | undefined;
+
+after(async () => {
+  maps?.restore();
+  await connectors?.close();
+});
+
+/**
+ * A profile with a name and a city, the designated search provider with searches and maps running without
+ * asking, and the Email and Calendar connectors registered as boot registers them. Set up once, the first
+ * time a no-friction journey runs, so the journeys before it keep their plain setup.
+ */
+async function setUpPersonalInstall(): Promise<void> {
+  connectors = await startPersonalConnectors();
+  maps = installRecordedMaps();
+  api.setFirstPartyOrigins([connectors.origin]);
+  await registerMailConnector({ url: connectors.mailUrl, mcpServerStore: api.mcpServerStore(), tenant_id: TENANT_ID });
+  await registerCalendarConnector({
+    url: connectors.calendarUrl,
+    mcpServerStore: api.mcpServerStore(),
+    tenant_id: TENANT_ID,
+  });
+  await apiJson(
+    '/api/v1/personalization/profile',
+    jsonRequest('PUT', {
+      profile: {
+        assistant_name: null,
+        assistant_identity: null,
+        voice_guidance: null,
+        user_name: PROFILE_NAME,
+        address_as: ADDRESS_AS,
+        user_profile: `Lives in ${HOME_CITY.name}.`,
+        pinned_preferences: [],
+      },
+    }),
+  );
+  await apiJson(
+    '/api/v1/user/settings/sentinel',
+    jsonRequest('PATCH', { search_without_asking: true, maps_without_asking: true }),
+  );
+}
+
+/** What the search provider finds: a forecast page for weather, two stories for news. */
+function searchResults(query: string): string[] {
+  if (/weather/i.test(query)) return [FORECAST_URL];
+  if (/news/i.test(query)) return NEWS_URLS;
+  return [`https://source.example.org/${encodeURIComponent(query)}`];
+}
+
+/**
+ * A page for the set-up person that records the text of every approval card it shows, so a card that
+ * flashes between two polls still counts. Plain text, because a compiled function can reference helpers
+ * the page does not have.
+ */
+async function personalPage(): Promise<Page> {
+  personalInstall ??= setUpPersonalInstall();
+  await personalInstall;
+  const page = await freshPage();
+  await page.addInitScript(`(() => {
+    localStorage.setItem(${JSON.stringify(CHAT_PREFERENCES_KEY)}, ${JSON.stringify(JSON.stringify(CHAT_PREFERENCES))});
+    window.__approvalCards = [];
+    const look = () => {
+      for (const card of document.querySelectorAll('[data-role="approval-ticket"]')) {
+        const text = card.innerText.replace(/\\s+/g, ' ').trim();
+        if (text !== '' && !window.__approvalCards.includes(text)) window.__approvalCards.push(text);
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      look();
+      new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+  })()`);
+  return page;
+}
+
+async function approvalCardsShown(page: Page): Promise<string[]> {
+  const cards: unknown = await page.evaluate('window.__approvalCards');
+  return Array.isArray(cards) ? cards.map(String) : [];
+}
+
+function search(query: string): PlannedToolCall {
+  return { match: 'web_search', argumentsJson: webSearchArgumentsJson(query) };
+}
+
+function readPage(url: string): PlannedToolCall {
+  return { match: 'web_fetch', argumentsJson: JSON.stringify({ urls: [url], objective: 'Read the page' }) };
+}
+
+/** The first page link a search result returned. */
+function firstResultUrl(result: string | undefined): string {
+  const url = /https?:\/\/[^\s"\\]+/.exec(result ?? '')?.[0];
+  if (url === undefined) throw new Error(`the search returned no page link: ${result ?? '(nothing)'}`);
+  return url;
+}
+
+/** One tool the reply must run, by the count that rises when it runs. */
+interface ExpectedTool {
+  what: string;
+  runs: () => number;
+  times: number;
+}
+
+/**
+ * Sends `message` in a new chat while the scripted model makes the calls `plan` gives, the realistic calls a
+ * real model makes, and waits until the reply finishes or a card shows. Returns the cards it showed.
+ */
+async function askAsThePerson({
+  message,
+  plan,
+}: {
+  message: string;
+  plan: (toolResults: string[]) => PlannedToolCall | undefined;
+}): Promise<{ page: Page; sessionId: string; cards: string[] }> {
+  const page = await personalPage();
+  api.model.setPlanner(exchange => (exchange.message.includes(message) ? plan(exchange.toolResults) : undefined));
+  api.mcp.setSearchResults(searchResults);
+  try {
+    await openHome(page);
+    await send(page, message);
+    await page.waitForURL(/\/sessions\//, { timeout: UI_LIMIT_MS });
+    const sessionId = sessionIdOf(page);
+    await until(`"${message}": the reply finishing or a card showing`, REPLY_LIMIT_MS, async () => {
+      if ((await approvalCardsShown(page)).length > 0) return true;
+      return (await settled(page)) && (await lastTurnStatus(sessionId)) !== 'running';
+    });
+    return { page, sessionId, cards: await approvalCardsShown(page) };
+  } finally {
+    api.model.setPlanner(undefined);
+    api.mcp.setSearchResults(undefined);
+  }
+}
+
+/** An everyday request: no card shows, the reply finishes, and each expected tool ran. */
+async function withoutFriction({
+  message,
+  plan,
+  tools,
+}: {
+  message: string;
+  plan: (toolResults: string[]) => PlannedToolCall | undefined;
+  tools: (() => ExpectedTool)[];
+}): Promise<void> {
+  const before = tools.map(tool => ({ ...tool(), from: tool().runs() }));
+  const { page, sessionId, cards } = await askAsThePerson({ message, plan });
+  assert.deepEqual(
+    cards,
+    [],
+    `"${message}" showed ${String(cards.length)} approval card(s): ${cards.map(card => `"${card}"`).join('; ')}`,
+  );
+  await waitForReplyText(page, `"${message}"`, 1);
+  await waitForIdle(page, `"${message}"`);
+  assert.equal(await lastTurnStatus(sessionId), 'done', `"${message}": the server stores the reply as done`);
+  for (const tool of before) {
+    const runs = tool.runs() - tool.from;
+    assert.ok(
+      runs >= tool.times,
+      `"${message}": ${tool.what} ran ${String(runs)} time(s), at least ${String(tool.times)} expected`,
+    );
+  }
+}
+
+/** A request that must still ask: a card shows and the tool has not run. */
+async function stillAsks({
+  message,
+  plan,
+  held,
+}: {
+  message: string;
+  plan: (toolResults: string[]) => PlannedToolCall | undefined;
+  held: () => ExpectedTool;
+}): Promise<void> {
+  const from = held().runs();
+  const { cards } = await askAsThePerson({ message, plan });
+  assert.ok(cards.length > 0, `"${message}" showed no approval card before ${held().what}`);
+  assert.equal(held().runs(), from, `"${message}": ${held().what} waits for the card`);
+}
+
+const searched = (times: number) => () => ({ what: 'web search', runs: () => api.mcp.webSearchInvocations(), times });
+const pageRead = (times: number) => () => ({ what: 'page read', runs: () => api.mcp.webFetchInvocations(), times });
+const connectorTool =
+  (tool: string, times = 1) =>
+  () => ({
+    what: tool,
+    runs: () => connectors?.invocations(tool) ?? 0,
+    times,
+  });
+
+journey('11. no friction: "What is the weather in San Diego" searches, then reads a result', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: 'What is the weather in San Diego',
+    plan: results =>
+      results.length === 0
+        ? search('weather in San Diego')
+        : results.length === 1
+          ? readPage(firstResultUrl(results[0]))
+          : undefined,
+    tools: [searched(1), pageRead(1)],
+  }),
+);
+
+journey(
+  '12. no friction: "What\'s the weather today?" searches the profile\'s city, then reads its forecast',
+  SCENARIO_LIMIT_MS,
+  () =>
+    withoutFriction({
+      message: "What's the weather today?",
+      plan: results =>
+        results.length === 0
+          ? search(`weather today ${HOME_CITY.name}`)
+          : results.length === 1
+            ? readPage(FORECAST_URL)
+            : undefined,
+      tools: [searched(1), pageRead(1)],
+    }),
+);
+
+journey('13. no friction: "What\'s in the news today" searches, then reads one story', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: "What's in the news today",
+    plan: results =>
+      results.length === 0
+        ? search('top news today')
+        : results.length === 1
+          ? readPage(firstResultUrl(results[0]))
+          : undefined,
+    tools: [searched(1), pageRead(1)],
+  }),
+);
+
+journey('14. no friction: "Open this link" reads the link the person typed', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: `Open this link: ${TYPED_LINK}`,
+    plan: results => (results.length === 0 ? readPage(TYPED_LINK) : undefined),
+    tools: [pageRead(1)],
+  }),
+);
+
+journey('15. no friction: "How long to drive to the airport" uses maps', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: 'How long to drive to the airport',
+    plan: results =>
+      results.length === 0
+        ? {
+            match: 'render_route',
+            argumentsJson: JSON.stringify({ from_place: HOME_CITY.name, to_place: AIRPORT.name, mode: 'driving' }),
+          }
+        : undefined,
+    tools: [() => ({ what: 'a driving route', runs: () => maps?.routeCalls() ?? 0, times: 1 })],
+  }),
+);
+
+journey('16. no friction: "What are my three newest emails" reads mail', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: 'What are my three newest emails',
+    plan: results => {
+      if (results.length === 0) return { match: 'list_emails_metadata', argumentsJson: JSON.stringify({ limit: 3 }) };
+      if (results.length > 1) return undefined;
+      const ids = [...(results[0] ?? '').matchAll(/mail-\d+/g)].map(match => match[0]);
+      return { match: 'get_emails_content', argumentsJson: JSON.stringify({ email_ids: [...new Set(ids)] }) };
+    },
+    tools: [connectorTool('list_emails_metadata'), connectorTool('get_emails_content')],
+  }),
+);
+
+journey('17. no friction: "What\'s on my calendar today" reads the calendar', SCENARIO_LIMIT_MS, () => {
+  const day = new Date().toISOString().slice(0, 10);
+  return withoutFriction({
+    message: "What's on my calendar today",
+    plan: results =>
+      results.length === 0
+        ? {
+            match: 'list_events',
+            argumentsJson: JSON.stringify({ start: `${day}T00:00:00Z`, end: `${day}T23:59:59Z` }),
+          }
+        : undefined,
+    tools: [connectorTool('list_events')],
+  });
+});
+
+journey("18. still asks: a search carrying a contact's email address read from mail", SCENARIO_LIMIT_MS, () =>
+  stillAsks({
+    message: 'Who emailed me about book club? Look them up online.',
+    plan: results =>
+      results.length === 0
+        ? { match: 'list_emails_metadata', argumentsJson: JSON.stringify({ limit: 5 }) }
+        : results.length === 1
+          ? search(MAIL_CONTACT_EMAIL)
+          : undefined,
+    held: searched(1),
+  }),
+);
+
+journey('19. still asks: sending an email', SCENARIO_LIMIT_MS, () =>
+  stillAsks({
+    message: "Email Juniper that I'll be at book club on Thursday",
+    plan: results =>
+      results.length === 0
+        ? {
+            match: 'send_email',
+            argumentsJson: JSON.stringify({
+              recipients: [MAIL_CONTACT_EMAIL],
+              subject: 'Book club',
+              body: "I'll be there on Thursday.",
+            }),
+          }
+        : undefined,
+    held: connectorTool('send_email'),
+  }),
+);
+
+journey('20. still asks: creating a calendar event with a guest', SCENARIO_LIMIT_MS, () =>
+  stillAsks({
+    message: 'Put dinner with Juniper on my calendar for Friday at 7 and invite her',
+    plan: results =>
+      results.length === 0
+        ? {
+            match: 'create_event',
+            argumentsJson: JSON.stringify({
+              summary: 'Dinner with Juniper',
+              start: '2026-10-30T19:00:00-07:00',
+              end: '2026-10-30T21:00:00-07:00',
+              attendees: [MAIL_CONTACT_EMAIL],
+            }),
+          }
+        : undefined,
+    held: connectorTool('create_event'),
+  }),
+);

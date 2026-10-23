@@ -88,6 +88,18 @@ export interface ModelPacing {
   wordDelayMs: number;
 }
 
+/** One tool call a planned reply makes: the advertised tool whose name contains `match`, with these arguments. */
+export interface PlannedToolCall {
+  match: string;
+  argumentsJson: string;
+}
+
+/**
+ * Plans a reply to a message that carries no directive, the way a real model would choose its calls: given the
+ * person's latest message and the text of each tool result since, the next call, or undefined to answer.
+ */
+export type ReplyPlanner = (input: { message: string; toolResults: string[] }) => PlannedToolCall | undefined;
+
 /** One chat-completion request and how its response ended. */
 export interface ModelCall {
   request: ChatCompletionRequest;
@@ -104,6 +116,8 @@ export interface ScriptedModelServer {
   calls: () => readonly ModelCall[];
   /** Paces every later streamed reply; `undefined` answers at once again. */
   setPacing: (pacing: ModelPacing | undefined) => void;
+  /** Plans replies to messages with no directive; `undefined` answers them with text again. */
+  setPlanner: (planner: ReplyPlanner | undefined) => void;
   /** Cuts every open response, as a server whose process died would. */
   hangUpAll: () => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
@@ -326,6 +340,21 @@ function briefSteps(messages: ChatMessage[]): { match: string; argumentsJson: st
   ];
 }
 
+/** The person's latest message and the text of every tool result after it. */
+function latestExchange(messages: ChatMessage[]): { message: string; toolResults: string[] } {
+  let message = '';
+  let toolResults: string[] = [];
+  for (const entry of messages) {
+    if (entry.role === 'user') {
+      message = personText(entry.content);
+      toolResults = [];
+    } else if (entry.role === 'tool') {
+      toolResults.push(messageText(entry.content));
+    }
+  }
+  return { message, toolResults };
+}
+
 /** Page links the search results in this conversation returned, in order, without repeats. */
 function resultUrls(messages: ChatMessage[]): string[] {
   const urls: string[] = [];
@@ -343,7 +372,7 @@ function resultUrls(messages: ChatMessage[]): string[] {
 }
 
 /** The search provider's own argument shape: an objective plus the queries to run. */
-function webSearchArgumentsJson(query: string): string {
+export function webSearchArgumentsJson(query: string): string {
   return JSON.stringify({ objective: `Find out: ${query}`, search_queries: [query] });
 }
 
@@ -536,6 +565,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const open = new Set<ServerResponse>();
   const calls: ModelCall[] = [];
   let pacing: ModelPacing | undefined;
+  let planner: ReplyPlanner | undefined;
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
@@ -600,6 +630,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         query === undefined ? undefined : { match: 'web_search', argumentsJson: webSearchArgumentsJson(query) };
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
+    } else if (progress.directive === undefined && planner !== undefined && parsed.tools.length > 0) {
+      requestedTool = planner(latestExchange(parsed.messages));
     }
     const toolName =
       requestedTool === undefined
@@ -729,6 +761,9 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     calls: () => calls,
     setPacing: next => {
       pacing = next;
+    },
+    setPlanner: next => {
+      planner = next;
     },
     hangUpAll: () => {
       for (const res of open) {

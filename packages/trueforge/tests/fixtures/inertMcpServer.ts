@@ -124,6 +124,11 @@ export interface InertMcpServer {
   redirectAllTo: (redirect: InertRedirect | undefined) => void;
   /** HTTP requests received since the last reset, whatever they were answered with. */
   requestsSeen: () => number;
+  /**
+   * While set, the search provider's `web_search` answers each query with these page links, as JSON results
+   * that each carry their own `url` like a real provider's, instead of its invented line. `undefined` restores it.
+   */
+  setSearchResults: (results: ((query: string) => string[]) | undefined) => void;
   /** Parks the next write invocation so a turn can be cancelled mid-execution. */
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
@@ -160,6 +165,10 @@ interface Counters {
   searchMemory: number;
   webSearch: number;
   webFetch: number;
+}
+
+interface SearchResults {
+  current: ((query: string) => string[]) | undefined;
 }
 
 interface MemoryModes {
@@ -213,12 +222,14 @@ function buildMcpServer({
   counters,
   gates,
   memoryModes,
+  searchResults,
   webSearch,
   searchProvider,
 }: {
   counters: Counters;
   gates: WriteGate[];
   memoryModes: MemoryModes;
+  searchResults: SearchResults;
   webSearch: boolean;
   searchProvider: boolean;
 }): McpServer {
@@ -345,6 +356,17 @@ function buildMcpServer({
       ({ search_queries }) => {
         counters.webSearch += 1;
         const n = counters.webSearch;
+        const results = searchResults.current;
+        if (results !== undefined) {
+          // A real provider's shape: each result carries its own `url`, which a later page read may name.
+          return textResult(
+            JSON.stringify({
+              results: search_queries.flatMap(query =>
+                results(query).map(url => ({ url, title: `Result for ${query}`, excerpts: [`About ${query}.`] })),
+              ),
+            }),
+          );
+        }
         return textResult(
           search_queries
             .map(query => `Result for ${query}: https://source-${String(n)}.example.org/article`)
@@ -441,6 +463,7 @@ export async function startInertMcpServer(options?: {
     webFetch: 0,
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
+  const searchResults: SearchResults = { current: undefined };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
@@ -505,7 +528,9 @@ export async function startInertMcpServer(options?: {
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, webSearch, searchProvider }).connect(asTransport(transport));
+    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider }).connect(
+      asTransport(transport),
+    );
     await transport.handleRequest(req, res, body);
   }
 
@@ -596,6 +621,9 @@ export async function startInertMcpServer(options?: {
       redirect = next;
     },
     requestsSeen: () => requestCount,
+    setSearchResults: results => {
+      searchResults.current = results;
+    },
     holdNextWrite: () => {
       const entered: PromiseWithResolvers<void> = Promise.withResolvers();
       const released: PromiseWithResolvers<void> = Promise.withResolvers();
