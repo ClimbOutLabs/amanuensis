@@ -101,6 +101,7 @@ import {
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import { resolveModelContextLength } from '../runtime/modelContextLength';
 import {
   flushModelUsage,
   modelIdentity,
@@ -534,6 +535,15 @@ function createTurnResolver(deps: {
           modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
+          // Sizes compaction and the request guard; unknown leaves both on their fixed fallbacks.
+          // The configured limit belongs to the configured model, not to a forced Token Factory one.
+          modelProperties: {
+            contextLength: await resolveModelContextLength({
+              providerConfig: routed.providerConfig,
+              configuredContextLength:
+                routed.providerConfig === resolved.providerConfig ? resolved.modelProperties.context_length : undefined,
+            }),
+          },
         };
       },
       mcp: async name => {
