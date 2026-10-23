@@ -4,9 +4,9 @@
  */
 
 /** Most words an automatically spoken answer reads before pointing at the screen. */
-export const SPOKEN_WORD_LIMIT = 60;
-export const REST_ON_SCREEN = 'The rest is on screen.';
-export const APPROVAL_SPEECH_PREFIX = 'I need your OK on screen.';
+const SPOKEN_WORD_LIMIT = 60;
+const REST_ON_SCREEN = 'The rest is on screen.';
+const APPROVAL_SPEECH_PREFIX = 'Please approve this on screen';
 const APPROVAL_WORD_LIMIT = 20;
 
 /** The part fields speech reads; a content part of any message fits this shape. */
@@ -87,5 +87,5 @@ export function approvalSpeechLine(plainWhat: string): string {
     .split(' ')
     .filter(word => word !== '');
   const head = words.slice(0, APPROVAL_WORD_LIMIT).join(' ');
-  return head === '' ? APPROVAL_SPEECH_PREFIX : `${APPROVAL_SPEECH_PREFIX} ${head}`;
+  return head === '' ? `${APPROVAL_SPEECH_PREFIX}.` : `${APPROVAL_SPEECH_PREFIX}: ${head}`;
 }

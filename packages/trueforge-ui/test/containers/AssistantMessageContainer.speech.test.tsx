@@ -53,7 +53,7 @@ describe('finished answer read-aloud controls', () => {
   it('reads the answer aloud on demand and offers a stop while it is read', () => {
     renderAnswer();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read answer aloud' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
 
     expect(spokenTexts(synthesis)).toEqual(['Here is the plan for your week.']);
     const stop = screen.getByRole('button', { name: 'Stop reading aloud' });
@@ -61,7 +61,7 @@ describe('finished answer read-aloud controls', () => {
     fireEvent.click(stop);
 
     expect(synthesis.cancel).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Read answer aloud' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Read aloud' })).toBeInTheDocument();
   });
 
   it('shows no read-aloud control when the browser cannot read text aloud', () => {
@@ -69,7 +69,7 @@ describe('finished answer read-aloud controls', () => {
 
     renderAnswer();
 
-    expect(screen.queryByRole('button', { name: 'Read answer aloud' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Read aloud' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop reading aloud' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });

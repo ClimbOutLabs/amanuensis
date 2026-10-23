@@ -1,3 +1,4 @@
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import configuration from '../../../src/config';
 import {
   createHttpScheduleRunExecutor,
@@ -7,8 +8,10 @@ import {
   SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
+  scheduleTaskText,
   startScheduleRun,
 } from '../../../src/controller/scheduleDispatch';
+import type { IBriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
 import type { ScheduleDispatchItem, ScheduleRunRecord } from '../../../src/db/scheduleStore';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
@@ -23,6 +26,10 @@ describe('scheduleRunFailureReason', () => {
     expect(scheduleRunFailureReason(null)).toBe('Schedule run failed');
   });
 });
+
+function noBriefItemsDone(): Pick<IBriefItemCompletionStore, 'listCompletedSince'> {
+  return { listCompletedSince: jest.fn().mockResolvedValue([]) };
+}
 
 function item(): ScheduleDispatchItem {
   return {
@@ -148,6 +155,7 @@ describe('startScheduleRun', () => {
       sessions: { getOrCreateByExternalId },
       agentStore: { getAgent },
       personaStore: { getPersona: jest.fn() },
+      briefItems: noBriefItemsDone(),
     });
 
     expect(getAgent).toHaveBeenCalledWith({ tenant_id: 'default', name: 'reporter' });
@@ -194,6 +202,7 @@ describe('startScheduleRun', () => {
       },
       agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
       personaStore: { getPersona },
+      briefItems: noBriefItemsDone(),
     });
 
     expect(getPersona).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'tester', id: 'persona-1' });
@@ -208,6 +217,7 @@ describe('startScheduleRun', () => {
         sessions: { getOrCreateByExternalId: jest.fn() },
         agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
         personaStore: { getPersona: jest.fn().mockResolvedValue(undefined) },
+        briefItems: noBriefItemsDone(),
       }),
     ).rejects.toThrow(new SchedulePersonaNotFoundError());
   });
@@ -225,6 +235,7 @@ describe('startScheduleRun', () => {
       sessions: { getOrCreateByExternalId },
       agentStore: { getAgent },
       personaStore: { getPersona: jest.fn() },
+      briefItems: noBriefItemsDone(),
     });
 
     expect(prepared).toBeUndefined();
@@ -237,6 +248,7 @@ describe('startScheduleRun', () => {
         sessions: { getOrCreateByExternalId: jest.fn() },
         agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) },
         personaStore: { getPersona: jest.fn() },
+        briefItems: noBriefItemsDone(),
       }),
     ).rejects.toBeInstanceOf(ScheduleAgentNotFoundError);
   });
@@ -270,5 +282,44 @@ describe('loadScheduleDispatchItem', () => {
       }),
     ).rejects.toBeInstanceOf(ScheduleRunNotFoundError);
     expect(getSchedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('scheduleTaskText', () => {
+  const owner = { tenant_id: 'default', created_by: 'tester' };
+  const now = new Date('2026-10-22T08:00:00.000Z');
+  const done = (title: string) => ({
+    item_key: `bi_${title}`,
+    section: 'decision' as const,
+    title,
+    completed_at: '2026-10-21T09:00:00.000Z',
+  });
+
+  it('leaves a non-brief task unchanged and does not read completions', async () => {
+    const listCompletedSince = jest.fn().mockResolvedValue([done('A')]);
+    const text = await scheduleTaskText({ task: 'Write the report', owner, briefItems: { listCompletedSince }, now });
+    expect(text).toBe('Write the report');
+    expect(listCompletedSince).not.toHaveBeenCalled();
+  });
+
+  it('leaves a brief unchanged when nothing was marked done in the last seven days', async () => {
+    const text = await scheduleTaskText({
+      task: MORNING_BRIEF_PROMPT,
+      owner,
+      briefItems: noBriefItemsDone(),
+      now,
+    });
+    expect(text).toBe(MORNING_BRIEF_PROMPT);
+  });
+
+  it('appends the done titles to a brief for the last seven days, without repeats', async () => {
+    const listCompletedSince = jest.fn().mockResolvedValue([done('A'), done('B'), done('A')]);
+    const text = await scheduleTaskText({ task: MORNING_BRIEF_PROMPT, owner, briefItems: { listCompletedSince }, now });
+    expect(listCompletedSince).toHaveBeenCalledWith({
+      tenant_id: 'default',
+      created_by: 'tester',
+      since: new Date('2026-10-15T08:00:00.000Z'),
+    });
+    expect(text).toBe(`${MORNING_BRIEF_PROMPT}\nAlready done, leave these out of the brief: A; B.`);
   });
 });

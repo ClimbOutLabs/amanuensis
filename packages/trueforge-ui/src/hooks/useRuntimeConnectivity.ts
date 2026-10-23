@@ -101,10 +101,19 @@ export function useRuntimeConnectivity({
     const handleOnline = () => {
       void probe();
     };
+    // Coming back to a backgrounded phone, the last probe may have failed while the page slept;
+    // check again right away instead of showing it offline until the next interval.
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') void probe();
+    };
     window.addEventListener('online', handleOnline);
+    window.addEventListener('pageshow', handleOnline);
+    document.addEventListener('visibilitychange', handleVisible);
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('pageshow', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisible);
     };
   }, [enabled, healthPath, probeIntervalMs, probeTimeoutMs, slowProbeMs, probeNonce, probe]);
 

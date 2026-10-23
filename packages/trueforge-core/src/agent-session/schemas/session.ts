@@ -100,6 +100,15 @@ export const SessionSourceSchema = sessionSourceScheduleObject()
 
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 
+/**
+ * Who set the session title. Only a `first_message` title is replaced by the generated title;
+ * `auto` (fixed or generated) and `person` (a manual rename or an imported title) never are.
+ * Internal only: not part of the wire session.
+ */
+export const SessionTitleSourceSchema = z.enum(['first_message', 'auto', 'person']);
+
+export type SessionTitleSource = z.infer<typeof SessionTitleSourceSchema>;
+
 export const SessionSchema = z
   .object({
     id: z.string().describe('Unique session id.'),

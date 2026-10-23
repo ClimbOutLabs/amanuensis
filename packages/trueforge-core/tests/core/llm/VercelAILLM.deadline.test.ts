@@ -1,6 +1,6 @@
 import { EventType } from '../../../src/core/events/schema';
 import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
-import { AgentThread } from '../../../src/core/runtime/AgentThread';
+import { AgentThread, MODEL_STOPPED_ANSWERING_MESSAGE } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
@@ -157,7 +157,7 @@ describe('provider stream progress deadlines', () => {
       ),
     ).toEqual([]);
     expect(events.filter(event => event.type === InternalEventType.AGENT_DONE)).toMatchObject([
-      { status: 'error', error: expect.stringMatching(/chunk.*timeout/i) },
+      { status: 'error', error: MODEL_STOPPED_ANSWERING_MESSAGE, handoff_cause: 'model_response_timeout' },
     ]);
   });
 

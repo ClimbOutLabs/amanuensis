@@ -17,7 +17,7 @@ import {
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
-import { markDraftFromVoice, takeSpokenReply } from '@/utils/voiceTurn.js';
+import { markDraftFromVoice, noteUserMessage, takeSpokenReply } from '@/utils/voiceTurn.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -429,6 +429,46 @@ describe('ComposerContainer', () => {
     // The hook sees this as ordinary typing and keeps saving it.
     fireEvent.change(input, { target: { value: 'lost?, edited' } });
     await waitFor(() => expect(window.sessionStorage.getItem(key)).toBe('lost?, edited'));
+  });
+
+  it('shows Stopping… after Cancel and leaves the running state once the turn stops', async () => {
+    let finishCancel: () => void = () => undefined;
+    cancelRun.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishCancel = resolve;
+        }),
+    );
+    const running: ThreadMessageLike[] = [
+      { role: 'user', content: 'What is on in town tonight?' },
+      { role: 'assistant', content: '' },
+    ];
+    const view = render(
+      <RuntimeHarness messages={running} isRunning>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    const stopping = await screen.findByRole('button', { name: 'Stopping' });
+    expect(stopping).toHaveTextContent('Stopping…');
+    expect(stopping).toBeDisabled();
+    expect(cancelRun).toHaveBeenCalledOnce();
+
+    // The runtime ends the run (confirmed or not, within its bound), then cancel() resolves.
+    view.rerender(
+      <RuntimeHarness messages={running}>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+    finishCancel();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
   });
 
   it('a second send after a completed turn sends only the new text', async () => {
@@ -1129,7 +1169,8 @@ describe('spoken replies from the composer', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
-    expect(takeSpokenReply()).toBe(true);
+    noteUserMessage({ id: 'sent', text: 'spoken words' });
+    expect(takeSpokenReply('sent')).toBe(true);
   });
 
   it('does not arm the reply for a typed message', async () => {
@@ -1141,7 +1182,8 @@ describe('spoken replies from the composer', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
-    expect(takeSpokenReply()).toBe(false);
+    noteUserMessage({ id: 'typed', text: 'typed words' });
+    expect(takeSpokenReply('typed')).toBe(false);
   });
 
   it('drops a voice draft that was emptied before sending', async () => {
@@ -1156,6 +1198,7 @@ describe('spoken replies from the composer', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
-    expect(takeSpokenReply()).toBe(false);
+    noteUserMessage({ id: 'typed', text: 'typed instead' });
+    expect(takeSpokenReply('typed')).toBe(false);
   });
 });

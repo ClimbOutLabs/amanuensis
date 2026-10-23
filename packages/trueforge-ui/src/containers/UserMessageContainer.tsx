@@ -5,7 +5,6 @@ import { MessagePrimitive, useAui, useAuiState } from '@assistant-ui/react';
 import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 import { copyText } from '@/utils/copyText.js';
-import { AmanBriefRequest } from '../components/AmanBrief.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MessageAttachmentsContainer } from './AttachmentsContainer.js';
@@ -24,14 +23,8 @@ export function UserMessageContainer() {
     copyToClipboard: value => copyText(value),
   });
 
-  // A morning brief request is shown as the brief's ticket, not as a bubble.
-  if (isMorningBriefPrompt(text)) {
-    return (
-      <MessagePrimitive.Root data-role="user">
-        <AmanBriefRequest />
-      </MessagePrimitive.Root>
-    );
-  }
+  // A morning brief request is hidden: the brief itself is the turn's answer.
+  if (isMorningBriefPrompt(text)) return null;
 
   return (
     <MessagePrimitive.Root data-role="user">

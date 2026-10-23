@@ -1081,6 +1081,28 @@ describe('enforceStreamDeadlines', () => {
     expect(deadlineController.signal.aborted).toBe(false);
   });
 
+  it('ends the read itself when the provider stream ignores the abort', async () => {
+    async function* stream() {
+      yield { type: 'start' } as TextStreamPart<ToolSet>;
+      // A provider that accepted the request and never ends its stream, abort or not.
+      await new Promise(() => undefined);
+    }
+    const deadlineController = new AbortController();
+    const outcome = collect(
+      enforceStreamDeadlines({
+        stream: stream(),
+        timeout: { firstChunkMs: 90_000, chunkMs: 60_000 },
+        hasSubstance: chunkHasSubstance,
+        deadlineController,
+      }),
+    ).then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
+    await jest.advanceTimersByTimeAsync(90_000);
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
   it('aborts with a first-chunk TimeoutError when no substantive part arrives in time', async () => {
     async function* stream() {
       yield { type: 'start' } as TextStreamPart<ToolSet>;
@@ -1097,13 +1119,18 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(60);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/first chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
   });
 
   it('aborts with a chunk TimeoutError once a substantive part has cleared the first-chunk deadline', async () => {
@@ -1122,13 +1149,18 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(30);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/^chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
   });
 });
 

@@ -13,7 +13,6 @@ import {
   type PersonalizationApi,
   type PersonalizationProfile,
 } from './PersonalizationContext.js';
-import { VoiceReplySettings } from './VoiceReplySettings.js';
 
 const inputClassName =
   'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary/70 focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
@@ -386,8 +385,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 {feedback.message}
               </p>
             ) : null}
-
-            <VoiceReplySettings />
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button type="button" variant="ghost" onClick={() => void clear()} disabled={saving}>

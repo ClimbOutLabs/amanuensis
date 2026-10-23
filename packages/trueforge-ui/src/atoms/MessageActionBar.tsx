@@ -49,7 +49,7 @@ export function MessageActionBar({ isCopied, onCopy, createdAt, speech, classNam
           </IconButton>
         ) : (
           <IconButton
-            aria-label="Read answer aloud"
+            aria-label="Read aloud"
             tooltip="Read aloud"
             variant="ghost"
             className={actionBtnClass}

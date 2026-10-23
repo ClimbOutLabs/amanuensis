@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import type { RespondToToolApprovalOptions, ThreadMessageLike } from '@assistant-ui/react';
-import { act, render, screen } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SpokenReplyContainer } from '@/containers/SpokenReplyContainer.js';
 import { stopSpeaking } from '@/utils/speechOutput.js';
 import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
-import { armSpokenReply, clearDraftFromVoice, markDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
+import {
+  armSpokenReply,
+  clearDraftFromVoice,
+  disarmSpokenReply,
+  markDraftFromVoice,
+  takeDraftFromVoice,
+} from '@/utils/voiceTurn.js';
 import {
   installSpeechSynthesis,
   removeSpeechSynthesis,
@@ -92,18 +98,23 @@ async function settle() {
   });
 }
 
+const PROMPT = 'Check my calendar';
+
 /**
- * Mirrors the composer send path: the draft's voice flag arms the reply, the reply streams in while
- * the turn runs, then the turn ends with the reply complete.
+ * Mirrors the composer send path: the draft's voice flag arms the send, its message reaches the chat,
+ * the reply streams in while the turn runs, then the turn ends with the reply complete.
  */
 async function sendAndFinish({ fromVoice, reply }: { fromVoice: boolean; reply: ThreadMessageLike['content'] }) {
   if (fromVoice) markDraftFromVoice();
-  armSpokenReply(takeDraftFromVoice());
-  const prompt = [userMessage('Check my calendar')];
-  const { rerender } = render(thread({ messages: prompt, running: true }));
+  const { rerender } = render(thread({ messages: [], running: false }));
+  armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
+  const prompt = [userMessage(PROMPT)];
+  rerender(thread({ messages: prompt, running: true }));
+  await settle();
   rerender(thread({ messages: [...prompt, streamingMessage(reply)], running: true }));
   rerender(thread({ messages: [...prompt, assistantMessage(reply)], running: false }));
   await settle();
+  return rerender;
 }
 
 describe('SpokenReplyContainer', () => {
@@ -132,14 +143,54 @@ describe('SpokenReplyContainer', () => {
     });
 
     expect(spokenTexts(synthesis)).toEqual(['You have two meetings today.']);
-    expect(screen.getByTestId('spoken-reply-announcement').textContent).toBe('Reading the answer aloud.');
+  });
+
+  // The blocker: a voice send that never reached the chat left its flag set, so the next finished run was read aloud.
+  it('does not read a later typed reply after a voice send that never went through', async () => {
+    const { rerender } = render(thread({ messages: [], running: false }));
+    armSpokenReply({ fromVoice: true, text: 'Check my calendar' });
+    const typed = [userMessage('Typed instead')];
+
+    rerender(thread({ messages: typed, running: true }));
+    rerender(
+      thread({ messages: [...typed, assistantMessage([{ type: 'text', text: 'Typed answer.' }])], running: false }),
+    );
+    await settle();
+
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it('does not read a reply to a voice message that a failed send left behind', async () => {
+    const { rerender } = render(thread({ messages: [], running: false }));
+    armSpokenReply({ fromVoice: true, text: PROMPT });
+    disarmSpokenReply();
+    const prompt = [userMessage(PROMPT)];
+
+    rerender(thread({ messages: prompt, running: true }));
+    rerender(
+      thread({ messages: [...prompt, assistantMessage([{ type: 'text', text: 'Late answer.' }])], running: false }),
+    );
+    await settle();
+
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it('stops a reply in progress when the person switches chats', async () => {
+    const rerender = await sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: 'Long answer here.' }] });
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+
+    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
+    await settle();
+
+    expect(synthesis.cancel).toHaveBeenCalled();
   });
 
   it('does not read a reply in a chat the person left before it finished', async () => {
-    markDraftFromVoice();
-    armSpokenReply(takeDraftFromVoice());
-    const prompt = [userMessage('Check my calendar')];
-    const { rerender } = render(thread({ messages: prompt, running: true, threadId: 'chat-a' }));
+    const { rerender } = render(thread({ messages: [], running: false, threadId: 'chat-a' }));
+    armSpokenReply({ fromVoice: true, text: PROMPT });
+    const prompt = [userMessage(PROMPT)];
+    rerender(thread({ messages: prompt, running: true, threadId: 'chat-a' }));
+    await settle();
     rerender(
       thread({
         messages: [...prompt, streamingMessage([{ type: 'text', text: 'Working.' }])],
@@ -177,9 +228,10 @@ describe('SpokenReplyContainer', () => {
     approvals['call-approval'] = { card: { plain_what: 'Send the email to Sam Rivera.' } };
     const respond = vi.fn<(options: RespondToToolApprovalOptions) => void>();
     const prompt = [userMessage('Email Sam')];
-    markDraftFromVoice();
-    armSpokenReply(takeDraftFromVoice());
-    const { rerender } = render(thread({ messages: prompt, running: true, onRespondToToolApproval: respond }));
+    const { rerender } = render(thread({ messages: [], running: false, onRespondToToolApproval: respond }));
+    armSpokenReply({ fromVoice: true, text: 'Email Sam' });
+    rerender(thread({ messages: prompt, running: true, onRespondToToolApproval: respond }));
+    await settle();
     rerender(
       thread({
         messages: [
@@ -203,7 +255,7 @@ describe('SpokenReplyContainer', () => {
     );
 
     await settle();
-    expect(spokenTexts(synthesis)).toEqual(['I need your OK on screen. Send the email to Sam Rivera.']);
+    expect(spokenTexts(synthesis)).toEqual(['Please approve this on screen: Send the email to Sam Rivera.']);
     expect(respond).not.toHaveBeenCalled();
     delete approvals['call-approval'];
   });
@@ -221,7 +273,7 @@ describe('SpokenReplyContainer', () => {
 
     await expect(
       sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: 'Hello there.' }] }),
-    ).resolves.toBeUndefined();
-    expect(screen.getByTestId('spoken-reply-announcement').textContent).toBe('');
+    ).resolves.toBeDefined();
+    expect(synthesis.speak).not.toHaveBeenCalled();
   });
 });

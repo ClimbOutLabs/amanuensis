@@ -23,6 +23,8 @@ export type ComposerSendButtonProps = {
   disabled: boolean;
   canSubmit: boolean;
   isRunning: boolean;
+  /** Cancel was pressed and the turn has not stopped yet. */
+  isStopping?: boolean;
   onSubmit: () => void;
   onCancel?: () => void;
 };
@@ -51,19 +53,25 @@ export function ComposerRightSection({ disabled }: ComposerRightSectionProps): R
   return <VoiceInputButton disabled={disabled} />;
 }
 
-export function ComposerSendButton({ canSubmit, isRunning, onSubmit, onCancel }: ComposerSendButtonProps) {
+export function ComposerSendButton({
+  canSubmit,
+  isRunning,
+  isStopping = false,
+  onSubmit,
+  onCancel,
+}: ComposerSendButtonProps) {
   if (isRunning) {
     return (
       <Button.Primary
         type="button"
         size="small"
         className="aui-composer-cancel-button"
-        disabled={!onCancel}
+        disabled={!onCancel || isStopping}
         onClick={onCancel}
-        aria-label="Cancel"
+        aria-label={isStopping ? 'Stopping' : 'Cancel'}
       >
         <Spinner size={14} />
-        Cancel
+        {isStopping ? 'Stopping…' : 'Cancel'}
       </Button.Primary>
     );
   }

@@ -25,6 +25,9 @@ function makeEntry(overrides: Partial<SentinelUserAuditEntry>): SentinelUserAudi
 function stubApi(listUserAuditEntries: SentinelApi['listUserAuditEntries']): SentinelApi {
   return {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
     listUserAuditEntries,
     getUserSettings: vi.fn(async () => ({
       offline_mode: false,

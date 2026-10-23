@@ -28,7 +28,12 @@ export function makeVoice(
 }
 
 /** Installs a browser-like `window.speechSynthesis` and the `SpeechSynthesisUtterance` constructor. */
-export function installSpeechSynthesis({ voices = [] }: { voices?: SpeechSynthesisVoice[] } = {}): FakeSpeechSynthesis {
+/** An on-device browser default voice, so speech has a voice to use unless a test says otherwise. */
+const BROWSER_DEFAULT_VOICE = makeVoice({ voiceURI: 'browser-default', default: true });
+
+export function installSpeechSynthesis({
+  voices = [BROWSER_DEFAULT_VOICE],
+}: { voices?: SpeechSynthesisVoice[] } = {}): FakeSpeechSynthesis {
   const synthesis: FakeSpeechSynthesis = {
     speak: vi.fn<(utterance: FakeUtterance) => void>(),
     cancel: vi.fn<() => void>(),

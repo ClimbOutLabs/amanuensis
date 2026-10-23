@@ -96,11 +96,11 @@ describe('pendingApprovalCallIds', () => {
 describe('approvalSpeechLine', () => {
   it('builds one short line from the card sentence', () => {
     expect(approvalSpeechLine('Send the email to Sam Rivera.')).toBe(
-      'I need your OK on screen. Send the email to Sam Rivera.',
+      'Please approve this on screen: Send the email to Sam Rivera.',
     );
   });
 
   it('falls back to the plain request when the card has no sentence', () => {
-    expect(approvalSpeechLine('')).toBe('I need your OK on screen.');
+    expect(approvalSpeechLine('')).toBe('Please approve this on screen.');
   });
 });

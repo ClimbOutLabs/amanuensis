@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
-import { isSpeechOutputSupported, useSpeechVoices } from '../utils/speechOutput.js';
+import { isSpeechOutputSupported, stopSpeaking, useSpeechVoices } from '../utils/speechOutput.js';
 import { readSpeechVoiceURI, useSpeakVoiceReplies, writeSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
 
 const selectClassName =
@@ -28,12 +28,15 @@ export function VoiceReplySettings() {
             Speak replies when I use my voice
           </p>
           <p id="voice-reply-switch-hint" className="mt-1 text-xs leading-snug text-text-secondary">
-            Only replies to messages you spoke are read aloud. Stored on this computer.
+            Only replies to messages you spoke are read aloud. Saved in this browser only.
           </p>
         </div>
         <Switch
           checked={enabled}
-          onCheckedChange={setEnabled}
+          onCheckedChange={checked => {
+            setEnabled(checked);
+            if (!checked) stopSpeaking();
+          }}
           aria-labelledby="voice-reply-switch-label"
           aria-describedby="voice-reply-switch-hint"
         />
