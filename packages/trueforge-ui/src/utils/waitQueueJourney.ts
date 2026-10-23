@@ -20,6 +20,9 @@ export const WAIT_STATION_LABELS: Record<WaitStationId, string> = {
   writing: 'Writing',
 };
 
+/** The live line while the chat's history is being shortened, which can take minutes on a slow model. */
+export const COMPACTING_LINE = 'Tidying up the conversation so far so I can keep going.';
+
 /** Time with nothing new arriving after which the queue adds an honest "still working" note. */
 export const LONG_WAIT_MS = 15_000;
 
@@ -54,6 +57,8 @@ export type WaitQueueInput = {
   isRunning: boolean;
   parts: ReadonlyArray<WaitQueuePart>;
   memory: WaitQueueMemory;
+  /** True while the server says it is shortening the chat's history before it can answer. */
+  compacting?: boolean;
 };
 
 export type WaitStation = {
@@ -193,7 +198,7 @@ function reasoningLine(parts: ReadonlyArray<WaitQueuePart>): string {
 }
 
 export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
-  const { isRunning, parts, memory } = input;
+  const { isRunning, parts, memory, compacting = false } = input;
   // The `indicator` pseudo-part is the queue's own mount point, not turn activity.
   const substantive = parts.filter(part => part.type !== 'indicator');
   const textParts = substantive.filter(part => part.type === 'text');
@@ -266,7 +271,10 @@ export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
     const first = runningTools[0];
     microcopy = first ? `${toolLabel(first)} · +${String(runningTools.length - 1)} more…` : 'Working…';
   } else if (reasoningStreaming) {
+    // Live model output beats the tidying line: the line goes once the reply starts.
     microcopy = reasoningLine(reasoningParts);
+  } else if (compacting && isRunning) {
+    microcopy = COMPACTING_LINE;
   } else if (listening === 'active') {
     microcopy = 'On it…';
   } else {
@@ -308,6 +316,7 @@ export type LongWaitNoteInput = {
  */
 export function buildLongWaitNote({ elapsedMs, activeStation, microcopy }: LongWaitNoteInput): string {
   const elapsed = formatDuration(elapsedMs);
+  if (microcopy === COMPACTING_LINE) return `Still tidying up the conversation, ${elapsed} so far.`;
   if (activeStation === 'listening') {
     return `Still waiting for the first response — ${elapsed} so far.`;
   }
@@ -326,6 +335,7 @@ export type LongWaitAnnouncementInput = {
  * the long-wait show begins, instead of every second.
  */
 export function buildLongWaitAnnouncement({ activeStation, microcopy }: LongWaitAnnouncementInput): string {
+  if (microcopy === COMPACTING_LINE) return 'Still tidying up the conversation. This can take a few minutes.';
   if (activeStation === 'listening') {
     return 'Still waiting for the first response — this is taking longer than usual.';
   }

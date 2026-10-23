@@ -5,7 +5,7 @@ import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { ABILITY_BOUNDARIES_PROMPT, WEB_IMAGES_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import '../harnessMocks';
-import { makeSilentLogger } from '../harnessMocks';
+import { hostText, makeSilentLogger, readGuidanceModel } from '../harnessMocks';
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
 async function* finalAnswerStream(): AsyncGenerator<
@@ -51,8 +51,7 @@ describe('AgentThread ability boundaries instruction', () => {
   });
 
   it('tells the model not to embed decorative images from web pages in its reply', async () => {
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient = readGuidanceModel('web');
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -70,8 +69,9 @@ describe('AgentThread ability boundaries instruction', () => {
       // Draining is enough; the assertion is on the request sent to the model.
     }
 
-    const systemMessage = create.mock.calls[0]?.[0].messages.find(m => m.role === 'system');
-    expect(systemMessage?.content).toContain('<web-images>');
-    expect(systemMessage?.content).toContain(WEB_IMAGES_PROMPT.trim());
+    // The web guidance comes back when the model reads it, never in the system prompt.
+    const [system] = (modelClient.create.mock.calls[0]?.[0].messages ?? []).filter(m => m.role === 'system');
+    expect(system?.content).not.toContain('<web-images>');
+    expect(hostText(modelClient.create)).toContain(WEB_IMAGES_PROMPT.trim());
   });
 });

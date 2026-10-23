@@ -340,6 +340,8 @@ export function runStoreContractSuite<
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data.map(s => s.session_id)).toContain('created-by-session');
       expect(listed.data.find(s => s.session_id === 'created-by-session')?.created_by_subject.subject_id).toBe(
@@ -406,6 +408,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(filtered.data.map(row => row.session_id)).toEqual(['named-1']);
     });
@@ -730,6 +734,7 @@ export function runStoreContractSuite<
       has_text: true,
       secret: false,
       entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+      attached_files: 1,
     };
 
     async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
@@ -755,12 +760,13 @@ export function runStoreContractSuite<
       const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
       await store.setPrivateFingerprints({
         session_id: sessionId,
-        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry], attached_files: 2 },
       });
       await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
 
       const merged = await savedFingerprints(store);
-      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      // The count of attached files covered never drops: a turn that saw fewer does not lower it.
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true, attached_files: 2 });
       expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
       expect(merged?.entries).toHaveLength(2);
     });
@@ -888,6 +894,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data).toHaveLength(0);
 
@@ -1238,6 +1246,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(desc.data.map(s => s.session_id)).toEqual(['sc', 'sb', 'sa']);
 
@@ -1253,6 +1263,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(asc.data.map(s => s.session_id)).toEqual(['sa', 'sb', 'sc']);
     });
@@ -1273,6 +1285,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(first.data).toHaveLength(2);
       expect(first.pagination.next_page_token).toBeDefined();
@@ -1288,6 +1302,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(second.data.map(s => s.session_id)).toEqual(['sa']);
       expect(second.pagination.next_page_token).toBeUndefined();
@@ -1304,6 +1320,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       const middleSession = all.data[1];
       if (!middleSession) {
@@ -1322,6 +1340,8 @@ export function runStoreContractSuite<
         end_timestamp: middleCreatedAt,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bounded.data.map(s => s.session_id)).toEqual(['sb']);
     });
@@ -1348,6 +1368,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const desc = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       expect(desc.data.map(s => s.session_id)).toEqual(['sa', 'sc', 'sb']);
@@ -1377,6 +1399,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const full = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       const page1 = await store.listSessions({ ...listArgs, limit: 2, page_token: undefined });
@@ -1447,6 +1471,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
 
       const byEnv = await store.listSessions({ ...listArgs, metadata: { env: 'prod' } });
@@ -1520,6 +1546,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOnly.data.map(s => s.session_id)).toEqual(['alice-session']);
       expect(aliceOnly.data[0]?.created_by_subject.subject_id).toBe('alice');
@@ -1539,6 +1567,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOrManaged.data.map(s => s.session_id)).toEqual(['alice-session', 'managed-session']);
 
@@ -1557,6 +1587,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(managedAgentOnly.data.map(s => s.session_id)).toEqual(['managed-session']);
 
@@ -1575,6 +1607,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
     });
@@ -1632,6 +1666,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(byType.data.map(s => s.session_id).sort()).toEqual(['from-other-schedule', 'from-schedule']);
 
@@ -1647,6 +1683,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'sched-1',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bySourceId.data.map(s => s.session_id)).toEqual(['from-schedule']);
       expect(bySourceId.data[0]?.source).toEqual(scheduleSource);
@@ -1663,8 +1701,171 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'missing-sched',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
+    });
+
+    it('filters listSessions by folder_id, newest first, with keyset paging inside the folder', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-2',
+        created_by: 'user-1',
+        name: 'Personal',
+      });
+      const seedFiled = async (sessionId: string, folderId: string) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        await store.setSessionFolder({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by: 'user-1',
+          folder_id: folderId,
+        });
+      };
+      await seedFiled('filed-1', 'folder-1');
+      await seedFiled('filed-2', 'folder-1');
+      await seedFiled('filed-3', 'folder-1');
+      await seedFiled('other-folder', 'folder-2');
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'unfiled',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        no_folder: false,
+      };
+
+      const all = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 10, page_token: undefined });
+      expect(all.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2', 'filed-1']);
+
+      const page1 = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...base,
+        folder_id: 'folder-1',
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['filed-1']);
+
+      const other = await store.listSessions({ ...base, folder_id: 'folder-2', limit: 10, page_token: undefined });
+      expect(other.data.map(s => s.session_id)).toEqual(['other-folder']);
+
+      const missing = await store.listSessions({
+        ...base,
+        folder_id: 'no-such-folder',
+        limit: 10,
+        page_token: undefined,
+      });
+      expect(missing.data).toEqual([]);
+    });
+
+    it('filters listSessions to sessions with no folder when no_folder is set, with caller scoping and keyset paging', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      const seed = async (sessionId: string, createdBy: string, folderId: string | null) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        if (folderId !== null) {
+          await store.setSessionFolder({
+            tenant_id: tenant,
+            session_id: sessionId,
+            created_by: createdBy,
+            folder_id: folderId,
+          });
+        }
+      };
+      await seed('filed-1', 'user-1', 'folder-1');
+      await seed('loose-1', 'user-1', null);
+      await seed('loose-2', 'user-1', null);
+      await seed('loose-3', 'user-1', null);
+      await seed('other-loose', 'user-2', null);
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        folder_id: undefined,
+      };
+
+      const unscoped = await store.listSessions({ ...base, no_folder: true, limit: 10, page_token: undefined });
+      expect(unscoped.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1']);
+      expect(unscoped.data.every(s => s.folder_id === null)).toBe(true);
+
+      const scopedInput = {
+        ...base,
+        no_folder: true,
+        created_by_or_agent_ids: { created_by_subject_id: 'user-1', agent_ids: [] },
+      };
+      const scoped = await store.listSessions({ ...scopedInput, limit: 10, page_token: undefined });
+      expect(scoped.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2', 'loose-1']);
+
+      const page1 = await store.listSessions({ ...scopedInput, limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...scopedInput,
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['loose-1']);
+
+      const off = await store.listSessions({ ...base, no_folder: false, limit: 10, page_token: undefined });
+      expect(off.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1', 'filed-1']);
     });
   });
 
@@ -2296,68 +2497,11 @@ export function runStoreContractSuite<
       expect(mustGet(afterSecond).metrics.total_turns).toBe(2);
     });
 
-    it('generated title replaces only a first-message title, once', async () => {
-      const store = createStore();
-      await seedSession(store);
-      await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Give me my morning brief', source: 'first_message' },
-        }),
-      );
-      await finishTurn(store, 'turn-1');
-
-      const first = await store.setGeneratedSessionTitle({
-        tenant_id: tenant,
-        session_id: sessionId,
-        title: 'Morning brief',
-      });
-      const second = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'Other' });
-      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(first).toBe(true);
-      expect(second).toBe(false);
-      expect(mustGet(session).title).toBe('Morning brief');
-      expect(mustGet(session).title_source).toBe('auto');
-    });
-
-    it('a person title and a fixed schedule title are never replaced by the generated title', async () => {
-      const store = createStore();
-      await seedSession(store);
-      await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Morning brief · Thu 22 Oct', source: 'auto' },
-        }),
-      );
-      await finishTurn(store, 'turn-1');
-      const scheduled = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'X' });
-
-      await store.updateSession({
-        tenant_id: tenant,
-        session_id: sessionId,
-        agent: undefined,
-        title: 'Renamed by me',
-        metadata: undefined,
-      });
-      const renamed = await store.setGeneratedSessionTitle({ tenant_id: tenant, session_id: sessionId, title: 'Y' });
-      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(scheduled).toBe(false);
-      expect(renamed).toBe(false);
-      expect(mustGet(session).title).toBe('Renamed by me');
-      expect(mustGet(session).title_source).toBe('person');
-    });
-
     it('update_session_title_if_not_exist sets once and never overwrites', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
-        makeCreateTurnInput({
-          sessionId,
-          turnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'First title', source: 'first_message' },
-        }),
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'First title' }),
       );
       await finishTurn(store, 'turn-1');
       await store.createTurn(
@@ -2366,11 +2510,34 @@ export function runStoreContractSuite<
           turnId: 'turn-2',
           previousTurnId: 'turn-1',
           firstTurnId: 'turn-1',
-          update_session_title_if_not_exist: { title: 'Second title', source: 'first_message' },
+          update_session_title_if_not_exist: 'Second title',
         }),
       );
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).title).toBe('First title');
+    });
+
+    it('a first-message title is replaced only by a rename, and the record tracks no title source', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Plan my week' }),
+      );
+      await finishTurn(store, 'turn-1');
+      const titled = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(titled.title).toBe('Plan my week');
+      expect(titled).not.toHaveProperty('title_source');
+
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'Renamed by me',
+        metadata: undefined,
+      });
+      const renamed = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(renamed.title).toBe('Renamed by me');
+      expect(renamed).not.toHaveProperty('title_source');
     });
 
     it('fork from any existing turn succeeds and advances tip', async () => {
@@ -2381,6 +2548,7 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
       );
+      await finishTurn(store, 'turn-2');
       // Fork from turn-1 (not the tip).
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
@@ -2393,12 +2561,56 @@ export function runStoreContractSuite<
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }));
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).last_turn_id).toBe('turn-root-2');
     });
 
-    it('concurrent createTurn forking the same tip: both succeed with isolated context', async () => {
+    it('rejects a new root turn while the tip is still running', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await expect(store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }))).rejects.toMatchObject({
+        name: 'PreviousTurnRunningError',
+        previous_turn_id: 'turn-1',
+      });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-1');
+    });
+
+    it('concurrent first turns on a new chat: only the first commits', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const results = await Promise.allSettled([
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-a' })),
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-b' })),
+      ]);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
+      const turns = await store.listTurns({ session_id: sessionId, limit: 10, page_token: undefined });
+      expect(turns.data).toHaveLength(1);
+    });
+
+    it('rejects a fork while the tip is a different running turn', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+      );
+      await expect(
+        store.createTurn(
+          makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+        ),
+      ).rejects.toMatchObject({ name: 'PreviousTurnRunningError', previous_turn_id: 'turn-2' });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-2');
+    });
+
+    it('concurrent createTurn forking the same tip: only the first commits', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
@@ -2447,20 +2659,24 @@ export function runStoreContractSuite<
           }),
         ),
       ]);
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_id);
+      const winner = mustGet(mustGet(session).last_turn_id);
+      expect(['turn-a', 'turn-b']).toContain(winner);
       const turns = await store.listTurns({
         session_id: sessionId,
         limit: 10,
         page_token: undefined,
       });
-      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', 'turn-a', 'turn-b']);
+      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', winner].sort());
 
-      const turnA = await store.getTurn({ session_id: sessionId, turn_id: 'turn-a' });
-      const turnB = await store.getTurn({ session_id: sessionId, turn_id: 'turn-b' });
-      expect(contextContents(turnA?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'a-only']);
-      expect(contextContents(turnB?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'b-only']);
+      const committed = await store.getTurn({ session_id: sessionId, turn_id: winner });
+      expect(contextContents(committed?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual([
+        'shared',
+        winner === 'turn-a' ? 'a-only' : 'b-only',
+      ]);
     });
 
     it('rejects createTurn when previous turn is still running', async () => {
@@ -3893,10 +4109,23 @@ export function runStoreContractSuite<
     it('recovers only explicitly selected owners with expired leases', async () => {
       const store = createStore();
       await seedSession(store);
+      // A chat runs one turn at a time, so the second running command lives in another chat.
+      const otherSessionId = `${sessionId}-other`;
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const sessionOf = (turnId: string): string => (turnId.endsWith('replica-a') ? sessionId : otherSessionId);
       for (const turnId of ['turn-a.replica-a', 'turn-b.replica-b']) {
-        await store.createTurn(makeCreateTurnInput({ sessionId, turnId }));
+        await store.createTurn(makeCreateTurnInput({ sessionId: sessionOf(turnId), turnId }));
         await store.appendCommandExecutionStarted({
-          session_id: sessionId,
+          session_id: sessionOf(turnId),
           turn_id: turnId,
           ownership: commandOwnership({
             leaseId: `lease-${turnId}`,
@@ -3941,14 +4170,14 @@ export function runStoreContractSuite<
       ).resolves.toMatchObject({ status: 'running', disposition: null });
       await expect(
         store.getCommandExecution({
-          session_id: sessionId,
+          session_id: otherSessionId,
           turn_id: 'turn-b.replica-b',
           thread_id: MAIN_THREAD_ID,
           tool_call_id: 'call-turn-b.replica-b',
         }),
       ).resolves.toMatchObject({ status: 'terminal', disposition: 'outcome_unknown' });
       const recoveredEvents = await store.listTurnEvents({
-        session_id: sessionId,
+        session_id: otherSessionId,
         turn_id: 'turn-b.replica-b',
         limit: 10,
         page_token: undefined,
@@ -4035,6 +4264,8 @@ export function runStoreContractSuite<
         expect(
           events.data.filter(event => event.type === EventType.TOOL_RESPONSE_V2 && event.tool_call_id === toolCallId),
         ).toHaveLength(recovered);
+        // The chat takes its next turn only once this one has ended.
+        await finishTurn(store, turnId);
       }
     });
 
@@ -4324,16 +4555,20 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-sibling', previousTurnId: 't1', firstTurnId: 't1' }),
       );
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-sibling',
+        events: [makeTurnCreatedEvent('t2-sibling')],
+      });
+      await finishTurn(store, 't2-sibling');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-anchor', previousTurnId: 't1', firstTurnId: 't1' }),
       );
-      for (const turnId of ['t2-sibling', 't2-anchor']) {
-        await store.appendToEvents({
-          session_id: sessionId,
-          turn_id: turnId,
-          events: [makeTurnCreatedEvent(turnId)],
-        });
-      }
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-anchor',
+        events: [makeTurnCreatedEvent('t2-anchor')],
+      });
       const { data } = await store.listSessionEvents({
         session_id: sessionId,
         limit: 10,
@@ -4391,6 +4626,7 @@ export function runStoreContractSuite<
         event_id: mustGet(firstPage.data[0]).event.id,
       });
 
+      await finishTurn(store, 't2');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-new-active', previousTurnId: 't1', firstTurnId: 't1' }),
       );

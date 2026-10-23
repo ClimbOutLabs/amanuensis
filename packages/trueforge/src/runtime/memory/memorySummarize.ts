@@ -13,14 +13,14 @@
  * stampede the model.
  */
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import type { ILLM } from '@truefoundry/trueforge-core/core';
+import { VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
-import { flattenLlmContent, resolveHelperLlm } from '../helperLlm';
 import { routeHelperModel } from '../helperModelRouting';
-import type { TurnModelUsage } from '../modelUsage';
-import type { TokenFactoryBudget } from '../tokenFactoryBudget';
+import { modelIdentity, type TurnModelUsage } from '../modelUsage';
+import { getModelDetails } from '../sessionResources';
+import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 
 /** Bounded model call; summaries are short and must not delay the drain. */
 const SUMMARIZE_TIMEOUT_MS = 30_000;
@@ -133,6 +133,16 @@ export function buildSummarizationMessages(params: {
   ];
 }
 
+function flattenLlmContent(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (content === null) {
+    return '';
+  }
+  return content.map(part => (part.type === 'text' ? (part.text ?? '') : '')).join('');
+}
+
 /**
  * Summarizes one turn's exchange via the LLM.
  *
@@ -179,16 +189,26 @@ export async function summarizeTurnContent(params: {
   return withSummarizeSlot(async () => {
     const resolveLlm =
       params.resolveLlm ??
-      ((name: string): Promise<ILLM> =>
-        resolveHelperLlm({
-          tenantId,
-          modelProviderStore,
-          modelFqn: name,
-          tokenFactoryBudget: params.tokenFactoryBudget,
-          modelUsage: params.modelUsage,
+      (async (name: string): Promise<ILLM> => {
+        const { providerConfig, streamTimeout } = await getModelDetails({
+          tenant_id: tenantId,
+          name,
+          store: modelProviderStore,
+        });
+        return meterHelperLlm({
+          llm: new VercelAILLM({
+            providerConfig,
+            logger,
+            signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
+            streamTimeout,
+          }),
+          identity: modelIdentity({ name, providerConfig }),
+          role: 'summarization',
+          budget: params.tokenFactoryBudget,
+          usage: params.modelUsage,
           logger,
-          timeoutMs: SUMMARIZE_TIMEOUT_MS,
-        }));
+        });
+      });
     let llm: ILLM;
     try {
       llm = await resolveLlm(summarizationModelFqn);

@@ -19,6 +19,10 @@ export interface ListSessionsRequest {
     endTimestamp?: Date;
     /** When set, only sessions bound to this agent id are returned. */
     agentId?: string;
+    /** When set, only sessions filed in this folder are returned. */
+    folderId?: string;
+    /** When true, only sessions with no folder are returned. */
+    noFolder?: boolean;
     /** When true, only sessions created by the authenticated subject. */
     createdByMe?: boolean;
     /** Exact metadata pairs as metadata[key]=value. Sessions must contain all pairs. */

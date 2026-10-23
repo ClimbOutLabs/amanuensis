@@ -4,6 +4,7 @@ import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 import { ContextCompactionEvent } from "./ContextCompactionEvent.js";
+import { ContextCompactionStartedEvent } from "./ContextCompactionStartedEvent.js";
 import { DocumentIngestionEvent } from "./DocumentIngestionEvent.js";
 import { McpAuthRequiredEvent } from "./McpAuthRequiredEvent.js";
 import { McpInitializeEvent } from "./McpInitializeEvent.js";
@@ -25,8 +26,8 @@ import { ToolResponseRequiredEvent } from "./ToolResponseRequiredEvent.js";
 import { TurnCreatedEvent } from "./TurnCreatedEvent.js";
 import { TurnDoneEvent } from "./TurnDoneEvent.js";
 
-export const TurnStreamingEvent: core.serialization.Schema<serializers.TurnStreamingEvent.Raw, TrueForge.TurnStreamingEvent> = core.serialization.undiscriminatedUnion([ContextCompactionEvent, MemoryRecallPersistedEvent, ModelUsagePersistedEvent, ProfileLearnedPersistedEvent, ProvisioningPersistedEvent, SkillUsedPersistedEvent, DocumentIngestionEvent, McpAuthRequiredEvent, McpInitializeEvent, ModelMessageEvent, ModelMessageDeltaEvent, SandboxCreatedEvent, ThreadCreatedEvent, ThreadDoneEvent, ToolApprovalRequiredEvent, ToolExecutionStartedEvent, ToolResponseEvent, ToolResponseEventV2, ToolResponseRequiredEvent, TurnCreatedEvent, TurnDoneEvent]);
+export const TurnStreamingEvent: core.serialization.Schema<serializers.TurnStreamingEvent.Raw, TrueForge.TurnStreamingEvent> = core.serialization.undiscriminatedUnion([ContextCompactionEvent, ContextCompactionStartedEvent, MemoryRecallPersistedEvent, ModelUsagePersistedEvent, ProfileLearnedPersistedEvent, ProvisioningPersistedEvent, SkillUsedPersistedEvent, DocumentIngestionEvent, McpAuthRequiredEvent, McpInitializeEvent, ModelMessageEvent, ModelMessageDeltaEvent, SandboxCreatedEvent, ThreadCreatedEvent, ThreadDoneEvent, ToolApprovalRequiredEvent, ToolExecutionStartedEvent, ToolResponseEvent, ToolResponseEventV2, ToolResponseRequiredEvent, TurnCreatedEvent, TurnDoneEvent]);
 
 export declare namespace TurnStreamingEvent {
-    export type Raw = ContextCompactionEvent.Raw | MemoryRecallPersistedEvent.Raw | ModelUsagePersistedEvent.Raw | ProfileLearnedPersistedEvent.Raw | ProvisioningPersistedEvent.Raw | SkillUsedPersistedEvent.Raw | DocumentIngestionEvent.Raw | McpAuthRequiredEvent.Raw | McpInitializeEvent.Raw | ModelMessageEvent.Raw | ModelMessageDeltaEvent.Raw | SandboxCreatedEvent.Raw | ThreadCreatedEvent.Raw | ThreadDoneEvent.Raw | ToolApprovalRequiredEvent.Raw | ToolExecutionStartedEvent.Raw | ToolResponseEvent.Raw | ToolResponseEventV2.Raw | ToolResponseRequiredEvent.Raw | TurnCreatedEvent.Raw | TurnDoneEvent.Raw;
+    export type Raw = ContextCompactionEvent.Raw | ContextCompactionStartedEvent.Raw | MemoryRecallPersistedEvent.Raw | ModelUsagePersistedEvent.Raw | ProfileLearnedPersistedEvent.Raw | ProvisioningPersistedEvent.Raw | SkillUsedPersistedEvent.Raw | DocumentIngestionEvent.Raw | McpAuthRequiredEvent.Raw | McpInitializeEvent.Raw | ModelMessageEvent.Raw | ModelMessageDeltaEvent.Raw | SandboxCreatedEvent.Raw | ThreadCreatedEvent.Raw | ThreadDoneEvent.Raw | ToolApprovalRequiredEvent.Raw | ToolExecutionStartedEvent.Raw | ToolResponseEvent.Raw | ToolResponseEventV2.Raw | ToolResponseRequiredEvent.Raw | TurnCreatedEvent.Raw | TurnDoneEvent.Raw;
 }

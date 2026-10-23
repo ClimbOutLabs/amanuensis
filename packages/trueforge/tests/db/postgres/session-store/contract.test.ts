@@ -35,7 +35,8 @@ describePg('PostgresSessionStore (ISessionStore contract)', () => {
           thread_context_log,
           turn_thread,
           turn,
-          session
+          session,
+          session_folder
         RESTART IDENTITY CASCADE
       `.execute(env.db);
     }

@@ -1202,8 +1202,9 @@ try {
       // closed covers the gap where the registry is empty before that late track().
       await activeTurns.shutdownAndWait(CancellationReason.Abandoned);
       await closed;
-      // Wait for detached turn drains (memory retain, profile learning, artifact persistence)
-      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. This
+      // Wait for detached turn drains (artifact persistence, memory retain, profile learning)
+      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. Each drain
+      // also stops watching its follow-up work after its own time limit. This
       // runs before the Redis/DB teardown below because drains still dual-write events.
       if (turnDrains.size > 0) {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);

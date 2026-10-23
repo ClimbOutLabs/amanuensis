@@ -29,6 +29,7 @@ import {
   hasPendingAskUserResponse,
   hasPendingToolApproval,
   parseToolResultDisposition,
+  toolCallDisposition,
 } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
@@ -115,7 +116,7 @@ function isToolPartErrored(part: PartState): boolean {
 function isToolPartUnfinished(part: PartState): boolean {
   if (part.type !== 'tool-call') return false;
   if (isToolPartErrored(part)) return true;
-  const disposition = parseToolResultDisposition(part.result);
+  const disposition = toolCallDisposition(part);
   return disposition !== undefined && disposition.disposition !== 'executed_ok';
 }
 

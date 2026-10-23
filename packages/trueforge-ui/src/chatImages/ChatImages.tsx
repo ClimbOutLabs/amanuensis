@@ -6,13 +6,14 @@ import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import type {
   ChatImageOutcome,
+  ChatImageRefusal,
   ChatImagesCatalog,
   ChatImageSource,
   TurnImageList,
   TurnImagesResult,
 } from '../plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 import { useChatImageScope, type ChatImageScopeValue } from './chatImageScope.js';
-import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT } from './refusalText.js';
+import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, emailImagesFailedText } from './refusalText.js';
 
 type ShowState =
   | { kind: 'loading' }
@@ -61,6 +62,16 @@ function showOnce(input: {
     });
   }
   return request;
+}
+
+/**
+ * Drops a finished request so the next one asks the server again. The server does not keep failed
+ * downloads, so a fresh request tries them again and returns the ones already shown.
+ */
+function forgetShown(input: { scope: Pick<ChatImageScopeValue, 'sessionId' | 'turnId'>; source: ChatImageSource }) {
+  for (const approved of [true, false]) {
+    pending.delete(requestKey({ ...input, approved }));
+  }
 }
 
 function toState(result: TurnImagesResult): ShowState {
@@ -257,8 +268,9 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
   const settled = scope?.settled ?? false;
   const source = useMemo<ChatImageSource>(() => ({ kind: 'reply', url }), [url]);
   const { state, approve } = useShowImages({ scope, source, enabled: settled });
+  // Nothing shows while waiting, so a reply with many links never flashes a stack of boxes.
   if (scope === null || !settled || state.kind === 'loading') {
-    return <Notice testId="aui-chat-image-loading">{alt === '' ? 'Image' : alt}</Notice>;
+    return null;
   }
   switch (state.kind) {
     case 'ask':
@@ -271,8 +283,8 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
         />
       );
     case 'error':
-      // A link the server does not find in the reply (for example inside a tool result) is not shown.
-      return <ChatImageNotShown alt={alt} />;
+      // A link the server does not offer (for example one only a tool result held) shows nothing.
+      return null;
     case 'done':
       return (
         <>
@@ -284,37 +296,123 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
   }
 }
 
-/** One line per email message: its linked images stay hidden until the person chooses Show images. */
-export function EmailImagesCard({ toolCallId, count }: { toolCallId: string; count: number }) {
+type EmailImagesState =
+  { kind: 'held' } | { kind: 'loading' } | { kind: 'done'; images: ChatImageOutcome[] } | { kind: 'error' };
+
+/**
+ * The most common refusal among outcomes other than a failed download, so many refused images still
+ * read as one sentence pair. Failed downloads get their own line with Try again.
+ */
+function mainRefusal(outcomes: readonly ChatImageOutcome[]): ChatImageRefusal | undefined {
+  const counts = new Map<ChatImageRefusal, number>();
+  for (const outcome of outcomes) {
+    if (outcome.status === 'refused' && outcome.reason !== 'fetch_failed') {
+      counts.set(outcome.reason, (counts.get(outcome.reason) ?? 0) + 1);
+    }
+  }
+  let top: ChatImageRefusal | undefined;
+  for (const [reason, count] of counts) {
+    if (top === undefined || count > (counts.get(top) ?? 0)) {
+      top = reason;
+    }
+  }
+  return top;
+}
+
+function heldEmailImagesLabel(input: { images: number; emails: number }): string {
+  const what = input.images === 1 ? '1 image' : `${String(input.images)} images`;
+  const from = input.emails === 1 ? 'the email' : 'your emails';
+  return `${what} from ${from} ${input.images === 1 ? 'was' : 'were'} not loaded.`;
+}
+
+/**
+ * One quiet line for every picture the turn's emails link. Nothing is requested until the person
+ * chooses Load images: loading one tells the sender the email was opened.
+ */
+function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
   const scope = useChatImageScope();
-  const source = useMemo<ChatImageSource>(() => ({ kind: 'email', tool_call_id: toolCallId }), [toolCallId]);
-  const { state, approve } = useShowImages({ scope, source, enabled: true });
-  if (scope === null) {
+  const [state, setState] = useState<EmailImagesState>({ kind: 'held' });
+  const total = emails.reduce((sum, email) => sum + email.count, 0);
+
+  const load = useCallback(
+    ({ retry }: { retry: boolean }) => {
+      if (scope === null) {
+        return;
+      }
+      setState({ kind: 'loading' });
+      const sources = emails.map((email): ChatImageSource => ({ kind: 'email', tool_call_id: email.tool_call_id }));
+      if (retry) {
+        for (const source of sources) {
+          forgetShown({ scope, source });
+        }
+      }
+      Promise.all(sources.map(source => showOnce({ scope, source, approved: true }))).then(
+        results =>
+          setState({
+            kind: 'done',
+            images: results.flatMap(result => (result.status === 'done' ? result.images : [])),
+          }),
+        () => setState({ kind: 'error' }),
+      );
+    },
+    [scope, emails],
+  );
+
+  if (scope === null || total === 0) {
     return null;
   }
-  const single = count === 1;
   switch (state.kind) {
-    case 'loading':
-      return <Notice testId="aui-email-images-loading">Loading images…</Notice>;
-    case 'ask':
+    case 'held':
       return (
         <HiddenImages
-          label={single ? 'Image hidden' : 'Images hidden'}
-          action={single ? 'Show image' : 'Show images'}
+          label={heldEmailImagesLabel({ images: total, emails: emails.length })}
+          action="Load images"
           testId="aui-email-images-hidden"
-          onShow={approve}
+          onShow={() => load({ retry: false })}
         />
       );
+    case 'loading':
+      return <Notice testId="aui-email-images-loading">Loading images…</Notice>;
     case 'error':
-      return <Notice testId="aui-chat-image-error">{CHAT_IMAGE_ERROR_TEXT}</Notice>;
-    case 'done':
       return (
-        <span className="flex flex-wrap gap-2 empty:hidden" data-testid="aui-email-images">
-          {state.images.map((outcome, index) => (
-            <Outcome key={index} outcome={outcome} alt={`Image ${String(index + 1)} from the email`} scope={scope} />
-          ))}
+        <HiddenImages
+          label={emailImagesFailedText({ failed: total, total })}
+          action="Try again"
+          testId="aui-email-images-error"
+          onShow={() => load({ retry: true })}
+        />
+      );
+    case 'done': {
+      const refusal = mainRefusal(state.images);
+      const failed = state.images.filter(
+        outcome => outcome.status === 'refused' && outcome.reason === 'fetch_failed',
+      ).length;
+      return (
+        <span className="flex flex-col gap-1" data-testid="aui-email-images">
+          <span className="flex flex-wrap gap-2 empty:hidden">
+            {state.images.map((outcome, index) =>
+              outcome.status === 'shown' ? (
+                <Outcome
+                  key={index}
+                  outcome={outcome}
+                  alt={`Image ${String(index + 1)} from the email`}
+                  scope={scope}
+                />
+              ) : null,
+            )}
+          </span>
+          {failed > 0 && (
+            <HiddenImages
+              label={emailImagesFailedText({ failed, total: state.images.length })}
+              action="Try again"
+              testId="aui-email-images-failed"
+              onShow={() => load({ retry: true })}
+            />
+          )}
+          {refusal !== undefined && <Notice testId="aui-chat-image-refused">{CHAT_IMAGE_REFUSAL_TEXT[refusal]}</Notice>}
         </span>
       );
+    }
   }
 }
 
@@ -341,7 +439,7 @@ function ToolImagesCard({ images }: { images: TurnImageList['tool_images'] }) {
   );
 }
 
-/** Images a turn produced outside its text: sandbox images, images a tool returned, and a line per email that links images. */
+/** Images a turn produced outside its text: sandbox images, images a tool returned, and one line for the images its emails link. */
 export function TurnImages() {
   const scope = useChatImageScope();
   const [list, setList] = useState<TurnImageList | null>(null);
@@ -365,9 +463,7 @@ export function TurnImages() {
   }
   return (
     <div className="aui-turn-images mt-2 flex flex-col gap-2 empty:hidden" data-testid="aui-turn-images">
-      {list.emails.map(email => (
-        <EmailImagesCard key={email.tool_call_id} toolCallId={email.tool_call_id} count={email.count} />
-      ))}
+      {list.emails.length > 0 && <EmailImagesLine emails={list.emails} />}
       {list.artifacts.length > 0 && (
         <div className="flex flex-wrap gap-2 empty:hidden">
           {list.artifacts.map(artifact => (

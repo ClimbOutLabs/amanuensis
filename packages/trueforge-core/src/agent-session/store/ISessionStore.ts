@@ -23,7 +23,7 @@ import type { SessionRecord } from '../models/SessionRecord';
 import type { TurnRecord } from '../models/TurnRecord';
 import type { PersistedTurnEvent, SessionEventItem, TurnDoneEvent } from '../schemas/events';
 import type { TokenPagination } from '../schemas/pagination';
-import type { SessionMetadata, SessionMetrics, SessionTitleSource } from '../schemas/session';
+import type { SessionMetadata, SessionMetrics } from '../schemas/session';
 import type { TaskChecklist, TaskChecklistItem } from '../schemas/taskChecklist';
 import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
@@ -37,22 +37,6 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
 > & {
   custom: TSessionCustom | null;
 };
-
-/**
- * A title written when a chat's first turn is created. Only applied while the chat has no title.
- * `source` records who the title came from: `first_message` for a chat's first message, `auto`
- * for a fixed schedule title, `person` for an imported title.
- */
-export interface SessionTitleSeed {
-  title: string;
-  source: SessionTitleSource;
-}
-
-export interface SetGeneratedSessionTitleInput {
-  tenant_id: string;
-  session_id: string;
-  title: string;
-}
 
 export interface SetPrivateFingerprintsInput {
   session_id: string;
@@ -210,6 +194,10 @@ export interface ListSessionsInput {
   end_timestamp: Date | undefined;
   /** When set, only sessions bound to this named agent id. */
   agent_id: string | undefined;
+  /** When set, only sessions filed in this folder. */
+  folder_id: string | undefined;
+  /** When true, only sessions with no folder. Never combined with `folder_id`. */
+  no_folder: boolean;
   /** When set, match creator or named-agent binding. Empty `agent_ids` means creator-only. */
   created_by_or_agent_ids:
     | {
@@ -294,7 +282,7 @@ export interface CreateTurnInput<TTurnCustom extends object = Record<string, nev
   /** Complete host-owned task-state scratchpads for all resulting threads. */
   task_states: ThreadTaskStateInit[];
   /** Set only if session.title is NULL (first write wins). */
-  update_session_title_if_not_exist: SessionTitleSeed | null;
+  update_session_title_if_not_exist: string | null;
 }
 
 export interface FreezeAndGetTurnInput {
@@ -554,18 +542,11 @@ export interface ISessionStore<
   /**
    * PATCH semantics — update only the provided fields:
    * - agent: replace inline binding (inline sessions only; reference → invariant error).
-   * - title: set/replace the session title. A title set here is a person's choice (`person`).
+   * - title: set/replace the session title.
    * - metadata: full replace of the caller-owned string map when set.
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
-
-  /**
-   * Replaces the title with the generated one, only while the title is still the first-message
-   * title. Returns false (and changes nothing) for a person's title, an auto title, or a chat
-   * with no tracked title. Does not bump session activity.
-   */
-  setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean>;
 
   /**
    * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
@@ -627,17 +608,20 @@ export interface ISessionStore<
    * Also bumps `session.last_activity_timestamp_ms` and increments
    * `session.metrics.total_turns` in that same atomic unit.
    *
+   * One reply at a time: while the session's tip is `running`, reject with
+   * `PreviousTurnRunningError` naming the tip, whatever `previous_turn_id` is.
+   * Only a Cancel or the turn's own end frees the chat. Of two concurrent
+   * creates on one session, only the first commits.
+   *
    * Fork semantics for `turn.previous_turn_id`:
-   * - `null` — new root turn (no parent); always allowed.
+   * - `null` — new root turn (no parent).
    * - string — fork/chain from that turn when it exists. Tip-equality is NOT
-   *   required; concurrent forks from the same tip both succeed. Unknown id is
-   *   allowed (relaxed) and treated as no inheritance. If that turn exists and
-   *   is still `running`, reject with {@link PreviousTurnRunningError} —
-   *   callers must {@link freezeAndGetTurn} first.
+   *   required. Unknown id is allowed (relaxed) and treated as no inheritance.
+   *   If that turn exists and is still `running`, reject the same way.
    * `last_turn_id` always advances to the new turn in the same atomic unit.
    *
    * `update_session_title_if_not_exist`: when set AND `session.title` is
-   * unset/null, set it (and its `title_source`) in the same atomic unit; an existing title is NEVER
+   * unset/null, set it in the same atomic unit; an existing title is NEVER
    * overwritten (first write wins). The caller derives the value; the store
    * only conditionally sets it.
    */

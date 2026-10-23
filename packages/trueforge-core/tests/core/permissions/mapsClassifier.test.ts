@@ -14,7 +14,11 @@ import {
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
 import { InMemoryPrivateDataReadStore } from '../../../src/core/permissions/privateDataReads';
-import { createWebSearchTurnState, markPrivateDataRead } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  markPrivateDataRead,
+  recordPrivateContextText,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -402,6 +406,21 @@ describe('maps without asking', () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('maps_tool');
+  });
+
+  it("asks when a silent map would send the person's name or phone from their profile, but not a place", async () => {
+    const ctx = makeCtx(maps_on);
+    recordPrivateContextText({
+      state: ctx.web_search,
+      text: '<user-name>Teodoro Brambleworth</user-name>\n<user-profile>Phone +351 912 345 678.</user-profile>',
+      source: 'each_turn',
+    });
+    const named = await classifyTier(mapsAction('render_map', { place_name: 'Teodoro Brambleworth home' }), ctx);
+    expect(named.tier).toBe(3);
+    const phoned = await classifyTier(mapsAction('render_map', { place_name: '+351 912 345 678' }), ctx);
+    expect(phoned.tier).toBe(3);
+    const place = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+    expect(place.tier).toBe(1);
   });
 
   it('asks again after the chat read something private like a secrets file', async () => {

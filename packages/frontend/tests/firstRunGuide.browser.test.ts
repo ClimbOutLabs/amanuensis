@@ -148,16 +148,16 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         await open('tour-focus');
         await page.getByRole('button', { name: /Help me clear my head/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(
-          await page.getByRole('button', { name: 'Focus and getting started' }).getAttribute('aria-pressed'),
+          await page.getByRole('radio', { name: 'Focus and getting started' }).getAttribute('aria-checked'),
           'true',
         );
         await shoot('tour-focus');
-        // Nothing chosen: the capability tickets, and no chip is pressed.
+        // Nothing chosen: the capability tickets, and no chip is checked.
         await open('tour-none');
         await page.getByRole('button', { name: /Handle your email/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(await page.getByRole('button', { name: /Help me clear my head/ }).count(), 0);
         assert.equal(
-          await page.getByRole('button', { name: 'Focus and getting started' }).getAttribute('aria-pressed'),
+          await page.getByRole('radio', { name: 'Focus and getting started' }).getAttribute('aria-checked'),
           'false',
         );
         await shoot('tour-none');
@@ -201,7 +201,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
             sel => Array.from(document.querySelectorAll(sel)).map(el => Math.round(el.getBoundingClientRect().top)),
             selector,
           );
-        const chipTops = await rowsOf('[role="group"] button');
+        const chipTops = await rowsOf('[role="radiogroup"] [role="radio"]');
         const ticketTops = await rowsOf('[data-testid="aman-tour"] > ul > li');
         if (viewport.name === 'desktop') {
           assert.equal(new Set(chipTops).size, 1, 'the five chips share one row at desktop width');

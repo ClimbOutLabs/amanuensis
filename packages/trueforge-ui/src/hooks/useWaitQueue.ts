@@ -7,7 +7,7 @@ import { useAuiState } from '../assistant-ui.js';
 import { usePrefersReducedMotion } from '../atoms/lib/usePrefersReducedMotion.js';
 import { useOptionalMemoryRecall } from '../components/MemoryRecallContext.js';
 import { useMemoryTurnContext } from '../containers/MemoryTurnContextProvider.js';
-import { parseToolNotDoneReason } from '../utils/toolCallParsing.js';
+import { toolCallNotDoneReason } from '../utils/toolCallParsing.js';
 import {
   arrivalSignature,
   countWords,
@@ -17,6 +17,7 @@ import {
   type WaitQueuePart,
   type WaitQueueSnapshot,
 } from '../utils/waitQueueJourney.js';
+import { useContextCompactionActive } from './useContextCompactionActive.js';
 
 export type WaitQueueView = {
   snapshot: WaitQueueSnapshot;
@@ -41,7 +42,7 @@ function toQueuePart(part: PartState): WaitQueuePart {
         statusType,
         toolName: part.toolName,
         argsText: part.argsText,
-        notDoneReason: parseToolNotDoneReason(part.result),
+        notDoneReason: toolCallNotDoneReason(part),
         arrivedChars: part.argsText.length + (part.result === undefined ? 0 : 1),
       };
     default:
@@ -112,6 +113,8 @@ export function useWaitQueue(): WaitQueueView {
   const memoryApi = useOptionalMemoryRecall();
   const memoryContext = useMemoryTurnContext(turnId);
   const reducedMotion = usePrefersReducedMotion();
+  const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
+  const compacting = useContextCompactionActive(sessionId);
 
   const queueParts = useMemo(() => parts.map(toQueuePart), [parts]);
 
@@ -161,8 +164,8 @@ export function useWaitQueue(): WaitQueueView {
   const quietMs = !isRunning || clock === null ? 0 : Math.max(0, now - lastArrival);
 
   const snapshot = useMemo(
-    () => deriveWaitQueue({ isRunning, parts: queueParts, memory }),
-    [isRunning, queueParts, memory],
+    () => deriveWaitQueue({ isRunning, parts: queueParts, memory, compacting }),
+    [isRunning, queueParts, memory, compacting],
   );
 
   // "Taking longer than usual" is about silence, not total time: a long turn that keeps streaming is not stuck.
