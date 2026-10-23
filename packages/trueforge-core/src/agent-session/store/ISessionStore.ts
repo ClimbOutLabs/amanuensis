@@ -630,10 +630,12 @@ export interface ISessionStore<
    * Fork semantics for `turn.previous_turn_id`:
    * - `null` — new root turn (no parent); always allowed.
    * - string — fork/chain from that turn when it exists. Tip-equality is NOT
-   *   required; concurrent forks from the same tip both succeed. Unknown id is
-   *   allowed (relaxed) and treated as no inheritance. If that turn exists and
-   *   is still `running`, reject with {@link PreviousTurnRunningError} —
-   *   callers must {@link freezeAndGetTurn} first.
+   *   required. Unknown id is allowed (relaxed) and treated as no inheritance.
+   *   If that turn exists and is still `running`, reject with
+   *   {@link PreviousTurnRunningError}: callers must {@link freezeAndGetTurn} first.
+   *   When the tip is a different turn that is still `running`, reject the same
+   *   way, naming the tip: nothing would end it. Of two concurrent successors of
+   *   one turn, only the first commits.
    * `last_turn_id` always advances to the new turn in the same atomic unit.
    *
    * `update_session_title_if_not_exist`: when set AND `session.title` is

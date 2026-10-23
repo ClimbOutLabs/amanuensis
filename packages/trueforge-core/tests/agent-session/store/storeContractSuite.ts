@@ -2381,6 +2381,7 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
       );
+      await finishTurn(store, 'turn-2');
       // Fork from turn-1 (not the tip).
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
@@ -2398,7 +2399,24 @@ export function runStoreContractSuite<
       expect(mustGet(session).last_turn_id).toBe('turn-root-2');
     });
 
-    it('concurrent createTurn forking the same tip: both succeed with isolated context', async () => {
+    it('rejects a fork while the tip is a different running turn', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+      );
+      await expect(
+        store.createTurn(
+          makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+        ),
+      ).rejects.toMatchObject({ name: 'PreviousTurnRunningError', previous_turn_id: 'turn-2' });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-2');
+    });
+
+    it('concurrent createTurn forking the same tip: only the first commits', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
@@ -2447,20 +2465,24 @@ export function runStoreContractSuite<
           }),
         ),
       ]);
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_id);
+      const winner = mustGet(mustGet(session).last_turn_id);
+      expect(['turn-a', 'turn-b']).toContain(winner);
       const turns = await store.listTurns({
         session_id: sessionId,
         limit: 10,
         page_token: undefined,
       });
-      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', 'turn-a', 'turn-b']);
+      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', winner].sort());
 
-      const turnA = await store.getTurn({ session_id: sessionId, turn_id: 'turn-a' });
-      const turnB = await store.getTurn({ session_id: sessionId, turn_id: 'turn-b' });
-      expect(contextContents(turnA?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'a-only']);
-      expect(contextContents(turnB?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'b-only']);
+      const committed = await store.getTurn({ session_id: sessionId, turn_id: winner });
+      expect(contextContents(committed?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual([
+        'shared',
+        winner === 'turn-a' ? 'a-only' : 'b-only',
+      ]);
     });
 
     it('rejects createTurn when previous turn is still running', async () => {
@@ -4324,16 +4346,20 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-sibling', previousTurnId: 't1', firstTurnId: 't1' }),
       );
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-sibling',
+        events: [makeTurnCreatedEvent('t2-sibling')],
+      });
+      await finishTurn(store, 't2-sibling');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-anchor', previousTurnId: 't1', firstTurnId: 't1' }),
       );
-      for (const turnId of ['t2-sibling', 't2-anchor']) {
-        await store.appendToEvents({
-          session_id: sessionId,
-          turn_id: turnId,
-          events: [makeTurnCreatedEvent(turnId)],
-        });
-      }
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-anchor',
+        events: [makeTurnCreatedEvent('t2-anchor')],
+      });
       const { data } = await store.listSessionEvents({
         session_id: sessionId,
         limit: 10,
@@ -4391,6 +4417,7 @@ export function runStoreContractSuite<
         event_id: mustGet(firstPage.data[0]).event.id,
       });
 
+      await finishTurn(store, 't2');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-new-active', previousTurnId: 't1', firstTurnId: 't1' }),
       );

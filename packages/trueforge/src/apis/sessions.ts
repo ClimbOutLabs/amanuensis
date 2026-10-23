@@ -231,10 +231,10 @@ export async function cancelSessionTurn(
     return;
   }
 
-  const aborted = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
-  if (!aborted) {
-    await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
-  }
+  cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  // Also when the run was found: a step that ignores the abort must not keep the turn running.
+  // The freeze waits briefly for the run to settle and is a no-op once it has ended itself.
+  await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
 }
 
 /** Freeze a running turn; missing turns are a no-op (already gone). */

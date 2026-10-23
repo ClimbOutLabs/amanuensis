@@ -33,6 +33,7 @@ import {
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
+  newEventId,
   rawSandboxId,
   redisKey,
   SandboxError,
@@ -146,6 +147,7 @@ import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import { TURN_COULD_NOT_START_MESSAGE, TurnStartBound } from '../runtime/turnStartBound';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
@@ -1139,6 +1141,8 @@ export interface DrainTurnEventsInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  /** Released by the turn's first event after `turn.created`. */
+  startBound?: TurnStartBound | undefined;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
@@ -1207,7 +1211,8 @@ async function runTurnEventDrain(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, markArtifactsCaptured } = params;
-  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
+    input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1218,6 +1223,9 @@ async function runTurnEventDrain(params: {
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
+      if (event.type !== EventType.TURN_CREATED) {
+        startBound?.markStarted();
+      }
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
         ingestedToolOutput = true;
       }
@@ -1254,6 +1262,7 @@ async function runTurnEventDrain(params: {
       markArtifactsCaptured();
     }
     executionDeadline.dispose();
+    startBound?.dispose();
   }
 }
 
@@ -1377,18 +1386,16 @@ async function waitForTurnFollowUp(params: {
 const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
 
 /**
- * Starts a created turn's clock. Every path that runs a turn calls this after createTurn froze the
- * previous turn and before any tool runs: it first waits, up to a short limit, for the chat's
- * previous turn to save its sandbox files, since this turn reuses that sandbox. The wait never
- * covers that turn's model calls, and it does not count against this turn's deadline.
+ * Every path that runs a turn calls this after createTurn froze the previous turn and before any
+ * tool runs: it waits, up to a short limit, for the chat's previous turn to save its sandbox files,
+ * since this turn reuses that sandbox. The wait never covers that turn's model calls.
  */
 export async function armTurnExecution(params: {
   turnDrains: TurnDrainRegistry;
   sessionId: string;
-  executionDeadline: TurnExecutionDeadline;
   logger: Logger;
 }): Promise<void> {
-  const { turnDrains, sessionId, executionDeadline, logger } = params;
+  const { turnDrains, sessionId, logger } = params;
   const stillRunning = await turnDrains.waitForArtifactCapture({
     sessionId,
     timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
@@ -1400,7 +1407,75 @@ export async function armTurnExecution(params: {
       timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
     });
   }
+}
+
+/**
+ * A turn's clocks, started when its request is accepted: the execution deadline and the limit on
+ * reaching its first sign of work. Both run before the turn exists, so no setup wait is unbounded.
+ */
+function startTurnClocks(input: { sessionId: string; logger: Logger }): {
+  abortController: AbortController;
+  executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
+} {
+  const abortController = new AbortController();
+  const executionDeadline = new TurnExecutionDeadline({
+    abortController,
+    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
+    finalization_buffer_ms: 30_000,
+  });
+  const startBound = new TurnStartBound({
+    abortController,
+    timeoutMs: configuration.TURN_START_TIMEOUT_MS,
+    logger: input.logger,
+    sessionId: input.sessionId,
+  });
   executionDeadline.arm();
+  startBound.arm();
+  return { abortController, executionDeadline, startBound };
+}
+
+/**
+ * Ends a created turn that never showed work: records the plain error first, so the chat is free
+ * even if the step it is stuck on ignores the abort, then aborts it. When the run still has not
+ * settled, open views are told the turn is over.
+ */
+async function endTurnThatCouldNotStart(input: {
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  activeTurns: ActiveTurnRegistry;
+  turn: TurnHandle<TurnCustom>;
+  turnEventStream: EventSubscription<TurnStreamingEvent>;
+  sessionId: string;
+}): Promise<void> {
+  const { sessionStore, activeTurns, turn, turnEventStream, sessionId } = input;
+  const completedAt = new Date().toISOString();
+  const state: TerminalTurnState = {
+    status: 'error',
+    message: TURN_COULD_NOT_START_MESSAGE,
+    completed_at: completedAt,
+  };
+  const turnDone: TurnStreamingEvent = {
+    type: EventType.TURN_DONE,
+    id: newEventId(),
+    created_at: completedAt,
+    state,
+    thread_id: null,
+  };
+  try {
+    await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turn.id, state, turn_done_event: turnDone });
+  } catch (error) {
+    if (!(error instanceof SessionStoreConflictError)) {
+      throw error;
+    }
+    // It ended on its own in the meantime; nothing to record.
+    return;
+  }
+  await turn.cancelAndSettle(CancellationReason.ServerExecutionTimeout);
+  if (
+    activeTurns.cancelIfRunning({ sessionId, turnId: turn.id, abortReason: CancellationReason.ServerExecutionTimeout })
+  ) {
+    await turnEventStream.put(turnDone, { streamTTLSeconds: streamTTLSecondsFor(turnDone) });
+  }
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1410,6 +1485,7 @@ export interface TurnEventDrainInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
@@ -1432,16 +1508,24 @@ export async function beginTurnExecution(params: {
   /** A scheduled chat's fixed title; interactive chats use their first message. */
   title_seed?: SessionTitleSeed | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
+  const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
+  try {
+    return await beginAcceptedTurnExecution({ ...params, clocks });
+  } catch (error) {
+    clocks.executionDeadline.dispose();
+    clocks.startBound.dispose();
+    throw error;
+  }
+}
+
+async function beginAcceptedTurnExecution(
+  params: Parameters<typeof beginTurnExecution>[0] & { clocks: ReturnType<typeof startTurnClocks> },
+): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
+  const { abortController, executionDeadline, startBound } = params.clocks;
   const sessionId = session.session_id;
   const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
 
-  const abortController = new AbortController();
-  const executionDeadline = new TurnExecutionDeadline({
-    abortController,
-    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-    finalization_buffer_ms: 30_000,
-  });
   const tenant_id = session.tenant_id;
   const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
   // One read per turn: the persisted override (or env default) applies to the whole turn.
@@ -1553,7 +1637,7 @@ export async function beginTurnExecution(params: {
     unattended: params.unattended,
   });
 
-  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
+  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
   const trackedStream = deps.activeTurns.track({
     sessionId,
@@ -1564,6 +1648,15 @@ export async function beginTurnExecution(params: {
 
   // Held for the whole turn; the stream's sequence counter dies with it.
   const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenant_id, sessionId, turn.id));
+  await startBound.whenExpired(() =>
+    endTurnThatCouldNotStart({
+      sessionStore: deps.sessionStore,
+      activeTurns: deps.activeTurns,
+      turn,
+      turnEventStream,
+      sessionId,
+    }),
+  );
   const autoTitle = await resolveAutoSessionTitleTarget({
     session,
     input,
@@ -1587,6 +1680,7 @@ export async function beginTurnExecution(params: {
       sessionId,
       turnId: turn.id,
       executionDeadline,
+      startBound,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
@@ -2022,7 +2116,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
   };
 
-  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+  const executeAcceptedTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    accepted: ReturnType<typeof startTurnClocks> & { handOffToDrain: () => void },
+  ) => {
+    const { abortController, executionDeadline, startBound, handOffToDrain } = accepted;
     const { session_id: sessionId } = c.req.valid('param');
     const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
@@ -2326,12 +2424,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       helperFqn: turnHelperModelFqn(),
     });
 
-    const abortController = new AbortController();
-    const executionDeadline = new TurnExecutionDeadline({
-      abortController,
-      default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-      finalization_buffer_ms: 30_000,
-    });
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
     const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
@@ -2437,6 +2529,20 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       input: body.input,
     });
 
+    // A deadline or start limit that ran out during setup refuses the reply before it exists.
+    const ranOutOfTime = (): boolean => abortController.signal.aborted;
+    const couldNotStart = () =>
+      c.json({ error: { message: TURN_COULD_NOT_START_MESSAGE, type: 'conflict', code: null } }, 409);
+    if (ranOutOfTime()) {
+      await resolver.close().catch((closeError: unknown) => {
+        deps.logger.warn('Failed to close turn resources for a reply that could not start', {
+          sessionId,
+          ...extractErrorLogFields(closeError),
+        });
+      });
+      return couldNotStart();
+    }
+
     let turn;
     try {
       turn = await session.createTurn({
@@ -2454,6 +2560,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         stop_after_tool_response: stopAfterToolResponse,
       });
     } catch (error) {
+      if (ranOutOfTime() && !(error instanceof SessionStoreConflictError)) {
+        deps.logger.warn('A reply ran out of time while it was being set up', {
+          sessionId,
+          ...extractErrorLogFields(error),
+        });
+        return couldNotStart();
+      }
       if (error instanceof SessionStoreNotFoundError) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -2684,7 +2797,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
     }
 
-    await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
+    await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
     const trackedStream = deps.activeTurns.track({
       sessionId,
@@ -2695,6 +2808,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
     // Held for the whole turn; the stream's sequence counter dies with it.
     const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turn.id));
+    const createdTurn = turn;
+    await startBound.whenExpired(() =>
+      endTurnThatCouldNotStart({
+        sessionStore: deps.sessionStore,
+        activeTurns: deps.activeTurns,
+        turn: createdTurn,
+        turnEventStream,
+        sessionId,
+      }),
+    );
     const autoTitle = await resolveAutoSessionTitleTarget({
       session,
       input: body.input,
@@ -2715,6 +2838,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionId,
       turnId: turn.id,
       executionDeadline,
+      startBound,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
@@ -2744,6 +2868,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         tenantId: requestContext.tenant_id,
       },
     };
+
+    // From here the drain ends both clocks.
+    handOffToDrain();
 
     // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
     // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
@@ -2783,6 +2910,25 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       });
       await stream.close();
     });
+  };
+
+  // The clocks start on arrival, so a turn is bounded from the moment it is accepted.
+  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+    const clocks = startTurnClocks({ sessionId: c.req.valid('param').session_id, logger: deps.logger });
+    const ownership = { drainOwnsClocks: false };
+    try {
+      return await executeAcceptedTurn(c, {
+        ...clocks,
+        handOffToDrain: () => {
+          ownership.drainOwnsClocks = true;
+        },
+      });
+    } finally {
+      if (!ownership.drainOwnsClocks) {
+        clocks.executionDeadline.dispose();
+        clocks.startBound.dispose();
+      }
+    }
   };
 
   const subscribeTurnHandler: RouteHandler<typeof subscribeTurnRoute> = async c => {

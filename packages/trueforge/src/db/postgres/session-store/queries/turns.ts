@@ -490,6 +490,20 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         throw new StaleApprovalContinuationError(input.turn.previous_turn_id, locked.last_turn_id);
       }
 
+      // A successor of another turn would leave the running tip with no runner to end it.
+      const forkedFrom = input.turn.previous_turn_id;
+      if (forkedFrom !== null && locked.last_turn_id !== null && locked.last_turn_id !== forkedFrom) {
+        const tip = await trx
+          .selectFrom('turn')
+          .select('state')
+          .where('session_id', '=', input.session_id)
+          .where('turn_id', '=', locked.last_turn_id)
+          .executeTakeFirst();
+        if (tip?.state.status === 'running') {
+          throw new PreviousTurnRunningError(locked.last_turn_id);
+        }
+      }
+
       const approvalGrants = [
         ...new Set(
           [...locked.approval_grants, ...input.approval_grants].filter(
