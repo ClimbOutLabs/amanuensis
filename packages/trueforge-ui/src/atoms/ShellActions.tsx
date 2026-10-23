@@ -7,10 +7,19 @@ import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 import { BugReportButton } from './BugReportButton.js';
-import { auiButtonClass, sidebarRailButtonClassName } from './lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
-export function ShellActions({ className, labeled = false }: { className?: string; labeled?: boolean }) {
+export function ShellActions({
+  className,
+  labeled = false,
+  rows = false,
+}: {
+  className?: string;
+  labeled?: boolean;
+  /** Lays the labeled actions out as menu rows instead of rail tiles. */
+  rows?: boolean;
+}) {
   const shell = useOptionalShellMode();
   const catalog = useOptionalCatalogServer();
   const capabilities = useServerCapabilities();
@@ -41,7 +50,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         className={auiButtonClass({
           variant: 'ghost',
           size: labeled ? undefined : 'icon',
-          className: cn(hoverClass, labeled && sidebarRailButtonClassName),
+          className: cn(hoverClass, labeled && (rows ? railMenuRowClassName : sidebarRailButtonClassName)),
         })}
         onClick={() => setTheme(isDark ? 'light' : 'dark')}
       >
@@ -60,7 +69,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
             size: labeled ? undefined : 'icon',
             className: cn(
               hoverClass,
-              labeled && sidebarRailButtonClassName,
+              labeled && (rows ? railMenuRowClassName : sidebarRailButtonClassName),
               shell.settingsOpen &&
                 'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
             ),
@@ -71,7 +80,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
           {labeled ? <span className="text-center">Settings</span> : null}
         </button>
       ) : null}
-      {labeled ? <SessionsBrowserButton compact /> : null}
+      {labeled ? <SessionsBrowserButton compact={!rows} /> : null}
       <BugReportButton />
       <ActionSlot />
     </div>

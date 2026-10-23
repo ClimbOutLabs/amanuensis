@@ -14,7 +14,7 @@ import {
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
-import { auiButtonClass, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
@@ -226,7 +226,7 @@ function RailMoreMenu() {
     <DropdownMenu
       align="start"
       side="top"
-      className="min-w-44 rounded-[1.25rem] border border-border bg-card-bg p-1 [&_button]:h-8 [&_button]:w-full [&_button]:flex-row [&_button]:justify-start [&_button]:gap-2 [&_button]:px-2.5 [&_button]:text-[0.875rem] [&_button]:font-normal"
+      className="min-w-44 rounded-[1.25rem] border border-border bg-card-bg p-1"
       trigger={
         <button
           type="button"
@@ -241,17 +241,12 @@ function RailMoreMenu() {
     >
       <div className="flex flex-col">
         {showNewActions && shell?.isComposerEnabled ? (
-          <button
-            type="button"
-            aria-label="Start new agent"
-            className="flex items-center rounded-[1.25rem] text-text-primary hover:bg-ghost-button-hover"
-            onClick={handleNewAgent}
-          >
+          <button type="button" aria-label="Start new agent" className={railMenuRowClassName} onClick={handleNewAgent}>
             <Icon name="agent-2" size={14} />
             Build agent
           </button>
         ) : null}
-        <ShellActions labeled className="flex-col items-stretch gap-0.5" />
+        <ShellActions labeled rows className="flex-col items-stretch gap-0.5" />
       </div>
     </DropdownMenu>
   );
