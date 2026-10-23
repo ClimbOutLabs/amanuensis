@@ -340,6 +340,8 @@ export function runStoreContractSuite<
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data.map(s => s.session_id)).toContain('created-by-session');
       expect(listed.data.find(s => s.session_id === 'created-by-session')?.created_by_subject.subject_id).toBe(
@@ -406,6 +408,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(filtered.data.map(row => row.session_id)).toEqual(['named-1']);
     });
@@ -730,6 +734,7 @@ export function runStoreContractSuite<
       has_text: true,
       secret: false,
       entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+      attached_files: 1,
     };
 
     async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
@@ -755,12 +760,13 @@ export function runStoreContractSuite<
       const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
       await store.setPrivateFingerprints({
         session_id: sessionId,
-        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry], attached_files: 2 },
       });
       await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
 
       const merged = await savedFingerprints(store);
-      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      // The count of attached files covered never drops: a turn that saw fewer does not lower it.
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true, attached_files: 2 });
       expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
       expect(merged?.entries).toHaveLength(2);
     });
@@ -888,6 +894,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data).toHaveLength(0);
 
@@ -1238,6 +1246,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(desc.data.map(s => s.session_id)).toEqual(['sc', 'sb', 'sa']);
 
@@ -1253,6 +1263,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(asc.data.map(s => s.session_id)).toEqual(['sa', 'sb', 'sc']);
     });
@@ -1273,6 +1285,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(first.data).toHaveLength(2);
       expect(first.pagination.next_page_token).toBeDefined();
@@ -1288,6 +1302,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(second.data.map(s => s.session_id)).toEqual(['sa']);
       expect(second.pagination.next_page_token).toBeUndefined();
@@ -1304,6 +1320,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       const middleSession = all.data[1];
       if (!middleSession) {
@@ -1322,6 +1340,8 @@ export function runStoreContractSuite<
         end_timestamp: middleCreatedAt,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bounded.data.map(s => s.session_id)).toEqual(['sb']);
     });
@@ -1348,6 +1368,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const desc = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       expect(desc.data.map(s => s.session_id)).toEqual(['sa', 'sc', 'sb']);
@@ -1377,6 +1399,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const full = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       const page1 = await store.listSessions({ ...listArgs, limit: 2, page_token: undefined });
@@ -1447,6 +1471,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
 
       const byEnv = await store.listSessions({ ...listArgs, metadata: { env: 'prod' } });
@@ -1520,6 +1546,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOnly.data.map(s => s.session_id)).toEqual(['alice-session']);
       expect(aliceOnly.data[0]?.created_by_subject.subject_id).toBe('alice');
@@ -1539,6 +1567,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOrManaged.data.map(s => s.session_id)).toEqual(['alice-session', 'managed-session']);
 
@@ -1557,6 +1587,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(managedAgentOnly.data.map(s => s.session_id)).toEqual(['managed-session']);
 
@@ -1575,6 +1607,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
     });
@@ -1632,6 +1666,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(byType.data.map(s => s.session_id).sort()).toEqual(['from-other-schedule', 'from-schedule']);
 
@@ -1647,6 +1683,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'sched-1',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bySourceId.data.map(s => s.session_id)).toEqual(['from-schedule']);
       expect(bySourceId.data[0]?.source).toEqual(scheduleSource);
@@ -1663,8 +1701,171 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'missing-sched',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
+    });
+
+    it('filters listSessions by folder_id, newest first, with keyset paging inside the folder', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-2',
+        created_by: 'user-1',
+        name: 'Personal',
+      });
+      const seedFiled = async (sessionId: string, folderId: string) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        await store.setSessionFolder({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by: 'user-1',
+          folder_id: folderId,
+        });
+      };
+      await seedFiled('filed-1', 'folder-1');
+      await seedFiled('filed-2', 'folder-1');
+      await seedFiled('filed-3', 'folder-1');
+      await seedFiled('other-folder', 'folder-2');
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'unfiled',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        no_folder: false,
+      };
+
+      const all = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 10, page_token: undefined });
+      expect(all.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2', 'filed-1']);
+
+      const page1 = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...base,
+        folder_id: 'folder-1',
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['filed-1']);
+
+      const other = await store.listSessions({ ...base, folder_id: 'folder-2', limit: 10, page_token: undefined });
+      expect(other.data.map(s => s.session_id)).toEqual(['other-folder']);
+
+      const missing = await store.listSessions({
+        ...base,
+        folder_id: 'no-such-folder',
+        limit: 10,
+        page_token: undefined,
+      });
+      expect(missing.data).toEqual([]);
+    });
+
+    it('filters listSessions to sessions with no folder when no_folder is set, with caller scoping and keyset paging', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      const seed = async (sessionId: string, createdBy: string, folderId: string | null) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        if (folderId !== null) {
+          await store.setSessionFolder({
+            tenant_id: tenant,
+            session_id: sessionId,
+            created_by: createdBy,
+            folder_id: folderId,
+          });
+        }
+      };
+      await seed('filed-1', 'user-1', 'folder-1');
+      await seed('loose-1', 'user-1', null);
+      await seed('loose-2', 'user-1', null);
+      await seed('loose-3', 'user-1', null);
+      await seed('other-loose', 'user-2', null);
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        folder_id: undefined,
+      };
+
+      const unscoped = await store.listSessions({ ...base, no_folder: true, limit: 10, page_token: undefined });
+      expect(unscoped.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1']);
+      expect(unscoped.data.every(s => s.folder_id === null)).toBe(true);
+
+      const scopedInput = {
+        ...base,
+        no_folder: true,
+        created_by_or_agent_ids: { created_by_subject_id: 'user-1', agent_ids: [] },
+      };
+      const scoped = await store.listSessions({ ...scopedInput, limit: 10, page_token: undefined });
+      expect(scoped.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2', 'loose-1']);
+
+      const page1 = await store.listSessions({ ...scopedInput, limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...scopedInput,
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['loose-1']);
+
+      const off = await store.listSessions({ ...base, no_folder: false, limit: 10, page_token: undefined });
+      expect(off.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1', 'filed-1']);
     });
   });
 

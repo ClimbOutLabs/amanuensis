@@ -1,5 +1,11 @@
 import type { OutboundStrings } from '../../../src/core/permissions/outboundGuard';
-import { privateTextLeak } from '../../../src/core/permissions/privateTextCheck';
+import {
+  ChatPrivateFingerprintsSchema,
+  fingerprintLeak,
+  fingerprintsOf,
+  hasEncodedText,
+  privateTextLeak,
+} from '../../../src/core/permissions/privateTextCheck';
 
 function outgoing(...values: string[]): OutboundStrings {
   return { values, scalars: [], keys: [], plumbing: [] };
@@ -445,5 +451,194 @@ describe('privateTextLeak keeps public places passing', () => {
     expect(
       privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Harbour Clinic Lisbon'), privateTexts: [MAIL] }),
     ).toBeNull();
+  });
+});
+
+describe('the chat fingerprints of a private note find the details it gives in running text', () => {
+  const noteLeak = (input: { mode: 'search' | 'maps'; query: string; note: string }) =>
+    fingerprintLeak({
+      mode: input.mode,
+      strings: outgoing(input.query),
+      earlier: '',
+      entries: fingerprintsOf({ texts: [input.note], word_runs: true, running_details: true }),
+      has_text: true,
+      encoded_runs: false,
+    });
+
+  const NOTE =
+    'My sister Inês Example lives at 48 Quillon Road. Her order ZX-55821Q ships soon. ' +
+    'She was born on 14 March 1987 and her account is 7731904.';
+
+  it.each([
+    ['a full name', 'Ines Example birthday ideas'],
+    ['a street address with its street word shortened', 'houses near 48 Quillon Rd'],
+    ['an order code', 'track zx55821q'],
+    ['a date of birth written another way', 'people born 1987-03-14'],
+    ['a date of birth written with a month name', 'March 14, 1987 horoscope'],
+    ['an account number', 'account 7731904 balance'],
+  ])('finds %s', (_label, query) => {
+    expect(noteLeak({ mode: 'search', query: query, note: NOTE })).not.toBe(null);
+  });
+
+  it('passes a public search that shares only common words or a single first name with the note', () => {
+    for (const query of ['best road bikes 2026', 'what to buy my sister for her birthday', 'Ines meaning of name']) {
+      expect(noteLeak({ mode: 'search', query: query, note: NOTE })).toBeNull();
+    }
+  });
+
+  it('does not take a weekday or a greeting before a name as part of it', () => {
+    const greeting = 'Dear Maria Costa, see you Monday Joana Pires.';
+    expect(noteLeak({ mode: 'search', query: 'joana pires', note: greeting })).toBe('name');
+    expect(noteLeak({ mode: 'search', query: 'dear maria', note: greeting })).toBeNull();
+  });
+
+  it('lets a map name an address from the note', () => {
+    expect(noteLeak({ mode: 'maps', query: '48 Quillon Road', note: NOTE })).toBeNull();
+  });
+});
+
+describe('fingerprintsOf without word runs', () => {
+  it('keeps names and numbers but not ordinary five-word runs', () => {
+    const text = 'Remember that the opening hours of the museum changed. Lunch with Ana Reis on 4417829.';
+    const withRuns = fingerprintsOf({ texts: [text], word_runs: true, running_details: true });
+    const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
+    const leak = (entries: typeof withRuns, query: string) =>
+      fingerprintLeak({
+        mode: 'search',
+        strings: outgoing(query),
+        earlier: '',
+        entries,
+        has_text: true,
+        encoded_runs: false,
+      });
+
+    expect(leak(withRuns, 'the opening hours of the louvre')).toBe('phrase');
+    expect(leak(withoutRuns, 'the opening hours of the louvre')).toBeNull();
+    expect(leak(withoutRuns, 'ana reis')).toBe('name');
+    expect(leak(withoutRuns, 'ref 4417829')).toBe('number');
+  });
+});
+
+describe('fingerprintLeak for the check every search gets', () => {
+  const memoryOnly = (text: string) => fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
+  const leak = (input: { entries: ReturnType<typeof fingerprintsOf>; query: string; earlier?: string }) =>
+    fingerprintLeak({
+      mode: 'search',
+      strings: outgoing(input.query),
+      earlier: input.earlier ?? '',
+      entries: input.entries,
+      has_text: true,
+      encoded_runs: false,
+    });
+
+  it('leaves links and provider fields to the outbound guard, so a name-only profile does not hold them', () => {
+    const profile = memoryOnly('<user-name>Teodoro Brambleworth</user-name>');
+    expect(leak({ entries: profile, query: 'https://docs.python.org/3/library/asyncio.html' })).toBeNull();
+    expect(leak({ entries: profile, query: 'https://www.nytimes.com/2024/10/23/technology/ai-chips.html' })).toBeNull();
+    expect(
+      leak({
+        entries: profile,
+        query: 'weather in Lisbon',
+        earlier: 'latest chip news search_depth advanced topic news max_results 5',
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['Al Green is coming to dinner.', 'royal greenwich observatory'],
+    ['Book 2 dr appointments next week.', 'buy 2 dresses online'],
+    ['Set up a 3 way call with the bank.', '3 way switch wiring'],
+    ['Flying to New York in May.', 'renew yorkshire passport'],
+  ])('matches only whole words: %s does not hold %s', (memory, query) => {
+    expect(leak({ entries: memoryOnly(memory), query })).toBeNull();
+  });
+
+  it('reads the names of the arguments too, not only their values', () => {
+    const strings: OutboundStrings = {
+      values: ['lease'],
+      scalars: ['1'],
+      keys: ['objective', 'search_queries', 'Sam Rivera'],
+      plumbing: [],
+    };
+    expect(
+      fingerprintLeak({
+        mode: 'search',
+        strings,
+        earlier: '',
+        entries: memoryOnly('<user-name>Sam Rivera</user-name>'),
+        has_text: true,
+        encoded_runs: false,
+      }),
+    ).toBe('name');
+  });
+
+  it('still holds the whole name, an address and a profile name in any case', () => {
+    expect(leak({ entries: memoryOnly('Al Green is coming to dinner.'), query: 'al green tour dates' })).toBe('name');
+    expect(leak({ entries: memoryOnly('She lives at 48 Harrowgate Road.'), query: '48 harrowgate rd' })).toBe('phrase');
+    expect(leak({ entries: memoryOnly('<user-name>sam rivera</user-name>'), query: 'Sam Rivera linkedin' })).toBe(
+      'name',
+    );
+  });
+});
+
+describe('a chat record saved before attached files were counted', () => {
+  it('reads as covering no attached files, so a chat whose history shows one asks', () => {
+    const older = { complete: true, has_text: true, secret: false, entries: [] };
+    expect(ChatPrivateFingerprintsSchema.parse(older)).toEqual({ ...older, attached_files: 0 });
+  });
+});
+
+describe('privateTextLeak keeps to what a read chat checked before', () => {
+  it('does not take running-text names from a web page kept after a private read', () => {
+    const page = 'Lantern Row Bakery opens at eight. Visit Lantern Row for fresh bread.';
+    expect(
+      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lantern Row bakery'), privateTexts: [page] }),
+    ).toBeNull();
+  });
+});
+
+describe('the People line of recalled memory', () => {
+  it('keeps each person named there as a name, whatever its case', () => {
+    const entries = fingerprintsOf({
+      texts: ['<aman-memory>\nPeople: wilhelmina thrupp: your cousin | Ana Reis: dentist\n</aman-memory>'],
+      word_runs: false,
+      running_details: true,
+    });
+    const leak = (query: string) =>
+      fingerprintLeak({
+        mode: 'search',
+        strings: outgoing(query),
+        earlier: '',
+        entries,
+        has_text: true,
+        encoded_runs: false,
+      });
+    expect(leak('Wilhelmina Thrupp')).toBe('name');
+    expect(leak('ana reis clinic')).toBe('name');
+    expect(leak('your cousin gift ideas')).toBeNull();
+  });
+});
+
+describe('hasEncodedText', () => {
+  it.each([
+    ['a base64 body', Buffer.from('Tenant: Ottilie Vanbrugh-Carrow, flat 4.').toString('base64')],
+    ['short padded base64', `Name: ${Buffer.from('Ottilie').toString('base64')}`],
+    ['a quoted-printable escape', 'Tenant: Ottil=C3=A9 Vanbrugh'],
+    ['a quoted-printable soft break', 'Tenant: Otti=\r\nlie Vanbrugh-Carrow'],
+    ['a unicode escape', 'Tenant: \\u004Fttilie'],
+    ['a hex escape', 'Tenant: \\x4Fttilie'],
+    ['a numeric character reference', 'Tenant: &#79;ttilie'],
+    ['a numeric character reference without its semicolon', 'Tenant: &#79ttilie'],
+    ['a hex character reference', 'Tenant: &#x4F;ttilie'],
+    ['a named character reference', 'Tenant: &Oacute;ttilie'],
+    ['an unpadded base64 header encoded-word', 'From: =?UTF-8?B?T3R0aWxpZSBWYW5l?= <ov@example.test>'],
+    ['a quoted-printable header encoded-word', 'From: =?UTF-8?Q?Ottilie_Vane?= <ov@example.test>'],
+  ])('flags %s', (_label, text) => {
+    expect(hasEncodedText(text)).toBe(true);
+  });
+
+  it('passes ordinary text and an ordinary CSV', () => {
+    expect(hasEncodedText('name,share\nA,50% now')).toBe(false);
+    expect(hasEncodedText('Tenant: Ottilie Vanbrugh-Carrow. Rent is due on the 1st, call 020 7946 0958.')).toBe(false);
   });
 });

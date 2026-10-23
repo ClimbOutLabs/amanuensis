@@ -67,6 +67,8 @@ export async function collectUsageEntries({
       metadata: undefined,
       source_type: undefined,
       source_id: undefined,
+      folder_id: undefined,
+      no_folder: false,
     });
     for (const session of page.data) {
       if (session.created_by_subject.subject_id !== userRef) {
