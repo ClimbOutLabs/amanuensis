@@ -83,7 +83,7 @@ import {
   listTurnsRoute,
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
@@ -1413,11 +1413,19 @@ export async function armTurnExecution(params: {
  * A turn's clocks, started when its request is accepted: the execution deadline and the limit on
  * reaching its first sign of work. Both run before the turn exists, so no setup wait is unbounded.
  */
-function startTurnClocks(input: { sessionId: string; logger: Logger }): {
+interface TurnClocks {
   abortController: AbortController;
   executionDeadline: TurnExecutionDeadline;
   startBound: TurnStartBound;
-} {
+}
+
+/** A chat request's turn from arrival: its clocks, its admission, and the hand-off of both clocks to the drain. */
+interface AcceptedTurn extends TurnClocks {
+  admission: TurnAdmission;
+  handOffToDrain: () => void;
+}
+
+function startTurnClocks(input: { sessionId: string; logger: Logger }): TurnClocks {
   const abortController = new AbortController();
   const executionDeadline = new TurnExecutionDeadline({
     abortController,
@@ -1519,7 +1527,7 @@ export async function beginTurnExecution(params: {
 }
 
 async function beginAcceptedTurnExecution(
-  params: Parameters<typeof beginTurnExecution>[0] & { clocks: ReturnType<typeof startTurnClocks> },
+  params: Parameters<typeof beginTurnExecution>[0] & { clocks: TurnClocks },
 ): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
   const { abortController, executionDeadline, startBound } = params.clocks;
@@ -2118,9 +2126,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const executeAcceptedTurn = async (
     c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
-    accepted: ReturnType<typeof startTurnClocks> & { handOffToDrain: () => void },
+    accepted: AcceptedTurn,
   ) => {
-    const { abortController, executionDeadline, startBound, handOffToDrain } = accepted;
+    const { abortController, executionDeadline, startBound, admission, handOffToDrain } = accepted;
     const { session_id: sessionId } = c.req.valid('param');
     const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
@@ -2804,6 +2812,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId: turn.id,
       abortController,
       stream: turn.stream(),
+      admission,
     });
 
     // Held for the whole turn; the stream's sequence counter dies with it.
@@ -2912,18 +2921,23 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     });
   };
 
-  // The clocks start on arrival, so a turn is bounded from the moment it is accepted.
+  // From arrival the turn is registered, so a Cancel that comes before it exists still stops it, and
+  // its clocks run, so it is bounded from the moment it is accepted.
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
-    const clocks = startTurnClocks({ sessionId: c.req.valid('param').session_id, logger: deps.logger });
+    const sessionId = c.req.valid('param').session_id;
+    const admission = deps.activeTurns.admit({ sessionId });
+    const clocks = startTurnClocks({ sessionId, logger: deps.logger });
     const ownership = { drainOwnsClocks: false };
     try {
       return await executeAcceptedTurn(c, {
         ...clocks,
+        admission,
         handOffToDrain: () => {
           ownership.drainOwnsClocks = true;
         },
       });
     } finally {
+      admission.release();
       if (!ownership.drainOwnsClocks) {
         clocks.executionDeadline.dispose();
         clocks.startBound.dispose();
