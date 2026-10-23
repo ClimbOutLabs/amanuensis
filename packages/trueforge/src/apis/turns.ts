@@ -89,6 +89,7 @@ import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } 
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { mailAccountDirectory } from '../runtime/mailConnector';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -558,6 +559,9 @@ function createTurnResolver(deps: {
               : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
+      setUpConnectorNames: async () =>
+        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+      mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,

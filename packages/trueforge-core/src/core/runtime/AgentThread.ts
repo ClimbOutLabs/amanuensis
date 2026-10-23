@@ -1726,6 +1726,7 @@ export class AgentThread {
       this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
+        setUpConnectorNames: this.definition.setUpConnectorNames,
       });
     }
 
