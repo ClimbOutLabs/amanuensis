@@ -34,7 +34,7 @@ export interface ResolvedAgentDefinition {
  * per-request state (secrets, providers, caches) freely.
  */
 export interface ITurnResourceResolver<TTurnCustom extends object = Record<string, never>> {
-  /** The turn's search and private-read state, shared by every thread's host context so one thread's reads bind the others. */
+  /** The turn's lookup state and where its links came from, shared by every thread's host context. */
   readonly webSearchTurn: WebSearchTurnState;
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;

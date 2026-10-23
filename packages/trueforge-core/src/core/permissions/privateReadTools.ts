@@ -1,6 +1,6 @@
 /**
- * Which tools read the user's private data: mail, calendar, spaces and document text. Each result of these
- * tools is kept as text for the checks on later searches and maps.
+ * Which tools read the person's own stores: mail, calendar, spaces and document text. Who their results name as
+ * sender, recipient or guest is the person's own contact.
  */
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
@@ -14,7 +14,7 @@ const PRIVATE_READ_TOOL_NAMES: readonly string[] = [
   EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
 ];
 
-/** Whether a tool reads the user's private data, so its results are checked before a later web request. */
+/** Whether a tool reads the person's own stores. */
 export function isPrivateReadToolName(tool_name: string): boolean {
   return PRIVATE_READ_TOOL_NAMES.some(name => tool_name.endsWith(name));
 }

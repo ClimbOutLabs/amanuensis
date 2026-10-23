@@ -4,13 +4,10 @@ import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   allowsChatApproval,
-  allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
-  offersChatApproval,
-  SEARCH_CHAT_GRANT_KEY,
 } from '../../../src/core/mcp/approvalGrant';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import {
@@ -289,20 +286,30 @@ describe('chat grant key', () => {
     expect(new Set(keys).size).toBe(5);
   });
 
-  it('never admits a Tier 3 send-class call from a chat grant, even a forged one', () => {
+  it('admits a send from "Always allow this here" in that chat, but never a send that read content steered', () => {
     const info: InternalToolCallInfo = {
       ...toolInfo('notes', 'send_note'),
       effect: 'inspect',
       tier: 3,
       tier_reason: 'external_service',
     };
-    const effective = effectiveApprovalDecisions({
+    const admitted = effectiveApprovalDecisions({
       calls: [toolCall('call', info)],
       decisions: new Map(),
       chatApprovalGrants: new Set([approvalGrantKey(info)]),
       implementationPlanGrants: new Set(),
     });
-    expect(effective.has('call')).toBe(false);
+    expect(admitted.get('call')).toEqual({ status: 'allow', scope: 'chat' });
+
+    const steered: InternalToolCallInfo = { ...info, tier_reason: 'content_steered' };
+    const refused = effectiveApprovalDecisions({
+      calls: [toolCall('call', steered)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(steered)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(refused.has('call')).toBe(false);
+    expect(allowsChatApproval(steered)).toBe(false);
   });
 });
 
@@ -725,34 +732,9 @@ describe('secret-path detection covers every argument of an unannotated connecto
   });
 });
 
-describe('search chat grant', () => {
-  const searchHold: InternalToolCallInfo = {
-    type: 'mcp',
-    mcp_server_id: 'search',
-    mcp_server_name: 'search',
-    original_tool_name: 'web_search',
-    is_approval_required: true,
-    tier: 3,
-    tier_reason: 'mcp_search_after_private_read',
-    search_provider_call: true,
-  };
-
-  it('is offered only for the designated search provider held after a private read', () => {
-    expect(allowsSearchChatGrant(searchHold)).toBe(true);
-    expect(offersChatApproval(searchHold)).toBe(true);
-    expect(allowsSearchChatGrant({ ...searchHold, tier_reason: 'mcp_search_unreturned_url' })).toBe(false);
-    expect(allowsSearchChatGrant({ ...searchHold, search_provider_call: undefined })).toBe(false);
-    expect(allowsSearchChatGrant({ ...searchHold, secret_path_read: true })).toBe(false);
-  });
-
-  it('is stored under a key no tool grant can match', () => {
-    expect(SEARCH_CHAT_GRANT_KEY).not.toBe(approvalGrantKey(searchHold));
-  });
-});
-
-describe('calendar changes that reach guests never get a durable grant', () => {
+describe('calendar changes that reach guests', () => {
   it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
-    'refuses chat and always scope for %s, even when the server calls the tool a read',
+    'may be answered for this chat, never for every chat: %s',
     tier_reason => {
       const info: InternalToolCallInfo = {
         type: 'mcp',
@@ -764,8 +746,7 @@ describe('calendar changes that reach guests never get a durable grant', () => {
         tier: 3,
         tier_reason,
       };
-      expect(allowsChatApproval(info)).toBe(false);
-      expect(offersChatApproval(info)).toBe(false);
+      expect(allowsChatApproval(info)).toBe(true);
       expect(allowsToolGrant(info)).toBe(false);
       const call: InternalEnrichedToolCall = {
         id: 'call-1',
@@ -773,14 +754,24 @@ describe('calendar changes that reach guests never get a durable grant', () => {
         function: { name: 'create_event', arguments: '{}' },
         tool_info: info,
       };
-      // A grant stored for this key, by an older rule, admits nothing.
       const admissions = effectiveToolAdmissions({
         calls: [call],
         decisions: new Map(),
         chatApprovalGrants: new Set([approvalGrantKey(info)]),
         implementationPlanGrants: new Set(),
       });
-      expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+      expect(admissions.get('call-1')).toEqual({
+        decision: { status: 'allow', scope: 'chat' },
+        admission_provenance: { source: 'chat_grant', decision: 'allow', scope: 'chat' },
+      });
+      // Another chat holds no grant, so the same call asks there.
+      const elsewhere = effectiveToolAdmissions({
+        calls: [call],
+        decisions: new Map(),
+        chatApprovalGrants: new Set(),
+        implementationPlanGrants: new Set(),
+      });
+      expect(elsewhere.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
     },
   );
 });

@@ -26,10 +26,13 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_CODE_REASON,
 ]);
 
+/** Reason code for a consequential action whose recipient or site only content the assistant read named. */
+export const CONTENT_STEERED_REASON = 'content_steered';
+
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
- * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
- * hosting server declares about the tool.
+ * action. A standing approval is argument-blind, so these never get "Always allow" across chats, whatever the
+ * hosting server declares about the tool. Only the chat grant below may cover some of them, inside one chat.
  */
 export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
@@ -42,6 +45,28 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'caldav_calendar_guests',
   'caldav_invitation_reply',
   'connector_calendar_write',
+  'schedule_write',
+  'persona_write',
+  CONTENT_STEERED_REASON,
+]);
+
+/**
+ * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
+ * binds the tool and its destination, never a standing grant across chats. A steered call is never among them.
+ */
+export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
+  'gmail_send',
+  'gmail_draft',
+  'calendar_write_guests',
+  'caldav_calendar_guests',
+  'caldav_invitation_reply',
+  'connector_calendar_write',
+  'connector_send',
+  'connector_outbound',
+  'external_service',
+  'destructive_action',
+  'mcp_destructive_hint',
+  'mcp_open_world_hint',
   'schedule_write',
   'persona_write',
 ]);
@@ -63,7 +88,7 @@ export const AUTO_DENY_REASONS = [
   'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
-  'private_text_check',
+  'steered_by_content',
   'tool_not_prepared',
   'unattended_run',
 ] as const;

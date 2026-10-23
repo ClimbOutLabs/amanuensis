@@ -71,21 +71,14 @@ async function canChatAllow(
 }
 
 describe('the approval event says whether chat scope is offered', () => {
-  it('offers it for a plain read and withholds it for a send', async () => {
+  it('offers it for a plain read and for a send, and withholds it for a send that read content steered', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
-    expect(await canChatAllow('connector_send')).toBe(false);
+    expect(await canChatAllow('connector_send')).toBe(true);
+    expect(await canChatAllow('content_steered')).toBe(false);
   });
 
-  it('offers the chat choice for a search held after a private read', async () => {
-    expect(await canChatAllow('mcp_search_after_private_read', { search_provider_call: true, effect: undefined })).toBe(
-      true,
-    );
-  });
-
-  it('withholds the chat choice from a search held for any other reason', async () => {
-    expect(await canChatAllow('mcp_search_unreturned_url', { search_provider_call: true, effect: undefined })).toBe(
-      false,
-    );
+  it('withholds the chat choice from a lookup that read content steered', async () => {
+    expect(await canChatAllow('mcp_search_steered', { search_provider_call: true, effect: undefined })).toBe(false);
   });
 
   it('withholds the chat choice from a search held because searches are set to ask', async () => {
@@ -96,13 +89,7 @@ describe('the approval event says whether chat scope is offered', () => {
     expect(await canChatAllow('mcp_search_guard', { search_provider_call: true, effect: undefined })).toBe(false);
   });
 
-  it('withholds the chat choice from a search held after the chat opened a key file', async () => {
-    expect(
-      await canChatAllow('mcp_search_after_private_read', {
-        search_provider_call: true,
-        effect: undefined,
-        secret_path_read: true,
-      }),
-    ).toBe(false);
+  it('withholds the chat choice from a send that reads a key file', async () => {
+    expect(await canChatAllow('connector_send', { secret_path_read: true })).toBe(false);
   });
 });

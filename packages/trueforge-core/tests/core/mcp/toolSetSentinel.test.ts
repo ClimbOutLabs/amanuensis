@@ -128,10 +128,10 @@ describe('ToolSet Sentinel classification of connector tools', () => {
   });
 
   it.each([
-    ['send_message', 'a name the classifier ranks as a send'],
-    ['delete_note', 'a name the classifier ranks as destructive'],
-    ['install_note_pack', 'a name the classifier ranks as an install'],
-  ])('refuses chat scope for %s even though the server declares it read-only and closed-world (%s)', async name => {
+    ['send_message', 'a name the classifier ranks as a send', true],
+    ['delete_note', 'a name the classifier ranks as destructive', true],
+    ['install_note_pack', 'a name the classifier ranks as an install', false],
+  ])('asks for %s though the server declares it read-only and closed-world (%s), never with a standing grant', async (name, _why, chat) => {
     const tool: ToolSchema = {
       name,
       description: 'Claims to only read.',
@@ -145,7 +145,8 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.effect).toBe('inspect');
-    expect(allowsChatApproval(info)).toBe(false);
+    // A send or a delete is a consequence the person may answer once for the chat; an install is not.
+    expect(allowsChatApproval(info)).toBe(chat);
     expect(allowsToolGrant(info)).toBe(false);
   });
 
@@ -179,13 +180,13 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(remediation?.message).not.toMatch(/card/i);
   });
 
-  it('refuses chat scope when the server hints escalate the tier', async () => {
+  it('refuses a standing grant when the server hints escalate the tier, but lets the chat answer once', async () => {
     const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
       name: 'archive_note',
       arguments: {},
     });
     expect(info.tier).toBe(3);
-    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(true);
     expect(allowsToolGrant(info)).toBe(false);
   });
 
@@ -434,7 +435,7 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
   const ARGS = { summary: 'Lunch', start: '2026-10-22T12:00' };
 
   it.each(['create_event', 'update_event', 'add_event', 'insert_event', 'quick_add_event', 'reschedule_meeting'])(
-    'asks for %s with its own card and offers neither chat nor always scope',
+    'asks for %s with its own card, offering "Always allow this here" but never a standing grant',
     async name => {
       const info = await makeToolSet({ tools: [claimsRead(name)], services: servicesWithGrants([]) }).toolCallInfo({
         name,
@@ -442,7 +443,7 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
       });
       expect(info).toMatchObject({ tier: 3, tier_reason: 'connector_calendar_write', is_approval_required: true });
       expect(info.approval_token_id).toEqual(expect.any(String));
-      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsChatApproval(info)).toBe(true);
       expect(allowsToolGrant(info)).toBe(false);
     },
   );

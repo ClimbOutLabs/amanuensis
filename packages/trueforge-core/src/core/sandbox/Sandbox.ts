@@ -6251,7 +6251,7 @@ export class Sandbox extends LocalToolMCP {
         status: persisted ? 'active' : 'submission_approved_once',
         message: persisted
           ? 'The implementation plan grant is active for this chat until revoked or repository state drifts.'
-          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Approve for this chat to create one.',
+          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Always allow this here to create one.',
       }),
     });
   }

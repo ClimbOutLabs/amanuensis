@@ -277,7 +277,7 @@ describe('EmailApprovalCard actions', () => {
   it('never offers Always allow on a mail card', () => {
     renderEmail();
     expect(screen.queryByText(/Always allow/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Approve for this chat/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Always allow this here/)).not.toBeInTheDocument();
   });
 });
 

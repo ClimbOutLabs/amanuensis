@@ -1,6 +1,6 @@
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { createWebSearchTurnState, hasReadPrivateData } from '../../../src/core/permissions/webSearch';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const MAIL_CONNECTOR = 'Email';
 const CLOSED_WORLD_READ = { read_only_hint: true, open_world_hint: false };
@@ -66,22 +66,14 @@ describe('Email connector classifier', () => {
     );
 
     it.each(READS)(
-      '%s from the first-party Email sidecar runs without a card and is a private read',
+      '%s from the first-party Email sidecar runs without a card and is a read of private data',
       async (name, params) => {
         const ctx = makeCtx();
         const decision = await classifyTier(firstPartyMailCall(name, params), ctx);
         expect(decision).toMatchObject({ tier: 1, reason: 'mail_read', auto_deny: null, sensitive_read: true });
         expect(decision.card).toBeNull();
-        expect(hasReadPrivateData(ctx.web_search)).toBe(true);
       },
     );
-
-    it('a silent read leaves the chat private, so a later web search still goes through the private-text check', async () => {
-      const ctx = makeCtx();
-      expect(hasReadPrivateData(ctx.web_search)).toBe(false);
-      await classifyTier(firstPartyMailCall('list_emails_metadata', { mailbox: 'INBOX' }), ctx);
-      expect(hasReadPrivateData(ctx.web_search)).toBe(true);
-    });
 
     it('a read is never silent when the sidecar is offline', async () => {
       const ctx = makeCtx();

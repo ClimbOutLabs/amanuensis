@@ -190,6 +190,12 @@ describe('grounded finder over the real server path', () => {
       ),
     );
     expect(saved.status).toBe(200);
+    // Maps set to ask, so the pin's card is what these tests check.
+    const maps = await server.request(
+      '/api/v1/user/settings/sentinel',
+      jsonInit({ maps_without_asking: false }, 'PATCH'),
+    );
+    expect(maps.status).toBe(200);
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {

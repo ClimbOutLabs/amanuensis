@@ -42,7 +42,7 @@ describe('PermissionApprovalCard without a new recipient', () => {
       />,
     );
     expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add and send' })).not.toBeInTheDocument();
   });

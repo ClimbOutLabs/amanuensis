@@ -1,6 +1,6 @@
 import type { Logger } from 'winston';
 import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
-import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
+import { chatProvenanceCapability } from '../core/capabilities/builtins/ChatProvenance';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import {
   MailAccountDirectory,
@@ -596,9 +596,9 @@ export class TurnResourceResolver<
         setUpConnectorNames,
       },
       compactionModel,
-      // Only the root thread holds the chat's private-read state. A sub-agent's mail and calendar reads reach the
-      // same turn state through its tool set, so the flag and the text checks still cover them.
-      extraCapabilities: agentInfo === undefined ? [privateDataReadCapability({ turn: this.webSearchTurn })] : [],
+      // Only the root thread reads the chat's history for where its links came from. A sub-agent's results reach the
+      // same turn state through the dispatch loop as they arrive.
+      extraCapabilities: agentInfo === undefined ? [chatProvenanceCapability({ turn: this.webSearchTurn })] : [],
     };
   }
 

@@ -517,11 +517,4 @@ describe('GmailToolSet classification', () => {
     const info = await tools.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
     expect(info).toMatchObject({ tier: 1, is_approval_required: false, open_world_hint: true, read_only_hint: true });
   });
-
-  it('does not mark the turn as having read private data when a read is only previewed', async () => {
-    const { tools, sentinel } = await build({ routes: [] });
-    expect(sentinel.web_search.privateDataRead).toBe(false);
-    await tools.toolCallInfo({ name: 'list_inbox_threads', arguments: {} });
-    expect(sentinel.web_search.privateDataRead).toBe(false);
-  });
 });

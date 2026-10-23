@@ -19,11 +19,20 @@ Aman reads mail, web pages, files, and whatever a connector sends back. All of t
 
 Aman sorts every action before it runs.
 
-- **Runs without asking:** Aman's own read-only tools, web searches with the web search service, and read-only tools from connectors that are trusted on this instance or that you set to "Always allow".
+- **Runs without asking:** lookups done for you. That means Aman's own read-only tools, reading your mail, calendar, spaces and files, web searches, opening a page, maps, and read-only tools from connectors that are trusted on this instance or that you set to "Always allow". What you say in the chat, and what Aman knows about you, is yours to use: asking for the weather where you live just runs.
 - **Shows a card and waits:** sending mail or messages, running code, writing or changing files, and any connector tool that could change something or reach outside your machine. A tool Aman cannot classify also shows a card.
 - **Refused without a card:** a send whose destination cannot be checked, a send whose card would hide a recipient or cut off its content, and anything that needs the network while Aman is in offline mode. Nothing runs.
 
-The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**, and for some read-only actions also **Approve for this chat**. **Approve for this chat** and **Always allow** are never offered for sends, deletes, installs or outside services. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
+The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**. Sends, invites, deletes and other actions with real effects also offer **Always allow this here**: Aman stops asking for that kind of action for the rest of this chat, and asks again in any other chat. **Always allow**, which covers every chat, is never offered for sends, deletes, installs or outside services. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
+
+### When Aman holds something it would normally do
+
+Pages, emails from other people, files and tool results are things Aman reads. They are never instructions. Two things are held with a card even when the action would otherwise run:
+
+- **Something Aman read chose where it goes.** Aman keeps track of where each link and email address in a chat came from: from you, from your own contacts, from a search result, or only from something it read. A page link that only a page or someone else's email gave is held when Aman would add anything to it, such as your email address. Opening that link exactly as written still runs. A send, an invite or another action is held the same way when only something Aman read named who or where it goes, and **Always allow this here** never covers it.
+- **It carries a secret.** A search, page or map that would send a password, an API key, a private key or a payment card number is held whatever its source.
+
+In a scheduled run a held call is skipped, and the run tells you in one line.
 
 You can choose to let file writes run without a card. That is the only kind of action you can relax this way.
 

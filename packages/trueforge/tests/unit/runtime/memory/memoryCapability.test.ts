@@ -4,7 +4,7 @@ import type {
   ContextMessage,
 } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InstructionBuilder, InternalEventType } from '@truefoundry/trueforge-core/core';
-import { fingerprintLeak } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
+import { steeredLinks } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import winston from 'winston';
 import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../../../src/runtime/internalSourceGuard';
@@ -759,12 +759,17 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   });
 });
 
-describe('HindsightMemoryProcessor private details for the search check', () => {
-  it("keeps the injected block's details, so a search that carries them asks and a plain one does not", async () => {
+describe('HindsightMemoryProcessor and where links come from', () => {
+  it("counts a site in what the assistant remembers of the person as the person's own", async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
       results: [
-        { id: '1', type: 'world', occurred_start: '2026-08-14', text: 'Your cousin Wilhelmina Thrupp lives in Leeds.' },
+        {
+          id: '1',
+          type: 'world',
+          occurred_start: '2026-08-14',
+          text: 'Your cousin Wilhelmina Thrupp posts photos on photos.thrupp.example.',
+        },
       ],
       entities: [],
     });
@@ -784,18 +789,11 @@ describe('HindsightMemoryProcessor private details for the search check', () => 
 
     await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'how is my cousin' }])));
 
-    const leak = (query: string) =>
-      fingerprintLeak({
-        mode: 'search',
-        strings: { values: [query], scalars: [], keys: [], plumbing: [] },
-        earlier: '',
-        entries: webSearch.chatFingerprints.entries,
-        has_text: webSearch.chatFingerprints.has_text,
-        encoded_runs: false,
-      });
-    expect(webSearch.privateContextKept).toBe(true);
-    expect(leak('wilhelmina thrupp leeds')).not.toBeNull();
-    expect(leak('things to do in Leeds')).toBeNull();
+    // A page that also names the site does not make it steered: the person's memory named it first.
+    webSearch.provenance.untrusted.hosts.add('photos.thrupp.example');
+    expect(
+      steeredLinks({ provenance: webSearch.provenance, values: ['https://photos.thrupp.example/album?u=1'] }),
+    ).toEqual([]);
   });
 });
 

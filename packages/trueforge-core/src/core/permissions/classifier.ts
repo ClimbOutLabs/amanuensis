@@ -81,7 +81,6 @@ import {
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import {
   isMapsToolName,
-  MAPS_AFTER_READ_SILENT_REASON,
   MAPS_ASK_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
@@ -97,16 +96,17 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { fingerprintLeak, privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
+import { namesUrl, steeredDestinations, steeredLinks } from './provenance';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
-  GUARD_RULE_SAY,
-  HOLD_SAY,
+  guardRuleSay,
+  holdSay,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
   searchProviderLabel,
+  SECRET_SAY,
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
@@ -121,6 +121,7 @@ import {
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  CONTENT_STEERED_REASON,
   failClosedDecision,
   SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
@@ -158,21 +159,9 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
-  chatPrivateReadHeld,
-  hasReadPrivateData,
-  markPrivateDataRead,
-  namesHostAtFetchLimit,
-  privateDetailCheckable,
-  privateDetailCheckNeeded,
-  privateFingerprintsUsable,
-  privateTextForChecks,
-  SEARCH_AFTER_PRIVATE_READ_REASON,
-  SEARCH_AFTER_READ_SILENT_REASON,
-  SEARCH_CHAT_GRANTED_SILENT_REASON,
-  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
+  SEARCH_STEERED_REASON,
   SILENT_SEARCH_LIMIT,
-  unreturnedUrls,
   type SearchAskReason,
   type WebSearchTurnState,
 } from './webSearch';
@@ -1783,15 +1772,15 @@ async function holdSearchCall(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
   reason: SearchAskReason;
-  /** The one sentence that says why Aman is asking. */
+  /** The one sentence that says why the assistant is asking. */
   say: string;
   /** The card's one line, with any held key masked. */
   summary: string;
+  /** True when the call opens a page rather than searches, so the card says so. */
+  page: boolean;
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
   params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
-  /** True when the chat read a secret or key file, so no chat-wide allow is offered on this card. */
-  secret_path_read: boolean;
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
   const shown =
@@ -1811,7 +1800,7 @@ async function holdSearchCall(input: {
     card: {
       plain_what:
         tavily === null
-          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say })
+          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say, page: input.page })
           : withHoldSay(tavily, input.say),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
@@ -1833,7 +1822,6 @@ async function holdSearchCall(input: {
     reason: input.reason,
     reason_detail: input.say,
     sensitive_read: false,
-    secret_path_read: input.secret_path_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -1843,18 +1831,18 @@ async function holdSearchCall(input: {
   });
   return {
     ...decision,
-    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say }),
+    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say, page: input.page }),
   };
 }
 
 /**
- * The designated search provider's call. Runs without asking unless the user switched searches to
- * ask, the outbound secret guard trips, the turn already ran its allowance of silent searches, or
- * the call names a URL no search result of this turn returned. Returns undefined, leaving the call
- * to the ordinary rules, for a tool that the server did not declare read-only and the host's list
- * does not name as a search tool, that declares itself destructive or not read-only, falls in a
- * name-based escalation class, or touches a sensitive path: the role never lowers those, so
- * designating a connector that can write does not make its unannotated tools silent.
+ * The designated search provider's call: a search or a page read. Runs without asking unless the person switched
+ * searches to ask, the outbound secret guard trips, the turn already ran its allowance of silent lookups, or content
+ * the assistant read chose the link and the call adds to it. Returns undefined, leaving the call to the ordinary
+ * rules, for a tool that the server did not declare read-only and the host's list does not name as a search tool,
+ * that declares itself destructive or not read-only, falls in a name-based escalation class, or touches a sensitive
+ * path: the role never lowers those, so designating a connector that can write does not make its unannotated tools
+ * silent.
  */
 async function classifySearchProviderTool(input: {
   action: SentinelAction;
@@ -1875,19 +1863,22 @@ async function classifySearchProviderTool(input: {
     return undefined;
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const say = holdSay(ctx.web_search.assistantName);
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
-  const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
+  const sentValues = strings === undefined ? [] : [...strings.values, ...strings.plumbing];
+  const page = namesUrl(sentValues);
+  const held = (reason: SearchAskReason, reasonSay: string): Promise<TierDecision> =>
     holdSearchCall({
       action,
       ctx,
       reason,
-      say,
+      say: reasonSay,
       summary,
+      page,
       params: action.canonical_params,
       fields: extraction.fields,
-      secret_path_read: false,
     });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
@@ -1904,15 +1895,15 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      say: HOLD_SAY.secret,
+      say: SECRET_SAY,
       summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
+      page,
       params: masked,
       fields: {
         ...extraction.fields,
         outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
         outbound_truncated: outbound?.truncated ?? false,
       },
-      secret_path_read: false,
     });
   };
 
@@ -1922,239 +1913,102 @@ async function classifySearchProviderTool(input: {
     return heldWithoutKey(secrets);
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', HOLD_SAY.search_setting);
+    return held('mcp_search_setting_ask', say.search_setting);
   }
   if (!verdict.ok) {
-    return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
-  }
-  // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
-  const readMode = hasReadPrivateData(ctx.web_search);
-  const privateReadHeld = chatPrivateReadHeld({
-    state: ctx.web_search,
-    markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx),
-  });
-  // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
-  const chatGranted =
-    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted() && privateFingerprintsUsable(ctx.web_search);
-  // A chat that read a secret or key file asks before every search, whatever the grant says.
-  const heldPrivate = (): Promise<TierDecision> =>
-    ctx.web_search.chatFingerprints.secret
-      ? holdSearchCall({
-          action,
-          ctx,
-          reason: SEARCH_AFTER_PRIVATE_READ_REASON,
-          say: HOLD_SAY.private_secret,
-          summary,
-          params: action.canonical_params,
-          fields: extraction.fields,
-          secret_path_read: true,
-        })
-      : held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
-  if (chatGranted) {
-    if (strings === undefined) {
-      return heldPrivate();
-    }
-    const leak = fingerprintLeak({
-      mode: 'search',
-      strings,
-      earlier: ctx.web_search.sentText,
-      entries: ctx.web_search.chatFingerprints.entries,
-      has_text: ctx.web_search.chatFingerprints.has_text,
-      encoded_runs: true,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
-    }
-  } else {
-    if (readMode) {
-      const texts = privateTextForChecks(ctx.web_search);
-      if (texts === undefined || strings === undefined) {
-        return heldPrivate();
-      }
-      const leak = privateTextLeak({
-        mode: 'search',
-        strings,
-        earlier: ctx.web_search.sentText,
-        privateTexts: texts,
-      });
-      if (leak !== null) {
-        return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
-      }
-    }
-    if (privateReadHeld) {
-      return heldPrivate();
-    }
-  }
-  // Recalled memory, the profile, an attached file and earlier turns' reads leave fingerprints too. No grant lifts
-  // this check, and a chat whose fingerprints miss a text asks, since the check cannot vouch for the search.
-  if (privateDetailCheckNeeded(ctx.web_search)) {
-    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
-      return held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_unchecked);
-    }
-    const leak = fingerprintLeak({
-      mode: 'search',
-      strings,
-      earlier: ctx.web_search.sentText,
-      entries: ctx.web_search.chatFingerprints.entries,
-      has_text: ctx.web_search.chatFingerprints.has_text,
-      encoded_runs: false,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended
-        ? privateDetailSkipped()
-        : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
-    }
+    return held('mcp_search_guard', guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }));
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', HOLD_SAY.search_limit);
+    return held('mcp_search_limit', say.search_limit);
   }
-  if (
-    strings !== undefined &&
-    unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
-  ) {
-    return held('mcp_search_unreturned_url', HOLD_SAY.unseen_link);
-  }
-  if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
-    return held('mcp_search_host_limit', HOLD_SAY.site_limit);
+  if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+    return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
   return tier1Decision({
-    reason: chatGranted
-      ? SEARCH_CHAT_GRANTED_SILENT_REASON
-      : readMode
-        ? SEARCH_AFTER_READ_SILENT_REASON
-        : SEARCH_SILENT_REASON,
-    reason_detail: `Searched: ${queryText}`,
+    reason: SEARCH_SILENT_REASON,
+    reason_detail: `${page ? 'Opened' : 'Searched'}: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
 }
 
-/** Said to the owner when a scheduled run's search or map is skipped because its text was copied from mail or calendar. */
-const PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE =
-  'One lookup was skipped, because it would have shared something from your mail or calendar.';
-
-/** What a skipped call's text would have carried, in plain words. */
-function leakWords(leak: PrivateTextLeak): string {
-  switch (leak) {
-    case 'contact':
-      return 'an email address or phone number';
-    case 'number':
-      return 'a long number';
-    case 'name':
-      return "a person's name";
-    case 'phrase':
-      return 'a phrase copied word for word';
-    case 'token':
-      return 'a long code';
-  }
-}
-
-/** A call that is skipped rather than asked, for a scheduled run with nobody to answer. */
-function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
+/** A held call that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function steeredSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
   return autoDenyDecision({
-    reason: 'private_text_check',
-    reason_detail: `It would have shared ${leakWords(leak)} from your mail or calendar.`,
-    owner_message: PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE,
-    sensitive_read: false,
-  });
-}
-
-/** Said to the owner when a scheduled run's search is skipped because it carried a private detail. */
-const PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE =
-  'One lookup was skipped, because it would have shared something private about you.';
-
-/** A search that is skipped rather than asked, for a scheduled run with nobody to answer. */
-function privateDetailSkipped(): TierDecision {
-  return autoDenyDecision({
-    reason: 'private_text_check',
-    reason_detail: 'It would have shared a private detail about you.',
-    owner_message: PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE,
+    reason: 'steered_by_content',
+    reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
+    owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
     sensitive_read: false,
   });
 }
 
 /**
- * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
- * read does not mark the chat as holding a secret.
+ * A consequential action asks with its card as it is. When a recipient or site the card names came only from content
+ * the assistant read, the card says so and no chat grant covers it; a scheduled run skips it. `guests` adds people
+ * the card holds only as text, such as a shared calendar's guests.
  */
-function isCheckedPrivateRead(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'truefoundry-system' &&
-    (action.mcp_server_name === GMAIL_SERVER_ID || action.mcp_server_name === CALENDAR_SERVER_ID)
-  );
+function steeringChecked(input: {
+  decision: TierDecision;
+  ctx: ClassifyContext;
+  guests: readonly string[];
+}): TierDecision {
+  const { decision, ctx } = input;
+  const card = decision.card;
+  if (decision.tier !== 3 || decision.auto_deny !== null || card === null) {
+    return decision;
+  }
+  const mail = card.email ?? null;
+  const steered = steeredDestinations({
+    provenance: ctx.web_search.provenance,
+    addresses: mail === null ? [] : [...mail.to, ...mail.cc, ...mail.bcc].map(mailbox => mailbox.address),
+    values: [
+      ...[card.recipient, card.destination, card.destination_host].filter(value => value !== null),
+      ...(card.calendar_event?.attendees ?? []),
+      ...input.guests,
+    ],
+  });
+  if (steered.length === 0) {
+    return decision;
+  }
+  if (ctx.services.unattended) {
+    return steeredSkipped(ctx);
+  }
+  const say = holdSay(ctx.web_search.assistantName).steered_action;
+  return {
+    ...decision,
+    reason: CONTENT_STEERED_REASON,
+    reason_detail: say,
+    card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+  };
 }
 
 /**
- * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
- * the search provider's silent-run rules hold: the chat has read no private data, and the outbound guard
- * finds nothing sensitive in the call's strings. Returns undefined when the call should show its card.
+ * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
+ * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
  */
 async function classifyMapsSilently(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
-}): Promise<TierDecision | undefined> {
+}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
   const { action, ctx } = input;
   const strings = collectOutboundStrings(action.canonical_params);
   const { verdict } = await outboundGuard({ ctx, strings });
   if (!verdict.ok) {
-    return undefined;
-  }
-  if (
-    chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
-  ) {
-    return undefined;
-  }
-  // The profile, recalled memory and attached files are checked too: a map may name a place from them, never a
-  // person, a contact or a number. A chat whose kept details miss a text shows the card.
-  if (privateDetailCheckNeeded(ctx.web_search)) {
-    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
-      return undefined;
-    }
-    const leak = fingerprintLeak({
-      mode: 'maps',
-      strings,
-      earlier: ctx.web_search.sentText,
-      entries: ctx.web_search.chatFingerprints.entries,
-      has_text: ctx.web_search.chatFingerprints.has_text,
-      encoded_runs: false,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended ? privateDetailSkipped() : undefined;
-    }
-  }
-  const readMode = hasReadPrivateData(ctx.web_search);
-  const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
-  if (readMode && texts === undefined) {
-    return undefined;
-  }
-  if (texts !== undefined && strings !== undefined) {
-    // A map may name a street address from the mail, so only the words of a search are checked for copies.
-    const leak = privateTextLeak({
-      mode: 'maps',
-      strings,
-      earlier: ctx.web_search.sentText,
-      privateTexts: texts,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended ? privateTextSkipped(leak) : undefined;
-    }
+    return { held: verdict };
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return readMode
-    ? tier1Decision({
-        reason: MAPS_AFTER_READ_SILENT_REASON,
-        reason_detail: `Map: ${values.join(', ')}`,
-        sensitive_read: false,
-      })
-    : tier1Decision({
-        reason: MAPS_SILENT_REASON,
-        reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-        sensitive_read: false,
-      });
+  return {
+    decision: tier1Decision({
+      reason: MAPS_SILENT_REASON,
+      reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+      sensitive_read: false,
+    }),
+  };
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -2327,7 +2181,6 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
       sensitive_read: false,
     });
   }
-  markPrivateDataRead(ctx.web_search);
   return tier1Decision({
     reason: MAIL_READ_REASON,
     reason_detail: `Read your email with \`${action.tool_name}\`.`,
@@ -3132,10 +2985,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   const name = action.tool_name;
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
-    return classifyGmailTool(action, ctx);
+    return steeringChecked({ decision: await classifyGmailTool(action, ctx), ctx, guests: [] });
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
-    return classifyCalendarTool(action, ctx);
+    return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
   }
   if (
     action.tool_type === 'mcp' &&
@@ -3216,7 +3069,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
           reason: 'offline_mode',
-          reason_detail: HOLD_SAY.maps_offline,
+          reason_detail: holdSay(ctx.web_search.assistantName).maps_offline,
           sensitive_read: false,
         });
       }
@@ -3225,8 +3078,8 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
       });
       const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
-      if (silent !== undefined) {
-        return silent;
+      if (silent !== undefined && 'decision' in silent) {
+        return silent.decision;
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -3248,7 +3101,12 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: MAPS_ASK_REASON,
-        reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
+        reason_detail:
+          silent === undefined
+            ? holdSay(ctx.web_search.assistantName).maps_always
+            : silent.held.ok
+              ? null
+              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
@@ -3274,14 +3132,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         }),
     });
     if (caldav !== undefined) {
-      if (caldav.tier === 1 && caldav.sensitive_read) {
-        markPrivateDataRead(ctx.web_search);
-      }
-      return caldav;
+      return steeringChecked({ decision: caldav, ctx, guests: action.caldav_event?.attendees ?? [] });
     }
   }
 
-  return classifyGenericTool(action, ctx);
+  return steeringChecked({ decision: await classifyGenericTool(action, ctx), ctx, guests: [] });
 }
 
 /**
@@ -3316,17 +3171,6 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
-  // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
-  if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
-    ctx.services.private_reads.markPrivateDataRead(ctx);
-    // Its text is never fingerprinted, so the chat's fingerprints miss it and a search grant cannot lift the hold.
-    ctx.web_search.fingerprintsLost = true;
-  }
-  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life. Only a read
-  // that names one counts; an argument that merely looks like a path, such as a link, does not.
-  if (decision.auto_deny === null && decision.sensitive_read && containsSecretPath(action.canonical_params)) {
-    ctx.web_search.chatFingerprints.secret = true;
-  }
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

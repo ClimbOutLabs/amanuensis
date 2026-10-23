@@ -1,5 +1,10 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
-import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/approvalGrant';
+import {
+  allowsChatApproval,
+  allowsToolGrant,
+  approvalGrantKey,
+  effectiveToolAdmissions,
+} from '../../../../src/core/mcp/approvalGrant';
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
@@ -756,7 +761,7 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('is not eligible for a standing "Always allow" or a chat-wide approval', async () => {
+  it('may be answered once for this chat, never by a standing "Always allow"', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     for (const [name, args] of [
       ['send_draft', { draft_id: 'd1' }],
@@ -766,8 +771,35 @@ describe('send_draft', () => {
       const info = await tools.toolCallInfo({ name, arguments: args });
       expect(info.tier).toBe(3);
       expect(allowsToolGrant(info)).toBe(false);
-      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsChatApproval(info)).toBe(true);
     }
+  });
+
+  it('after "Always allow this here", sends again in that chat with no card, and still asks in another chat', async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = {
+      id: 'call-2',
+      type: 'function' as const,
+      function: { name: 'send_draft', arguments: '{}' },
+      tool_info: info,
+    };
+    const thisChat = new Set([approvalGrantKey(info)]);
+    const admitted = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map(),
+      chatApprovalGrants: thisChat,
+      implementationPlanGrants: new Set(),
+    });
+    expect(admitted.get('call-2')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+
+    const otherChat = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map(),
+      chatApprovalGrants: new Set(),
+      implementationPlanGrants: new Set(),
+    });
+    expect(otherChat.get('call-2')?.decision).toBeUndefined();
   });
 });
 
