@@ -4,12 +4,15 @@
  * that carries a detail from an unread page asks first.
  */
 import { EventType } from '../../src/agent-session/schemas/events';
-import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
+import { holdSay } from '../../src/core/permissions/searchHoldText';
+import { DEFAULT_ASSISTANT_NAME } from '../../src/core/personas/assistantName';
 import { MAX_PAGES_PER_DOCUMENT } from '../../src/documents/documentExtraction';
 import { syntheticBytesFor } from '../core/documents/syntheticFiles';
 import '../core/harnessMocks';
 import { makeStubPublicSandbox } from '../core/harnessMocks';
 import { searchStream, setupSearchChat, textStream } from './searchTurnHarness';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 /** Invented details only. */
 const NAME_PAGE = 120;

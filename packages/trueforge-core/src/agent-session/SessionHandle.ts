@@ -29,6 +29,7 @@ import {
 import { isChangeRequestReason } from '../core/permissions/changeRequest';
 import { emptyChatPrivateFingerprints } from '../core/permissions/privateTextCheck';
 import type { WebSearchTurnState } from '../core/permissions/webSearch';
+import { assistantDisplayName } from '../core/personas/assistantName';
 import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
@@ -101,6 +102,24 @@ function toSendBatch(input: TurnInputItem[] | undefined): AgentThreadSendBatch {
     return input;
   }
   throw new Error('input must be homogeneous: all user messages, or all approval/tool-response messages');
+}
+
+/** Most earlier turns an approval reply looks back through to find the message the person typed. */
+const MAX_TURNS_TO_PERSON_MESSAGE = 50;
+
+/** What the person typed in a batch, or undefined when it holds no message from them. Attached files are not read. */
+function personTextOf(input: readonly TurnInputItem[]): string | undefined {
+  const messages = input.filter(isInputUserMessage);
+  if (messages.length === 0) {
+    return undefined;
+  }
+  return messages
+    .flatMap(message =>
+      typeof message.content === 'string'
+        ? [message.content]
+        : message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])),
+    )
+    .join('\n');
 }
 
 function toNewThreadInit(snapshot: AgentThreadSnapshot): NewThreadInit {
@@ -488,6 +507,9 @@ export class SessionHandle<
       if (!mainDefinition) {
         throw new Error('Unreachable: missing resolved agent definition for main thread');
       }
+      input.resolver.webSearchTurn.assistantName = assistantDisplayName(
+        mainDefinition.definition.identity?.assistantName,
+      );
       if (sandbox) {
         sandbox.configureCodeMode(mainDefinition.definition.toolSets ?? []);
         // Code Mode must be configured before this refresh can initialize a
@@ -528,6 +550,7 @@ export class SessionHandle<
       if (earlierTurnUnsaved) {
         webSearchTurn.fingerprintsLost = true;
       }
+      webSearchTurn.personText = await this.personTextForTurn({ input: input.input ?? [], previous });
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not
@@ -1001,6 +1024,32 @@ export class SessionHandle<
       types: input.types,
       after_event_id: input.after_event_id,
     });
+  }
+
+  /**
+   * The message from the person this turn answers, from the stored turns, never from model output. An approval reply
+   * carries none, so the turns before it are read back to the one that does.
+   */
+  private async personTextForTurn(input: {
+    input: readonly TurnInputItem[];
+    previous: TurnRecord<TTurnCustom> | undefined;
+  }): Promise<string> {
+    const own = personTextOf(input.input);
+    if (own !== undefined || input.input.length === 0) {
+      return own ?? '';
+    }
+    let turn = input.previous;
+    for (let step = 0; turn !== undefined && step < MAX_TURNS_TO_PERSON_MESSAGE; step += 1) {
+      const text = personTextOf(turn.input);
+      if (text !== undefined) {
+        return text;
+      }
+      turn =
+        turn.previous_turn_id === null
+          ? undefined
+          : await this.store.getTurn({ session_id: this.session.session_id, turn_id: turn.previous_turn_id });
+    }
+    return '';
   }
 
   /** The predecessor turn as stored. Absence is a caller error, same as freezeTurn's. */

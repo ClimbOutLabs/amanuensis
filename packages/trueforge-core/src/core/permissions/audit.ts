@@ -9,7 +9,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { MAPS_AFTER_READ_SILENT_REASON, MAPS_SILENT_REASON } from './mapsToolNames';
 import {
-  HOLD_SAY,
+  GENERIC_HOLD_SAY,
   isSearchHoldCardText,
   savedSearchHold,
   SEARCH_SERVER_FALLBACK,
@@ -122,7 +122,7 @@ export function heldCallAuditText(
   if (info.search_provider_call === true || (card !== null && isSearchHoldCardText(card.plain_what))) {
     return searchHoldAuditText({
       server: SEARCH_SERVER_FALLBACK,
-      say: savedSearchHold(card?.why_asked_again ?? null)?.say ?? HOLD_SAY.generic,
+      say: savedSearchHold(card?.why_asked_again ?? null)?.say ?? GENERIC_HOLD_SAY,
     });
   }
   return card?.plain_what ?? info.original_tool_name;

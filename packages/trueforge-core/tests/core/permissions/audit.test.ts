@@ -1,4 +1,5 @@
 import { heldCallAuditText } from '../../../src/core/permissions/audit';
+import { GENERIC_HOLD_SAY } from '../../../src/core/permissions/searchHoldText';
 
 const key = 'wsk-live-synthetic000111222333';
 const cardNumber = '4111 1111 1111 1111';
@@ -35,8 +36,8 @@ describe('heldCallAuditText', () => {
       'Held for approval: it contains a secret this server holds.',
       'This search contains something that looks like a password or key.',
     ],
-    ['Held for approval: it contains a card number.', 'Aman is checking with you before searching.'],
-    [null, 'Aman is checking with you before searching.'],
+    ['Held for approval: it contains a card number.', GENERIC_HOLD_SAY],
+    [null, GENERIC_HOLD_SAY],
   ])('names the saved reason %s, never the query, for a saved search card', (why, expected) => {
     const text = heldCallAuditText({ original_tool_name: 'web_search', tier3_card: savedSearchCard(why) });
     expect(text).toBe(`Search the web through the search provider. ${expected}`);
@@ -50,7 +51,7 @@ describe('heldCallAuditText', () => {
       search_provider_call: true,
       tier3_card: { ...savedSearchCard(null), plain_what: `Open a page about ${key}` },
     });
-    expect(text).toBe('Search the web through the search provider. Aman is checking with you before searching.');
+    expect(text).toBe(`Search the web through the search provider. ${GENERIC_HOLD_SAY}`);
   });
 
   it('keeps the card sentence for any other call', () => {

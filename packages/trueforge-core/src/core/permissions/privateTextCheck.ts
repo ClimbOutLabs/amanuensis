@@ -85,6 +85,18 @@ const MIN_STREET_ADDRESS_CHARS = 8;
 /** A street word first and the house number after it: `Rua das Flores 12`. */
 const STREET_ADDRESS_NUMBER_LAST =
   /\b(?:rua|calle|via|rue|avenida|strasse|straße)\s+(?:[\p{L}'-]+\s+){0,3}\d{1,5}\b/giu;
+/**
+ * Words that say a place is where the person lives or comes from, such as `lives in` or `City:`. What follows is a
+ * town, region or country, which a search may name freely.
+ */
+const PLACE_CUE =
+  /\b(?:(?:lives?|lived|living|based|located|resides?|residing|grew\s+up|raised|moved|relocated)\s+(?:in|to|near)|(?:home\s*town|city|town|region|state|province|county|country|location)\s*(?:is\s+|:\s*))\s*(?:the\s+)?/gi;
+/**
+ * A town, region or country: capitalized words. More places after commas, as in `Porto, Portugal`, count only when
+ * the list ends the sentence, so a name after a comma (`Porto, Ana Reis is her sister`) is never read as a place.
+ */
+const PLACE_NAMES =
+  /\p{Lu}[\p{L}'’-]*(?:[ \t]+\p{Lu}[\p{L}'’-]*){0,3}(?:(?:,[ \t]*\p{Lu}[\p{L}'’-]*(?:[ \t]+\p{Lu}[\p{L}'’-]*){0,3}){1,3}(?=[ \t]*(?:[.;)<\n\r]|$)))?/uy;
 /** A code of letters and digits, such as an order, booking or account reference. */
 const REFERENCE_CODE = /\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b/g;
 const MIN_REFERENCE_CODE_CHARS = 6;
@@ -346,6 +358,30 @@ function runningTextNames(text: string): string[] {
 }
 
 /**
+ * The text with each town, region or country it names as where the person lives blanked out, so those words are not
+ * kept as a name. The words after a street address and its comma are the town of that address. Street addresses,
+ * postal codes and numbers are read from the whole text, so they stay private.
+ */
+function withoutPlaces(text: string): string {
+  const starts = [...text.matchAll(PLACE_CUE)].map(match => match.index + match[0].length);
+  for (const match of text.matchAll(STREET_ADDRESS)) {
+    const comma = /^,[ \t]*/.exec(text.slice(match.index + match[0].length));
+    if (comma !== null) {
+      starts.push(match.index + match[0].length + comma[0].length);
+    }
+  }
+  let blanked = text;
+  for (const start of starts) {
+    PLACE_NAMES.lastIndex = start;
+    const place = PLACE_NAMES.exec(text);
+    if (place !== null) {
+      blanked = blanked.slice(0, start) + ' '.repeat(place[0].length) + blanked.slice(start + place[0].length);
+    }
+  }
+  return blanked;
+}
+
+/**
  * A name and the shorter forms a search may write it in: with three or more words, each two words in a row and the
  * first with the last, so `Dr Rafe Ollerenshaw` and `Ana Maria Reis` are found as `Rafe Ollerenshaw` and `Ana Reis`.
  */
@@ -409,6 +445,11 @@ export function fingerprintsOf(input: {
    * own (a read of their mail, calendar or spaces, their memory, profile or files): a web page's names are not.
    */
   running_details: boolean;
+  /**
+   * Whether the town, region or country the text gives as where the person lives is public. Only for the person's
+   * profile: a search for the weather in their own town carries nothing private.
+   */
+  public_places: boolean;
 }): PrivateFingerprint[] {
   const found = new Map<string, PrivateFingerprint>();
   const add = (kind: PrivateFingerprint['kind'], length: number, value: string): void => {
@@ -437,7 +478,8 @@ export function fingerprintsOf(input: {
       add('number', date.length, date);
     }
     const running = input.running_details;
-    const names = [...namesIn(text), ...(running ? runningTextNames(text) : [])].flatMap(nameForms);
+    const runningText = input.public_places ? withoutPlaces(text) : text;
+    const names = [...namesIn(text), ...(running ? runningTextNames(runningText) : [])].flatMap(nameForms);
     for (const name of [...names, ...(running ? referenceCodesIn(text) : [])]) {
       const words = wordsOf(name);
       if (compactForm(name).length >= MIN_NAME_CHARS) {
@@ -468,10 +510,11 @@ export function addPrivateFingerprints(input: {
   text: string;
   word_runs: boolean;
   running_details: boolean;
+  public_places: boolean;
 }): boolean {
   const merged = new Map(input.state.entries.map(entry => [fingerprintKey(entry), entry]));
-  const { text, word_runs, running_details } = input;
-  for (const entry of fingerprintsOf({ texts: [text], word_runs, running_details })) {
+  const { text, word_runs, running_details, public_places } = input;
+  for (const entry of fingerprintsOf({ texts: [text], word_runs, running_details, public_places })) {
     merged.set(fingerprintKey(entry), entry);
   }
   if (merged.size > MAX_PRIVATE_FINGERPRINTS) {
@@ -480,6 +523,47 @@ export function addPrivateFingerprints(input: {
   input.state.entries = [...merged.values()];
   input.state.has_text = true;
   return true;
+}
+
+/** Longest run of the person's words kept for the check, as long as the longest name or code a fingerprint holds. */
+const MAX_PERSON_RUN_WORDS = 6;
+
+/**
+ * Whether a matched value is one the person wrote in this turn's own message, read as whole words or whole numbers.
+ * They chose to share it, so it is never a leak. Only the host's record of their message is read here.
+ */
+function personWroteCheck(personText: string): (kind: PrivateFingerprint['kind'], value: string) => boolean {
+  if (personText.trim() === '') {
+    return () => false;
+  }
+  const text = scanForm(personText);
+  const words = wordsOf(text);
+  const spaced = ` ${words.join(' ')} `;
+  const runs = new Set<string>();
+  for (let size = 1; size <= MAX_PERSON_RUN_WORDS; size += 1) {
+    for (const run of wordRunsCompact(text, size)) {
+      runs.add(run);
+    }
+  }
+  const emails = new Set([...addressForm(text).matchAll(EMAIL)].map(match => compactForm(match[0])));
+  const numbers = new Set([
+    ...[...text.matchAll(PHONE_CANDIDATE)].map(match => digitsOf(match[0])),
+    ...[...text.matchAll(DIGIT_RUN)].map(match => match[0]),
+    ...datesIn(text),
+  ]);
+  return (kind, value) => {
+    switch (kind) {
+      case 'email':
+        return emails.has(value);
+      case 'phone':
+      case 'number':
+        return numbers.has(value);
+      case 'name':
+      case 'phrase':
+        // A spaced value is matched as whole words; a compact one as a run of words written together.
+        return value.includes(' ') ? spaced.includes(` ${value} `) : runs.has(value);
+    }
+  };
 }
 
 /**
@@ -499,11 +583,14 @@ export function fingerprintLeak(input: {
    * the outbound guard, whose own rule knows a link's path and a provider's plumbing.
    */
   encoded_runs: boolean;
+  /** The text of this turn's own message from the person. What they wrote there is never a leak. */
+  person_text: string;
 }): PrivateTextLeak | null {
   const { mode, entries } = input;
   if (!input.has_text) {
     return null;
   }
+  const personWrote = personWroteCheck(input.person_text);
   // Keys go out with the call too, so a detail the model puts in an argument's name is read like its value.
   const outgoing = [
     ...input.strings.values,
@@ -532,7 +619,10 @@ export function fingerprintLeak(input: {
           continue;
         }
         const value = spaced.slice(start, end);
-        if (known.has(fingerprintKey({ kind: 'phrase', length, digest: digestOf({ kind: 'phrase', value }) }))) {
+        if (
+          known.has(fingerprintKey({ kind: 'phrase', length, digest: digestOf({ kind: 'phrase', value }) })) &&
+          !personWrote('phrase', value)
+        ) {
           return true;
         }
       }
@@ -543,7 +633,10 @@ export function fingerprintLeak(input: {
     for (const length of lengthsOf(kind)) {
       for (let start = 0; start + length <= source.length; start += 1) {
         const value = source.slice(start, start + length);
-        if (known.has(fingerprintKey({ kind, length, digest: digestOf({ kind, value }) }))) {
+        if (
+          known.has(fingerprintKey({ kind, length, digest: digestOf({ kind, value }) })) &&
+          !personWrote(kind, value)
+        ) {
           return true;
         }
       }
@@ -567,7 +660,10 @@ export function fingerprintLeak(input: {
   for (const length of lengthsOf('name')) {
     for (let start = 0; start + length <= words.length; start += 1) {
       const value = words.slice(start, start + length).join(' ');
-      if (known.has(fingerprintKey({ kind: 'name', length, digest: digestOf({ kind: 'name', value }) }))) {
+      if (
+        known.has(fingerprintKey({ kind: 'name', length, digest: digestOf({ kind: 'name', value }) })) &&
+        !personWrote('name', value)
+      ) {
         return 'name';
       }
     }
@@ -595,14 +691,21 @@ export function privateTextLeak(input: {
   strings: OutboundStrings;
   earlier: string;
   privateTexts: readonly string[];
+  person_text: string;
 }): PrivateTextLeak | null {
   return fingerprintLeak({
     mode: input.mode,
     strings: input.strings,
     earlier: input.earlier,
+    person_text: input.person_text,
     // These texts also hold other results kept after a private read, such as web pages, so only what main
     // fingerprinted is taken here; the chat's kept fingerprints carry the running-text details of the reads.
-    entries: fingerprintsOf({ texts: input.privateTexts, word_runs: true, running_details: false }),
+    entries: fingerprintsOf({
+      texts: input.privateTexts,
+      word_runs: true,
+      running_details: false,
+      public_places: false,
+    }),
     has_text: input.privateTexts.length > 0,
     encoded_runs: true,
   });

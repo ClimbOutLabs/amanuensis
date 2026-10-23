@@ -28,7 +28,13 @@ const CALENDAR = JSON.stringify({
 describe('privateTextLeak for a search', () => {
   it('passes a query with nothing copied from the private text', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('best tapas in Lisbon'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('best tapas in Lisbon'),
+        privateTexts: [MAIL],
+      }),
     ).toBeNull();
   });
 
@@ -36,6 +42,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('Maria Costa clinic reviews'),
         privateTexts: [MAIL],
@@ -45,7 +52,13 @@ describe('privateTextLeak for a search', () => {
 
   it('finds a name from a mail recipient list, in any case', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('joao silva lisbon'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('joao silva lisbon'),
+        privateTexts: [MAIL],
+      }),
     ).toBe('name');
   });
 
@@ -53,6 +66,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('ana reis restaurants'),
         privateTexts: [CALENDAR],
@@ -64,6 +78,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('maria.costa@harbour-clinic.example reviews'),
         privateTexts: [MAIL],
@@ -73,7 +88,13 @@ describe('privateTextLeak for a search', () => {
 
   it('finds a phone number written with spaces', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('call 351 912 345 678'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('call 351 912 345 678'),
+        privateTexts: [MAIL],
+      }),
     ).toBe('contact');
   });
 
@@ -81,6 +102,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('booking 4417829 status'),
         privateTexts: [MAIL],
@@ -92,6 +114,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('please bring your booking reference tapas'),
         privateTexts: [MAIL],
@@ -103,6 +126,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('bring your booking reference'),
         privateTexts: [MAIL],
@@ -114,6 +138,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('lookup 3f9a2b7c8d1e4f5a6b7c8d9e'),
         privateTexts: [MAIL],
@@ -125,6 +150,7 @@ describe('privateTextLeak for a search', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('Zm9vYmFyYmF6cXV1eDEyMzQ1Ng=='),
         privateTexts: [MAIL],
@@ -134,12 +160,20 @@ describe('privateTextLeak for a search', () => {
 
   it('reads plumbing fields as well as the query', () => {
     const strings: OutboundStrings = { values: ['tapas'], scalars: [], keys: [], plumbing: ['Maria Costa'] };
-    expect(privateTextLeak({ earlier: '', mode: 'search', strings, privateTexts: [MAIL] })).toBe('name');
+    expect(privateTextLeak({ earlier: '', person_text: '', mode: 'search', strings, privateTexts: [MAIL] })).toBe(
+      'name',
+    );
   });
 
   it('has nothing to compare against when no private text is given', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Maria Costa'), privateTexts: [] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Maria Costa'),
+        privateTexts: [],
+      }),
     ).toBeNull();
   });
 });
@@ -149,6 +183,7 @@ describe('privateTextLeak for a map', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'maps',
         strings: outgoing('12 Example Street, Lisbon 1100-000'),
         privateTexts: [MAIL],
@@ -160,6 +195,7 @@ describe('privateTextLeak for a map', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'maps',
         strings: outgoing('the clinic is at 12 Example Street'),
         privateTexts: [MAIL],
@@ -168,15 +204,22 @@ describe('privateTextLeak for a map', () => {
   });
 
   it('finds a sender name', () => {
-    expect(privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Maria Costa'), privateTexts: [MAIL] })).toBe(
-      'name',
-    );
+    expect(
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('Maria Costa'),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('name');
   });
 
   it('finds an email address', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'maps',
         strings: outgoing('maria.costa@harbour-clinic.example'),
         privateTexts: [MAIL],
@@ -185,9 +228,15 @@ describe('privateTextLeak for a map', () => {
   });
 
   it('finds a number from the private text', () => {
-    expect(privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('4417829'), privateTexts: [MAIL] })).toBe(
-      'number',
-    );
+    expect(
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('4417829'),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('number');
   });
 });
 
@@ -200,6 +249,7 @@ describe('privateTextLeak across the earlier text of the turn', () => {
       privateTextLeak({
         mode: 'search',
         earlier: 'please bring your',
+        person_text: '',
         strings: outgoing('booking reference tapas'),
         privateTexts: [MAIL],
       }),
@@ -211,6 +261,7 @@ describe('privateTextLeak across the earlier text of the turn', () => {
       privateTextLeak({
         mode: 'search',
         earlier: 'booking 4417',
+        person_text: '',
         strings: outgoing('829 lisbon'),
         privateTexts: [MAIL],
       }),
@@ -222,6 +273,7 @@ describe('privateTextLeak across the earlier text of the turn', () => {
       privateTextLeak({
         mode: 'search',
         earlier: 'maria',
+        person_text: '',
         strings: outgoing('costa clinic'),
         privateTexts: [MAIL],
       }),
@@ -232,7 +284,13 @@ describe('privateTextLeak across the earlier text of the turn', () => {
 describe('privateTextLeak with encoded or spelled-out text', () => {
   it('finds a number written with spaces between its digits', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('code 482 913'), privateTexts: [BOOKING] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('code 482 913'),
+        privateTexts: [BOOKING],
+      }),
     ).toBe('number');
   });
 
@@ -240,6 +298,7 @@ describe('privateTextLeak with encoded or spelled-out text', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('maria.costa%40harbour-clinic.example reviews'),
         privateTexts: [MAIL],
@@ -251,6 +310,7 @@ describe('privateTextLeak with encoded or spelled-out text', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('maria dot costa at harbour clinic dot example'),
         privateTexts: [MAIL],
@@ -262,6 +322,7 @@ describe('privateTextLeak with encoded or spelled-out text', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('call %2B351 912 345 678'),
         privateTexts: [MAIL],
@@ -273,7 +334,13 @@ describe('privateTextLeak with encoded or spelled-out text', () => {
 describe('privateTextLeak with glued words and look-alike letters', () => {
   it('finds a sender name with its words run together', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('MariaCosta clinic'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('MariaCosta clinic'),
+        privateTexts: [MAIL],
+      }),
     ).toBe('name');
   });
 
@@ -281,6 +348,7 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('PleaseBringYourBookingReferenceTapas'),
         privateTexts: [MAIL],
@@ -290,7 +358,13 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
 
   it('finds a name spelled with Cyrillic letters that look Latin', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Mаria Cоsta'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Mаria Cоsta'),
+        privateTexts: [MAIL],
+      }),
     ).toBe('name');
   });
 
@@ -298,6 +372,7 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('ｍａｒｉａ ｃｏｓｔａ'),
         privateTexts: [MAIL],
@@ -309,6 +384,7 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('xKqZpLmNvBtRwYsHjFgDcAe'),
         privateTexts: [MAIL],
@@ -320,6 +396,7 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('internationalization lisbon'),
         privateTexts: [MAIL],
@@ -335,22 +412,46 @@ const CITY_SENDER = 'From: Lisbon Metro <metro@example.test>\nYour pass is ready
 describe('privateTextLeak keeps single words and surnames passing', () => {
   it('passes one name part on its own, such as a surname or a first name', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lee tapas'), privateTexts: [LEE] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Lee tapas'),
+        privateTexts: [LEE],
+      }),
     ).toBeNull();
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('costa reviews'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('costa reviews'),
+        privateTexts: [MAIL],
+      }),
     ).toBeNull();
   });
 
   it('passes a word that only begins with a name part', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Leeds tapas'), privateTexts: [LEE] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Leeds tapas'),
+        privateTexts: [LEE],
+      }),
     ).toBeNull();
   });
 
   it('finds a full name that has a short part', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lee Park tapas'), privateTexts: [LEE] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Lee Park tapas'),
+        privateTexts: [LEE],
+      }),
     ).toBe('name');
   });
 
@@ -358,6 +459,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('maria costa clinic'),
         privateTexts: [LAST_FIRST],
@@ -367,10 +469,22 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
 
   it('passes a city in a sender name when the search names only the city', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lisbon tapas'), privateTexts: [CITY_SENDER] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'search',
+        strings: outgoing('Lisbon tapas'),
+        privateTexts: [CITY_SENDER],
+      }),
     ).toBeNull();
     expect(
-      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lisbon'), privateTexts: [CITY_SENDER] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('Lisbon'),
+        privateTexts: [CITY_SENDER],
+      }),
     ).toBeNull();
   });
 
@@ -378,6 +492,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('Park Clinic Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
@@ -386,6 +501,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'maps',
         strings: outgoing('Park Clinic, Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
@@ -402,6 +518,7 @@ describe('privateTextLeak reads digits and escapes in any form', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing(`booking ${withDigits('4417829', 0x0660)} status`),
         privateTexts: [MAIL],
@@ -413,6 +530,7 @@ describe('privateTextLeak reads digits and escapes in any form', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing(`booking ${withDigits('4417829', 0x0966)} status`),
         privateTexts: [MAIL],
@@ -421,6 +539,7 @@ describe('privateTextLeak reads digits and escapes in any form', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing(`booking ${withDigits('4417829', 0x1d7ce)} status`),
         privateTexts: [MAIL],
@@ -432,6 +551,7 @@ describe('privateTextLeak reads digits and escapes in any form', () => {
     expect(
       privateTextLeak({
         earlier: '',
+        person_text: '',
         mode: 'search',
         strings: outgoing('maria.costa%2540harbour-clinic.example reviews'),
         privateTexts: [MAIL],
@@ -443,13 +563,25 @@ describe('privateTextLeak reads digits and escapes in any form', () => {
 describe('privateTextLeak keeps public places passing', () => {
   it('passes a city named in the mail text, for a map', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lisbon'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('Lisbon'),
+        privateTexts: [MAIL],
+      }),
     ).toBeNull();
   });
 
   it('passes a clinic named in the mail text, for a map', () => {
     expect(
-      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Harbour Clinic Lisbon'), privateTexts: [MAIL] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('Harbour Clinic Lisbon'),
+        privateTexts: [MAIL],
+      }),
     ).toBeNull();
   });
 });
@@ -460,7 +592,8 @@ describe('the chat fingerprints of a private note find the details it gives in r
       mode: input.mode,
       strings: outgoing(input.query),
       earlier: '',
-      entries: fingerprintsOf({ texts: [input.note], word_runs: true, running_details: true }),
+      person_text: '',
+      entries: fingerprintsOf({ texts: [input.note], word_runs: true, running_details: true, public_places: false }),
       has_text: true,
       encoded_runs: false,
     });
@@ -500,13 +633,19 @@ describe('the chat fingerprints of a private note find the details it gives in r
 describe('fingerprintsOf without word runs', () => {
   it('keeps names and numbers but not ordinary five-word runs', () => {
     const text = 'Remember that the opening hours of the museum changed. Lunch with Ana Reis on 4417829.';
-    const withRuns = fingerprintsOf({ texts: [text], word_runs: true, running_details: true });
-    const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
+    const withRuns = fingerprintsOf({ texts: [text], word_runs: true, running_details: true, public_places: false });
+    const withoutRuns = fingerprintsOf({
+      texts: [text],
+      word_runs: false,
+      running_details: true,
+      public_places: false,
+    });
     const leak = (entries: typeof withRuns, query: string) =>
       fingerprintLeak({
         mode: 'search',
         strings: outgoing(query),
         earlier: '',
+        person_text: '',
         entries,
         has_text: true,
         encoded_runs: false,
@@ -520,12 +659,14 @@ describe('fingerprintsOf without word runs', () => {
 });
 
 describe('fingerprintLeak for the check every search gets', () => {
-  const memoryOnly = (text: string) => fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
+  const memoryOnly = (text: string) =>
+    fingerprintsOf({ texts: [text], word_runs: false, running_details: true, public_places: false });
   const leak = (input: { entries: ReturnType<typeof fingerprintsOf>; query: string; earlier?: string }) =>
     fingerprintLeak({
       mode: 'search',
       strings: outgoing(input.query),
       earlier: input.earlier ?? '',
+      person_text: '',
       entries: input.entries,
       has_text: true,
       encoded_runs: false,
@@ -565,6 +706,7 @@ describe('fingerprintLeak for the check every search gets', () => {
         mode: 'search',
         strings,
         earlier: '',
+        person_text: '',
         entries: memoryOnly('<user-name>Sam Rivera</user-name>'),
         has_text: true,
         encoded_runs: false,
@@ -592,7 +734,13 @@ describe('privateTextLeak keeps to what a read chat checked before', () => {
   it('does not take running-text names from a web page kept after a private read', () => {
     const page = 'Lantern Row Bakery opens at eight. Visit Lantern Row for fresh bread.';
     expect(
-      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lantern Row bakery'), privateTexts: [page] }),
+      privateTextLeak({
+        earlier: '',
+        person_text: '',
+        mode: 'maps',
+        strings: outgoing('Lantern Row bakery'),
+        privateTexts: [page],
+      }),
     ).toBeNull();
   });
 });
@@ -603,12 +751,14 @@ describe('the People line of recalled memory', () => {
       texts: ['<aman-memory>\nPeople: wilhelmina thrupp: your cousin | Ana Reis: dentist\n</aman-memory>'],
       word_runs: false,
       running_details: true,
+      public_places: false,
     });
     const leak = (query: string) =>
       fingerprintLeak({
         mode: 'search',
         strings: outgoing(query),
         earlier: '',
+        person_text: '',
         entries,
         has_text: true,
         encoded_runs: false,
@@ -640,5 +790,80 @@ describe('hasEncodedText', () => {
   it('passes ordinary text and an ordinary CSV', () => {
     expect(hasEncodedText('name,share\nA,50% now')).toBe(false);
     expect(hasEncodedText('Tenant: Ottilie Vanbrugh-Carrow. Rent is due on the 1st, call 020 7946 0958.')).toBe(false);
+  });
+});
+
+describe('the town a profile names as home', () => {
+  const leak = (input: { profile: string; query: string; person_text?: string }) =>
+    fingerprintLeak({
+      mode: 'search',
+      strings: outgoing(input.query),
+      earlier: '',
+      person_text: input.person_text ?? '',
+      entries: fingerprintsOf({ texts: [input.profile], word_runs: false, running_details: true, public_places: true }),
+      has_text: true,
+      encoded_runs: false,
+    });
+
+  it.each([
+    ['a home phrase', '<user-profile>Lives in Fernhollow Bay, Calderra.</user-profile>'],
+    ['a learned City line', '<learned-profile>\n- City: Fernhollow Bay\n</learned-profile>'],
+    ['the town after a street address', '<user-profile>Home is 9 Larkspur Street, Fernhollow Bay.</user-profile>'],
+  ])('is public when written as %s', (_label, profile) => {
+    expect(leak({ profile, query: 'weather in Fernhollow Bay today' })).toBeNull();
+  });
+
+  it('keeps a name written after the town and a comma', () => {
+    const profile = '<user-profile>Lives in Fernhollow Bay, Odile Fenwright is my sister.</user-profile>';
+    expect(leak({ profile, query: 'Odile Fenwright pottery' })).toBe('name');
+  });
+
+  it('is private in any text other than the profile', () => {
+    const entries = fingerprintsOf({
+      texts: ['Lives in Fernhollow Bay, Calderra.'],
+      word_runs: false,
+      running_details: true,
+      public_places: false,
+    });
+    expect(
+      fingerprintLeak({
+        mode: 'search',
+        strings: outgoing('weather in Fernhollow Bay'),
+        earlier: '',
+        person_text: '',
+        entries,
+        has_text: true,
+        encoded_runs: false,
+      }),
+    ).toBe('name');
+  });
+});
+
+describe('what the person wrote in this message', () => {
+  const entries = fingerprintsOf({ texts: [MAIL], word_runs: true, running_details: true, public_places: false });
+  const leak = (query: string, person_text: string) =>
+    fingerprintLeak({
+      mode: 'search',
+      strings: outgoing(query),
+      earlier: '',
+      person_text,
+      entries,
+      has_text: true,
+      encoded_runs: false,
+    });
+
+  it.each([
+    ['a name', 'Maria Costa clinic', 'Is maria costa a good doctor?'],
+    ['a name written together', 'MariaCosta clinic', 'Is Maria Costa a good doctor?'],
+    ['an email address', 'maria.costa@harbour-clinic.example', 'Who is maria.costa@harbour-clinic.example?'],
+    ['a phone number', 'who calls from +351 912 345 678', 'Whose number is +351 912 345 678?'],
+    ['a booking number', 'booking 4417829', 'Find booking 4417829'],
+  ])('is never a leak: %s', (_label, query, person) => {
+    expect(leak(query, person)).toBeNull();
+  });
+
+  it('exempts only whole words the person wrote, so a longer name is still caught', () => {
+    expect(leak('Maria Costa clinic', 'Is Maria a good doctor?')).toBe('name');
+    expect(leak('Maria Costa +351 912 345 678', 'Is Maria Costa a good doctor?')).toBe('contact');
   });
 });

@@ -3,10 +3,13 @@
  * Every text the call sends out is checked, the names of its arguments included.
  */
 import { EventType } from '../../src/agent-session/schemas/events';
-import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
+import { holdSay } from '../../src/core/permissions/searchHoldText';
+import { DEFAULT_ASSISTANT_NAME } from '../../src/core/personas/assistantName';
 import '../core/harnessMocks';
 import { makeStubPublicSandbox } from '../core/harnessMocks';
 import { searchStream, setupSearchChat, textStream } from './searchTurnHarness';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 /** Invented details only. */
 const NAME = 'Ottilie Vanbrugh-Carrow';

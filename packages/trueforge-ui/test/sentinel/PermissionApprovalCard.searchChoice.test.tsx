@@ -1,13 +1,20 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 const SEARCH_CARD: SentinelApprovalCard = {
-  plain_what: searchHoldCardText({ summary: 'Find quiet coffee shops in San Francisco', say: HOLD_SAY.private_read }),
+  plain_what: searchHoldCardText({
+    summary: 'Find quiet coffee shops in San Francisco',
+    say: HOLD_SAY.private_read,
+    opens_page: false,
+  }),
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

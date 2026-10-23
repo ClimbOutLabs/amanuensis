@@ -413,7 +413,7 @@ describe('maps without asking', () => {
     recordPrivateContextText({
       state: ctx.web_search,
       text: '<user-name>Teodoro Brambleworth</user-name>\n<user-profile>Phone +351 912 345 678.</user-profile>',
-      source: 'each_turn',
+      source: 'profile',
     });
     const named = await classifyTier(mapsAction('render_map', { place_name: 'Teodoro Brambleworth home' }), ctx);
     expect(named.tier).toBe(3);

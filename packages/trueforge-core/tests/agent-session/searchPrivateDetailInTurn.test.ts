@@ -5,7 +5,7 @@
  */
 import { EventType } from '../../src/agent-session/schemas/events';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
-import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
+import { holdSay } from '../../src/core/permissions/searchHoldText';
 import {
   checkAttachedFilesCovered,
   markPrivateDataRead,
@@ -15,8 +15,11 @@ import {
   recordPrivateToolResult,
   type WebSearchTurnState,
 } from '../../src/core/permissions/webSearch';
+import { DEFAULT_ASSISTANT_NAME } from '../../src/core/personas/assistantName';
 import { drain, searchStream, setupSearchChat, textStream } from './searchTurnHarness';
 import { mintTestTurnId } from './testHelpers';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 /** Invented details only. */
 const MEMORY =
@@ -47,7 +50,7 @@ interface Source {
 
 /** Text the host puts before the model each turn (memory, profile), or once (an attached file's text). */
 const context =
-  (text: string, source: 'each_turn' | 'attachment') =>
+  (text: string, source: 'profile' | 'memory' | 'attachment') =>
   (state: WebSearchTurnState): void => {
     recordPrivateContextText({ state, text, source });
   };
@@ -60,14 +63,14 @@ const read =
 const SOURCES: Source[] = [
   {
     name: 'memory',
-    record: context(MEMORY, 'each_turn'),
+    record: context(MEMORY, 'memory'),
     query: '48 Harrowgate Rd house prices',
     message: 'What is near there?',
     say: HOLD_SAY.private_detail,
   },
   {
     name: 'profile',
-    record: context(PROFILE, 'each_turn'),
+    record: context(PROFILE, 'profile'),
     query: 'Teodoro Brambleworth nurse',
     message: 'Find me online',
     say: HOLD_SAY.private_detail,
@@ -98,13 +101,6 @@ const SOURCES: Source[] = [
     record: context(ATTACHMENT, 'attachment'),
     query: 'Casimir Pendlebury lease',
     message: 'Check the tenant',
-    say: HOLD_SAY.private_detail,
-  },
-  {
-    name: 'a name from the message that memory holds',
-    record: context(MEMORY, 'each_turn'),
-    query: 'Ines Quillfeather new job',
-    message: 'Look up Inês Quillfeather for me',
     say: HOLD_SAY.private_detail,
   },
 ];
@@ -146,8 +142,8 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
     const { run, resolverForTurn, create, callTool, audit } = await setupSearchChat({ reasoning_effort });
     const resolver = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY, source: 'each_turn' });
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'each_turn' });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY, source: 'memory' });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'profile' });
       return yield* searchStream({ id: 'call-1', query: 'opening hours of the Lisbon Oceanarium' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -164,7 +160,7 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
     const { run, resolverForTurn, create, callTool } = await setupSearchChat({ reasoning_effort });
     const resolver = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'each_turn' });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'profile' });
       return yield* searchStream({ id: 'call-1', query: 'asyncio event loop tutorial python 3.13 advanced news' });
     });
     create.mockImplementationOnce(() => searchStream({ id: 'call-2', query: 'weather in Lisbon' }));
@@ -181,7 +177,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const recalling = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'each_turn' });
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'memory' });
       return yield* textStream('Noted.');
     });
     await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Hello' }], resolver: recalling });
@@ -216,7 +212,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const losing = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY, source: 'each_turn' });
+      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY, source: 'memory' });
       losing.webSearchTurn.fingerprintsLost = true;
       return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
     });
@@ -255,7 +251,7 @@ describe('a chat with "Allow searches in this chat"', () => {
 
     const recalling = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'each_turn' });
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'memory' });
       return yield* searchStream({ id: 'call-2', query: 'Ines Quillfeather' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -282,7 +278,7 @@ describe('a turn that follows a profile-only turn', () => {
       release = resolve;
     });
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: first.webSearchTurn, text: PROFILE, source: 'each_turn' });
+      recordPrivateContextText({ state: first.webSearchTurn, text: PROFILE, source: 'profile' });
       recorded();
       await gate;
       return yield* textStream('Hello.');
@@ -312,7 +308,7 @@ describe('a turn that follows a profile-only turn', () => {
 
     const second = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, source: 'each_turn' });
+      recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, source: 'profile' });
       return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
     });
     create.mockImplementation(() => textStream('Done.'));

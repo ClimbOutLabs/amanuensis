@@ -1,5 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { isPrivateReadToolName } from './privateReadTools';
 import { addPrivateFingerprints, type ChatPrivateFingerprints, emptyChatPrivateFingerprints } from './privateTextCheck';
 
@@ -106,6 +107,13 @@ export interface WebSearchTurnState {
    * attached file's text. The profile and recalled memory are put there each turn, so they are not counted.
    */
   onceOnlyContextKept: boolean;
+  /**
+   * Text of the person's own message that started this turn, from the host's record of it. Words they wrote there
+   * never count as a private detail. Text from mail, files, tool results, pages or memory never gets this exemption.
+   */
+  personText: string;
+  /** The assistant's name as the person sees it, for the sentences on held cards. */
+  assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -127,6 +135,8 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     privateTextLost: false,
     privateContextKept: false,
     onceOnlyContextKept: false,
+    personText: '',
+    assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };
 }
@@ -331,6 +341,7 @@ function keepText(input: { state: WebSearchTurnState; text: string; running_deta
       text,
       word_runs: true,
       running_details: input.running_details,
+      public_places: false,
     })
   ) {
     state.fingerprintsLost = true;
@@ -389,10 +400,11 @@ export function recordPrivateContextText(input: {
   state: WebSearchTurnState;
   text: string;
   /**
-   * `each_turn` for a text the host puts before the model again every turn (the profile, recalled memory); its
-   * ordinary wording is left out, or it would hold ordinary searches. `attachment` for a file's text, kept whole.
+   * `profile` and `memory` for a text the host puts before the model again every turn; its ordinary wording is left
+   * out, or it would hold ordinary searches. The town, region or country the profile gives is public. `attachment`
+   * for a file's text, kept whole.
    */
-  source: 'each_turn' | 'attachment';
+  source: 'profile' | 'memory' | 'attachment';
 }): void {
   const { state, text } = input;
   if (text.trim() === '') {
@@ -405,7 +417,13 @@ export function recordPrivateContextText(input: {
   }
   if (
     !state.fingerprintsLost &&
-    !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: attachment, running_details: true })
+    !addPrivateFingerprints({
+      state: state.chatFingerprints,
+      text,
+      word_runs: attachment,
+      running_details: true,
+      public_places: input.source === 'profile',
+    })
   ) {
     state.fingerprintsLost = true;
   }

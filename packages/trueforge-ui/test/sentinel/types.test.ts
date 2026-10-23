@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { GENERIC_HOLD_SAY } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -121,9 +122,7 @@ describe('extractSentinelFromEvent', () => {
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
       // A card saved before the wording changed gets the plain reason after its sentence.
-      expect(card?.plain_what).toBe(
-        'Search the web through finder for: oslo weather. Aman is checking with you before searching.',
-      );
+      expect(card?.plain_what).toBe(`Search the web through finder for: oslo weather. ${GENERIC_HOLD_SAY}`);
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
     });

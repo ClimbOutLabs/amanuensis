@@ -101,8 +101,8 @@ import { fingerprintLeak, privateTextLeak, type PrivateTextLeak } from './privat
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
-  GUARD_RULE_SAY,
-  HOLD_SAY,
+  guardRuleSay,
+  holdSay,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
@@ -162,6 +162,7 @@ import {
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  namesUrl,
   privateDetailCheckable,
   privateDetailCheckNeeded,
   privateFingerprintsUsable,
@@ -343,7 +344,7 @@ function joinedLabels(values: readonly unknown[]): string {
 }
 
 /** Card plain_what naming the quoted place strings and the configured hosts. */
-function mapsPlainWhat(action: SentinelAction): string {
+function mapsPlainWhat({ action, assistant }: { action: SentinelAction; assistant: string }): string {
   const params = action.canonical_params;
   const hosts = action.maps_hosts;
   const geocoder = mapsHost(hosts?.geocoder);
@@ -357,7 +358,7 @@ function mapsPlainWhat(action: SentinelAction): string {
   if (action.tool_name === RENDER_PLACES_TOOL_NAME) {
     return (
       `Send the addresses ${joinedLabels(placeAddresses(params))} to ${geocoder} to find where they are, ` +
-      `then load map tiles for that area from ${tile}. The details on each pin come from pages Aman already read.`
+      `then load map tiles for that area from ${tile}. The details on each pin come from pages ${assistant} already read.`
     );
   }
   const placeName = mapsCardLabel(params['place_name']);
@@ -1605,7 +1606,7 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
     card: {
       plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'This workflow runs scripts Aman can edit.',
+      cannot_be_undone: `This workflow runs scripts ${ctx.web_search.assistantName} can edit.`,
       why_asked_again: null,
       destination: null,
       recipient: null,
@@ -1783,7 +1784,7 @@ async function holdSearchCall(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
   reason: SearchAskReason;
-  /** The one sentence that says why Aman is asking. */
+  /** The one sentence that says why the assistant is asking. */
   say: string;
   /** The card's one line, with any held key masked. */
   summary: string;
@@ -1811,7 +1812,13 @@ async function holdSearchCall(input: {
     card: {
       plain_what:
         tavily === null
-          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say })
+          ? searchHoldCardText({
+              summary: escapeDisplayText(shown),
+              say: input.say,
+              opens_page:
+                input.params !== undefined &&
+                namesUrl(collectOutboundStrings(input.params, action.mcp_search_plumbing_fields)?.values ?? []),
+            })
           : withHoldSay(tavily, input.say),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
@@ -1875,15 +1882,16 @@ async function classifySearchProviderTool(input: {
     return undefined;
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const say = holdSay(ctx.web_search.assistantName);
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
-  const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
+  const held = (reason: SearchAskReason, sentence: string): Promise<TierDecision> =>
     holdSearchCall({
       action,
       ctx,
       reason,
-      say,
+      say: sentence,
       summary,
       params: action.canonical_params,
       fields: extraction.fields,
@@ -1904,7 +1912,7 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      say: HOLD_SAY.secret,
+      say: say.secret,
       summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
       params: masked,
       fields: {
@@ -1922,10 +1930,10 @@ async function classifySearchProviderTool(input: {
     return heldWithoutKey(secrets);
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', HOLD_SAY.search_setting);
+    return held('mcp_search_setting_ask', say.search_setting);
   }
   if (!verdict.ok) {
-    return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
+    return held('mcp_search_guard', guardRuleSay({ rule: verdict.rule, say }));
   }
   // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
   const readMode = hasReadPrivateData(ctx.web_search);
@@ -1943,13 +1951,13 @@ async function classifySearchProviderTool(input: {
           action,
           ctx,
           reason: SEARCH_AFTER_PRIVATE_READ_REASON,
-          say: HOLD_SAY.private_secret,
+          say: say.private_secret,
           summary,
           params: action.canonical_params,
           fields: extraction.fields,
           secret_path_read: true,
         })
-      : held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
+      : held(SEARCH_AFTER_PRIVATE_READ_REASON, say.private_read);
   if (chatGranted) {
     if (strings === undefined) {
       return heldPrivate();
@@ -1958,6 +1966,7 @@ async function classifySearchProviderTool(input: {
       mode: 'search',
       strings,
       earlier: ctx.web_search.sentText,
+      person_text: ctx.web_search.personText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
       encoded_runs: true,
@@ -1975,6 +1984,7 @@ async function classifySearchProviderTool(input: {
         mode: 'search',
         strings,
         earlier: ctx.web_search.sentText,
+        person_text: ctx.web_search.personText,
         privateTexts: texts,
       });
       if (leak !== null) {
@@ -1989,33 +1999,32 @@ async function classifySearchProviderTool(input: {
   // this check, and a chat whose fingerprints miss a text asks, since the check cannot vouch for the search.
   if (privateDetailCheckNeeded(ctx.web_search)) {
     if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
-      return held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_unchecked);
+      return held(SEARCH_PRIVATE_DETAIL_REASON, say.private_unchecked);
     }
     const leak = fingerprintLeak({
       mode: 'search',
       strings,
       earlier: ctx.web_search.sentText,
+      person_text: ctx.web_search.personText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
       encoded_runs: false,
     });
     if (leak !== null) {
-      return ctx.services.unattended
-        ? privateDetailSkipped()
-        : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
+      return ctx.services.unattended ? privateDetailSkipped() : held(SEARCH_PRIVATE_DETAIL_REASON, say.private_detail);
     }
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', HOLD_SAY.search_limit);
+    return held('mcp_search_limit', say.search_limit);
   }
   if (
     strings !== undefined &&
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
-    return held('mcp_search_unreturned_url', HOLD_SAY.unseen_link);
+    return held('mcp_search_unreturned_url', say.unseen_link);
   }
   if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
-    return held('mcp_search_host_limit', HOLD_SAY.site_limit);
+    return held('mcp_search_host_limit', say.site_limit);
   }
   return tier1Decision({
     reason: chatGranted
@@ -2114,6 +2123,7 @@ async function classifyMapsSilently(input: {
       mode: 'maps',
       strings,
       earlier: ctx.web_search.sentText,
+      person_text: ctx.web_search.personText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
       encoded_runs: false,
@@ -2133,6 +2143,7 @@ async function classifyMapsSilently(input: {
       mode: 'maps',
       strings,
       earlier: ctx.web_search.sentText,
+      person_text: ctx.web_search.personText,
       privateTexts: texts,
     });
     if (leak !== null) {
@@ -2398,7 +2409,11 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
  * The approval card for a Calendar write, built from the request the host will send, never from model prose.
  * Every guest is listed, and whether Google emails them is said in words.
  */
-function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: string | null }): Tier3Card {
+function calendarWriteCard(input: {
+  review: CalendarWriteReview;
+  agent_intent: string | null;
+  assistant: string;
+}): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   const title = cardSubject(review.title);
@@ -2424,8 +2439,8 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
     review.attendees.length === 0
       ? ''
       : review.action === 'create'
-        ? ' This change sends an invitation to other people, so Aman always asks.'
-        : ' This change reaches the other people invited to this event, so Aman always asks.';
+        ? ` This change sends an invitation to other people, so ${input.assistant} always asks.`
+        : ` This change reaches the other people invited to this event, so ${input.assistant} always asks.`;
   return {
     plain_what: `${plainWhat}${alwaysAsks}`,
     plain_why: plainWhy(input.agent_intent),
@@ -2539,7 +2554,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
       });
     }
     return tier3Decision({
-      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
+      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
       reason_detail: reachesGuests
         ? 'A calendar change that reaches guests always asks.'
@@ -3212,11 +3227,12 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     // asking and the silent-run rules hold. The card names the place strings verbatim and the
     // configured hosts from server config; the destination never comes from model params.
     if (isMapsToolName(name)) {
+      const mapsSay = holdSay(ctx.web_search.assistantName);
       // Offline outranks the card: a stale call is denied, not offered for approval.
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
           reason: 'offline_mode',
-          reason_detail: HOLD_SAY.maps_offline,
+          reason_detail: mapsSay.maps_offline,
           sensitive_read: false,
         });
       }
@@ -3235,7 +3251,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       );
       return tier3Decision({
         card: {
-          plain_what: mapsPlainWhat(action),
+          plain_what: mapsPlainWhat({ action, assistant: ctx.web_search.assistantName }),
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: null,
           why_asked_again: null,
@@ -3248,7 +3264,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: MAPS_ASK_REASON,
-        reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
+        reason_detail: runsWithoutAsking ? mapsSay.maps_private : mapsSay.maps_always,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
@@ -3264,6 +3280,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,
+      assistant: ctx.web_search.assistantName,
       hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({

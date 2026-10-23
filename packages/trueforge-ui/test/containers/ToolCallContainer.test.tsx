@@ -1031,6 +1031,7 @@ describe('ToolCallContainer: held search request', () => {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
         say: 'This search contains something that looks like a password or key.',
+        opens_page: false,
       }),
       plain_why: null,
       cannot_be_undone: null,

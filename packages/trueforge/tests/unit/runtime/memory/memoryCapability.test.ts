@@ -789,6 +789,7 @@ describe('HindsightMemoryProcessor private details for the search check', () => 
         mode: 'search',
         strings: { values: [query], scalars: [], keys: [], plumbing: [] },
         earlier: '',
+        person_text: '',
         entries: webSearch.chatFingerprints.entries,
         has_text: webSearch.chatFingerprints.has_text,
         encoded_runs: false,

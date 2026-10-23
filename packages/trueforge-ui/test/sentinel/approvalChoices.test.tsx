@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { offersChangeIt } from '@/sentinel/approvalChoices.js';
@@ -9,6 +9,9 @@ import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { SentinelSettings } from '@/sentinel/SentinelSettings.js';
 import type { SentinelApi, SentinelApprovalCard } from '@/sentinel/types.js';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 const card: SentinelApprovalCard = {
   plain_what: 'Send a short note to the Example team',
@@ -144,7 +147,11 @@ describe('offersChangeIt', () => {
   });
 
   it('offers Change it for a held web search, so its words can be edited before it is sent', () => {
-    const plain_what = searchHoldCardText({ summary: 'Example Person clinic hours', say: HOLD_SAY.private_detail });
+    const plain_what = searchHoldCardText({
+      summary: 'Example Person clinic hours',
+      say: HOLD_SAY.private_detail,
+      opens_page: false,
+    });
     expect(offersChangeIt({ ...card, plain_what })).toBe(true);
   });
 

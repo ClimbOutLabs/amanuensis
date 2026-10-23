@@ -3,10 +3,13 @@
  * bytes the upload saw. The chat cannot vouch for what such a file says, so a search that names its sender asks.
  */
 import { EventType } from '../../src/agent-session/schemas/events';
-import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
+import { holdSay } from '../../src/core/permissions/searchHoldText';
+import { DEFAULT_ASSISTANT_NAME } from '../../src/core/personas/assistantName';
 import '../core/harnessMocks';
 import { makeStubPublicSandbox } from '../core/harnessMocks';
 import { searchStream, setupSearchChat, textStream } from './searchTurnHarness';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 /** Invented details only. */
 const NAME = 'Ottilie Vanbrugh-Carrow';

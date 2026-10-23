@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
@@ -14,7 +14,10 @@ import {
   type SentinelApi,
   type SentinelSessionContext,
 } from '@/sentinel/types.js';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
 import { RuntimeHarness } from './RuntimeHarness.js';
+
+const HOLD_SAY = holdSay(DEFAULT_ASSISTANT_NAME);
 
 const { respondToApproval } = vi.hoisted(() => ({ respondToApproval: vi.fn() }));
 
@@ -66,7 +69,7 @@ function approvalEvent(search: HeldSearch): Record<string, unknown> {
         source_event_id: 'evt-model',
         tier: 3,
         tier3_card: {
-          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say }),
+          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say, opens_page: false }),
           destination: 'search',
           outbound_text: 'query: "oslo weather"',
         },

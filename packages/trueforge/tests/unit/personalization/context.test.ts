@@ -1,4 +1,5 @@
 import { InstructionBuilder, rootAgentIdentity } from '@truefoundry/trueforge-core/core';
+import { fingerprintLeak } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import {
   buildPersonalizationContext,
@@ -107,6 +108,38 @@ describe('personalization context', () => {
     expect(webSearch.privateContextKept).toBe(true);
     // The profile is put before the model again each turn, so a later turn never distrusts the record over it.
     expect(webSearch.onceOnlyContextKept).toBe(false);
+  });
+
+  it('treats the town the profile gives as home as public, and the person’s name as private', async () => {
+    const local: PersonalizationProfile = {
+      ...profile,
+      user_name: 'Wren Oakhollow',
+      user_profile: 'I live in Fernhollow Bay, Calderra.',
+    };
+    const context = buildPersonalizationContext({ ...local, digest: personalizationDigest(local) });
+    const webSearch = createWebSearchTurnState();
+    const capability = personalizationContextCapability({ context, webSearch });
+    for (const processor of capability.preLLMProcessors ?? []) {
+      for await (const output of processor.processPreLLM({
+        threadId: 'main',
+        context: [],
+        currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
+      })) {
+        void output;
+      }
+    }
+    const leak = (query: string) =>
+      fingerprintLeak({
+        mode: 'search',
+        strings: { values: [query], scalars: [], keys: [], plumbing: [] },
+        earlier: '',
+        person_text: '',
+        entries: webSearch.chatFingerprints.entries,
+        has_text: webSearch.chatFingerprints.has_text,
+        encoded_runs: false,
+      });
+    expect(leak('weather in Fernhollow Bay right now')).toBeNull();
+    expect(leak('Wren Oakhollow pottery')).toBe('name');
   });
 
   it('renders the learned profile last, with its provenance preamble', () => {
