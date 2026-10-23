@@ -9,8 +9,10 @@
  * several steps probing for keys or tokens instead.
  */
 
-export const GITHUB_CONNECTOR_MISSING_HINT =
-  'GitHub credentials are available only through the GitHub connector. Ask the user to attach the GitHub connector to this chat (Add-ons > Connectors), then retry the same command.';
+import { connectorUnavailableLine } from '../connectors/connectorAvailability';
+
+/** The sandbox cannot tell whether GitHub is set up and only turned off, so it claims neither. */
+export const GITHUB_CONNECTOR_MISSING_HINT = `GitHub credentials are available only through the GitHub connector. ${connectorUnavailableLine({ connector: 'GitHub', availability: 'unknown' })} Then retry the same command.`;
 
 export const GITHUB_CONNECTOR_REJECTED_HINT =
   'The GitHub connector is attached but GitHub refused the credentials; the user may need to re-authorise the connector.';

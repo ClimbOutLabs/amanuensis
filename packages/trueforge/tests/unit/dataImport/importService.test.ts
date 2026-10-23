@@ -238,6 +238,8 @@ describe('runDataImport', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data.map(session => session.session_id).sort()).toEqual([
         SEED_IDS.sessionMain,
@@ -735,6 +737,8 @@ async function chatsOf(instance: Instance, userId: string) {
     metadata: undefined,
     source_type: undefined,
     source_id: undefined,
+    folder_id: undefined,
+    no_folder: false,
   });
   return page.data;
 }
@@ -892,6 +896,8 @@ describe('runDataImport keeps what the archive recorded', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(newestFirst.data.map(session => session.session_id)).toEqual([
         SEED_IDS.sessionRunning,
@@ -998,6 +1004,43 @@ describe('runDataImport reads what compaction writes', () => {
       expect(events).toContainEqual(
         expect.objectContaining({ type: 'agent.context.compaction', tokens_after: 1234.75 }),
       );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reads the compaction start note', () => {
+  it('keeps a compaction start event and leaves out one whose shape changed', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-compaction-started');
+    try {
+      const withStarts = await editScheduledTurn(archive, ({ turnEntry }) => {
+        const events = listAt(turnEntry['events'], 'events');
+        events.push({
+          type: 'agent.context.compaction_started',
+          id: 'event-compaction-started',
+          created_at: '2026-09-10T06:00:10.000Z',
+          thread_id: 'main',
+          mode: 'conversation',
+          tokens_before: 5000.5,
+        });
+        // A later build may record this note differently; the chat must still import.
+        events.push({
+          type: 'agent.context.compaction_started',
+          id: 'event-compaction-started-newer',
+          created_at: '2026-09-10T06:00:20.000Z',
+          thread_id: 'main',
+          mode: 'a-newer-mode',
+        });
+      });
+      await runDataImport(importDeps(target), importRequest(withStarts));
+      const { events } = await importedScheduledChat(target);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'agent.context.compaction_started', id: 'event-compaction-started' }),
+      );
+      expect(events).not.toContainEqual(expect.objectContaining({ id: 'event-compaction-started-newer' }));
     } finally {
       await source.close();
       await target.close();
@@ -1347,6 +1390,8 @@ describe('runDataImport failure handling', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(
@@ -1402,6 +1447,8 @@ describe('runDataImport failure handling', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
@@ -1804,7 +1851,7 @@ describe('runDataImport at scale', () => {
           makeCreateTurnInput({
             sessionId,
             turnId,
-            update_session_title_if_not_exist: { title: `Bulk chat ${String(index)}`, source: 'first_message' },
+            update_session_title_if_not_exist: `Bulk chat ${String(index)}`,
             new_context_appends: [
               {
                 thread_id: 'main',
@@ -2444,6 +2491,31 @@ describe('runDataImport keeps permission history and persona choices', () => {
     }
   });
 
+  it('imports an export whose chats say who set their title, keeping each title', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-title-source');
+    try {
+      const titles: (string | null)[] = [];
+      const withTitleSource = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        // Exports made while chats were named after their first reply carry this field.
+        for (const [index, item] of sessions.entries()) {
+          const session = recordAt(recordAt(item, 'chat')['session'], 'session');
+          session['title_source'] = ['first_message', 'auto', 'person'][index % 3];
+          titles.push(typeof session['title'] === 'string' ? session['title'] : null);
+        }
+        setLegacySessions(entries, sessions);
+      });
+      const result = await runDataImport(importDeps(target), importRequest(withTitleSource));
+      expect(result.chats).toBe(3);
+      const imported = await chatsOf(target, 'bob');
+      expect(imported.map(chat => chat.title).sort()).toEqual([...titles].sort());
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an audit row with a tier or outcome the app never writes, and writes nothing', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-bad-audit');
@@ -2963,6 +3035,8 @@ describe('runDataImport never restores a live approval', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data).toHaveLength(3);
       for (const session of sessions.data) {
@@ -3016,9 +3090,7 @@ async function seedLongChat(
       makeCreateTurnInput({
         sessionId,
         turnId,
-        ...(previousTurnId === undefined
-          ? { update_session_title_if_not_exist: { title: 'Long chat', source: 'first_message' } }
-          : { previousTurnId }),
+        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
         new_context_appends: [
           {
             thread_id: MAIN_THREAD_ID,
@@ -3282,6 +3354,8 @@ describe('runDataImport dry run on a long chat', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data).toEqual([]);
     } finally {
@@ -3809,6 +3883,8 @@ describe('runDataImport tells the person everything it left out', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(sessions.data).toEqual([]);
 

@@ -31,7 +31,8 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
-import { LiveConnectionLostError } from '../../utils/liveConnection.js';
+import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
@@ -414,6 +415,28 @@ function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForg
 }
 
 /**
+ * Taps the compaction start and end off a raw stream item, before the vendor conversion narrows
+ * them away. The chat stops being "compacting" when compaction ends, the reply starts, or the
+ * turn ends, so a cancelled compaction that never sends its end still clears.
+ */
+function tapContextCompactionStreamEvent(sessionId: string, data: TrueForgeApi.TurnStreamingEvent): void {
+  switch (data.type) {
+    case 'agent.context.compaction_started':
+      publishContextCompaction({ sessionId, active: true });
+      return;
+    case 'agent.context.compaction':
+    case 'model.message.delta':
+    case 'model.message':
+    case 'turn.created':
+    case 'turn.done':
+      publishContextCompaction({ sessionId, active: false });
+      return;
+    default:
+      return;
+  }
+}
+
+/**
  * Every `document.ingestion` event this session has recorded, folded to one entry per file per
  * turn (the later of a file's `started`/`finished`/`failed`/`cancelled` events wins) — so a status
  * line can show which files are still being read ('started' with no later event) without the
@@ -499,6 +522,7 @@ async function* subscribeTurnOnce(
     if (item.data.type === 'document.ingestion') {
       publishDocumentIngestionEvent(turnId, item.data);
     }
+    tapContextCompactionStreamEvent(sessionId, item.data);
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
@@ -518,10 +542,9 @@ async function* subscribeTurnOnce(
  * `turn.done` carrying that state instead of surfacing the raw 412.
  *
  * When the record still says `running`, the turn's executor died with the
- * restart and will never complete on its own: that is reported as a plain,
- * actionable error (the user can cancel the turn and send again) rather than
- * a hung loading state or a synthesized terminal state the server would
- * contradict on the next send.
+ * restart and will never complete on its own. It is cancelled, as the person
+ * would, so the chat is free for the next send, and reported as a reply the
+ * restart stopped rather than a hung loading state.
  */
 async function* fallbackToTurnFinalState(input: {
   client: TrueForge;
@@ -535,11 +558,13 @@ async function* fallbackToTurnFinalState(input: {
   const response = await client.sessions.getTurn(sessionId, turnId);
   const state = response.data.state;
   if (state.status === 'running') {
-    throw new Error(
-      'The server restarted while this turn was running, so its live updates are gone. ' +
-        'Cancel this turn and send your message again, or reload the chat.',
-      { cause: streamGoneError },
-    );
+    try {
+      await client.sessions.cancel(sessionId);
+    } catch (cancelError) {
+      // A send that the server still refuses re-attaches here and tries the cancel again.
+      throw new ReplyStoppedByRestartError({ cause: cancelError });
+    }
+    throw new ReplyStoppedByRestartError({ cause: streamGoneError });
   }
   const sequenceNumber = (cursor.sequence ?? 0) + 1;
   cursor.sequence = sequenceNumber;
@@ -763,6 +788,7 @@ export function createHarnessChatServer(
           if (item.data.type === 'document.ingestion' && turnId !== undefined) {
             publishDocumentIngestionEvent(turnId, item.data);
           }
+          tapContextCompactionStreamEvent(sessionId, item.data);
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;

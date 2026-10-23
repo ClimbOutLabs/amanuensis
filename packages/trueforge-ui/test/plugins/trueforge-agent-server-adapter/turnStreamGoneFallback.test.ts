@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import { createHarnessChatServer } from '@/plugins/trueforge-agent-server-adapter/chatServer.js';
+import { createTrueForgeClient } from '@/plugins/trueforge-agent-server-adapter/client.js';
+import { ReplyStoppedByRestartError } from '@/utils/liveConnection.js';
 
 /** Minimal SSE-shaped stream the adapter consumes via `withMetadata()`. */
 interface FakeStreamItem {
@@ -158,28 +160,38 @@ describe('turn stream 412 (dead stream) REST fallback', () => {
     assert.equal(first.event.type, 'turn.done');
   });
 
-  it('throws an actionable error when the persisted turn is still running', async () => {
-    const fake = {
-      sessions: {
-        async subscribeToTurn() {
-          throw streamGoneError(true);
+  it('ends a turn the restart left running and reports it as stopped by the restart', async () => {
+    const requests: string[] = [];
+    const fetchMock: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      requests.push(`${method} ${url.pathname}`);
+      const json = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      if (url.pathname.endsWith('/subscribe')) {
+        return json(412, { error: { message: 'Cannot read from stream, stream does not exist anymore' } });
+      }
+      if (url.pathname.endsWith('/cancel')) return json(200, {});
+      return json(200, {
+        data: {
+          id: 'trn_1',
+          session_id: 'ses_1',
+          created_at: '2026-09-12T00:00:00.000Z',
+          input: [],
+          previous_turn_id: null,
+          state: { status: 'running' },
         },
-        async getTurn() {
-          return { data: doneTurn('running') };
-        },
-      },
-    } as unknown as TrueForge;
-    const server = createHarnessChatServer({ client: fake });
+      });
+    };
+    const server = createHarnessChatServer({ client: createTrueForgeClient({ fetch: fetchMock }) });
     assert.ok(server.subscribeToTurn);
 
     await assert.rejects(
       collect(server.subscribeToTurn({ sessionId: 'ses_1', turnId: 'trn_1' })),
-      (error: unknown) =>
-        error instanceof Error &&
-        /server restarted/.test(error.message) &&
-        error.cause instanceof Error &&
-        /412/.test(error.cause.message),
+      (error: unknown) => error instanceof ReplyStoppedByRestartError,
     );
+    // Cancelled as the person would, so the next send is not refused as still running.
+    assert.ok(requests.includes('POST /api/v1/sessions/ses_1/cancel'), requests.join(', '));
   });
 
   it('falls back on resubscribe inside createTurn, without retrying the dead stream', async () => {

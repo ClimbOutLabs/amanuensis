@@ -151,4 +151,66 @@ describe('AgentDetailsPreferenceContext', () => {
     await waitFor(() => expect(screen.getByRole('menuitemcheckbox')).toHaveAttribute('aria-checked', 'true'));
     expect(screen.getByTestId('assistant-message-agent-internals').querySelector('[hidden]')).toBeNull();
   });
+
+  it('keeps details on while a turn runs when the first read of the setting fails', async () => {
+    // The first read never reaches the server (often the first request after a phone wakes).
+    const stored = createMetadataBackedServer({ agent_details: 'expanded' });
+    let reads = 0;
+    const server: AgentUIServer = {
+      ...stored,
+      getSession: async request => {
+        reads += 1;
+        if (reads === 1) throw new TypeError('Failed to fetch');
+        return stored.getSession(request);
+      },
+    };
+    render(
+      <ServerProvider server={server}>
+        <AgentDetailsPreferenceProvider>
+          <RuntimeHarness
+            messages={[completedToolTurn('turn-1'), { role: 'user', content: 'and now?' }]}
+            isRunning
+            threadId="thread-1"
+            remoteId={SESSION_ID}
+          >
+            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+          </RuntimeHarness>
+        </AgentDetailsPreferenceProvider>
+      </ServerProvider>,
+    );
+
+    // The earlier turn keeps its details, and the running turn shows its live row.
+    await waitFor(() => expect(screen.getAllByTestId('assistant-message-agent-internals')).toHaveLength(2), {
+      timeout: 3000,
+    });
+    expect(screen.getAllByTestId('assistant-message-agent-internals')[1]?.textContent).toContain('Waiting for model');
+  });
+
+  it('a slow first read does not undo the switch the person turned on meanwhile', async () => {
+    const stored = createMetadataBackedServer();
+    let releaseFirstRead: () => void = () => undefined;
+    let reads = 0;
+    const server: AgentUIServer = {
+      ...stored,
+      getSession: async request => {
+        reads += 1;
+        // Read the stored value now, answer later, as a busy server does.
+        const answer = await stored.getSession(request);
+        if (reads === 1) {
+          await new Promise<void>(resolve => {
+            releaseFirstRead = resolve;
+          });
+        }
+        return answer;
+      },
+    };
+    renderChat(server, [completedToolTurn('turn-1')]);
+
+    act(() => screen.getByRole('menuitemcheckbox').click());
+    await waitFor(() => expect(screen.getByRole('menuitemcheckbox')).toHaveAttribute('aria-checked', 'true'));
+
+    await act(async () => releaseFirstRead());
+    expect(screen.getByRole('menuitemcheckbox')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('assistant-message-agent-internals')).toBeInTheDocument();
+  });
 });
