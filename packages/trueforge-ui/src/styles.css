@@ -1797,14 +1797,15 @@
   border-top: 0.0625rem dotted var(--border);
 }
 
-/* Inside the Activity row the receipt is a plain list: no card, border or monospace face. */
+/* Inside the Activity row the receipt is a plain list in the body face: no card, border or monospace. */
 .aman-runtime-rail .aui-receipt {
   padding: 0;
   border: 0;
   border-radius: 0;
   background: none;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.875rem;
+  letter-spacing: normal;
 }
 
 .aman-runtime-rail .aui-receipt .aui-row + .aui-row {
@@ -1819,6 +1820,9 @@
 
 .aman-runtime-rail .aui-receipt .aui-row--2 > .state {
   justify-self: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
 }
 
 /* An action in a row is a button; it keeps the look of the link it replaces. */

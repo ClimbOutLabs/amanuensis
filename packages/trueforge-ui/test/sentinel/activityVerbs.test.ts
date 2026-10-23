@@ -35,26 +35,22 @@ describe('activityVerbOf', () => {
 
 describe('activityStateOf', () => {
   it('maps each audit outcome to one of the five state words', () => {
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'approved', tier: 3 }))]).toBe('You approved');
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'denied', tier: 3 }))]).toBe('You declined');
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'auto_denied', tier: 3 }))]).toBe(
-      'Turned down automatically',
-    );
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'ran', tier: 2 }))]).toBe(
-      'Done · allowed by your settings',
-    );
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'approved', tier: 3 }))]).toBe('Approved');
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'denied', tier: 3 }))]).toBe('Declined');
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'auto_denied', tier: 3 }))]).toBe('Blocked');
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'ran', tier: 2 }))]).toBe('Allowed by your settings');
   });
 
   it('splits a logged row by tier: a read the settings allow is allowed, a held call is waiting for you', () => {
     expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 1 }))]).toBe(
-      'Done · allowed by your settings',
+      'Allowed by your settings',
     );
     expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 2 }))]).toBe('Waiting for you');
   });
 });
 
 describe('receiptRowsOf', () => {
-  it('counts entries that share a verb and a state into one row', () => {
+  it('folds entries that share a verb and a state into one row', () => {
     const rows = receiptRowsOf([
       entry({ id: '1', created_at: '2026-10-21T09:00:00.000Z' }),
       entry({ id: '2', created_at: '2026-10-21T09:05:00.000Z' }),
@@ -65,7 +61,6 @@ describe('receiptRowsOf', () => {
         key: 'allowed:Read your email',
         verb: 'Read your email',
         state: 'allowed',
-        count: 3,
         latestAt: '2026-10-21T09:05:00.000Z',
       },
     ]);
@@ -77,7 +72,6 @@ describe('receiptRowsOf', () => {
       entry({ id: '2', action_type: 'gmail_send', outcome: 'denied', tier: 3 }),
     ]);
     expect(rows.map(row => row.state)).toEqual(['approved', 'declined']);
-    expect(rows.map(row => row.count)).toEqual([1, 1]);
   });
 
   it('lists the newest row first', () => {

@@ -666,7 +666,7 @@ describe('parseAuditEntries', () => {
 
 describe('sentinelAuditLabel', () => {
   it('says a Tier 1 run the settings allow is done, and a Tier 2 or 3 call is waiting for the person', () => {
-    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done · allowed by your settings');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Allowed by your settings');
     expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Waiting for you');
     expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Waiting for you');
   });

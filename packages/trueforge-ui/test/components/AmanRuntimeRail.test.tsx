@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { avatarAltText } from '@/components/AmanAvatarMotion.js';
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 import { clearContextCompaction, publishContextCompaction } from '@/utils/contextCompactionLive.js';
 
@@ -611,6 +612,52 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('keeps Rules and Activity folded, with at most five actions and no Show all link', async () => {
+    const actions = [
+      'read_email',
+      'list_events',
+      'tavily_search',
+      'update_space',
+      'run_code',
+      'write_file',
+      'send_draft',
+      'create_schedule',
+    ];
+    const api = {
+      ...sentinelWith(settingsStub),
+      listAuditEntries: vi.fn(async () =>
+        actions.map((action, index) => ({
+          id: `entry-${String(index)}`,
+          session_id: 'chat-1',
+          created_at: `2026-10-23T10:0${String(index)}:00.000Z`,
+          tier: 2 as const,
+          action_type: action,
+          description: '',
+          outcome: 'ran' as const,
+        })),
+      ),
+    };
+    const { container } = render(
+      <SentinelApiProvider api={api}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail avatarSrc="/aman-avatar.png" auditFeed={<SentinelAuditFeed sessionId="chat-1" />} />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+
+    const fold = (section: string) =>
+      container.querySelector<HTMLDetailsElement>(`details.aman-runtime-rail__details[data-section="${section}"]`);
+    expect(fold('rules')?.open).toBe(false);
+    expect(fold('activity')?.open).toBe(false);
+    expect(screen.queryByText('Your rules')).not.toBeInTheDocument();
+
+    const activity = fold('activity');
+    expect(await within(activity ?? document.body).findByText('Changed a schedule')).toBeInTheDocument();
+    expect(within(activity ?? document.body).queryByText('Read your email')).not.toBeInTheDocument();
+    expect(activity?.querySelectorAll('li')).toHaveLength(5);
+    expect(screen.queryByText(/Show all/i)).not.toBeInTheDocument();
   });
 
   it('puts the panda first, then the status line, then Rules, Memory and Activity', async () => {

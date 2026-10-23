@@ -205,7 +205,7 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
 /** The one owner of the words for a call that ran because the person's settings allow it. */
-export const ALLOWED_BY_SETTINGS_LABEL = 'Done · allowed by your settings';
+export const ALLOWED_BY_SETTINGS_LABEL = 'Allowed by your settings';
 
 /** The one owner of the words for a call held for the person's OK. */
 export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
