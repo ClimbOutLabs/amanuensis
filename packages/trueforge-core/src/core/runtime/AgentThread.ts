@@ -1522,9 +1522,9 @@ export class AgentThread {
   private postToolCallContextProcessor: PostToolCallAgentContextProcessor[];
 
   private instruction: string | undefined;
-  // Per-reply block (date, person, a bound repository's state). Built when the
-  // thread starts, then fixed: a thread that crosses UTC midnight keeps the date
-  // its reply started with.
+  // Per-reply block (date, person, a bound repository's state). Only the date is
+  // fixed: a thread that crosses UTC midnight keeps the date its reply started with.
+  // The block is rebuilt when a bound repository's branch or head changes.
   private replyContext: string;
   private readonly replyDate = new Date();
   private toolResponseProcessors: ToolResponseProcessor[];
@@ -1740,16 +1740,16 @@ export class AgentThread {
     }
 
     this.instruction = this.buildInstruction(this.definition.instruction);
-    // Built once per reply, never per step: the static instruction above stays
-    // byte-identical across days and people, so provider prefix caching holds.
+    // Kept out of the static instruction above, so it stays byte-identical across
+    // days and people and provider prefix caching holds.
     this.replyContext = this.buildReplyContext();
   }
 
   /**
    * The per-reply block, sent right after the static instruction. Today's date and the
    * person's name change between replies, so they live here instead of in the static
-   * instruction. Built once when the thread starts, so every step of a reply sends the
-   * same bytes. Sub-agents get the date only.
+   * instruction. The date is fixed when the thread starts; a bound repository's branch and
+   * head are rebuilt here when they change. Sub-agents get the date only.
    */
   private buildReplyContext(): string {
     const builder = new InstructionBuilder('reply-context');

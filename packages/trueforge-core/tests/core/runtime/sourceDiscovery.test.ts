@@ -63,7 +63,7 @@ describe('source discovery contract at the model request boundary', () => {
     expect(systemMessage?.content).not.toContain(
       'the sandbox exec tool when it retrieves an already identified source',
     );
-    const execDescription = createSandboxExecDescription({ offline: false });
+    const execDescription = createSandboxExecDescription({ offline: false, fileDownload: false });
     expect(execDescription).toContain('provides retrieval');
     expect(execDescription).toContain('already identified public source');
     expect(execDescription).toContain('does not provide search or discovery');

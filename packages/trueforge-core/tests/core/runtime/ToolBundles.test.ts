@@ -204,7 +204,7 @@ describe('tool bundles in a turn', () => {
   it('names the closest topic for a name that means none', async () => {
     const { requests } = await runTurn({ steps: [{ name: 'load_bundle', args: { name: 'spacse' } }, 'answer'] });
     expect(toolResults(requests[1])[0]).toContain(
-      "No guidance named 'spacse'. Closest is spaces. Topics: web, spaces.",
+      "No guidance named 'spacse'. Closest is spaces. Call load_bundle again with one of these topics: web, spaces.",
     );
   });
 

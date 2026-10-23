@@ -30,7 +30,7 @@ export interface PromptReportInput {
   sandbox?: Sandbox | undefined;
   /** Whether the server has a sandbox at all. See ITurnResourceResolver.serverSandboxAvailable. */
   serverSandboxAvailable?: boolean | undefined;
-  /** The person's message the turn answers; it decides which tool bundles the request carries. */
+  /** The person's message the turn answers. The tools and system prompt are the same whatever it says. */
   message: string;
 }
 

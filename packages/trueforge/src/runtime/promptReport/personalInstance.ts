@@ -265,8 +265,12 @@ export async function buildPersonalInstance(input: {
 }): Promise<PersonalInstance> {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const sandbox = new Sandbox({
     provider: sandboxProvider(),
+    fileDownloadEnabled: spec.config.sandbox.file_downloads,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -325,9 +329,6 @@ export async function buildPersonalInstance(input: {
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
-  const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,

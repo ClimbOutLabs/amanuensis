@@ -44,7 +44,7 @@ export class ToolBundles {
   }) {
     this.sectionBundles = input.sectionBundles;
     this.guidance = input.guidance;
-    this.toolSet = new LoadBundleTool({ tracing: input.tracing, bundles: this });
+    this.toolSet = new LoadBundleTool({ tracing: input.tracing, bundles: this, guidance: input.guidance });
   }
 
   /**
@@ -82,11 +82,6 @@ export class ToolBundles {
     ]);
   }
 
-  /** A bundle's prompt sections. */
-  guidanceOf(name: ToolBundleName): string {
-    return this.guidance(name);
-  }
-
   /** The tool names a bundle holds in this chat, in the order they are sent. */
   toolsOf(name: ToolBundleName): string[] {
     return [...this.bundleByTool.entries()].flatMap(([tool, bundle]) => (bundle === name ? [tool] : []));
@@ -121,9 +116,9 @@ export class LoadBundleTool extends LocalToolMCP {
   readonly displayName = 'Tool guidance';
   private readonly tools: ToolDefinition[];
 
-  constructor(input: { tracing: AgentTracing; bundles: ToolBundles }) {
+  constructor(input: { tracing: AgentTracing; bundles: ToolBundles; guidance: (name: ToolBundleName) => string }) {
     super({ tracing: input.tracing });
-    const { bundles } = input;
+    const { bundles, guidance } = input;
     this.tools = [
       defineTool({
         name: LOAD_BUNDLE_TOOL_NAME,
@@ -138,7 +133,10 @@ export class LoadBundleTool extends LocalToolMCP {
             const closest = lookup.closest === undefined ? '' : ` Closest is ${lookup.closest}.`;
             return Promise.resolve(
               toolResultResponse({
-                text: `No guidance named '${name}'.${closest} Topics: ${offered.join(', ') || 'none'}.`,
+                text:
+                  offered.length === 0
+                    ? `No guidance named '${name}'. There is no guidance to read here, so call the tool you need directly.`
+                    : `No guidance named '${name}'.${closest} Call ${LOAD_BUNDLE_TOOL_NAME} again with one of these topics: ${offered.join(', ')}.`,
                 isError: true,
               }),
             );
@@ -148,7 +146,7 @@ export class LoadBundleTool extends LocalToolMCP {
           // The guidance lands here, at the end of the chat, so the system prompt never changes.
           return Promise.resolve(
             toolResultResponse({
-              text: `Guidance for ${lookup.found}.${covers}\n${bundles.guidanceOf(lookup.found)}`,
+              text: `Guidance for ${lookup.found}.${covers}\n${guidance(lookup.found)}`,
             }),
           );
         },
