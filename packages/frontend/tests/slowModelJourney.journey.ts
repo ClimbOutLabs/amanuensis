@@ -360,8 +360,8 @@ async function leaveAndComeBack({
   await pause(1_000);
   await comeBack();
   assert.equal(call.outcome(), 'open', `${label}: the reply was still being written when the chat was opened again`);
-  await within(`${label}: Cancel showing while the reply is still running`, UI_LIMIT_MS, async () => {
-    await page.getByRole('button', { name: CANCEL, exact: true }).waitFor({ timeout: UI_LIMIT_MS });
+  await until(`${label}: Cancel showing while the reply is still running`, UI_LIMIT_MS, async () => {
+    return await page.getByRole('button', { name: CANCEL, exact: true }).isVisible();
   });
   await waitForReplyText(page, `${label}: the reply finishing live, without a reload`, repliesBefore + 1);
   await waitForIdle(page, label);
