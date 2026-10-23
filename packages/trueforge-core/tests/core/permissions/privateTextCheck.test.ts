@@ -552,6 +552,25 @@ describe('fingerprintLeak for the check every search gets', () => {
     expect(leak({ entries: memoryOnly(memory), query })).toBeNull();
   });
 
+  it('reads the names of the arguments too, not only their values', () => {
+    const strings: OutboundStrings = {
+      values: ['lease'],
+      scalars: ['1'],
+      keys: ['objective', 'search_queries', 'Sam Rivera'],
+      plumbing: [],
+    };
+    expect(
+      fingerprintLeak({
+        mode: 'search',
+        strings,
+        earlier: '',
+        entries: memoryOnly('<user-name>Sam Rivera</user-name>'),
+        has_text: true,
+        encoded_runs: false,
+      }),
+    ).toBe('name');
+  });
+
   it('still holds the whole name, an address and a profile name in any case', () => {
     expect(leak({ entries: memoryOnly('Al Green is coming to dinner.'), query: 'al green tour dates' })).toBe('name');
     expect(leak({ entries: memoryOnly('She lives at 48 Harrowgate Road.'), query: '48 harrowgate rd' })).toBe('phrase');

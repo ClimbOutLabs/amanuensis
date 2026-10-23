@@ -124,33 +124,16 @@ export function uploadedFilesCount(text: string): number {
   return count === null ? 0 : Number(count[1]);
 }
 
-/** Files read as plain text when attached, so the searches that follow can be checked against what they say. */
-const TEXT_FILE_EXTENSIONS = new Set([
-  '.txt',
-  '.csv',
-  '.tsv',
-  '.md',
-  '.markdown',
-  '.eml',
-  '.ics',
-  '.vcf',
-  '.json',
-  '.xml',
-  '.html',
-  '.htm',
-  '.yaml',
-  '.yml',
-  '.log',
-]);
+/**
+ * Files read as plain text when attached, so the searches that follow can be checked against what they say. Only
+ * formats whose bytes are the words a reader sees: mail, web pages, calendars, contact cards and data files can carry
+ * their text encoded (base64, quoted-printable, entities, folded lines), so they count as unreadable instead.
+ */
+const TEXT_FILE_EXTENSIONS = new Set(['.txt', '.csv', '.tsv', '.md', '.markdown', '.log']);
 
 /** The text of an attached file that is plain UTF-8 text, or undefined for any other file. */
-function attachedPlainText(file: { filename: string; mime: string; bytes: Buffer }): string | undefined {
-  const textType =
-    TEXT_FILE_EXTENSIONS.has(extname(file.filename).toLowerCase()) ||
-    file.mime.startsWith('text/') ||
-    file.mime === 'application/json' ||
-    file.mime === 'application/xml';
-  if (!textType) {
+function attachedPlainText(file: { filename: string; bytes: Buffer }): string | undefined {
+  if (!TEXT_FILE_EXTENSIONS.has(extname(file.filename).toLowerCase())) {
     return undefined;
   }
   let text: string;
@@ -408,7 +391,7 @@ export async function processAgentUserInput(
     const buffer = extractBase64(file_data);
     const visionImage = isImageMime(mime) && modelSupportsVision;
     if (!visionImage) {
-      const text = attachedPlainText({ filename, mime, bytes: buffer });
+      const text = attachedPlainText({ filename, bytes: buffer });
       attachedFiles.push(
         text !== undefined
           ? { kind: 'text', text }

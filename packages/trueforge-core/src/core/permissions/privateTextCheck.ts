@@ -480,7 +480,13 @@ export function fingerprintLeak(input: {
   if (!input.has_text) {
     return null;
   }
-  const outgoing = [...input.strings.values, ...input.strings.scalars, ...input.strings.plumbing].map(scanForm);
+  // Keys go out with the call too, so a detail the model puts in an argument's name is read like its value.
+  const outgoing = [
+    ...input.strings.values,
+    ...input.strings.scalars,
+    ...input.strings.plumbing,
+    ...input.strings.keys,
+  ].map(scanForm);
   const text = [input.earlier, ...outgoing].join(' ');
   const known = new Set(entries.map(fingerprintKey));
   const lengthsOf = (kind: PrivateFingerprint['kind']): number[] => [

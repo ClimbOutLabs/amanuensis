@@ -18,15 +18,15 @@ import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from '.
 export const OWNER = { subject_id: 'user-1', subject_type: 'user' as const, subject_display_name: 'user-1' };
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-export async function* searchStream(input: {
-  id: string;
-  query: string;
-}): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+export async function* searchStream(
+  input: { id: string; query: string } | { id: string; args: Record<string, unknown> },
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+  const args = 'args' in input ? input.args : { query: input.query };
   const toolCalls = [
     {
       id: input.id,
       type: 'function' as const,
-      function: { name: 'lookup', arguments: JSON.stringify({ query: input.query }) },
+      function: { name: 'lookup', arguments: JSON.stringify(args) },
     },
   ];
   yield {
