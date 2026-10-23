@@ -240,7 +240,9 @@ describe('provider stream progress deadlines', () => {
     expect(observed.abortReason).toBeUndefined();
     expect(result.finish_reason).toBe('stop');
     expect(result.output.content).toBe('Here is the answer.');
-    const thinking = (result.output.thinking_blocks ?? []).map(block => block.thinking).join('');
+    const thinking = (result.output.thinking_blocks ?? [])
+      .map(block => (block.type === 'thinking' ? block.thinking : ''))
+      .join('');
     expect(thinking).toContain('Thinking about breeds.');
     expect(thinking).toContain('Done thinking.');
   });

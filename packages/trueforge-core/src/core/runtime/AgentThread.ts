@@ -3511,10 +3511,9 @@ export class AgentThread {
     // silence deadlines in the loop only ever measure a request that was actually sent. While
     // the step waits, the chat shows the waiting line once.
     const gateSpec = this.definition.modelRequestGate;
-    const modelSlot =
-      gateSpec === undefined ? undefined : gateSpec.gate.begin({ key: gateSpec.key, limit: gateSpec.limit });
+    const modelSlot = gateSpec?.gate.begin(gateSpec);
     try {
-      if (modelSlot !== undefined && modelSlot.queued) {
+      if (modelSlot?.queued) {
         yield { type: InternalEventType.PASSTHROUGH, event: buildModelWaitingEvent() };
         const granted = await new Promise<boolean>(resolve => {
           if (signal === undefined) {
