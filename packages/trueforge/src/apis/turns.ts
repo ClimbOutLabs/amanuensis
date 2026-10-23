@@ -42,7 +42,11 @@ import {
   type BoundRepository,
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
+import { readTurnedOffConnectors } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
+import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -345,6 +349,46 @@ export type BeginTurnExecutionDeps = Pick<
 };
 
 /**
+ * Whether this turn is a morning brief with no mail source to read: the Email connector is
+ * not set up for the tenant and the person has no Google login that can read mail. Only
+ * then does the brief carry the one plain line saying so. A read that fails answers false:
+ * the line is a courtesy, never a reason to fail the turn.
+ */
+async function resolveNoMailBrief(input: {
+  turnInput: TurnInputItem[] | undefined;
+  mcpServerStore: IMcpServerWithAuthStore;
+  googleConnectionStore: IGoogleConnectionStore | undefined;
+  tenant_id: string;
+  userRef: string;
+  logger: Logger;
+}): Promise<boolean> {
+  if (!isMorningBriefPrompt(extractUserMessageText(input.turnInput))) {
+    return false;
+  }
+  try {
+    const servers = await input.mcpServerStore.listServers({ tenant_id: input.tenant_id, names: undefined });
+    if (servers.some(server => server.name === MAIL_CONNECTOR_NAME)) {
+      return false;
+    }
+    if (input.googleConnectionStore !== undefined) {
+      const connection = await input.googleConnectionStore.get({
+        tenant_id: input.tenant_id,
+        created_by: input.userRef,
+      });
+      if (connection !== null && grantedFeatures(connection.granted_scopes).includes('gmail_read')) {
+        return false;
+      }
+    }
+    return true;
+  } catch (error) {
+    input.logger.debug('The brief mail check could not be read; the brief runs without the no-mail line', {
+      ...extractErrorLogFields(error),
+    });
+    return false;
+  }
+}
+
+/**
  * Builds the per-turn resolver. Agent / MCP / sandbox / LLM lookups are wired
  * the same way: async factories over the corresponding stores.
  */
@@ -364,6 +408,8 @@ function createTurnResolver(deps: {
   turnId: string;
   /** The turn's input holds a new message from the person, not only approvals or tool responses. */
   startsAnswer: boolean;
+  /** This turn is a morning brief and no mail source is set up: the brief says so in one plain line. */
+  noMailBrief?: boolean | undefined;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -419,6 +465,7 @@ function createTurnResolver(deps: {
     session,
     turnId,
     startsAnswer,
+    noMailBrief,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -830,6 +877,10 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
+      // The chat's own stored choice, read off the session record: the connectors the
+      // person turned off for this chat stay off on every turn of it.
+      turnedOffConnectorNames: readTurnedOffConnectors(session.record.metadata),
+      noMailBrief: noMailBrief === true,
       // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
       recallEnabled: undefined,
       internalSourceState,
@@ -1571,9 +1622,18 @@ async function beginAcceptedTurnExecution(
         helperFqn: turnHelperModelFqn(),
         logger: deps.logger,
       });
+      const noMailBrief = await resolveNoMailBrief({
+        turnInput: input,
+        mcpServerStore: deps.mcpServerStore,
+        googleConnectionStore: deps.googleConnectionStore,
+        tenant_id,
+        userRef,
+        logger: deps.logger,
+      });
       const resolver = createTurnResolver({
         mcpCatalog: deps.mcpCatalog,
         mcpServerStore: deps.mcpServerStore,
+        noMailBrief,
         tokenStore: deps.tokenStore,
         skillStore: deps.skillStore,
         sandboxProviderStore: deps.sandboxProviderStore,
@@ -2445,9 +2505,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProvider?.settings,
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
+    const noMailBrief = await resolveNoMailBrief({
+      turnInput: body.input,
+      mcpServerStore,
+      googleConnectionStore: deps.googleConnectionStore,
+      tenant_id: requestContext.tenant_id,
+      userRef,
+      logger: deps.logger,
+    });
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
+      noMailBrief,
       tokenStore: deps.tokenStore,
       skillStore,
       sandboxProviderStore,
