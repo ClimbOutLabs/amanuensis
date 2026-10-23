@@ -231,4 +231,36 @@ describe('TrueFoundryChatProvider', () => {
 
     expect(await screen.findByText('runtime failed')).toBeInTheDocument();
   });
+
+  it.each([
+    [
+      'previous_turn_running',
+      'Still working',
+      'Aman is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    ],
+    ['turn_could_not_start', 'Reply did not start', 'That reply could not start. Send your message again.'],
+  ])('shows a refused send (%s) in plain words, never the server text', async (code, title, description) => {
+    render(
+      <TrueFoundryChatProvider server={createMockAgentUIServer()} agentName="my-agent">
+        <div>chat-child</div>
+      </TrueFoundryChatProvider>,
+    );
+    const options = runtimeSpy.mock.calls[0]?.[0];
+    if (options?.onError === undefined) {
+      throw new Error('Expected runtime onError handler');
+    }
+    const refused = Object.assign(new Error('Previous turn 01m5 is still running; freezeAndGetTurn must be called'), {
+      statusCode: 409,
+      body: { error: { message: 'Previous turn 01m5 is still running', type: 'conflict', code } },
+    });
+
+    act(() => {
+      options.onError?.(refused);
+    });
+
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/freezeAndGetTurn/)).not.toBeInTheDocument();
+  });
 });

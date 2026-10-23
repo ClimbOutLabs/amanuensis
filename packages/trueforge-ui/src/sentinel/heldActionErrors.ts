@@ -3,6 +3,8 @@
  * what went wrong by status and `error.code`; its own message text is never shown.
  */
 
+import { stillWorkingText } from '../utils/turnRefusal.js';
+
 export const HELD_EXPIRED_TEXT = 'Expired, nothing was done. Ask again in chat.';
 
 const REFUSAL_TEXT: Record<string, string> = {
@@ -32,15 +34,19 @@ function errorCode(error: Error): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
-export function describeHeldAnswerFailure(error: unknown): HeldAnswerFailure {
+export function describeHeldAnswerFailure(error: unknown, assistantName: string): HeldAnswerFailure {
   if (!(error instanceof Error)) return { kind: 'retry', message: GENERIC_FAILURE };
   const status: unknown = Reflect.get(error, 'statusCode');
   const code = errorCode(error);
   if (status === 409) {
     const refusal = code === undefined ? undefined : REFUSAL_TEXT[code];
     if (refusal !== undefined) return { kind: 'refused', message: refusal, expired: code === 'held_action_expired' };
+    // Nothing was recorded for these, so the buttons stay for another try.
     if (code === 'previous_turn_running') {
-      return { kind: 'retry', message: 'This chat is still busy. Try again in a moment.' };
+      return { kind: 'retry', message: stillWorkingText(assistantName) };
+    }
+    if (code === 'turn_could_not_start') {
+      return { kind: 'retry', message: 'That reply could not start, so nothing was done. Answer again.' };
     }
     return {
       kind: 'refused',

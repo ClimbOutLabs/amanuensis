@@ -261,12 +261,13 @@ Use \`previous_turn_id\` to chain to the session's last turn (defaults to \`auto
       description:
         'The turn conflicts with the session as stored. `error.code` says which: ' +
         '`stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), ' +
-        '`previous_turn_running` (the prior turn is still executing), ' +
+        '`previous_turn_running` (the chat is still answering; wait or cancel, then send again), ' +
         '`turn_already_exists` (that turn id is taken), or ' +
         '`approval_conflict` (a resubmitted decision contradicts the one already recorded), or ' +
         '`approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or ' +
         '`held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or ' +
-        '`held_action_sign_in` (a held action cannot run now; nothing was done).',
+        '`held_action_sign_in` (a held action cannot run now; nothing was done), or ' +
+        '`turn_could_not_start` (the reply could not start in time; send again).',
     },
     412: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
