@@ -79,8 +79,6 @@ export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';
 export {
-  APPROVAL_AUTO_DENY_MINUTES,
-  approvalAutoDenyReason,
   isPendingApprovalsError,
   publishBlockedSend,
   subscribeToBlockedSend,

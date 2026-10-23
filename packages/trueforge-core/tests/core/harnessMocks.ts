@@ -136,20 +136,18 @@ export async function* unknownToolStream({
 
 /** Streamed assistant turn that ends the conversation with a final answer. */
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-export async function* finalAnswerStream(): AsyncGenerator<
-  ExtendedChatCompletionChunk,
-  RawAssistantMessageWithUsage,
-  unknown
-> {
+export async function* finalAnswerStream(
+  text = 'done',
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   yield {
     id: 'chunk-final',
     object: 'chat.completion.chunk',
     created: 0,
     model: 'test-model',
-    choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+    choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: 'stop' }],
   };
   return {
-    output: { role: 'assistant', content: 'done' },
+    output: { role: 'assistant', content: text },
     usage: getEmptyUsage(),
     finish_reason: 'stop',
   };

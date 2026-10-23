@@ -141,7 +141,7 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         key: 'get-started',
         label: 'Help me get started',
         prompt:
-          "I can't get started. Pick the one smallest thing I should do right now, and check in with me in 25 minutes.",
+          "I can't get started. Pick the one smallest thing I should do right now, small enough to finish in 25 minutes.",
       },
       {
         key: 'forgot',
