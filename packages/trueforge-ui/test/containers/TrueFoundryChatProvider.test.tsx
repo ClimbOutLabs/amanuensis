@@ -33,8 +33,25 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryReload: () => reloadSpy,
 }));
 
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
+
+import { ChatNoticeContainer } from '@/containers/ChatNoticeContainer.js';
 import { TrueFoundryChatProvider } from '@/containers/TrueFoundryChatProvider.js';
-import { LiveConnectionLostError } from '@/utils/liveConnection.js';
+import { ComposerBusyProvider } from '@/hooks/useComposerBusyState.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '@/utils/liveConnection.js';
+
+function renderWithNotice(onError: (error: unknown) => void) {
+  render(
+    <TrueFoundryChatProvider server={createMockAgentUIServer()} agentName="my-agent" onError={onError}>
+      <ComposerBusyProvider>
+        <ChatNoticeContainer />
+      </ComposerBusyProvider>
+    </TrueFoundryChatProvider>,
+  );
+  const forwardedOnError = runtimeSpy.mock.calls[0]?.[0]?.onError;
+  if (forwardedOnError === undefined) throw new Error('Expected runtime onError handler');
+  return forwardedOnError;
+}
 
 describe('TrueFoundryChatProvider', () => {
   beforeEach(() => {
@@ -58,6 +75,44 @@ describe('TrueFoundryChatProvider', () => {
 
     expect(onError).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-attaches to the running reply and says so in one line when a send is refused as still running', async () => {
+    const onError = vi.fn();
+    const forwardedOnError = renderWithNotice(onError);
+    const refused = Object.assign(new Error('Conflict'), {
+      statusCode: 409,
+      body: { error: { type: 'conflict', code: 'previous_turn_running', message: 'turn is still running' } },
+    });
+
+    await act(async () => {
+      forwardedOnError(refused);
+      await Promise.resolve();
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(
+        `${DEFAULT_ASSISTANT_NAME} is still working on your last message. Wait for it to finish, or press Cancel, then send this again.`,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('says in one line that a restart stopped the reply instead of reporting an error', async () => {
+    const onError = vi.fn();
+    const forwardedOnError = renderWithNotice(onError);
+
+    await act(async () => {
+      forwardedOnError(new ReplyStoppedByRestartError({ cause: new Error('Request failed (412)') }));
+      await Promise.resolve();
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(`This reply stopped when ${DEFAULT_ASSISTANT_NAME} restarted. Send your message again.`),
+    ).toBeInTheDocument();
   });
 
   it('forwards legacy runtime options and supplies the default attachment adapter', () => {

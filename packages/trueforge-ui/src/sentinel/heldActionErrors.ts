@@ -3,6 +3,8 @@
  * what went wrong by status and `error.code`; its own message text is never shown.
  */
 
+import { requestErrorCode } from '../utils/requestErrorCode.js';
+
 export const HELD_EXPIRED_TEXT = 'Expired, nothing was done. Ask again in chat.';
 
 const REFUSAL_TEXT: Record<string, string> = {
@@ -21,21 +23,10 @@ export type HeldAnswerFailure =
   /** The answer did not reach the server in a way that settles anything; the buttons stay. */
   | { kind: 'retry'; message: string };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object';
-}
-
-function errorCode(error: Error): string | undefined {
-  const body: unknown = Reflect.get(error, 'body');
-  const detail = isRecord(body) ? body.error : undefined;
-  const code = isRecord(detail) ? detail.code : undefined;
-  return typeof code === 'string' ? code : undefined;
-}
-
 export function describeHeldAnswerFailure(error: unknown): HeldAnswerFailure {
   if (!(error instanceof Error)) return { kind: 'retry', message: GENERIC_FAILURE };
   const status: unknown = Reflect.get(error, 'statusCode');
-  const code = errorCode(error);
+  const code = requestErrorCode(error);
   if (status === 409) {
     const refusal = code === undefined ? undefined : REFUSAL_TEXT[code];
     if (refusal !== undefined) return { kind: 'refused', message: refusal, expired: code === 'held_action_expired' };

@@ -10,6 +10,17 @@ export class LiveConnectionLostError extends Error {
   }
 }
 
+/**
+ * A reply that was still running when the server restarted: its live updates died with the
+ * restart and it will never finish, so it was ended and the person sends their message again.
+ */
+export class ReplyStoppedByRestartError extends Error {
+  constructor(options: { cause: unknown }) {
+    super('This reply stopped when the server restarted. Send your message again.', options);
+    this.name = 'ReplyStoppedByRestartError';
+  }
+}
+
 /** The texts browsers use when a request or an open response never reached the server. */
 function isNetworkFailureMessage(message: string): boolean {
   return (
