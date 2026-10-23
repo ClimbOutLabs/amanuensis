@@ -300,9 +300,7 @@ describe('model silence bounds', () => {
     expect(done?.status).toBe('done');
     expect(events.filter(event => event.type === InternalEventType.AGENT_DONE)).toHaveLength(1);
     expect(
-      events.filter(
-        event => event.type === InternalEventType.AGENT_DONE && event.status === 'error',
-      ),
+      events.filter(event => event.type === InternalEventType.AGENT_DONE && event.status === 'error'),
     ).toHaveLength(0);
   });
 

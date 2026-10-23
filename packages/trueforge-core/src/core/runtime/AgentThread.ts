@@ -71,8 +71,8 @@ import {
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
-import { type StreamDeadlineDetails, streamDeadlineDetailsOf } from '../llm/streamDeadline';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
+import { streamDeadlineDetailsOf, type StreamDeadlineDetails } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';

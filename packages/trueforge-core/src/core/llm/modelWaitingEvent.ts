@@ -16,7 +16,9 @@ export const MODEL_WAITING_MESSAGE = 'Waiting for the model to finish another re
 /** Payload of the `aman.model.waiting` passthrough event. */
 export const ModelWaitingEventSchema = z
   .object({
-    type: z.literal(MODEL_WAITING_EVENT_TYPE).describe('Emitted when a model step waits for another reply on the same model.'),
+    type: z
+      .literal(MODEL_WAITING_EVENT_TYPE)
+      .describe('Emitted when a model step waits for another reply on the same model.'),
     message: z.string().describe('The plain line shown in the chat while the reply waits.'),
   })
   .openapi('ModelWaitingEvent');

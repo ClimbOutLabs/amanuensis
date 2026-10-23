@@ -48,13 +48,9 @@ import {
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
-import {
-  recordStreamDeadlineDetails,
-  type StreamDeadlineDetails,
-  streamDeadlineDetailsOf,
-} from './streamDeadline';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
+import { recordStreamDeadlineDetails, type StreamDeadlineDetails, streamDeadlineDetailsOf } from './streamDeadline';
 import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
@@ -1433,7 +1429,8 @@ class StreamingRepetitionGuard {
 }
 
 /** The field of a provider's raw chunk that carried its progress, named for logs and deadline reports. */
-export type RawProgressField = 'content' | 'reasoning' | 'reasoning_content' | 'reasoning_details' | 'tool_call_arguments';
+export type RawProgressField =
+  'content' | 'reasoning' | 'reasoning_content' | 'reasoning_details' | 'tool_call_arguments';
 
 interface RawChunkScan {
   /** The first field carrying nonempty progress text, when any field does. */
@@ -1555,8 +1552,8 @@ export function rawChunkProgressField(rawValue: unknown): RawProgressField | und
  * provider chunk also counts when its delta carries nonempty text in any field, including fields
  * the parser drops or holds back (see scanRawChunk). False for bookkeeping and
  * empty-heartbeat parts (role-only deltas, `start`/`start-step`, zero-length deltas). Only
- * substantive parts may satisfy the first-chunk deadline or reset the per-chunk deadline — see
- * {@link VercelAILLM}.
+ * substantive parts may satisfy the first-chunk deadline or reset the per-chunk deadline in
+ * VercelAILLM.
  */
 export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
   switch (part.type) {

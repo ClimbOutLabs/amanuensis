@@ -249,7 +249,9 @@ describe('provider stream progress deadlines', () => {
     const { observed } = mockProvider([
       {
         atMs: 5,
-        delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { arguments: '{"body":"<div>' } }] },
+        delta: {
+          tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { arguments: '{"body":"<div>' } }],
+        },
         finishReason: null,
       },
       {

@@ -2,7 +2,7 @@
  * Wire schemas for the model-waiting passthrough event (`aman.model.waiting`).
  *
  * The bare event schema is canonically owned by trueforge-core
- * (`core/llm/modelWaitingEvent.ts`) because the event is produced there — AgentThread emits it
+ * (`core/llm/modelWaitingEvent.ts`) because the event is produced there: AgentThread emits it
  * when a step has to wait for another reply on the same model to finish. This module re-exports
  * it and adds the persisted form (flat, with the row's id and timestamp), so schemas/events.ts
  * and schemas/turn.ts can widen their wire unions without reaching into the runtime, and so the
