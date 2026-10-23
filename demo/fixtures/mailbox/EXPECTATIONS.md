@@ -11,8 +11,10 @@ useful answer must contain.
 
 The demo persona is Maya Hollis, who moved from Austin to Lisbon and rents in
 Chiado. The demo mailbox is English, Portuguese and Spanish only; amounts are
-in euros. Dates run Monday October 12 to Sunday October 18, 2026, and "today"
-in the demo is Monday October 19.
+in euros. The dates below are for the committed snapshot, made for Monday
+October 19, 2026: mail runs Monday October 12 to Sunday October 18. Mail made
+for another day moves every date with that day, so check the weekday and date
+against the day the mail was made for.
 
 ## 01-flight-confirmation.eml
 

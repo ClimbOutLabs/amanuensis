@@ -12,7 +12,7 @@ describe('B2 look styles', () => {
   const css = readFileSync(stylesPath, 'utf8');
   const b2Section = css.slice(css.indexOf('B2 look: time-of-day paper'));
 
-  it('defines every ticket, row and chapter class', () => {
+  it('defines every ticket, row and brief card class', () => {
     for (const selector of [
       '.aui-ticket {',
       '.aui-ticket--stub {',
@@ -23,7 +23,8 @@ describe('B2 look styles', () => {
       '.aui-ticket__stub {',
       '.aui-row {',
       '.aui-row--2 {',
-      '.aui-chapter {',
+      '.aui-brief-card {',
+      '.aui-brief-action {',
       '.aui-underline::after {',
       '.aui-receipt {',
     ]) {

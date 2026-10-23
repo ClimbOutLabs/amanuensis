@@ -1454,6 +1454,64 @@ describe('AssistantMessageContainer model and cost line', () => {
   });
 });
 
+describe('AssistantMessageContainer morning brief', () => {
+  const briefRequest: ThreadMessageLike = { role: 'user', content: 'Give me my morning brief.' };
+  const briefBlock = [
+    'Here is your brief.',
+    '',
+    '```json',
+    JSON.stringify({
+      digest: 'One thing to check today.',
+      items: [
+        {
+          section: 'check_first',
+          title: 'Dentist moved to **Fri 10/23**',
+          subtitle: ['*calendar*'],
+          action: { label: '[Check the time]', target: { kind: 'prompt', text: 'Check the dentist time' } },
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+
+  function renderBriefTurn(answer: ThreadMessageLike, isRunning: boolean) {
+    return render(
+      <RuntimeHarness messages={[briefRequest, answer]} isRunning={isRunning}>
+        <ThreadPrimitive.Messages>
+          {({ message }) => (message.role === 'assistant' ? <AssistantMessageContainer /> : null)}
+        </ThreadPrimitive.Messages>
+      </RuntimeHarness>,
+    );
+  }
+
+  it('shows one quiet line instead of the raw text while the brief is being written', () => {
+    renderBriefTurn(
+      { role: 'assistant', status: { type: 'running' }, content: 'Here is your brief.\n\n```json\n{"digest": "One' },
+      true,
+    );
+    expect(screen.getByTestId('brief-writing')).toHaveTextContent('Putting your brief together…');
+    expect(screen.queryByText(/Here is your brief/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
+  });
+
+  it('shows the brief, with no markdown, once its block is complete', () => {
+    renderBriefTurn({ role: 'assistant', content: briefBlock }, false);
+    const brief = screen.getByTestId('aman-brief');
+    expect(within(brief).getByText('Dentist moved to Fri 10/23')).toBeInTheDocument();
+    expect(within(brief).getByRole('button', { name: 'Check the time' })).toBeInTheDocument();
+    expect(within(brief).getByTestId('brief-source')).toHaveTextContent('calendar');
+    expect(brief.textContent).not.toMatch(/[*[\]]/);
+    expect(screen.queryByTestId('brief-writing')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the plain answer as markdown when the block never arrives', () => {
+    renderBriefTurn({ role: 'assistant', content: 'Your **mail** could not be read this morning.' }, false);
+    expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-writing')).not.toBeInTheDocument();
+    expect(screen.getByText(/could not be read this morning/)).toBeInTheDocument();
+  });
+});
+
 describe('AssistantMessageContainer with agent details off and an answer before a later step', () => {
   it('shows the whole answer and the short closing line', async () => {
     const ANSWER =

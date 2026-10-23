@@ -312,10 +312,9 @@ export function SidebarLayout({ className }: { className?: string }) {
           helpAction={!overlayOpen}
           className={cn(
             'bg-topbar-bg',
-            // Desktop: hide when settings/idle or the thread header has nothing to show
-            // (empty untitled draft). Mobile still needs the menu button.
-            // Builder mode keeps New Agent and its actions beside the persistent config.
-            overlayOpen && 'md:hidden',
+            // An open overlay (Settings, Library, Sessions, ...) brings its own header and this bar
+            // has no menu button or title there, so hide it at every width rather than leave a blank band.
+            overlayOpen && 'hidden',
           )}
           start={
             !overlayOpen ? (

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -128,7 +128,7 @@ async function openSettings() {
 
 async function openMemorySection() {
   await openSettings();
-  fireEvent.click(screen.getByRole('button', { name: 'Memory' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Memory' }));
   await waitFor(() => {
     expect(screen.getByRole('tab', { name: 'Memories' })).toBeInTheDocument();
   });
@@ -139,7 +139,7 @@ describe('Settings Memory section', () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openSettings();
 
-    expect(screen.getByRole('button', { name: 'Memory' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Memory' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Memory vault' })).not.toBeInTheDocument();
   });
 
@@ -147,7 +147,12 @@ describe('Settings Memory section', () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openMemorySection();
 
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Memories', 'Sharing', 'Settings']);
+    const memoryTabs = screen.getByRole('tablist', { name: 'Memory sections' });
+    expect(
+      within(memoryTabs)
+        .getAllByRole('tab')
+        .map(tab => tab.textContent),
+    ).toEqual(['Memories', 'Sharing', 'Settings']);
   });
 
   it('opens on Memories when memory is set up', async () => {

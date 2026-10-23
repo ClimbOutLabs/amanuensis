@@ -107,6 +107,9 @@ describe('AmanRuntimeRail', () => {
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async () => settings),
@@ -609,6 +612,9 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
   function sentinelWith(settings: SentinelUserSettings): SentinelApi {
     return {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async () => settings),

@@ -32,6 +32,7 @@ export {
   SessionSourceScheduleSchema,
   SessionSourceSchema,
   SessionSourceTypeSchema,
+  SessionTitleSourceSchema,
 } from './schemas/session';
 export type {
   Session,
@@ -41,6 +42,7 @@ export type {
   SessionMetrics,
   SessionSource,
   SessionSourceType,
+  SessionTitleSource,
 } from './schemas/session';
 
 export { CreatedBySubjectSchema } from './schemas/subject';
@@ -121,6 +123,8 @@ export type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SessionTitleSeed,
+  SetGeneratedSessionTitleInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,

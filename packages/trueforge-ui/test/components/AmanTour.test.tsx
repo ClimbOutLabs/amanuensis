@@ -148,3 +148,13 @@ describe('pickHelpArea', () => {
     expect(pickHelpArea({ current: ['family'], id: 'family' })).toEqual([]);
   });
 });
+
+describe('AmanTour brief card', () => {
+  it('reads the brief in plain words to a screen reader, not the prompt that spells out its format', () => {
+    renderTour({ helpAreas: ['productivity'] });
+
+    expect(screen.getByRole('button', { name: 'Open the brief' })).toHaveAccessibleDescription(
+      MORNING_BRIEF.description ?? '',
+    );
+  });
+});

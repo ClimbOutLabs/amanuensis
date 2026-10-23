@@ -31,6 +31,7 @@ import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
 import configuration, { TrueForgeAuthMode } from '../../src/config';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
+import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
@@ -169,6 +170,7 @@ function buildApp(input: {
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),

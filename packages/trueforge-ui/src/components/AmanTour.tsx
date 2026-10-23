@@ -49,11 +49,14 @@ const ARROW_STEPS: Partial<Record<string, number>> = {
  */
 function TicketButton({
   prompt,
+  description = prompt,
   disabled,
   onSend,
   children,
 }: {
   prompt: string;
+  /** What a screen reader hears when the prompt is not plain words. */
+  description?: string;
   disabled: boolean;
   onSend: (prompt: string) => void;
   children: ReactNode;
@@ -71,7 +74,7 @@ function TicketButton({
         {children}
       </button>
       <span id={promptId} hidden>
-        {prompt}
+        {description}
       </span>
     </>
   );
@@ -201,7 +204,7 @@ function CapabilityTicket({
 }) {
   return (
     <li className="aui-ticket aui-ticket--punch flex flex-col aui-settle">
-      <TicketButton prompt={item.prompt} disabled={disabled} onSend={onSend}>
+      <TicketButton prompt={item.prompt} description={item.description} disabled={disabled} onSend={onSend}>
         {item.illustration === undefined ? null : (
           <TourIllustration name={item.illustration} className="size-6 shrink-0" />
         )}
