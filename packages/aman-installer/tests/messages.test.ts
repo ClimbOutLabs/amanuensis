@@ -8,6 +8,7 @@ import {
   DOCKER_NOT_RUNNING,
   ENGINE_VERSION_MISSING,
   LOW_MEMORY,
+  MEMORY_NOT_REPORTED,
   UNKNOWN_DOCTOR_CHECK,
   allMessageLines,
   problemText,
@@ -41,7 +42,7 @@ function sentenceCount(text: string): number {
 
 function allProblems(): Problem[] {
   const problems: Problem[] = [ENGINE_VERSION_MISSING, UNKNOWN_DOCTOR_CHECK, unknownCommandProblem('example')];
-  for (const record of [DOCKER_NOT_INSTALLED, DOCKER_NOT_RUNNING, COMPOSE_MISSING, LOW_MEMORY]) {
+  for (const record of [DOCKER_NOT_INSTALLED, DOCKER_NOT_RUNNING, COMPOSE_MISSING, LOW_MEMORY, MEMORY_NOT_REPORTED]) {
     problems.push(record.windows, record.darwin, record.linux);
   }
   return problems;
@@ -66,6 +67,21 @@ test('no message uses a word from the jargon list', () => {
     }
     assert.ok(wordCount(line) <= 40, line);
     assert.ok(!line.includes('\u2014'), line);
+  }
+});
+
+// The plan's fourth message rule: a message that names a file path must
+// also name the Start menu entry or the folder the person would use, so a
+// later stage cannot add a path message without this test firing.
+function namesFilePath(text: string): boolean {
+  return /(?:[A-Za-z]:\\|\\\\|~\/|\/[\w.-]+\/|\.exe\b|\.cmd\b)/.test(text);
+}
+
+test('a message that names a file path also names the Start menu or a folder', () => {
+  for (const line of allMessageLines()) {
+    if (namesFilePath(line)) {
+      assert.ok(line.includes('Start menu') || line.includes('folder'), line);
+    }
   }
 });
 

@@ -83,6 +83,24 @@ export const LOW_MEMORY: Record<SystemKind, Problem> = {
   },
 };
 
+// Said when Docker does not report its memory at all. On Windows and Mac
+// the check fails with this instead of guessing from the whole computer's
+// memory, which is not the memory Docker can use.
+export const MEMORY_NOT_REPORTED: Record<SystemKind, Problem> = {
+  windows: {
+    happened: 'Docker did not say how much memory it has to work with.',
+    fix: 'Open Docker Desktop, choose Settings, then Resources, set the memory to at least 6 GB, then run this check again.',
+  },
+  darwin: {
+    happened: 'Docker did not say how much memory it has to work with.',
+    fix: 'Open Docker Desktop, check the memory in its settings, then run this check again.',
+  },
+  linux: {
+    happened: 'Docker did not say how much memory it has to work with.',
+    fix: 'Start Docker Engine again, then run this check again.',
+  },
+};
+
 export const ENGINE_VERSION_MISSING: Problem = {
   happened: 'Docker did not say which Engine version it is running.',
   fix: 'Update Docker to the newest version, then run this check again.',
@@ -127,6 +145,7 @@ export function allMessageLines(): string[] {
     lines.push(problemText(DOCKER_NOT_RUNNING[kind]));
     lines.push(problemText(COMPOSE_MISSING[kind]));
     lines.push(problemText(LOW_MEMORY[kind]));
+    lines.push(problemText(MEMORY_NOT_REPORTED[kind]));
   }
   lines.push(problemText(ENGINE_VERSION_MISSING));
   lines.push(problemText(unknownCommandProblem('example')));

@@ -6,6 +6,7 @@ import {
   DOCKER_NOT_RUNNING,
   ENGINE_VERSION_MISSING,
   LOW_MEMORY,
+  MEMORY_NOT_REPORTED,
   composeReadyLine,
   dockerInstalledLine,
   dockerRunningLine,
@@ -57,11 +58,11 @@ export async function checkDocker(deps: DoctorDeps): Promise<number> {
     print(problemText(DOCKER_NOT_RUNNING[host.kind]));
     return 1;
   }
-  if (engineVersion === '') {
-    print(problemText(ENGINE_VERSION_MISSING));
-    return 1;
+  // The Engine version is read here, with the running check, but an empty
+  // one only fails at the end, so the checks surface in the stated order.
+  if (engineVersion !== '') {
+    print(dockerRunningLine(engineVersion));
   }
-  print(dockerRunningLine(engineVersion));
 
   const composeResult = await runner.run('docker', ['compose', 'version']);
   const composeVersion =
@@ -74,12 +75,31 @@ export async function checkDocker(deps: DoctorDeps): Promise<number> {
 
   const memoryResult = await runner.run('docker', ['info', '--format', '{{.MemTotal}}']);
   const engineMemory = Number.parseInt(memoryResult.stdout.trim(), 10);
-  const memoryBytes = Number.isNaN(engineMemory) || engineMemory <= 0 ? host.memoryBytes() : engineMemory;
+  let memoryBytes: number | null =
+    memoryResult.started && memoryResult.exitCode === 0 && !Number.isNaN(engineMemory) && engineMemory > 0
+      ? engineMemory
+      : null;
+  if (memoryBytes === null && host.kind === 'linux') {
+    // On Linux, Docker Engine uses the computer's own memory directly, so
+    // the host total is the memory Docker can use when Docker reports none.
+    // On Windows and Mac, Docker gets only part of the computer's memory,
+    // so a missing report fails below instead of passing on a wrong guess.
+    memoryBytes = host.memoryBytes();
+  }
+  if (memoryBytes === null) {
+    print(problemText(MEMORY_NOT_REPORTED[host.kind]));
+    return 1;
+  }
   if (memoryBytes < MIN_MEMORY_BYTES) {
     print(problemText(LOW_MEMORY[host.kind]));
     return 1;
   }
   print(memoryReadyLine(memoryText(memoryBytes)));
+
+  if (engineVersion === '') {
+    print(problemText(ENGINE_VERSION_MISSING));
+    return 1;
+  }
 
   print(ALL_READY_LINE);
   return 0;

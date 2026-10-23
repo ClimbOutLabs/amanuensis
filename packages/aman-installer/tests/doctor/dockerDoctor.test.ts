@@ -9,7 +9,9 @@ import {
   COMPOSE_MISSING,
   DOCKER_NOT_INSTALLED,
   DOCKER_NOT_RUNNING,
+  ENGINE_VERSION_MISSING,
   LOW_MEMORY,
+  MEMORY_NOT_REPORTED,
   problemText,
 } from '../../src/messages.ts';
 import {
@@ -110,12 +112,39 @@ test('low memory on a Mac names Docker Desktop, not its settings pages', async (
   assert.ok(!(last?.includes('Resources') ?? true));
 });
 
-test('Docker that does not report an Engine version fails that check', async () => {
+test('Docker that does not report an Engine version fails that check, after Compose and memory', async () => {
   const answers = goodAnswers(8 * GIB);
   answers.set('docker info --format {{.ServerVersion}}', okResult('\n'));
   const { deps, printed } = runDoctor({ kind: 'linux', answers });
   const exitCode = await checkDocker(deps);
   assert.equal(exitCode, 1);
-  assert.equal(printed.length, 2);
-  assert.ok(printed[1]?.includes('Engine version'));
+  assert.deepEqual(printed, [
+    'Docker is installed, version 27.3.1.',
+    'Docker Compose is ready, version 2.29.1.',
+    'Docker has 8 GB of memory to work with, which is enough.',
+    problemText(ENGINE_VERSION_MISSING),
+  ]);
+});
+
+test('Docker that does not report its memory on Windows fails instead of counting the whole computer', async () => {
+  const answers = goodAnswers(8 * GIB);
+  answers.set('docker info --format {{.MemTotal}}', okResult('\n'));
+  // The fake host reports 16 GB of computer memory, so the old silent
+  // fallback to the host total would have passed this check.
+  const { deps, printed } = runDoctor({ kind: 'windows', answers });
+  const exitCode = await checkDocker(deps);
+  assert.equal(exitCode, 1);
+  const last = printed[printed.length - 1];
+  assert.equal(last, problemText(MEMORY_NOT_REPORTED.windows));
+});
+
+test('on Linux a memory Docker does not report falls back to the computer memory', async () => {
+  const answers = goodAnswers(8 * GIB);
+  answers.set('docker info --format {{.MemTotal}}', okResult('\n'));
+  // Docker Engine on Linux uses the computer's memory directly, and the
+  // fake host reports 16 GB, so the check passes on the host total.
+  const { deps, printed } = runDoctor({ kind: 'linux', answers });
+  const exitCode = await checkDocker(deps);
+  assert.equal(exitCode, 0);
+  assert.ok(printed.includes('Docker has 16 GB of memory to work with, which is enough.'));
 });

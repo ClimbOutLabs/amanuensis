@@ -6,14 +6,17 @@ Docker is not installed on this computer. Install Docker Desktop from its websit
 Docker Desktop is not running. Open Docker Desktop from the Start menu, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
 Docker has less than 6 GB of memory to work with on this computer. Open Docker Desktop, choose Settings, then Resources, give it at least 6 GB, then run this check again.
+Docker did not say how much memory it has to work with. Open Docker Desktop, choose Settings, then Resources, set the memory to at least 6 GB, then run this check again.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from Launchpad, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
 Docker has less than 6 GB of memory to work with on this computer. Give Docker Desktop at least 6 GB of memory in its settings, then run this check again.
+Docker did not say how much memory it has to work with. Open Docker Desktop, check the memory in its settings, then run this check again.
 Docker is not installed on this computer. Install Docker Engine from its website, then run this check again.
 Docker Engine is not running. Start Docker Engine on this computer, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Install the Docker Compose add-on, then run this check again.
 This computer gives Docker Engine less than 6 GB of memory to work with. Free up memory on this computer so Docker Engine can use at least 6 GB, then run this check again.
+Docker did not say how much memory it has to work with. Start Docker Engine again, then run this check again.
 Docker did not say which Engine version it is running. Update Docker to the newest version, then run this check again.
 Aman does not know the command "example". Run aman with no command to see what it can do.
 That doctor check is not one Aman knows. Run aman doctor docker to check Docker on this computer.
