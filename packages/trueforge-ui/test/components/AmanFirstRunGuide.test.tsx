@@ -1,196 +1,102 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from '@/components/AmanFirstRunGuide.js';
+import { AmanSetupTicket, setupTicketItems } from '@/components/AmanFirstRunGuide.js';
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import {
-  EMPTY_PERSONALIZATION_PROFILE,
-  PersonalizationProvider,
-  type PersonalizationProfile,
-} from '@/components/PersonalizationContext.js';
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 
-function renderGuide(input: { setup: AmanSetupState; userName?: string | null; placement?: 'chat' | 'settings' }) {
+const { server } = vi.hoisted(() => {
+  const server: { grantedFeatures: string[]; scheduleCount: number } = { grantedFeatures: [], scheduleCount: 0 };
+  return { server };
+});
+
+vi.mock('@/server/ServerContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ServerContext.js')>()),
+  useOptionalCatalogServer: () => ({
+    getGoogleStatus: async () => ({
+      features: ['gmail_read', 'calendar_read'].map(feature => ({
+        feature,
+        granted: server.grantedFeatures.includes(feature),
+        label: feature,
+      })),
+    }),
+  }),
+  useOptionalScheduleServer: () => ({
+    listSchedules: async () => ({ data: Array.from({ length: server.scheduleCount }, () => ({})) }),
+  }),
+}));
+
+function renderTicket({ assistantName = null, setup }: { assistantName?: string | null; setup: AmanSetupState }) {
   const api = {
-    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, user_name: input.userName ?? null }),
+    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: assistantName }),
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
   return render(
     <PersonalizationProvider api={api}>
-      <AmanSetupProvider value={input.setup}>
-        <AmanFirstRunGuide placement={input.placement ?? 'chat'} />
+      <AmanSetupProvider value={setup}>
+        <AmanSetupTicket />
       </AmanSetupProvider>
     </PersonalizationProvider>,
   );
 }
 
-describe('amanFirstRunItems', () => {
-  it('ticks each line from real state', () => {
-    const fresh = amanFirstRunItems({
-      modelName: null,
-      userName: null,
-      hasChatted: false,
-      placement: 'chat',
-    });
-    expect(fresh.map(item => [item.key, item.done])).toEqual([
-      ['model', false],
-      ['about-you', false],
-      ['first-chat', false],
+const open: AmanSetupState = {
+  modelName: 'local/llama',
+  firstRunGuide: { dismissed: false, dismiss: () => {} },
+  settingsHref: '/settings',
+};
+
+describe('setupTicketItems', () => {
+  it('marks each line done from its own state', () => {
+    const items = setupTicketItems({ assistantName: 'Mannie', googleReady: false, scheduleCount: 0 });
+
+    expect(items.map(item => [item.label, item.done])).toEqual([
+      ['Pick a name', true],
+      ['Connect Gmail and Calendar', false],
+      ['Choose when the morning brief arrives', false],
     ]);
-
-    const halfDone = amanFirstRunItems({
-      modelName: 'local/llama',
-      userName: 'Sam Rivera',
-      hasChatted: false,
-      placement: 'chat',
-    });
-    expect(halfDone.map(item => item.done)).toEqual([true, true, false]);
-    expect(halfDone[0]?.detail).toBe('Using local/llama.');
-    expect(halfDone[1]?.detail).toBe('Aman knows you as Sam Rivera.');
-
-    const done = amanFirstRunItems({
-      modelName: 'local/llama',
-      userName: 'Sam',
-      hasChatted: true,
-      placement: 'chat',
-    });
-    expect(done.every(item => item.done)).toBe(true);
+    expect(items[2]?.verb).toBe('Pick a time');
   });
 
-  it('leaves out what the host could not find out, and treats a blank name as unset', () => {
-    const items = amanFirstRunItems({
-      modelName: '  ',
-      userName: '   ',
-      hasChatted: undefined,
-      placement: 'chat',
-    });
-    expect(items.map(item => item.key)).toEqual(['model', 'about-you']);
-    expect(items.every(item => !item.done)).toBe(true);
-  });
+  it('counts a blank name as unset and a schedule as the brief time being set', () => {
+    const items = setupTicketItems({ assistantName: '   ', googleReady: true, scheduleCount: 1 });
 
-  it('offers a way back to chat only from settings', () => {
-    const inChat = amanFirstRunItems({
-      modelName: 'm',
-      userName: null,
-      hasChatted: false,
-      placement: 'chat',
-    });
-    expect(inChat.find(item => item.key === 'first-chat')?.action).toBeUndefined();
-
-    const inSettings = amanFirstRunItems({
-      modelName: 'm',
-      userName: null,
-      hasChatted: false,
-      placement: 'settings',
-    });
-    expect(inSettings.find(item => item.key === 'first-chat')?.action).toEqual({
-      label: 'Back to chat',
-      target: { kind: 'chat' },
-    });
+    expect(items[0]?.done).toBe(false);
+    expect(items[2]?.done).toBe(true);
   });
 });
 
-describe('AmanFirstRunGuide', () => {
-  it('shows progress, links the open lines to settings, and dismisses through the host', async () => {
-    const dismiss = vi.fn();
-    renderGuide({
-      userName: 'Sam',
-      setup: {
-        modelName: 'local/llama',
-        hasChatted: false,
-        firstRunGuide: { dismissed: false, dismiss },
-        settingsHref: '/settings',
-      },
+describe('AmanSetupTicket', () => {
+  beforeEach(() => {
+    server.grantedFeatures = [];
+    server.scheduleCount = 0;
+  });
+
+  it('shows the count, the open lines with their verbs, and the finished name', async () => {
+    renderTicket({ assistantName: 'Mannie', setup: open });
+
+    expect(await screen.findByRole('heading', { name: 'Set up Mannie' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 3 done')).toBeInTheDocument();
+    expect(screen.getByText('Connect')).toBeInTheDocument();
+    expect(screen.getByText('Pick a time')).toBeInTheDocument();
+    expect(screen.getByText('Mannie')).toBeInTheDocument();
+  });
+
+  it('hides once every line is done', async () => {
+    server.grantedFeatures = ['gmail_read', 'calendar_read'];
+    server.scheduleCount = 2;
+    const { container } = renderTicket({ assistantName: 'Mannie', setup: open });
+
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it('renders nothing once the owner has skipped it', () => {
+    const { container } = renderTicket({
+      assistantName: 'Mannie',
+      setup: { ...open, firstRunGuide: { dismissed: true, dismiss: () => {} } },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.getByTestId('aman-first-run-progress')).toHaveTextContent('2 of 3 done.');
-    const items = screen.getAllByRole('listitem');
-    expect(items.map(item => item.getAttribute('data-done'))).toEqual(['true', 'true', 'false']);
-    expect(items[1]).toHaveTextContent('Done: Tell Aman about you');
-    // Memory works out of the box, so the checklist never asks about it.
-    expect(screen.getByTestId('aman-first-run-guide')).not.toHaveTextContent(/memory/i);
-    // Done lines carry no link; there is nothing left to do there.
-    expect(screen.queryByRole('link', { name: 'Open Personalization' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(dismiss).toHaveBeenCalledTimes(1);
-  });
-
-  it('says so when everything is done, and renders nothing once dismissed', async () => {
-    const { unmount } = renderGuide({
-      userName: 'Sam',
-      setup: {
-        modelName: 'local/llama',
-        hasChatted: true,
-        firstRunGuide: { dismissed: false, dismiss: () => {} },
-      },
-    });
-    expect(await screen.findByRole('heading', { name: 'You are all set' })).toBeInTheDocument();
-    unmount();
-
-    renderGuide({
-      setup: { modelName: null, firstRunGuide: { dismissed: true, dismiss: () => {} } },
-    });
-    expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
-  });
-
-  it('has no dismiss control when the host cannot remember one', async () => {
-    renderGuide({ setup: { modelName: null, settingsHref: '/settings' } });
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
-  });
-
-  it('is visible until the host reports a dismissal', () => {
-    expect(isFirstRunGuideVisible(null)).toBe(false);
-    expect(isFirstRunGuideVisible({ modelName: null })).toBe(true);
-    expect(
-      isFirstRunGuideVisible({
-        modelName: null,
-        firstRunGuide: { dismissed: false, dismiss() {} },
-      }),
-    ).toBe(true);
-    expect(
-      isFirstRunGuideVisible({
-        modelName: null,
-        firstRunGuide: { dismissed: true, dismiss() {} },
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('AmanFirstRunGuide help question', () => {
-  it('saves a changed help choice to the profile at once, keeping the rest of the profile', async () => {
-    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => profile);
-    const saved: PersonalizationProfile = { ...EMPTY_PERSONALIZATION_PROFILE, user_name: 'Sam', help_areas: ['focus'] };
-    const api = {
-      getProfile: async () => saved,
-      updateProfile,
-      deleteProfile: async () => {},
-    };
-    render(
-      <PersonalizationProvider api={api}>
-        <AmanSetupProvider value={{ modelName: 'local/llama', hasChatted: false }}>
-          <AmanFirstRunGuide placement="chat" />
-        </AmanSetupProvider>
-      </PersonalizationProvider>,
-    );
-
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Caring for someone' }));
-
-    expect(updateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ user_name: 'Sam', help_areas: ['focus', 'caring'] }),
-    );
-  });
-
-  it('leaves the help question out of the Settings placement', async () => {
-    renderGuide({
-      setup: { modelName: 'local/llama', hasChatted: false },
-      placement: 'settings',
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'What would help you most?' })).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });

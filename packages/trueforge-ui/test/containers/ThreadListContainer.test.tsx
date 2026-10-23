@@ -373,7 +373,7 @@ describe('ThreadListContainer', () => {
       variant: 'recent-history',
     });
 
-    expect(screen.getByText('No recent chats')).toBeInTheDocument();
+    expect(screen.getByText('Your chats will show up here.')).toBeInTheDocument();
   });
 
   it('loads a named history session without leaving the recent list', async () => {

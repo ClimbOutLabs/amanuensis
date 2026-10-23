@@ -432,7 +432,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     void Promise.resolve(aui.threads().switchToNewThread()).catch(() => undefined);
   };
 
-  const emptyMessage = isRecentHistory ? 'No recent chats' : undefined;
+  const emptyMessage = isRecentHistory ? 'Your chats will show up here.' : undefined;
   const hasFolders = chatFolders !== null && chatFolders.folders.length > 0;
 
   let listBody: ReactNode;

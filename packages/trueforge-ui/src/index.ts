@@ -218,20 +218,15 @@ export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
-export {
-  AmanFirstRunGuide,
-  AmanFirstRunSummary,
-  amanFirstRunItems,
-  isFirstRunGuideVisible,
-} from './components/AmanFirstRunGuide.js';
-export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './components/AmanFirstRunGuide.js';
+export { AmanSetupTicket } from './components/AmanFirstRunGuide.js';
+export type { FirstRunTarget, SetupItem } from './components/AmanFirstRunGuide.js';
 export { AmanPandaSourceProvider } from './components/AmanPanda.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
 export type { AmanSetupState, FirstRunGuideState } from './components/AmanSetupContext.js';
 export { AmanTour, type AmanTourProps } from './components/AmanTour.js';
-export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
+export { AmanWelcome } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
   AppBugReportBundle,

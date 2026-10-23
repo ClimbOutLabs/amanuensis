@@ -6,7 +6,6 @@ import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useTheme } from '../theme/ThemeProvider.js';
-import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { BugReportButton } from './BugReportButton.js';
 import { auiButtonClass, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -21,7 +20,6 @@ export function ShellActions({ className, labeled = false }: { className?: strin
   const isDark = mode === 'dark';
   const themeLabel = isDark ? 'Light' : 'Dark';
   const settingsChromeEnabled = isSettingsChromeEnabled({ catalog, capabilities });
-  const { hidden: tourHidden, setHidden: setTourHidden } = useTourHidden();
 
   const hoverClass = 'hover:bg-secondary-button-hover hover:text-ghost-button-text';
 
@@ -50,21 +48,6 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         <Icon name={isDark ? 'sun' : 'moon'} size={labeled ? 14 : undefined} />
         {labeled ? <span className="text-center">{themeLabel}</span> : null}
       </button>
-      {tourHidden ? (
-        <button
-          type="button"
-          title="Replay the tour"
-          className={auiButtonClass({
-            variant: 'ghost',
-            size: labeled ? undefined : 'icon',
-            className: cn(hoverClass, labeled && sidebarRailButtonClassName),
-          })}
-          onClick={() => setTourHidden(false)}
-        >
-          <Icon name="welcome-sparkle" size={labeled ? 14 : undefined} />
-          {labeled ? <span className="text-center">Replay the tour</span> : null}
-        </button>
-      ) : null}
       {shell != null && settingsChromeEnabled ? (
         <button
           type="button"

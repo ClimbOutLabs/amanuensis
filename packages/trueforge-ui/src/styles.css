@@ -1646,15 +1646,6 @@
   background-color: var(--gold-soft);
 }
 
-.aui-ticket--mark {
-  border-color: var(--gold-line);
-  background-color: var(--gold-soft);
-}
-
-.aui-ticket__tear {
-  border-top: 0.125rem dashed var(--border);
-}
-
 /* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
 .aui-ticket__title {
   font-family: var(--font-display);
@@ -1684,25 +1675,28 @@
   outline-offset: 0.125rem;
 }
 
-/* Underline: a hand-drawn stroke under one phrase. Mask keeps the colour a theme token. */
-.aui-underline {
-  position: relative;
-  isolation: isolate;
+/* Home greeting: the first name carries a hand-drawn stroke. Fraunces is not bundled, so the serif is Newsreader. */
+.aui-face-serif {
+  font-family: var(--font-serif);
 }
 
-.aui-underline::after {
-  content: '';
+.aui-name-underline {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: -0.08em;
-  height: 0.45em;
-  z-index: -1;
-  background-color: var(--gold);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
-    0 0 / 100% 100% no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
-    0 0 / 100% 100% no-repeat;
+  top: 100%;
+  width: 100%;
+  height: 0.5rem;
+  margin-top: 0.25rem;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.aui-name-underline path {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 0.125rem;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Row grid shared by chapter lines, receipt rows and rail rows: mark · when · text · action. */
@@ -1882,13 +1876,9 @@
   }
 }
 
-/* Settle: anything that appears. Lay: stubs and tiles. */
+/* Settle: anything that appears. */
 .aui-settle {
   animation: aui-settle 300ms ease-out both;
-}
-
-.aui-lay {
-  animation: aui-lay 320ms ease-out both;
 }
 
 .aui-press:active {
@@ -1904,18 +1894,6 @@
   from {
     opacity: 0.001;
     transform: translateY(0.5rem);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes aui-lay {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
   }
 
   to {
@@ -2091,7 +2069,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .aui-settle,
-  .aui-lay,
   .aui-press:active,
   .aui-pulse,
   .aui-reward-tick[data-play='true'] path,
@@ -2134,15 +2111,6 @@
   color: var(--text-primary);
 }
 
-/* First frame: the day ticket's display title. */
-.aui-day-title {
-  font-family: var(--font-display);
-  font-size: 2.5rem;
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-}
-
 .aui-ticket__title {
   font-family: var(--font-display);
   font-size: 1.5rem;
@@ -2168,10 +2136,4 @@
   line-height: 1.4;
   letter-spacing: 0.01em;
   color: var(--text-secondary);
-}
-
-@media (max-width: 40rem) {
-  .aui-day-title {
-    font-size: 1.9rem;
-  }
 }
