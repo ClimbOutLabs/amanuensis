@@ -82,6 +82,7 @@ import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchem
 import {
   isMapsToolName,
   MAPS_AFTER_READ_SILENT_REASON,
+  MAPS_ASK_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -3190,7 +3191,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: 'maps_tool',
+        reason: MAPS_ASK_REASON,
         reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({

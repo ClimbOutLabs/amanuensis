@@ -647,19 +647,22 @@ describe('per-turn tool loop guard', () => {
 
 /**
  * A tool set shaped like a live chat: the search provider's web_search and web_fetch held for the
- * person's OK with no read-only hint from the server, a read-only map lookup that always asks, and a
- * draft_email that changes something. All are tier 3; only the draft is a write.
+ * person's OK, a read-only map lookup that always asks, and a draft_email that changes something.
+ * delete_note, wipe_note and update_record are third-party writes whose server wrongly says they
+ * are read-only. All are tier 3; only the search provider's calls and the map lookup are reads.
  */
 function makeResearchToolSet() {
   const toolSet = makeMockIMCPServer({
     name: 'research',
     preload: true,
-    tools: ['web_search', 'web_fetch', 'render_map', 'draft_email'].map(name => ({
-      name,
-      description: name,
-      inputSchema: { type: 'object' as const, properties: { text: { type: 'string' } }, required: ['text'] },
-      preload: true,
-    })),
+    tools: ['web_search', 'web_fetch', 'render_map', 'draft_email', 'delete_note', 'wipe_note', 'update_record'].map(
+      name => ({
+        name,
+        description: name,
+        inputSchema: { type: 'object' as const, properties: { text: { type: 'string' } }, required: ['text'] },
+        preload: true,
+      }),
+    ),
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) => {
     const base = {
@@ -678,10 +681,22 @@ function makeResearchToolSet() {
           ...base,
           read_only_hint: true,
           open_world_hint: true,
-          tier_reason: 'mcp_open_world_hint',
+          search_provider_call: true as const,
+          tier_reason: 'mcp_search_unreturned_url',
         });
       case 'render_map':
         return Promise.resolve({ ...base, read_only_hint: true, open_world_hint: true, tier_reason: 'maps_tool' });
+      case 'delete_note':
+        return Promise.resolve({ ...base, read_only_hint: true, tier_reason: 'mcp_destructive_hint' });
+      case 'wipe_note':
+        return Promise.resolve({
+          ...base,
+          read_only_hint: true,
+          effect: 'inspect' as const,
+          tier_reason: 'mcp_destructive_hint',
+        });
+      case 'update_record':
+        return Promise.resolve({ ...base, read_only_hint: true, tier_reason: 'unrecognized_tool' });
       default:
         return Promise.resolve({
           ...base,
@@ -760,6 +775,25 @@ describe('write cap counts only calls that change something', () => {
     expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     expect(deliveredText(events)).toBe('Here is what I found.');
+  });
+
+  it.each([
+    ['delete_note', 'a read-only hint next to a destructive hint'],
+    ['wipe_note', 'a read-only hint that made it an inspection, next to a destructive hint'],
+    ['update_record', 'a read-only hint on a tool the host does not recognise'],
+  ])('still stops %s at five when its server gives %s', async name => {
+    const toolSet = makeResearchToolSet();
+    const calls = Array.from({ length: 7 }, (_, index) => [{ name, text: `note ${String(index)}` }]);
+    const thread = makeThread({ toolSet, create: scriptedCalls(calls) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(Array.from({ length: MAX_WRITE_CALLS_PER_TURN }, () => name));
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
   });
 });
 

@@ -35,6 +35,7 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
+import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import { isSearchAskReason, isSilentSearchReason, recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
@@ -866,8 +867,8 @@ export const IDENTICAL_CALL_STOP_AT = 4;
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
 /**
- * Tier 3 calls that change something a turn may run before the host stops it. Reads, searches
- * included, never count: searches have their own limits. The call past the cap never runs; the
+ * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
+ * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
  * turn ends once the batch that reached the cap has resolved.
  */
 export const MAX_WRITE_CALLS_PER_TURN = 5;
@@ -886,11 +887,24 @@ export function isReadOnlyCall(
   if (info.read_only_hint === true) {
     return true;
   }
+  return isSearchProviderRead(info);
+}
+
+function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
   return (
     info.search_provider_call === true &&
     info.tier_reason !== undefined &&
     (isSilentSearchReason(info.tier_reason) || isSearchAskReason(info.tier_reason))
   );
+}
+
+/**
+ * Whether the host itself ruled a call a read: the search provider's search or page read, or a maps
+ * lookup. Only these skip the write cap; a server's own read-only claim never does, so a write it
+ * wrongly calls read-only still counts.
+ */
+export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
 }
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;

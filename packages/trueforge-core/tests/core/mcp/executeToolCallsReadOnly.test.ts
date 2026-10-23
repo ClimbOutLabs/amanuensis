@@ -1,4 +1,4 @@
-import { isReadOnlyCall } from '../../../src/core/mcp/executeToolCalls';
+import { isHostVouchedRead, isReadOnlyCall } from '../../../src/core/mcp/executeToolCalls';
 
 const NO_HINTS = {
   effect: undefined,
@@ -26,5 +26,20 @@ describe('isReadOnlyCall', () => {
     expect(isReadOnlyCall({ ...NO_HINTS, search_provider_call: true, tier_reason: 'connector_send' })).toBe(false);
     expect(isReadOnlyCall({ ...NO_HINTS, tier_reason: 'mcp_search_setting_ask' })).toBe(false);
     expect(isReadOnlyCall(NO_HINTS)).toBe(false);
+  });
+});
+
+describe('isHostVouchedRead', () => {
+  it('vouches only for search provider reads and maps lookups the host classified', () => {
+    expect(isHostVouchedRead({ search_provider_call: true, tier_reason: 'mcp_search_setting_ask' })).toBe(true);
+    expect(isHostVouchedRead({ search_provider_call: true, tier_reason: 'mcp_search_provider' })).toBe(true);
+    expect(isHostVouchedRead({ search_provider_call: undefined, tier_reason: 'maps_tool' })).toBe(true);
+  });
+
+  it('does not vouch for a server that only claims its tool is read-only', () => {
+    expect(isHostVouchedRead({ search_provider_call: undefined, tier_reason: 'mcp_destructive_hint' })).toBe(false);
+    expect(isHostVouchedRead({ search_provider_call: undefined, tier_reason: 'unrecognized_tool' })).toBe(false);
+    expect(isHostVouchedRead({ search_provider_call: undefined, tier_reason: 'mcp_search_setting_ask' })).toBe(false);
+    expect(isHostVouchedRead({ search_provider_call: undefined, tier_reason: undefined })).toBe(false);
   });
 });
