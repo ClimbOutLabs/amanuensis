@@ -38,14 +38,15 @@ const EMPTY_PROFILE: PersonalizationProfile = {
 };
 
 function profileFor(state: FixtureState): PersonalizationProfile {
-  if (state === 'fresh') {
+  if (state === 'fresh' || state === 'half') {
     return EMPTY_PROFILE;
   }
   return { ...EMPTY_PROFILE, assistant_name: 'Mannie', user_name: 'Sam Rivera', address_as: 'Sam' };
 }
 
 function setupFor(state: FixtureState): AmanSetupState {
-  const base = { settingsHref: '/settings', modelName: 'local/qwen3-8b' };
+  // A first run has no model yet, so "Add a model" is the open line; the other states have one.
+  const base = { settingsHref: '/settings', modelName: state === 'fresh' ? null : 'local/qwen3-8b' };
   switch (state) {
     case 'fresh':
     case 'half':

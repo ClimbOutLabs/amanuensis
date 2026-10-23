@@ -1,34 +1,21 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
 import { AmanSetupTicket, setupTicketItems } from '@/components/AmanFirstRunGuide.js';
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 
-const { server } = vi.hoisted(() => {
-  const server: { grantedFeatures: string[]; scheduleCount: number } = { grantedFeatures: [], scheduleCount: 0 };
-  return { server };
-});
-
-vi.mock('@/server/ServerContext.js', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/server/ServerContext.js')>()),
-  useOptionalCatalogServer: () => ({
-    getGoogleStatus: async () => ({
-      features: ['gmail_read', 'calendar_read'].map(feature => ({
-        feature,
-        granted: server.grantedFeatures.includes(feature),
-        label: feature,
-      })),
-    }),
-  }),
-  useOptionalScheduleServer: () => ({
-    listSchedules: async () => ({ data: Array.from({ length: server.scheduleCount }, () => ({})) }),
-  }),
-}));
-
-function renderTicket({ assistantName = null, setup }: { assistantName?: string | null; setup: AmanSetupState }) {
+function renderTicket({
+  assistantName = null,
+  userName = null,
+  setup,
+}: {
+  assistantName?: string | null;
+  userName?: string | null;
+  setup: AmanSetupState;
+}) {
   const api = {
-    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: assistantName }),
+    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: assistantName, user_name: userName }),
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
@@ -42,53 +29,91 @@ function renderTicket({ assistantName = null, setup }: { assistantName?: string 
 }
 
 const open: AmanSetupState = {
-  modelName: 'local/llama',
+  modelName: null,
+  hasChatted: false,
   firstRunGuide: { dismissed: false, dismiss: () => {} },
   settingsHref: '/settings',
 };
 
 describe('setupTicketItems', () => {
-  it('marks each line done from its own state', () => {
-    const items = setupTicketItems({ assistantName: 'Mannie', googleReady: false, scheduleCount: 0 });
+  it('lists the three steps in order, with the actions that open Settings', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
+      modelName: null,
+      userName: null,
+      hasChatted: false,
+    });
 
-    expect(items.map(item => [item.label, item.done])).toEqual([
-      ['Pick a name', true],
-      ['Connect Gmail and Calendar', false],
-      ['Choose when the morning brief arrives', false],
-    ]);
-    expect(items[2]?.verb).toBe('Pick a time');
+    expect(items.map(item => item.label)).toEqual(['Add a model', 'Tell Mannie about you', 'Try your first chat']);
+    expect(items[0]?.action).toEqual({ label: 'Choose a model', target: { kind: 'settings', section: 'models' } });
+    expect(items[1]?.action).toEqual({
+      label: 'Open Personalization',
+      target: { kind: 'settings', section: 'personalization' },
+    });
+    expect(items[2]?.action).toBeUndefined();
   });
 
-  it('counts a blank name as unset and a schedule as the brief time being set', () => {
-    const items = setupTicketItems({ assistantName: '   ', googleReady: true, scheduleCount: 1 });
+  it('marks each step done from its own state', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
+      modelName: 'local/llama',
+      userName: 'Sidd',
+      hasChatted: true,
+    });
 
-    expect(items[0]?.done).toBe(false);
-    expect(items[2]?.done).toBe(true);
+    expect(items.map(item => item.done)).toEqual([true, true, true]);
+    expect(items[0]?.doneValue).toBe('local/llama');
+    expect(items[1]?.doneValue).toBe('Sidd');
+  });
+
+  it('counts a blank model or name as not set', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
+      modelName: '  ',
+      userName: '   ',
+      hasChatted: false,
+    });
+
+    expect(items.map(item => item.done)).toEqual([false, false, false]);
+  });
+
+  it('leaves out the first-chat step when the host does not know whether a chat started', () => {
+    const items = setupTicketItems({ assistantName: 'Mannie', modelName: null, userName: null, hasChatted: undefined });
+
+    expect(items.map(item => item.key)).toEqual(['model', 'about-you']);
   });
 });
 
 describe('AmanSetupTicket', () => {
-  beforeEach(() => {
-    server.grantedFeatures = [];
-    server.scheduleCount = 0;
-  });
-
-  it('shows the count, the open lines with their verbs, and the finished name', async () => {
-    renderTicket({ assistantName: 'Mannie', setup: open });
+  it('shows the count, the three steps and the open actions', async () => {
+    renderTicket({ assistantName: 'Mannie', userName: 'Sidd', setup: { ...open, modelName: 'local/llama' } });
 
     expect(await screen.findByRole('heading', { name: 'Set up Mannie' })).toBeInTheDocument();
-    expect(screen.getByText('1 of 3 done')).toBeInTheDocument();
-    expect(screen.getByText('Connect')).toBeInTheDocument();
-    expect(screen.getByText('Pick a time')).toBeInTheDocument();
-    expect(screen.getByText('Mannie')).toBeInTheDocument();
+    expect(screen.getByText('2 of 3 done')).toBeInTheDocument();
+    expect(screen.getByText('Add a model')).toBeInTheDocument();
+    expect(screen.getByText('Tell Mannie about you')).toBeInTheDocument();
+    expect(screen.getByText('Try your first chat')).toBeInTheDocument();
+    // Both finished lines show their value, and no action is left to offer.
+    expect(screen.getByText('Sidd')).toBeInTheDocument();
+    expect(screen.queryByText('Choose a model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open Personalization')).not.toBeInTheDocument();
   });
 
-  it('hides once every line is done', async () => {
-    server.grantedFeatures = ['gmail_read', 'calendar_read'];
-    server.scheduleCount = 2;
-    const { container } = renderTicket({ assistantName: 'Mannie', setup: open });
+  it('names the assistant in the about-you step, never a fixed name', async () => {
+    renderTicket({ assistantName: 'Juniper', setup: open });
 
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(await screen.findByText('Tell Juniper about you')).toBeInTheDocument();
+    expect(screen.queryByText(/Aman|Mannie/)).not.toBeInTheDocument();
+  });
+
+  it('hides once every step is done', async () => {
+    const { container } = renderTicket({
+      assistantName: 'Mannie',
+      userName: 'Sidd',
+      setup: { ...open, modelName: 'local/llama', hasChatted: true },
+    });
+
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('renders nothing once the owner has skipped it', () => {

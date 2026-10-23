@@ -13,7 +13,9 @@ import { AgentHistoryFilterButton } from '../atoms/AgentHistoryFilterButton.js';
 import { cn } from '../atoms/lib/cn.js';
 import {
   canReuseMutableShell,
+  filterIndicesByTitle,
   readThreadAgentName,
+  splitIndicesByDay,
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
@@ -184,12 +186,15 @@ function ThreadListItemByIndex({
 
 function ThreadListItemsByRecency({
   indices,
+  grouped = false,
   onThreadOpen,
   canDeleteSession,
   canDeleteResource,
   canRenameSession,
 }: {
   indices: number[];
+  /** Splits the flat list under Today and Earlier headings. Folders keep their own sections. */
+  grouped?: boolean;
   onThreadOpen?: () => void;
   canDeleteSession: boolean;
   canDeleteResource: (sessionId: string) => boolean;
@@ -200,18 +205,33 @@ function ThreadListItemsByRecency({
   const chatFolders = useOptionalChatFolders();
 
   if (chatFolders === null || chatFolders.folders.length === 0) {
+    const rows = (list: number[]) =>
+      list.map(index => (
+        <ThreadListItemByIndex
+          key={threadIds[index] ?? String(index)}
+          index={index}
+          onThreadOpen={onThreadOpen}
+          canDeleteSession={canDeleteSession}
+          canDeleteResource={canDeleteResource}
+          canRenameSession={canRenameSession}
+        />
+      ));
+    if (!grouped) return <>{rows(indices)}</>;
+    const { today, earlier } = splitIndicesByDay({ indices, threadIds, threadItems, now: new Date() });
     return (
       <>
-        {indices.map(index => (
-          <ThreadListItemByIndex
-            key={threadIds[index] ?? String(index)}
-            index={index}
-            onThreadOpen={onThreadOpen}
-            canDeleteSession={canDeleteSession}
-            canDeleteResource={canDeleteResource}
-            canRenameSession={canRenameSession}
-          />
-        ))}
+        {today.length > 0 ? (
+          <>
+            <h3 className="m-0 px-2.5 pt-2 pb-1 text-[0.75rem] font-normal text-text-secondary">Today</h3>
+            {rows(today)}
+          </>
+        ) : null}
+        {earlier.length > 0 ? (
+          <>
+            <h3 className="m-0 px-2.5 pt-2 pb-1 text-[0.75rem] font-normal text-text-secondary">Earlier</h3>
+            {rows(earlier)}
+          </>
+        ) : null}
       </>
     );
   }
@@ -271,17 +291,22 @@ const THREAD_LIST_VIEWPORT_SLOT = 'aui_thread-list-viewport';
 /** How close to the bottom (px) before the next sessions page is fetched. */
 const LOAD_MORE_BOTTOM_PX = 80;
 
+/** The Chats column's search: a toggle in the header, and a field under it while open. */
+type RecentChatsSearch = { open: boolean; query: string; onToggle: () => void; onQueryChange: (query: string) => void };
+
 function RecentChatsSection({
   children,
   viewportRef,
   hideScrollbar,
   collapsible,
+  search,
 }: {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   hideScrollbar: boolean;
   /** `recent-history` renders in a narrow, always-open rail; only `default` collapses. */
   collapsible: boolean;
+  search?: RecentChatsSearch;
 }) {
   const [expanded, setExpanded] = useState(true);
   const shell = useOptionalShellMode();
@@ -296,8 +321,7 @@ function RecentChatsSection({
       shell.mode.isMutable ||
       shell.pendingSessionId != null ||
       activeRemoteId != null);
-  const heading =
-    shell?.historyAgentFilter == null ? 'Chat History' : `Chats for ${shell.historyAgentFilter.agentName}`;
+  const heading = shell?.historyAgentFilter == null ? 'Chats' : `Chats for ${shell.historyAgentFilter.agentName}`;
   const isOpen = !collapsible || expanded;
 
   return (
@@ -320,8 +344,34 @@ function RecentChatsSection({
           <h2 className="min-w-0 flex-1 truncate px-1.5 py-1 text-sm font-medium text-text-secondary">{heading}</h2>
         )}
         {showFilter ? <AgentHistoryFilterButton /> : null}
+        {search !== undefined ? (
+          <button
+            type="button"
+            aria-label="Search chats"
+            aria-pressed={search.open}
+            title="Search chats"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+            onClick={search.onToggle}
+          >
+            <Icon name="search" className="size-3.5" />
+          </button>
+        ) : null}
         {chatFolders !== null ? <NewFolderButton /> : null}
       </div>
+      {search?.open ? (
+        <label className="mx-1 mb-1 flex shrink-0 items-center gap-2 rounded-[1.25rem] border border-border bg-card-bg px-3 py-1.5 focus-within:border-gold-line">
+          <Icon name="search" className="size-3.5 shrink-0 text-text-secondary" />
+          <input
+            type="search"
+            aria-label="Search chats"
+            placeholder="Search chats"
+            value={search.query}
+            onChange={event => search.onQueryChange(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-text-primary outline-none placeholder:text-text-secondary"
+            autoFocus
+          />
+        </label>
+      ) : null}
       {isOpen ? (
         <div
           ref={viewportRef}
@@ -359,6 +409,8 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const ThreadListEmptyState = useSlot('ThreadListEmptyState');
 
   const indices = useThreadListIndicesByRecency(variant);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const viewportRef = useRef<HTMLDivElement>(null);
   const hasMoreRef = useRef(hasMore);
   const auiRef = useRef(aui);
@@ -434,6 +486,9 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
 
   const emptyMessage = isRecentHistory ? 'Your chats will show up here.' : undefined;
   const hasFolders = chatFolders !== null && chatFolders.folders.length > 0;
+  const shownIndices = isRecentHistory
+    ? filterIndicesByTitle({ indices, threadIds, threadItems, query: searchOpen ? searchQuery : '' })
+    : indices;
 
   let listBody: ReactNode;
   if (isIdle) {
@@ -442,11 +497,14 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     listBody = <ThreadListRowSkeleton />;
   } else if (indices.length === 0 && !hasFolders) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
+  } else if (shownIndices.length === 0 && !hasFolders) {
+    listBody = <ThreadListEmptyState message="No chats match that search." />;
   } else {
     listBody = (
       <ThreadListPrimitive.Root className="flex min-h-0 flex-col gap-0.5">
         <ThreadListItemsByRecency
-          indices={indices}
+          indices={shownIndices}
+          grouped={isRecentHistory}
           onThreadOpen={onThreadOpen}
           canDeleteSession={canDeleteSession}
           canDeleteResource={canDeleteResource}
@@ -470,7 +528,24 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
         )
       }
     >
-      <RecentChatsSection viewportRef={viewportRef} hideScrollbar={isRecentHistory} collapsible={!isRecentHistory}>
+      <RecentChatsSection
+        viewportRef={viewportRef}
+        hideScrollbar={isRecentHistory}
+        collapsible={!isRecentHistory}
+        search={
+          isRecentHistory
+            ? {
+                open: searchOpen,
+                query: searchQuery,
+                onToggle: () => {
+                  setSearchOpen(open => !open);
+                  setSearchQuery('');
+                },
+                onQueryChange: setSearchQuery,
+              }
+            : undefined
+        }
+      >
         {listBody}
         {!isIdle && hasMore ? <div className="h-4 shrink-0" aria-hidden /> : null}
       </RecentChatsSection>

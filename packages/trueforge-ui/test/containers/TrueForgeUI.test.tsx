@@ -565,7 +565,7 @@ describe('SidebarLayout', () => {
     expect(container.querySelector('aside img')).toHaveAttribute('src', '/acme.svg');
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
-    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    expect(screen.getByText('New chat')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
   });
@@ -625,7 +625,7 @@ describe('SidebarLayout', () => {
     const recentChats = screen.getByRole('complementary', { name: 'Recent chats' });
     expect(recentChats).toHaveClass('hidden', 'md:flex');
     expect(recentChats.parentElement?.previousElementSibling?.tagName).toBe('HEADER');
-    expect(screen.getAllByText('New Chat')).toHaveLength(2);
+    expect(screen.getAllByText(/^New chat$/i)).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: 'Start new agent' }));
     await waitFor(() => {

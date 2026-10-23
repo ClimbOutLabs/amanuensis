@@ -1,95 +1,71 @@
 'use client';
 
-import { useEffect, useState, type FC, type ReactNode } from 'react';
+import { type FC, type ReactNode } from 'react';
 
-import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { Icon } from '../icons/Icon.js';
-import { useOptionalScheduleServer } from '../server/ServerContext.js';
 import { useOptionalShellMode, type SettingsSection } from '../server/ShellModeContext.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 
-/** Where a setup line sends the person: a Settings section, or the schedules list. */
-export type FirstRunTarget = { kind: 'settings'; section: SettingsSection } | { kind: 'schedules' };
+/** Where a setup line sends the person: a Settings section. */
+export type FirstRunTarget = { kind: 'settings'; section: SettingsSection };
 
 export type SetupItem = {
-  key: 'name' | 'google' | 'brief';
+  key: 'model' | 'about-you' | 'first-chat';
   label: string;
   done: boolean;
   /** What a finished line says on its right. */
   doneValue: string;
-  /** The one action an open line offers. */
-  verb: string;
-  target: FirstRunTarget;
+  /** The one action an open line offers; a line without one only says what is left. */
+  action?: { label: string; target: FirstRunTarget };
 };
 
+function hasText(value: string | null | undefined): value is string {
+  return value !== null && value !== undefined && value.trim() !== '';
+}
+
 /**
- * The three setup lines, read from real state so they tick themselves off. The morning brief line
- * is done once any schedule exists, since that is where its time is saved.
+ * The setup lines, computed from real state so they tick themselves off. The first-chat line is
+ * listed only when the host knows whether a chat has started.
  */
-export function setupTicketItems(input: {
-  assistantName: string | null | undefined;
-  googleReady: boolean;
-  scheduleCount: number;
+export function setupTicketItems({
+  assistantName,
+  modelName,
+  userName,
+  hasChatted,
+}: {
+  assistantName: string;
+  modelName: string | null | undefined;
+  /** The profile's user name; undefined while the profile is still loading. */
+  userName: string | null | undefined;
+  hasChatted: boolean | undefined;
 }): SetupItem[] {
-  const name = input.assistantName?.trim() ?? '';
-  return [
+  const items: SetupItem[] = [
     {
-      key: 'name',
-      label: 'Pick a name',
-      done: name !== '',
-      doneValue: name,
-      verb: 'Pick',
-      target: { kind: 'settings', section: 'personalization' },
+      key: 'model',
+      label: 'Add a model',
+      done: hasText(modelName),
+      doneValue: modelName?.trim() ?? '',
+      action: { label: 'Choose a model', target: { kind: 'settings', section: 'models' } },
     },
     {
-      key: 'google',
-      label: 'Connect Gmail and Calendar',
-      done: input.googleReady,
-      doneValue: 'Connected',
-      verb: 'Connect',
-      target: { kind: 'settings', section: 'connectors' },
-    },
-    {
-      key: 'brief',
-      label: 'Choose when the morning brief arrives',
-      done: input.scheduleCount > 0,
-      doneValue: 'Set',
-      verb: 'Pick a time',
-      target: { kind: 'schedules' },
+      key: 'about-you',
+      label: `Tell ${assistantName} about you`,
+      done: hasText(userName),
+      doneValue: userName?.trim() ?? '',
+      action: { label: 'Open Personalization', target: { kind: 'settings', section: 'personalization' } },
     },
   ];
+  if (hasChatted !== undefined) {
+    items.push({ key: 'first-chat', label: 'Try your first chat', done: hasChatted, doneValue: 'Started' });
+  }
+  return items;
 }
 
 /** Whether the setup ticket is on screen: the owner has not skipped it, and it still has a line to do. */
 export function isSetupTicketVisible(setup: { firstRunGuide?: { dismissed: boolean } } | null): boolean {
   return setup !== null && setup.firstRunGuide?.dismissed !== true;
-}
-
-/**
- * How many scheduled runs the person has set up, read from the first page of the schedules list.
- * A failed read keeps the last count, so the ticket never flips back because the schedules server is slow.
- */
-function useScheduleCount(): number {
-  const schedules = useOptionalScheduleServer();
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (schedules === null) return;
-    let cancelled = false;
-    schedules
-      .listSchedules()
-      .then(page => {
-        if (!cancelled) setCount(page.data.length);
-      })
-      .catch(() => {
-        /* Keep the last count. */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [schedules]);
-  return count;
 }
 
 /**
@@ -107,22 +83,12 @@ const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | undefine
     'cursor-pointer appearance-none border-0 bg-transparent p-0 font-[inherit] text-[0.8125rem] text-gold-ink underline underline-offset-2';
   if (shell !== null) {
     return (
-      <button
-        type="button"
-        className={className}
-        onClick={() => {
-          if (target.kind === 'settings') {
-            shell.setSettingsOpen(true, target.section);
-          } else {
-            shell.setSchedulesOpen(true);
-          }
-        }}
-      >
+      <button type="button" className={className} onClick={() => shell.setSettingsOpen(true, target.section)}>
         {children}
       </button>
     );
   }
-  if (target.kind === 'settings' && settingsHref !== undefined) {
+  if (settingsHref !== undefined) {
     return (
       <a className={className} href={settingsHref}>
         {children}
@@ -139,8 +105,6 @@ const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | undefine
 export const AmanSetupTicket: FC = () => {
   const setup = useOptionalAmanSetup();
   const personalization = useOptionalPersonalization();
-  const granted = useGrantedGoogleFeatures();
-  const scheduleCount = useScheduleCount();
   if (!isSetupTicketVisible(setup) || setup === null) {
     return null;
   }
@@ -150,9 +114,10 @@ export const AmanSetupTicket: FC = () => {
   }
   const assistant = assistantDisplayName(personalization?.profile?.assistant_name);
   const items = setupTicketItems({
-    assistantName: personalization?.profile?.assistant_name,
-    googleReady: granted !== null && granted.includes('gmail_read') && granted.includes('calendar_read'),
-    scheduleCount,
+    assistantName: assistant,
+    modelName: setup.modelName,
+    userName: personalization?.profile?.user_name,
+    hasChatted: setup.hasChatted,
   });
   const doneCount = items.filter(item => item.done).length;
   if (doneCount === items.length) {
@@ -168,7 +133,9 @@ export const AmanSetupTicket: FC = () => {
         <h2 id="aman-setup-ticket-heading" className="aui-face-serif m-0 text-[0.9375rem] font-normal">
           Set up {assistant}
         </h2>
-        <p className="m-0 text-[0.8125rem] text-text-secondary">{doneCount} of 3 done</p>
+        <p className="m-0 text-[0.8125rem] text-text-secondary">
+          {doneCount} of {items.length} done
+        </p>
       </header>
       <ol className="m-0 flex list-none flex-col p-0">
         {items.map((item, index) => (
@@ -190,11 +157,13 @@ export const AmanSetupTicket: FC = () => {
                   aria-hidden="true"
                 />
                 <span className="text-text-primary">{item.label}</span>
-                <span className="ml-auto">
-                  <FirstRunLink target={item.target} settingsHref={setup.settingsHref}>
-                    {item.verb}
-                  </FirstRunLink>
-                </span>
+                {item.action === undefined ? null : (
+                  <span className="ml-auto">
+                    <FirstRunLink target={item.action.target} settingsHref={setup.settingsHref}>
+                      {item.action.label}
+                    </FirstRunLink>
+                  </span>
+                )}
               </>
             )}
           </li>

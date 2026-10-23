@@ -42,8 +42,9 @@ const railWidthClassName = 'w-20';
 
 const railActionButtonClassName = cn(sidebarRailButtonClassName, 'text-sidebar-text');
 
+/** The selected rail item: the soft fill the composer's open menu uses, not a solid block. */
 const railSelectedClassName =
-  'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text';
+  'bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
 
 function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; mode?: ShellMode }): boolean {
   return !overlayOpen && mode?.status === 'active' && !mode.isCreateAgent;
@@ -55,9 +56,8 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
  * in one scrolling flex column instead of two separately-boxed groups that can paint over
  * each other on a short viewport.
  *
- * Order is the everyday-user order: New Chat, Hide/Show recent chats, Spaces, Schedules,
- * Agents, Build Agent. Sessions lives with the footer actions in `ShellActions`, after
- * Settings.
+ * Order is the everyday-user order: New chat, Chats, Spaces, Schedules, Agents, Build agent.
+ * Sessions, Settings and the other footer actions live in `ShellActions`, below these.
  */
 function SidebarNavItems({
   showHistoryToggle = false,
@@ -125,7 +125,7 @@ function SidebarNavItems({
           onClick={handleNewChat}
         >
           <Icon name="square-pen" size={14} />
-          <span className="text-center">New Chat</span>
+          <span className="text-center">New chat</span>
         </button>
       ) : null}
       {showHistoryToggle ? (
@@ -143,8 +143,8 @@ function SidebarNavItems({
             onToggleHistoryCollapsed?.();
           }}
         >
-          <Icon name={historyCollapsed ? 'panel-left-open' : 'panel-left-close'} size={14} />
-          <span className="text-center">{historyToggleLabel}</span>
+          <Icon name="message-square-text" size={14} />
+          <span className="text-center">Chats</span>
         </button>
       ) : null}
       <SpacesButton compact />
@@ -163,7 +163,7 @@ function SidebarNavItems({
           onClick={handleNewAgent}
         >
           <Icon name="agent-2" size={14} />
-          <span className="text-center whitespace-nowrap">Build Agent</span>
+          <span className="text-center whitespace-nowrap">Build agent</span>
         </button>
       ) : null}
     </>

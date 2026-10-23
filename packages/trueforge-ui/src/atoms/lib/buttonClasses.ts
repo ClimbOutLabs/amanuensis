@@ -24,10 +24,16 @@ const baseClasses =
 /** Sidebar / rail nav control corner radius: 12px. */
 export const sidebarButtonRadiusClassName = 'rounded-[0.75rem]';
 
-/** Compact sidebar rail control: 66×54px → 4.125rem × 3.375rem. */
+/** Rail and Chats-column corner radius: the composer's 20px, so the left column reads as one family with it. */
+export const sidebarQuietRadiusClassName = 'rounded-[1.25rem]';
+
+/**
+ * Compact sidebar rail control: 4rem × 3.375rem, icon over a 12px secondary label. No box at rest;
+ * hover and the selected item use the soft fill tokens, not a heavy primary fill.
+ */
 export const sidebarRailButtonClassName = cn(
-  sidebarButtonRadiusClassName,
-  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 whitespace-normal px-0.5 text-[0.625rem] font-normal leading-tight !justify-center shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text [&_svg]:size-3.5',
+  sidebarQuietRadiusClassName,
+  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 whitespace-normal px-0.5 text-[0.75rem] font-normal leading-tight text-text-secondary !justify-center shadow-none hover:bg-ghost-button-hover hover:text-text-primary [&_svg]:size-3.5',
 );
 
 /** Shared Button / native `<button>` className helper (SDK utilities are layered). */

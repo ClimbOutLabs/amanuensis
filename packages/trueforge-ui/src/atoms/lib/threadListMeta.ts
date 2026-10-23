@@ -39,6 +39,69 @@ export function threadListIndicesByRecency({
     .map(row => row.index);
 }
 
+/** Indices of the threads whose title contains the query, ignoring case. A blank query keeps every index. */
+export function filterIndicesByTitle({
+  indices,
+  threadIds,
+  threadItems,
+  query,
+}: {
+  indices: readonly number[];
+  threadIds: readonly string[];
+  threadItems: readonly { id: string; remoteId?: string | null; title?: string | null }[];
+  query: string;
+}): number[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle === '') return [...indices];
+  const titleByKey = new Map<string, string>();
+  for (const item of threadItems) {
+    const title = item.title ?? '';
+    titleByKey.set(item.id, title);
+    if (item.remoteId != null) titleByKey.set(item.remoteId, title);
+  }
+  return indices.filter(index => {
+    const id = threadIds[index];
+    if (id === undefined) return false;
+    return (titleByKey.get(id) ?? '').toLocaleLowerCase().includes(needle);
+  });
+}
+
+/**
+ * Splits indices into threads used since local midnight and older ones. A thread with no message yet
+ * counts as today, the same way the recency sort treats it as newest.
+ */
+export function splitIndicesByDay({
+  indices,
+  threadIds,
+  threadItems,
+  now,
+}: {
+  indices: readonly number[];
+  threadIds: readonly string[];
+  threadItems: readonly { id: string; remoteId?: string | null; lastMessageAt?: Date | null }[];
+  now: Date;
+}): { today: number[]; earlier: number[] } {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const timeByKey = new Map<string, number>();
+  for (const item of threadItems) {
+    const t = item.lastMessageAt?.getTime() ?? Number.POSITIVE_INFINITY;
+    timeByKey.set(item.id, t);
+    if (item.remoteId != null) timeByKey.set(item.remoteId, t);
+  }
+  const today: number[] = [];
+  const earlier: number[] = [];
+  for (const index of indices) {
+    const id = threadIds[index];
+    const t = id === undefined ? 0 : (timeByKey.get(id) ?? 0);
+    if (t >= startOfToday) {
+      today.push(index);
+    } else {
+      earlier.push(index);
+    }
+  }
+  return { today, earlier };
+}
+
 export function readThreadAgentName(custom: unknown): string | undefined {
   if (custom == null || typeof custom !== 'object') return undefined;
   if (!('agentName' in custom)) return undefined;

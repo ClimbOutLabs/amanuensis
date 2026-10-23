@@ -62,7 +62,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
               hoverClass,
               labeled && sidebarRailButtonClassName,
               shell.settingsOpen &&
-                'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+                'bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
             ),
           })}
           onClick={() => shell.setSettingsOpen(true)}

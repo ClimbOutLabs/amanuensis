@@ -202,6 +202,24 @@ describe('SidebarLayout rail layout', () => {
     localStorage.clear();
   });
 
+  it('lists the destinations in order: New chat, Chats, Spaces, Agents, then Build agent', () => {
+    renderSidebarLayoutWithSpaces();
+
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const buttons = Array.from(nav.querySelectorAll('button'));
+    const labelOf = (button: HTMLButtonElement) =>
+      button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '';
+    // Schedules is off in this fixture; when it is on, it sits between Spaces and Agents.
+    const order = ['Start new chat', 'Hide recent chats', 'Spaces', 'Agents', 'Start new agent'];
+    const positions = order.map(label => buttons.findIndex(button => labelOf(button) === label));
+
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(buttons[0]).toBe(buttons.find(button => labelOf(button) === 'Start new chat'));
+    expect(within(buttons[positions[0] ?? 0] as HTMLElement).getByText('New chat')).toBeInTheDocument();
+    expect(within(buttons[positions[1] ?? 0] as HTMLElement).getByText('Chats')).toBeInTheDocument();
+  });
+
   it('renders every rail entry as a sibling of the next in one scrolling flex column, New Chat then toggle then Build Agent', () => {
     renderSidebarLayoutWithSpaces();
 

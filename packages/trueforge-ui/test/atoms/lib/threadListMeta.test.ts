@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canReuseMutableShell,
+  filterIndicesByTitle,
   formatRelativeShort,
   readThreadAgentName,
   readThreadIsMutable,
+  splitIndicesByDay,
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '@/atoms/lib/threadListMeta.js';
@@ -111,5 +113,49 @@ describe('canReuseMutableShell', () => {
         pendingSessionId: 'sess-a',
       }),
     ).toBe(true);
+  });
+});
+
+describe('splitIndicesByDay', () => {
+  // Local midnight is the boundary, so the test builds its dates in local time.
+  const now = new Date(2026, 9, 23, 14, 0, 0);
+  const threadIds = ['a', 'b', 'c', 'd'];
+  const threadItems = [
+    { id: 'a', lastMessageAt: new Date(2026, 9, 23, 9, 0, 0) },
+    { id: 'b', lastMessageAt: new Date(2026, 9, 22, 23, 59, 0) },
+    { id: 'c', lastMessageAt: null },
+    { id: 'd', lastMessageAt: new Date(2026, 9, 23, 0, 0, 0), remoteId: 'remote-d' },
+  ];
+
+  it('puts chats used since local midnight under today, and older ones under earlier', () => {
+    expect(splitIndicesByDay({ indices: [0, 1, 2, 3], threadIds, threadItems, now })).toEqual({
+      today: [0, 2, 3],
+      earlier: [1],
+    });
+  });
+
+  it('keeps the order of the indices it is given', () => {
+    expect(splitIndicesByDay({ indices: [3, 1, 0], threadIds, threadItems, now })).toEqual({
+      today: [3, 0],
+      earlier: [1],
+    });
+  });
+});
+
+describe('filterIndicesByTitle', () => {
+  const threadIds = ['a', 'b', 'c'];
+  const threadItems = [
+    { id: 'a', title: 'Plan the Trip' },
+    { id: 'b', title: 'Groceries' },
+    { id: 'c', title: null },
+  ];
+
+  it('keeps every index for a blank query', () => {
+    expect(filterIndicesByTitle({ indices: [0, 1, 2], threadIds, threadItems, query: '   ' })).toEqual([0, 1, 2]);
+  });
+
+  it('matches titles that contain the query, ignoring case', () => {
+    expect(filterIndicesByTitle({ indices: [0, 1, 2], threadIds, threadItems, query: 'trip' })).toEqual([0]);
+    expect(filterIndicesByTitle({ indices: [0, 1, 2], threadIds, threadItems, query: 'GROC' })).toEqual([1]);
   });
 });
