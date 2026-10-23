@@ -38,7 +38,6 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
@@ -183,7 +182,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -272,7 +270,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -494,7 +491,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -634,7 +630,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -741,7 +736,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -869,7 +863,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -963,7 +956,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,

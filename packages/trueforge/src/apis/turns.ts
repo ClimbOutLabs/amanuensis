@@ -5,7 +5,6 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type {
   ISessionStore,
   Sessions,
-  SessionTitleSeed,
   TerminalTurnState,
   Turn,
   TurnStreamingEvent,
@@ -63,7 +62,6 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -101,7 +99,6 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
-import { resolveSummarizationModelFqn } from '../runtime/memory/memorySummarize';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import {
@@ -140,7 +137,6 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import { applyAutoSessionTitle, truncateSessionTitle, type AutoSessionTitleTarget } from '../runtime/sessionTitle';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -157,7 +153,6 @@ import {
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { TENANT_ID } from '../tenancy';
 import { canReadAgentBoundResource } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
 
@@ -272,8 +267,6 @@ export interface TurnsRouterDeps {
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
   turnDrains: TurnDrainRegistry;
-  /** Offline mode gates the chat title call. */
-  sentinelSettingsStore: ISentinelSettingsStore;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
@@ -320,7 +313,6 @@ export type BeginTurnExecutionDeps = Pick<
   | 'globalSettingsStore'
   | 'mcpCatalog'
   | 'tokenFactoryBudget'
-  | 'sentinelSettingsStore'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -857,6 +849,29 @@ function createTurnResolver(deps: {
   );
 }
 
+const MAX_SESSION_TITLE_LENGTH = 50;
+
+/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
+const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
+ * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
+ * ZWJ sequences, which read as one unit but span several) are dropped whole.
+ */
+function truncateSessionTitle(title: string): string {
+  let truncated = '';
+  let length = 0;
+  for (const { segment } of titleSegmenter.segment(title)) {
+    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
+      break;
+    }
+    truncated += segment;
+    length += segment.length;
+  }
+  return truncated;
+}
+
 /**
  * Derives a session title from the first user message of the first turn. Returns the
  * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
@@ -887,77 +902,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/** A chat's first-message title, or null when the message has no usable text. */
-export function firstMessageTitleSeed(input: TurnInputItem[] | undefined): SessionTitleSeed | null {
-  const title = deriveSessionTitle(input);
-  return title === undefined ? null : { title, source: 'first_message' };
-}
-
-/**
- * The chat-title target for a turn: present only for a chat's first interactive turn with a
- * text message, when the chat is online and a helper model resolves. Scheduled turns never get a
- * generated title; their fixed title is seeded at create time instead.
- */
-async function resolveAutoSessionTitleTarget(params: {
-  session: SessionHandle<SessionCustom, TurnCustom>;
-  input: TurnInputItem[] | undefined;
-  unattended: boolean | undefined;
-  subjectId: string;
-  personaModelName: string | undefined;
-  modelProviderStore: IModelProviderStore;
-  agentStore: IAgentStore;
-  sentinelSettingsStore: ISentinelSettingsStore;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
-  tokenFactoryBudget: TokenFactoryBudget;
-  modelUsage: TurnModelUsage;
-  logger: Logger;
-}): Promise<AutoSessionTitleTarget | undefined> {
-  const { session, input, unattended, subjectId, logger } = params;
-  if (unattended === true || session.record.source !== null || session.record.last_turn_id !== null) {
-    return undefined;
-  }
-  const userText = extractUserMessageText(input ?? []);
-  if (userText.trim() === '') {
-    return undefined;
-  }
-  // A failed lookup only costs the chat its generated title; the turn itself must still run.
-  let modelFqn: string | undefined;
-  try {
-    const sentinel = await params.sentinelSettingsStore.get({ tenant_id: TENANT_ID, created_by: subjectId });
-    if (sentinel.offline_mode) {
-      logger.info('Chat title not generated: offline mode is on', { sessionId: session.session_id });
-      return undefined;
-    }
-    modelFqn = await resolveSummarizationModelFqn({
-      tenantId: session.tenant_id,
-      personaModelName: params.personaModelName,
-      sessionAgent: session.record.agent,
-      agentStore: params.agentStore,
-      helperFqn: turnHelperModelFqn(),
-    });
-  } catch (error) {
-    logger.info('Chat title not generated: the helper model did not resolve', {
-      sessionId: session.session_id,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
-  if (modelFqn === undefined || modelFqn.trim() === '') {
-    return undefined;
-  }
-  return {
-    store: params.sessionStore,
-    tenantId: session.tenant_id,
-    sessionId: session.session_id,
-    userText,
-    modelFqn,
-    modelProviderStore: params.modelProviderStore,
-    tokenFactoryBudget: params.tokenFactoryBudget,
-    modelUsage: params.modelUsage,
-    logger,
-  };
 }
 
 /** True when any user message in a create-turn input carries an attached file. */
@@ -1180,8 +1124,6 @@ export interface DrainTurnEventsInput {
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
   modelUsage?: ModelUsageDrainMember | undefined;
-  /** Present only for a chat's first interactive turn; the drain names the chat after its reply. */
-  auto_title?: AutoSessionTitleTarget | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
@@ -1290,7 +1232,7 @@ async function runTurnEventDrain(params: {
 }
 
 /**
- * The work a finished turn does after its answer: artifacts, usage, title, memory, profile learning.
+ * The work a finished turn does after its answer: artifacts, usage, memory, profile learning.
  * Never throws; a failure is logged.
  */
 async function runTurnFollowUp(params: {
@@ -1300,8 +1242,7 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, auto_title } =
-    input;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1325,13 +1266,6 @@ async function runTurnFollowUp(params: {
       }
     };
     await flushUsage();
-    if (auto_title !== undefined) {
-      // Never blocks the reply: the reply is already complete on the stream.
-      await applyAutoSessionTitle({
-        ...auto_title,
-        assistantText: formatAssistantMessageText(state.output?.content),
-      });
-    }
     if (memory !== undefined) {
       // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
@@ -1367,7 +1301,7 @@ async function runTurnFollowUp(params: {
         logger,
       });
     }
-    // The title, summarization and profile learning calls above record after the first flush.
+    // The summarization and profile learning calls above record after the first flush.
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
@@ -1541,7 +1475,6 @@ export interface TurnEventDrainInput {
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
-  auto_title?: AutoSessionTitleTarget | undefined;
 }
 
 /**
@@ -1556,8 +1489,6 @@ export async function beginTurnExecution(params: {
   deps: BeginTurnExecutionDeps;
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
-  /** A scheduled chat's fixed title; interactive chats use their first message. */
-  title_seed?: SessionTitleSeed | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1672,10 +1603,9 @@ async function beginAcceptedTurnExecution(
         modelUsage,
       });
 
-      // First turn only: a scheduled chat's fixed title, else the first message. The store
+      // First turn only: derive the title from the first user message. The store
       // never overwrites an existing title.
-      const titleSeed =
-        session.record.last_turn_id === null ? (params.title_seed ?? firstMessageTitleSeed(input)) : null;
+      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
 
       const turn = await session.createTurn({
         turn_id: turnId,
@@ -1684,7 +1614,7 @@ async function beginAcceptedTurnExecution(
         signal: abortController.signal,
         resolver,
         custom: { library_near_miss: internalSources.libraryNearMiss },
-        update_session_title_if_not_exist: titleSeed,
+        update_session_title_if_not_exist: title,
         on_command_execution_started: execution => {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
@@ -1723,20 +1653,6 @@ async function beginAcceptedTurnExecution(
       sessionId,
     }),
   );
-  const autoTitle = await resolveAutoSessionTitleTarget({
-    session,
-    input,
-    unattended: params.unattended,
-    subjectId: userRef,
-    personaModelName: deps.personaContext?.model_name,
-    modelProviderStore: deps.modelProviderStore,
-    agentStore: deps.agentStore,
-    sentinelSettingsStore: deps.sentinelSettingsStore,
-    sessionStore: deps.sessionStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    logger: deps.logger,
-  });
 
   return {
     turn,
@@ -1750,7 +1666,6 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-      auto_title: autoTitle,
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1776,7 +1691,6 @@ export async function startTurnInProcess(params: {
   userRef: string;
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
-  title_seed?: SessionTitleSeed | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2602,7 +2516,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
     // First turn only: derive the title from the first user message. The store
     // never overwrites an existing title.
-    const titleSeed = session.record.last_turn_id === null ? firstMessageTitleSeed(body.input) : null;
+    const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
@@ -2631,7 +2545,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         signal: abortController.signal,
         resolver,
         custom: turnCustom,
-        update_session_title_if_not_exist: titleSeed,
+        update_session_title_if_not_exist: title,
         on_command_execution_started: execution => {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
@@ -2898,20 +2812,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             sessionId,
           }),
         );
-        const autoTitle = await resolveAutoSessionTitleTarget({
-          session,
-          input: body.input,
-          unattended: undefined,
-          subjectId: requestContext.subject.id,
-          personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-          modelProviderStore,
-          agentStore,
-          sentinelSettingsStore: deps.sentinelSettingsStore,
-          sessionStore: deps.sessionStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          modelUsage,
-          logger: deps.logger,
-        });
         const drainInput = {
           trackedStream,
           turnEventStream,
@@ -2922,7 +2822,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-          auto_title: autoTitle,
           memory:
             memoryClient === undefined
               ? undefined

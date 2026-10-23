@@ -23,7 +23,7 @@ import type { SessionRecord } from '../models/SessionRecord';
 import type { TurnRecord } from '../models/TurnRecord';
 import type { PersistedTurnEvent, SessionEventItem, TurnDoneEvent } from '../schemas/events';
 import type { TokenPagination } from '../schemas/pagination';
-import type { SessionMetadata, SessionMetrics, SessionTitleSource } from '../schemas/session';
+import type { SessionMetadata, SessionMetrics } from '../schemas/session';
 import type { TaskChecklist, TaskChecklistItem } from '../schemas/taskChecklist';
 import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
@@ -37,22 +37,6 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
 > & {
   custom: TSessionCustom | null;
 };
-
-/**
- * A title written when a chat's first turn is created. Only applied while the chat has no title.
- * `source` records who the title came from: `first_message` for a chat's first message, `auto`
- * for a fixed schedule title, `person` for an imported title.
- */
-export interface SessionTitleSeed {
-  title: string;
-  source: SessionTitleSource;
-}
-
-export interface SetGeneratedSessionTitleInput {
-  tenant_id: string;
-  session_id: string;
-  title: string;
-}
 
 export interface SetPrivateFingerprintsInput {
   session_id: string;
@@ -298,7 +282,7 @@ export interface CreateTurnInput<TTurnCustom extends object = Record<string, nev
   /** Complete host-owned task-state scratchpads for all resulting threads. */
   task_states: ThreadTaskStateInit[];
   /** Set only if session.title is NULL (first write wins). */
-  update_session_title_if_not_exist: SessionTitleSeed | null;
+  update_session_title_if_not_exist: string | null;
 }
 
 export interface FreezeAndGetTurnInput {
@@ -558,18 +542,11 @@ export interface ISessionStore<
   /**
    * PATCH semantics — update only the provided fields:
    * - agent: replace inline binding (inline sessions only; reference → invariant error).
-   * - title: set/replace the session title. A title set here is a person's choice (`person`).
+   * - title: set/replace the session title.
    * - metadata: full replace of the caller-owned string map when set.
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
-
-  /**
-   * Replaces the title with the generated one, only while the title is still the first-message
-   * title. Returns false (and changes nothing) for a person's title, an auto title, or a chat
-   * with no tracked title. Does not bump session activity.
-   */
-  setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean>;
 
   /**
    * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
@@ -644,7 +621,7 @@ export interface ISessionStore<
    * `last_turn_id` always advances to the new turn in the same atomic unit.
    *
    * `update_session_title_if_not_exist`: when set AND `session.title` is
-   * unset/null, set it (and its `title_source`) in the same atomic unit; an existing title is NEVER
+   * unset/null, set it in the same atomic unit; an existing title is NEVER
    * overwritten (first write wins). The caller derives the value; the store
    * only conditionally sets it.
    */

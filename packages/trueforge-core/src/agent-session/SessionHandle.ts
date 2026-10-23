@@ -69,7 +69,6 @@ import { CancellationReason } from './schemas/turn';
 import type {
   ISessionStore,
   NewThreadInit,
-  SessionTitleSeed,
   ThreadTaskStateInit,
   ThreadToolCallMemoInit,
   TurnContextAppend,
@@ -420,7 +419,7 @@ export class SessionHandle<
      * unit IF the session has none; never overwrites. The caller derives the
      * value (e.g. from the first user message) — the library does not.
      */
-    update_session_title_if_not_exist?: SessionTitleSeed | null | undefined;
+    update_session_title_if_not_exist?: string | undefined;
     /** Called only after a registered command's durable start record commits. */
     on_command_execution_started?: ((execution: RegisteredCommandExecution) => void) | undefined;
     /** Durable owner written on registered-command leases (replica id in distributed mode). */
