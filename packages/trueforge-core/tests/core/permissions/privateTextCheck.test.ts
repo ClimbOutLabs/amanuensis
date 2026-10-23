@@ -3,6 +3,7 @@ import {
   ChatPrivateFingerprintsSchema,
   fingerprintLeak,
   fingerprintsOf,
+  hasEncodedText,
   privateTextLeak,
 } from '../../../src/core/permissions/privateTextCheck';
 
@@ -615,5 +616,27 @@ describe('the People line of recalled memory', () => {
     expect(leak('Wilhelmina Thrupp')).toBe('name');
     expect(leak('ana reis clinic')).toBe('name');
     expect(leak('your cousin gift ideas')).toBeNull();
+  });
+});
+
+describe('hasEncodedText', () => {
+  it.each([
+    ['a base64 body', Buffer.from('Tenant: Ottilie Vanbrugh-Carrow, flat 4.').toString('base64')],
+    ['short padded base64', `Name: ${Buffer.from('Ottilie').toString('base64')}`],
+    ['a quoted-printable escape', 'Tenant: Ottil=C3=A9 Vanbrugh'],
+    ['a quoted-printable soft break', 'Tenant: Otti=\r\nlie Vanbrugh-Carrow'],
+    ['a unicode escape', 'Tenant: \\u004Fttilie'],
+    ['a hex escape', 'Tenant: \\x4Fttilie'],
+    ['a numeric character reference', 'Tenant: &#79;ttilie'],
+    ['a numeric character reference without its semicolon', 'Tenant: &#79ttilie'],
+    ['a hex character reference', 'Tenant: &#x4F;ttilie'],
+    ['a named character reference', 'Tenant: &Oacute;ttilie'],
+  ])('flags %s', (_label, text) => {
+    expect(hasEncodedText(text)).toBe(true);
+  });
+
+  it('passes ordinary text and an ordinary CSV', () => {
+    expect(hasEncodedText('name,share\nA,50% now')).toBe(false);
+    expect(hasEncodedText('Tenant: Ottilie Vanbrugh-Carrow. Rent is due on the 1st, call 020 7946 0958.')).toBe(false);
   });
 });

@@ -248,6 +248,30 @@ function isEncodedToken(token: string): boolean {
   return /\d/.test(token) || (/^[A-Za-z]+$/.test(token) && !looksLikeWord(token));
 }
 
+/**
+ * Escapes and character references a reader decodes into other letters: quoted-printable escapes and soft line
+ * breaks, `\u` and `\x` escapes, numeric and named character references, and short padded base64. Percent escapes
+ * are left out, since the fingerprints already read them decoded.
+ */
+const ENCODED_ESCAPE =
+  /=[0-9A-F]{2}|=\r?\n|\\u\{?[0-9A-Fa-f]{2,6}|\\x[0-9A-Fa-f]{2}|&#(?:[0-9]+|[xX][0-9A-Fa-f]+)|&[A-Za-z][A-Za-z0-9]{1,31};|(?<![A-Za-z0-9+/])(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)(?![A-Za-z0-9+/=])/;
+
+/**
+ * Whether the text holds any run written in an encoding, so the words a reader decodes from it are not its bytes and
+ * fingerprints of it would miss them.
+ */
+export function hasEncodedText(text: string): boolean {
+  if (ENCODED_ESCAPE.test(text)) {
+    return true;
+  }
+  for (const match of text.matchAll(ENCODED_TOKEN)) {
+    if (isEncodedToken(match[0])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function digestOf(input: { kind: PrivateFingerprint['kind']; value: string }): string {
   // Hashed with the kind, so a digit run and a phone number that read the same are told apart.
   return createHash('sha256').update(`${input.kind}\u0000${input.value}`).digest('hex').slice(0, 32);

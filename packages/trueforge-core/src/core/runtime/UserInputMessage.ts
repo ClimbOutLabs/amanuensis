@@ -14,6 +14,7 @@ import {
   type UserContentPart,
 } from '../events/schema';
 import type { LLMUserMessage } from '../llm/LLMTypes';
+import { hasEncodedText } from '../permissions/privateTextCheck';
 import type { AttachedFileContent } from '../permissions/webSearch';
 import { SandboxFileUploadError, type Sandbox, type SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentSendInput } from './AgentThread.types';
@@ -131,7 +132,10 @@ export function uploadedFilesCount(text: string): number {
  */
 const TEXT_FILE_EXTENSIONS = new Set(['.txt', '.csv', '.tsv', '.md', '.markdown', '.log']);
 
-/** The text of an attached file that is plain UTF-8 text, or undefined for any other file. */
+/**
+ * The text of an attached file that is plain UTF-8 text, or undefined for any other file. A plain-text name can still
+ * hold encoded text, so a file with any encoded run counts as unreadable too.
+ */
 function attachedPlainText(file: { filename: string; bytes: Buffer }): string | undefined {
   if (!TEXT_FILE_EXTENSIONS.has(extname(file.filename).toLowerCase())) {
     return undefined;
@@ -142,7 +146,7 @@ function attachedPlainText(file: { filename: string; bytes: Buffer }): string | 
   } catch {
     return undefined;
   }
-  return text.includes('\u0000') ? undefined : text;
+  return text.includes('\u0000') || hasEncodedText(text) ? undefined : text;
 }
 
 function buildUploadedFilesAnnouncement(

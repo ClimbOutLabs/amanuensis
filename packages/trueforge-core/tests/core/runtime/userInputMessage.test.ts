@@ -420,6 +420,34 @@ describe('processAgentUserInput reports what it could read of each attached file
     expect(processed.attachedFiles).toEqual([{ kind: 'unreadable' }, { kind: 'unreadable' }, { kind: 'unreadable' }]);
   });
 
+  it('calls a plain-text file unreadable when its text is encoded', async () => {
+    const localSandbox = makeStubPublicSandbox();
+    jest
+      .spyOn(localSandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
+    const mail = `Content-Transfer-Encoding: base64\r\n\r\n${Buffer.from('Tenant: Jane Smith, flat 4').toString('base64')}`;
+    const msg: AgentInputUserMessage = {
+      type: EventType.USER_MESSAGE,
+      content: [
+        { type: 'file', name: 'lease.eml.txt', data: asData('text/plain', mail) } satisfies FileContentPart,
+        {
+          type: 'file',
+          name: 'lease.txt',
+          data: asData('text/plain', 'Tenant: Ja=\r\nne Smith'),
+        } satisfies FileContentPart,
+        {
+          type: 'file',
+          name: 'lease.md',
+          data: asData('text/markdown', 'Tenant: &#74;ane Smith'),
+        } satisfies FileContentPart,
+      ],
+    };
+
+    const processed = await processAgentUserInput(msg, localSandbox);
+
+    expect(processed.attachedFiles).toEqual([{ kind: 'unreadable' }, { kind: 'unreadable' }, { kind: 'unreadable' }]);
+  });
+
   it('calls an image the model reads itself unreadable', async () => {
     const msg: AgentInputUserMessage = {
       type: EventType.USER_MESSAGE,

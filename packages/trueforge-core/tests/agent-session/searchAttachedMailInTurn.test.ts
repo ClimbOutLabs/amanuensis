@@ -21,7 +21,10 @@ const MAIL = [
 ].join('\r\n');
 
 describe('a mail attached through the upload path', () => {
-  it('asks before a search for a name in its encoded body', async () => {
+  it.each([
+    ['lease.eml', 'message/rfc822'],
+    ['lease.txt', 'text/plain'],
+  ])('asks before a search for a name in the encoded body of %s', async (name, mime) => {
     const sandbox = makeStubPublicSandbox();
     jest
       .spyOn(sandbox, 'uploadUserFile')
@@ -38,8 +41,8 @@ describe('a mail attached through the upload path', () => {
             { type: 'text', text: 'Who is the tenant?' },
             {
               type: 'file',
-              name: 'lease.eml',
-              data: `data:message/rfc822;base64,${Buffer.from(MAIL).toString('base64')}`,
+              name,
+              data: `data:${mime};base64,${Buffer.from(MAIL).toString('base64')}`,
             },
           ],
         },
