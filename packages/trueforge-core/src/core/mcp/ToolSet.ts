@@ -80,8 +80,14 @@ export function deniedToolCallText(reason: string | undefined): string {
   if (isApprovalExpiredReason(reason)) {
     return JSON.stringify({ error: APPROVAL_EXPIRED_RESULT });
   }
-  return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+  const said = reason === undefined ? DENIED_SAID : `${DENIED_SAID} Their reason: ${reason}.`;
+  return JSON.stringify({ error: `${said} ${DENIED_NEXT_STEP}` });
 }
+
+// Firm on purpose: a small model reads a bare "denied" as "try another wording".
+const DENIED_SAID = 'The person said no to this.';
+const DENIED_NEXT_STEP =
+  'Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.';
 
 /** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
 export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {

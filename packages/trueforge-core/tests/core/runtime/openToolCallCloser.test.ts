@@ -1,5 +1,6 @@
 import { EventType, type AgentApprovalDecisionMessage, type ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall } from '../../../src/core/llm/LLMTypes';
+import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils';
 import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
@@ -135,9 +136,7 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
       decisionFor('tc-approval', { status: 'deny', reason: 'not this repo' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(
-      new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: not this repo' })]]),
-    );
+    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-approval', deniedToolCallText('not this repo')]]));
   });
 
   it('closes a denied approval call with no reason using the shared fallback wording', () => {
@@ -145,9 +144,7 @@ describe('getClosableOpenToolCalls', () => {
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
       decisionFor('tc-approval', { status: 'deny' }),
     ];
-    expect(getClosableOpenToolCalls(context)).toEqual(
-      new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: no reason provided' })]]),
-    );
+    expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-approval', deniedToolCallText(undefined)]]));
   });
 
   it('keeps a decided call closed out once its tool response exists', () => {

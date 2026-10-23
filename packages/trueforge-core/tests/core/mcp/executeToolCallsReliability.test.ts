@@ -990,10 +990,10 @@ describe('turn-scoped tool-call reliability', () => {
     expect(memoState.repeatedDeniedApproval).toBe(true);
     expect(result.toolCallResults[0]).toMatchObject({
       failure: true,
-      disposition: 'policy_blocked',
-      remediation: { reason_code: 'repeated_denied_action', suggested_action: 'change_strategy' },
+      disposition: 'denied',
+      remediation: { reason_code: 'repeated_denied_action', suggested_action: 'contact_user' },
     });
-    expect(result.toolCallResults[0]?.message.content).toContain('already denied');
+    expect(result.toolCallResults[0]?.message.content).toContain('Do not try it again');
   });
 
   it('records a current user denial separately from a policy block', async () => {
