@@ -6,9 +6,8 @@ import { cn } from '../atoms/lib/cn.js';
 import { groupRecentChats, RECENT_CHATS_PAGE_SIZE, visibleChats } from '../atoms/lib/threadListMeta.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders } from '../server/ChatFolderContext.js';
+import { useChatColumnFold } from '../utils/chatColumnFolds.js';
 import { ChatFolderSection } from './ChatFolderControls.js';
-
-const groupHeadingClass = 'm-0 px-2.5 pt-2 pb-1 text-[0.75rem] font-normal text-text-secondary';
 
 /** What the groups need to know about one chat; `time` is its last use, `folderId` its live folder. */
 export type RecentChat = { key: string; time: number; folderId: string | undefined };
@@ -41,27 +40,33 @@ function LimitedChatRows<T extends RecentChat>({
   );
 }
 
-/** The Earlier group. It starts closed; its heading is the toggle. */
-export function EarlierChats<T extends RecentChat>({
+/** A dated group of chats whose heading folds it. The fold is remembered across screens and reloads. */
+export function FoldedChatGroup<T extends RecentChat>({
+  section,
+  label,
+  defaultOpen,
   chats,
   openKey,
   renderRow,
 }: {
+  section: string;
+  label: string;
+  defaultOpen: boolean;
   chats: readonly T[];
   openKey: string | undefined;
   renderRow: (chat: T) => ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, toggle] = useChatColumnFold({ section, defaultOpen });
   return (
-    <section aria-label="Earlier chats">
+    <section aria-label={`${label} chats`}>
       <button
         type="button"
         aria-expanded={expanded}
         className="flex w-full items-center gap-1 border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-[0.75rem] font-normal text-text-secondary hover:text-text-primary"
-        onClick={() => setExpanded(value => !value)}
+        onClick={toggle}
       >
         <Icon name="chevron-down" className={cn('size-3 shrink-0 transition-transform', !expanded && '-rotate-90')} />
-        Earlier
+        {label}
       </button>
       {expanded ? <LimitedChatRows chats={chats} openKey={openKey} renderRow={renderRow} /> : null}
     </section>
@@ -98,13 +103,24 @@ export function RecentChatsGroups<T extends RecentChat>({
         );
       })}
       {grouped.today.length > 0 ? (
-        <>
-          <h3 className={groupHeadingClass}>Today</h3>
-          <LimitedChatRows chats={grouped.today} openKey={openKey} renderRow={renderRow} />
-        </>
+        <FoldedChatGroup
+          section="today"
+          label="Today"
+          defaultOpen
+          chats={grouped.today}
+          openKey={openKey}
+          renderRow={renderRow}
+        />
       ) : null}
       {grouped.earlier.length > 0 ? (
-        <EarlierChats chats={grouped.earlier} openKey={openKey} renderRow={renderRow} />
+        <FoldedChatGroup
+          section="earlier"
+          label="Earlier"
+          defaultOpen={false}
+          chats={grouped.earlier}
+          openKey={openKey}
+          renderRow={renderRow}
+        />
       ) : null}
     </>
   );

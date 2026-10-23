@@ -15,6 +15,7 @@ import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
 import { CHAT_TITLE_MAX_LENGTH, normalizeChatTitle, useSaveChatTitle } from '../hooks/useChatTitleSave.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
+import { useChatColumnFold } from '../utils/chatColumnFolds.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
 /** Escape cancels without saving in every inline rename/create form below. */
@@ -608,7 +609,7 @@ export function ChatFolderSection({
   count: number;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, toggleExpanded] = useChatColumnFold({ section: `folder:${folder.id}`, defaultOpen: true });
   const [manageOpen, setManageOpen] = useState(false);
   return (
     <section aria-label={folder.name} className="mt-1">
@@ -617,7 +618,7 @@ export function ChatFolderSection({
           type="button"
           aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
-          onClick={() => setExpanded(value => !value)}
+          onClick={toggleExpanded}
         >
           <Icon name="chevron-down" className={cn('size-3 transition-transform', !expanded && '-rotate-90')} />
           <Icon name="folder" className="size-3.5" />
