@@ -800,7 +800,7 @@ describe('SidebarLayout', () => {
     );
     openRailMenu();
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ })).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
   });
 });
 
