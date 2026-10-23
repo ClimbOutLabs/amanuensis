@@ -75,6 +75,8 @@ function stoppedTurnText(reason: string): string {
       return 'Stopped. This reply ran past its time limit.';
     case 'abandoned':
       return 'Stopped. The app restarted while this reply was running.';
+    case 'could-not-start':
+      return 'Stopped. This reply could not start.';
     default:
       return 'Stopped.';
   }
