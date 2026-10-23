@@ -401,7 +401,7 @@ describe('ThemeProvider', () => {
     );
 
     expect(screen.getByTestId('mode')).toHaveTextContent('light');
-    expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Appearance' })).toBeInTheDocument();
   });
 
   it('lets a stored preference win over defaultMode', () => {

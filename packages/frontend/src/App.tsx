@@ -96,7 +96,6 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
-  defaultMode: 'light',
   webFonts: false,
   brand: {
     mode: 'icon-title',

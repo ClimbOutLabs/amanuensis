@@ -286,7 +286,8 @@ describe('SidebarLayout More menu', () => {
       .map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '');
 
     // Report a bug renders only when the bug-report feature is wired, as it does on main.
-    expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Switch to dark theme', 'Settings']));
+    expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Settings']));
+    expect(within(menu).getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
     for (const railItem of ['Start new chat', 'Hide recent chats', 'Spaces', 'Agents']) {
       expect(names).not.toContain(railItem);
     }
