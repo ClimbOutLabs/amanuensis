@@ -117,6 +117,9 @@ function sentinelApi(readSavedCards: () => Promise<SentinelSessionContext>): Sen
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings: vi.fn(async () => settings),
     listSentinelSessionContext: vi.fn(readSavedCards),
+    listBriefItemCompletions: vi.fn(async () => []),
+    markBriefItemDone: vi.fn(async () => undefined),
+    unmarkBriefItemDone: vi.fn(async () => undefined),
   };
 }
 

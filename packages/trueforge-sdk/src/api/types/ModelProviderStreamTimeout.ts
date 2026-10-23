@@ -4,8 +4,8 @@
  * Optional per-provider override of the server-wide stream progress deadlines.
  */
 export interface ModelProviderStreamTimeout {
-    /** Milliseconds to wait between substantive stream chunks before aborting. Default: 60000. */
+    /** Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it). */
     chunkMs?: number;
-    /** Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000. */
+    /** Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it). */
     firstChunkMs?: number;
 }

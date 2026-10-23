@@ -39,6 +39,8 @@
     --font-display:
       'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-receipt: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Display titles only. Newsreader is bundled in fonts.css. */
+    --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
     /* Each palette colour is a hex line, then the same colour in oklch(); engines that read oklch() take the second. */
     --sidebar-bg: #efe7d8;
     --sidebar-bg: oklch(0.93 0.022 83.3);
@@ -652,6 +654,7 @@
  * Tailwind v4 `@theme inline` registrations.
  * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
+  --font-serif: var(--font-serif);
   --color-sidebar-bg: var(--sidebar-bg);
   --color-topbar-bg: var(--topbar-bg);
   --color-primary-bg: var(--primary-bg);
@@ -1541,6 +1544,61 @@
   --paper-top: oklch(0.26 0.032 85.2);
 }
 
+/* The morning brief's one card: the ticket face with hairlines inside, no punch, stub or texture. */
+.aui-brief-card {
+  background-color: var(--card-bg);
+  background-image: none;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.0625rem 0.125rem rgb(70 50 20 / 0.1);
+  color: var(--text-primary);
+}
+
+.aui-theme-root.dark .aui-brief-card {
+  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
+}
+
+/* A quiet text action in the accent ink. Resets native button chrome so it looks the same with or without preflight. */
+.aui-brief-action {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--gold-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Where a brief item came from: a small quiet label, not part of the sentence. */
+.aui-brief-source {
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0 0.3125rem;
+  font-size: var(--text-xs);
+  line-height: 1.125rem;
+  color: var(--text-secondary);
+}
+
+.aui-brief-action:hover,
+.aui-brief-action:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.aui-brief-action:focus-visible {
+  outline: 0.125rem solid var(--gold-ink);
+  outline-offset: 0.125rem;
+  border-radius: 0.125rem;
+}
+
 /* Ticket: a card with a punch hole and a dashed tear line. */
 .aui-ticket {
   position: relative;
@@ -1645,15 +1703,6 @@
     0 0 / 100% 100% no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
     0 0 / 100% 100% no-repeat;
-}
-
-/* Chapter: a label column beside its rows, split from the chapter above by a dashed line. */
-.aui-chapter {
-  display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr);
-  column-gap: 1rem;
-  padding-block: 0.7rem;
-  border-top: 0.125rem dashed var(--border);
 }
 
 /* Row grid shared by chapter lines, receipt rows and rail rows: mark · when · text · action. */
@@ -1802,15 +1851,6 @@
   letter-spacing: 0.1em;
 }
 
-/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
-.aui-brief-display {
-  font-family: var(--font-display);
-}
-
-.aui-brief-mono {
-  font-family: var(--font-receipt);
-}
-
 /* An action in a row is a button; it keeps the look of the link it replaces. */
 .aui-row > button.action {
   padding: 0;
@@ -1822,11 +1862,6 @@
 
 /* Phone: the chapter label stacks above its rows and the when column narrows. */
 @media (max-width: 40rem) {
-  .aui-chapter {
-    grid-template-columns: 1fr;
-    row-gap: 0.3rem;
-  }
-
   .aui-row {
     grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
   }

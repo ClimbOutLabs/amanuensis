@@ -28,6 +28,7 @@ import {
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { IBriefItemCompletionStore } from '../db/briefItemCompletionStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
@@ -80,6 +81,8 @@ import { getTurnExecutionError, startTurnInProcess } from './turns';
 export interface ScheduleTurnExecutionDeps<TTransaction> {
   mcpCatalog: McpCatalog;
   scheduleStore: IScheduleStore<TTransaction>;
+  /** A morning brief run leaves out the items the owner already marked done. */
+  briefItemStore: IBriefItemCompletionStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -141,6 +144,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
+    briefItems: deps.briefItemStore,
   });
   if (prepared === undefined) {
     return;

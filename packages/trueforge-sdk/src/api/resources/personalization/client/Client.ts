@@ -10,6 +10,7 @@ import * as errors from "../../../../errors/index.js";
 import * as serializers from "../../../../serialization/index.js";
 import * as TrueForge from "../../../index.js";
 import { AuditLogClient } from "../resources/auditLog/client/Client.js";
+import { BriefItemsClient } from "../resources/briefItems/client/Client.js";
 
 export declare namespace PersonalizationClient {
     export type Options = BaseClientOptions;
@@ -21,6 +22,7 @@ export declare namespace PersonalizationClient {
 export class PersonalizationClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<PersonalizationClient.Options>;
     protected _auditLog: AuditLogClient | undefined;
+    protected _briefItems: BriefItemsClient | undefined;
 
     constructor(options: PersonalizationClient.Options) {
 
@@ -29,6 +31,10 @@ export class PersonalizationClient {
 
     public get auditLog(): AuditLogClient {
         return (this._auditLog ??= new AuditLogClient(this._options));
+    }
+
+    public get briefItems(): BriefItemsClient {
+        return (this._briefItems ??= new BriefItemsClient(this._options));
     }
 
     /**
