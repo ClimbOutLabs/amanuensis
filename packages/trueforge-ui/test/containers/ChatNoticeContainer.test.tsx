@@ -85,7 +85,7 @@ describe('ChatNoticeContainer on a loaded chat', () => {
     await waitFor(() => expect(screen.getAllByText(line)).toHaveLength(1));
   });
 
-  it('says nothing when the person pressed Cancel', async () => {
+  it('says nothing when the person pressed Stop', async () => {
     renderSavedChat(endedTurn({ turnId: 'turn-cancelled', reason: 'client-cancelled' }));
 
     await screen.findByText('your message');

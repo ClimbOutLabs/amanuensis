@@ -274,6 +274,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="primary"
             size="small"
+            data-approval-primary
             title={APPROVAL_CHOICES.approve.hint}
             onClick={markSent(onApprove)}
             disabled={disabled || sentAt !== null}

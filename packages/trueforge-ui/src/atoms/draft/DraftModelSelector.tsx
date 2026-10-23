@@ -12,8 +12,9 @@ import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
-import { displayModelLabel, DraftModelCatalogPanel, ProviderMark } from './DraftModelCatalogPanel.js';
+import { displayModelLabel, DraftModelCatalogPanel } from './DraftModelCatalogPanel.js';
 import { DraftModelMenuPortal, useFloatingMenuPosition } from './DraftModelMenuPortal.js';
+import { DraftReasoningEffortOptions, useReasoningEffortChoices } from './DraftReasoningEffortSelector.js';
 import { modelPatchWithReasoningEffort } from './reasoningEffort.js';
 
 export type DraftModelSelectorProps = {
@@ -42,6 +43,7 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
   const useSheet = isMobile || compactLayout;
   const showConfigureSettingsCta = !loading && models.length === 0 && catalog != null;
   const seededDefaultModelRef = useRef<string | null>(null);
+  const effort = useReasoningEffortChoices();
 
   // Desktop only: float the menu in a portal so it escapes whatever container the
   // trigger sits in (a settings card clips an absolutely-positioned menu; a portal
@@ -102,33 +104,48 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const account = selected?.provider.name ?? selectedName;
-
   const content = (
-    <DraftModelCatalogPanel
-      models={models}
-      loading={loading}
-      selectedName={selectedName}
-      query={query}
-      onQueryChange={setQuery}
-      listboxId={menuId}
-      onOpenSettings={
-        showConfigureSettingsCta
-          ? () => {
+    <>
+      <DraftModelCatalogPanel
+        models={models}
+        loading={loading}
+        selectedName={selectedName}
+        query={query}
+        onQueryChange={setQuery}
+        listboxId={menuId}
+        onOpenSettings={
+          showConfigureSettingsCta
+            ? () => {
+                setOpen(false);
+                setQuery('');
+                shell?.setSettingsOpen(true, 'models');
+              }
+            : undefined
+        }
+        onSelect={model => {
+          updateAgentSpec?.({
+            model: modelPatchWithReasoningEffort(
+              model.name,
+              agentSpec?.model?.params,
+              model.properties.reasoningEfforts,
+            ),
+          });
+          setOpen(false);
+          setQuery('');
+        }}
+      />
+      {effort ? (
+        <DraftReasoningEffortOptions
+          choices={{
+            ...effort,
+            choose: value => {
+              effort.choose(value);
               setOpen(false);
-              setQuery('');
-              shell?.setSettingsOpen(true, 'models');
-            }
-          : undefined
-      }
-      onSelect={model => {
-        updateAgentSpec?.({
-          model: modelPatchWithReasoningEffort(model.name, agentSpec?.model?.params, model.properties.reasoningEfforts),
-        });
-        setOpen(false);
-        setQuery('');
-      }}
-    />
+            },
+          }}
+        />
+      ) : null}
+    </>
   );
 
   return (
@@ -145,15 +162,13 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
           variant: 'ghost',
           size: 'small',
           className: cn(
-            'aui-composer-model-button h-8 max-w-48 min-w-0 gap-1.5 rounded-full px-2 text-xs font-medium',
-            'hover:bg-ghost-button-hover',
+            'aui-composer-model-button text-text-secondary hover:text-text-primary h-8 max-w-48 min-w-0 gap-1 rounded-full px-2 text-[0.8125rem] font-normal',
           ),
         })}
         onClick={() => setOpen(v => !v)}
       >
-        <ProviderMark logo={selected?.provider.logo} label={account} className="size-4 text-xs" />
         <span className="truncate">{label}</span>
-        <Icon name="chevron-down" className="size-3.5 shrink-0 opacity-60" />
+        <Icon name="chevron-down" className="size-3.5 shrink-0" />
       </button>
 
       {useSheet && open ? (

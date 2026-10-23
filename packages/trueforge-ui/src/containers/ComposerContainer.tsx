@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
+import { cn } from '../atoms/lib/cn.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { takeComposerPrefill, useComposerDraft } from '../hooks/useComposerDraft.js';
 import { useComposerPauseView } from '../hooks/useComposerPauseView.js';
@@ -47,7 +48,7 @@ function ComposerBody({
 }: {
   placeholder: string;
   forceDisabled?: boolean;
-  /** Flatten top radius/border so the approval banner sits flush above. */
+  /** The approval strip sits flush above: drop the shared top corners and borders. */
   connectedToBanner?: boolean;
 }) {
   const ComposerShell = useSlot('ComposerShell');
@@ -74,12 +75,29 @@ function ComposerBody({
   }, [isBusy]);
   const toaster = useToasterOptional();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const disabled = isBusy || forceDisabled || !canManageSession;
+  // The box stays open during a run so the next message can be typed; only Send and Stop change.
+  const inputDisabled = forceDisabled || !canManageSession;
+  const disabled = isBusy || inputDisabled;
   const canSubmit = canSubmitComposer({ disabled, hasText, hasAttachments, requiresModel, hasModel });
   const submit = () => {
     if (!canSubmit) return;
     send(() => aui.composer().send());
   };
+  const stop = canManageSession
+    ? () => {
+        setIsStopping(true);
+        void (async () => {
+          try {
+            await cancel();
+            resetBusy();
+          } catch (error) {
+            toaster?.showError(error);
+          } finally {
+            setIsStopping(false);
+          }
+        })();
+      }
+    : undefined;
 
   return (
     <>
@@ -113,45 +131,33 @@ function ComposerBody({
           }}
         >
           <ComposerShell
-            className={
-              connectedToBanner
-                ? // Banner owns the top accent; composer keeps its normal chrome without a shared blue frame.
-                  'rounded-t-none border-t-0 focus-within:ring-0'
-                : undefined
-            }
             attachments={<ComposerAttachmentsContainer />}
             input={
               <ComposerPrimitive.Input
                 data-slot="aui_composer-input"
                 placeholder={placeholder}
-                disabled={disabled}
+                disabled={inputDisabled}
                 submitMode="enter"
                 aria-label="Message input"
-                className="aman-chat-text text-text-primary placeholder:text-text-secondary/80 max-h-[10lh] min-h-10 w-full resize-none overflow-y-auto rounded-lg border-none bg-transparent px-1 py-1 leading-normal shadow-none outline-none disabled:cursor-not-allowed"
+                onKeyDown={event => {
+                  // Esc stops a running turn; the box is still typeable while it runs.
+                  if (event.key !== 'Escape' || !isBusy || forceDisabled || stop === undefined) return;
+                  event.preventDefault();
+                  stop();
+                }}
+                className="text-text-primary placeholder:text-text-secondary max-h-[8lh] min-h-10 w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-1 text-[0.9375rem] leading-normal shadow-none outline-none disabled:cursor-not-allowed"
               />
             }
+            className={cn(
+              connectedToBanner && 'border-gold-line rounded-t-none border-t-0',
+              !connectedToBanner && hasText && 'border-gold-line',
+            )}
             disabled={disabled}
             canSubmit={canSubmit}
             isRunning={isBusy && !forceDisabled}
             isStopping={isStopping}
             onSubmit={submit}
-            onCancel={
-              canManageSession
-                ? () => {
-                    setIsStopping(true);
-                    void (async () => {
-                      try {
-                        await cancel();
-                        resetBusy();
-                      } catch (error) {
-                        toaster?.showError(error);
-                      } finally {
-                        setIsStopping(false);
-                      }
-                    })();
-                  }
-                : undefined
-            }
+            onCancel={stop}
             onAttach={canManageSession ? () => fileInputRef.current?.click() : undefined}
           />
         </ComposerPrimitive.Root>
@@ -215,8 +221,9 @@ export function ComposerContainer({ placeholder: placeholderOverride }: Composer
   if (pauseView.kind === 'approval') {
     return (
       <div data-slot="aui_composer-approval-pause" className="flex w-full flex-col">
-        <ApprovalNavContainer />
-        <ComposerWithOptionalDraft placeholder={placeholder} forceDisabled connectedToBanner />
+        <ApprovalNavContainer>
+          {docked => <ComposerWithOptionalDraft placeholder={placeholder} forceDisabled connectedToBanner={docked} />}
+        </ApprovalNavContainer>
       </div>
     );
   }

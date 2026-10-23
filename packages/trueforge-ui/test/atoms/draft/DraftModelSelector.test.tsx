@@ -74,7 +74,6 @@ describe('DraftModelSelector', () => {
 
     const trigger = await screen.findByTitle('Select model');
     await waitFor(() => expect(trigger).toHaveTextContent('gpt-4.1'));
-    expect(trigger.querySelector('img')?.getAttribute('src')).toBe('https://assets.example/openai.svg');
     fireEvent.click(trigger);
 
     const listbox = screen.getByRole('listbox', { name: 'Select model' });

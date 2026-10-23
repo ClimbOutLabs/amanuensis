@@ -21,11 +21,6 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => ({ pending: pendingApprovals, respond: vi.fn() }),
 }));
 
-let placement: ApprovalCardPlacement = 'missing';
-vi.mock('@/hooks/useApprovalCardPlacement.js', () => ({
-  useApprovalCardPlacement: () => placement,
-}));
-
 const showSuccess = vi.fn();
 const showError = vi.fn();
 vi.mock('@/containers/ToasterContainer.js', () => ({
@@ -33,7 +28,6 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
 }));
 
 import { PendingApprovalsBanner } from '@/containers/PendingApprovalsBanner.js';
-import type { ApprovalCardPlacement } from '@/hooks/useApprovalCardPlacement.js';
 import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 
@@ -66,6 +60,15 @@ describe('PendingApprovalsBanner journeys', () => {
     );
   }
 
+  /** The banner shows for a blocked send; the composer strip carries a waiting card instead. */
+  function renderBlockedBanner(server: unknown) {
+    const result = renderBanner(server);
+    act(() => {
+      publishBlockedSend();
+    });
+    return result;
+  }
+
   function fakeServer() {
     dismissPendingApprovals = vi.fn(async () => ({ dismissed: 2, alreadyResolved: false }));
     return { peekSessionTip: vi.fn(), dismissPendingApprovals };
@@ -74,7 +77,6 @@ describe('PendingApprovalsBanner journeys', () => {
   afterEach(() => {
     threadMessages.current = [];
     pendingApprovals = [];
-    placement = 'missing';
     reload.mockClear();
     showSuccess.mockClear();
     showError.mockClear();
@@ -82,7 +84,7 @@ describe('PendingApprovalsBanner journeys', () => {
 
   it('shows Action needed with the count and dismisses every approval as deny', async () => {
     setPending({ id: 'a1', onNewest: true }, { id: 'a2', onNewest: true });
-    const { container } = renderBanner(fakeServer());
+    const { container } = renderBlockedBanner(fakeServer());
 
     expect(screen.getByRole('alert')).toHaveTextContent('Action needed');
     expect(screen.getByRole('alert')).toHaveTextContent('2 tool calls');
@@ -96,7 +98,8 @@ describe('PendingApprovalsBanner journeys', () => {
     expect(request.sessionId).toBe('ses_1');
     expect(reload).toHaveBeenCalledTimes(1);
     expect(showSuccess).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[data-role="host-pending-approvals"]')).not.toBeNull();
+    // Once the approvals are denied the thread is no longer blocked, so the banner goes.
+    expect(container.querySelector('[data-role="host-pending-approvals"]')).toBeNull();
   });
 
   it('appears immediately when a send is blocked, even before the runtime lists approvals', async () => {
@@ -114,26 +117,17 @@ describe('PendingApprovalsBanner journeys', () => {
 
   it('hides the dismiss button when the server has no resync port', () => {
     setPending({ id: 'a1', onNewest: true });
-    renderBanner({ someOther: 'server' });
+    renderBlockedBanner({ someOther: 'server' });
 
     expect(screen.getByRole('alert')).toHaveTextContent('Action needed');
     expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
   });
 
-  it('shows one pending signal: no banner while the approval card is on screen', () => {
-    placement = 'on-screen';
+  it('stays hidden while a card waits, because the composer strip carries that signal', () => {
     setPending({ id: 'a1', onNewest: true });
-    renderBanner(fakeServer());
+    const { container } = renderBanner(fakeServer());
 
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  it('leaves the stand-in to the composer banner while the card is off screen', () => {
-    placement = 'off-screen';
-    setPending({ id: 'a1', onNewest: true });
-    renderBanner(fakeServer());
-
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
   it('shows no banner for a card left pending on an older turn', () => {
@@ -145,7 +139,7 @@ describe('PendingApprovalsBanner journeys', () => {
 
   it('counts only the approvals on the newest message', () => {
     setPending({ id: 'old', onNewest: false }, { id: 'now', onNewest: true });
-    renderBanner(fakeServer());
+    renderBlockedBanner(fakeServer());
 
     expect(screen.getByRole('alert')).toHaveTextContent('1 tool call');
   });
@@ -160,7 +154,7 @@ describe('PendingApprovalsBanner journeys', () => {
     dismissPendingApprovals = vi.fn(async () => {
       throw new Error('server unreachable');
     });
-    renderBanner({ dismissPendingApprovals });
+    renderBlockedBanner({ dismissPendingApprovals });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /dismiss pending approvals/i }));
@@ -179,7 +173,7 @@ describe('PendingApprovalsBanner journeys', () => {
     dismissPendingApprovals = vi.fn(async () => {
       throw stale;
     });
-    renderBanner({ dismissPendingApprovals });
+    renderBlockedBanner({ dismissPendingApprovals });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /dismiss pending approvals/i }));

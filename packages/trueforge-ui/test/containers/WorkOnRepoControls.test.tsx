@@ -2,6 +2,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { useOptionalWorkOnRepoPanel, WorkOnRepoPanelProvider } from '@/containers/workOnRepoPanel.js';
+
 import {
   RepositoryWorkProvider,
   type GithubRepositoryDetails,
@@ -95,6 +97,16 @@ function fakeApi(state: FakeState): RepositoryWorkApi {
   };
 }
 
+/** Stands in for the composer's + menu item, which opens the panel. */
+function OpenPanelButton() {
+  const panel = useOptionalWorkOnRepoPanel();
+  return (
+    <button type="button" onClick={() => panel?.setPanelOpen(true)}>
+      Work on a repo
+    </button>
+  );
+}
+
 function renderControls(
   api: RepositoryWorkApi,
   props: { sessionId: string | null; isRunning?: boolean; sandboxOff?: boolean },
@@ -102,12 +114,15 @@ function renderControls(
   const sendMessage = vi.fn();
   const view = render(
     <RepositoryWorkProvider api={api}>
-      <WorkOnRepoControls
-        sessionId={props.sessionId}
-        isRunning={props.isRunning ?? false}
-        sandboxOff={props.sandboxOff ?? false}
-        sendMessage={sendMessage}
-      />
+      <WorkOnRepoPanelProvider>
+        <OpenPanelButton />
+        <WorkOnRepoControls
+          sessionId={props.sessionId}
+          isRunning={props.isRunning ?? false}
+          sandboxOff={props.sandboxOff ?? false}
+          sendMessage={sendMessage}
+        />
+      </WorkOnRepoPanelProvider>
     </RepositoryWorkProvider>,
   );
   return { sendMessage, view };
@@ -131,14 +146,20 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -164,18 +185,24 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls
-          sessionId="session-1"
-          isRunning={false}
-          turnFailed
-          sandboxOff={false}
-          sendMessage={sendMessage}
-        />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls
+            sessionId="session-1"
+            isRunning={false}
+            turnFailed
+            sandboxOff={false}
+            sendMessage={sendMessage}
+          />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
 
@@ -192,12 +219,18 @@ describe('WorkOnRepoControls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start work' }));
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -292,7 +325,7 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     renderControls(api, { sessionId: 'session-1', sandboxOff: true });
 
-    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeDisabled();
+    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
     expect(
       screen.getByText(
         'Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.',
@@ -311,7 +344,7 @@ describe('WorkOnRepoControls', () => {
     await waitFor(() => {
       expect(api.unbindSessionRepository).toHaveBeenCalledWith('session-1');
     });
-    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop working on this repo' })).not.toBeInTheDocument();
   });
 
   it('starts from a new chat: paste only, and binds once the chat exists and settles', async () => {
@@ -335,14 +368,20 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        <WorkOnRepoPanelProvider>
+          <OpenPanelButton />
+          <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
+        </WorkOnRepoPanelProvider>
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {

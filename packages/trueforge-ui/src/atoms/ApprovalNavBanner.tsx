@@ -1,88 +1,50 @@
 'use client';
 
-import { Icon } from '../icons/Icon.js';
 import { cn } from './lib/cn.js';
 
 export type ApprovalNavBannerProps = {
   total: number;
-  /** 1-based index for display, e.g. 1 in "(1/4)". */
-  current: number;
-  canPrev: boolean;
-  canNext: boolean;
-  onPrev: () => void;
-  onNext: () => void;
-  /** Scroll the thread to the currently selected approval. */
+  /** The name the person chose for the assistant. */
+  assistantName: string;
+  /** Title of the first pending card, e.g. "Send this reply?". */
+  title?: string;
+  /** Scroll the thread to the first pending card and focus its main button. */
   onFocusCurrent: () => void;
-  /** Names the one waiting item, e.g. "email": the banner then reads "1 email waiting for your approval". */
-  kind?: string;
   className?: string;
 };
 
-/** The banner's words: one item names its kind, several count the items. */
-export function approvalBannerLabel(total: number, kind: string | undefined): string {
-  if (total !== 1) return `${String(total)} items need your approval`;
-  return kind === undefined ? '1 item needs your approval' : `1 ${kind} waiting for your approval`;
+/** The strip's words: one item names the assistant (its card title follows), several count the items. */
+export function approvalBannerLabel({ total, assistantName }: { total: number; assistantName: string }): string {
+  if (total !== 1) return `${String(total)} things are waiting for your OK`;
+  return `${assistantName} is waiting for your OK:`;
 }
 
-export function ApprovalNavBanner({
-  total,
-  current,
-  canPrev,
-  canNext,
-  onPrev,
-  onNext,
-  onFocusCurrent,
-  kind,
-  className,
-}: ApprovalNavBannerProps) {
-  const label = approvalBannerLabel(total, kind);
+/** Docked to the top of the composer while a pending card is off screen; one box with the composer. */
+export function ApprovalNavBanner({ total, assistantName, title, onFocusCurrent, className }: ApprovalNavBannerProps) {
+  const label = approvalBannerLabel({ total, assistantName });
 
   return (
     <div
       data-slot="aui_approval-nav-banner"
       role="status"
       aria-live="polite"
-      aria-label={`${label}. Click to go to approval ${String(current)} of ${String(total)}.`}
-      onClick={onFocusCurrent}
       className={cn(
-        'aui-approval-nav-banner border-gold-line bg-gold-soft text-text-primary flex w-full cursor-pointer items-center justify-between gap-2 border-t px-4 py-1.5 text-sm',
-        'rounded-t-[var(--composer-radius,1.5rem)]',
+        'aui-approval-nav-banner border-gold-line bg-gold-soft text-text-primary flex w-full items-center gap-2 rounded-t-[1.25rem] border-t border-r border-l px-4 py-2 text-[0.8125rem]',
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
-        <span className="truncate font-medium leading-[1.4]">{label}</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="font-medium tabular-nums leading-[1.4]">
-          ({current}/{total})
-        </span>
-        <button
-          type="button"
-          aria-label="Next approval"
-          disabled={!canNext}
-          onClick={event => {
-            event.stopPropagation();
-            onNext();
-          }}
-          className="text-gold-ink hover:bg-gold-line/20 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
-        >
-          <Icon name="arrow-down" size="0.875rem" />
-        </button>
-        <button
-          type="button"
-          aria-label="Previous approval"
-          disabled={!canPrev}
-          onClick={event => {
-            event.stopPropagation();
-            onPrev();
-          }}
-          className="text-gold-ink hover:bg-gold-line/20 inline-flex size-6 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40"
-        >
-          <Icon name="arrow-up" size="0.875rem" />
-        </button>
-      </div>
+      <span className="bg-gold size-1.5 shrink-0 rounded-full" aria-hidden />
+      <p className="min-w-0 flex-1">
+        {label}
+        {total === 1 && title !== undefined ? <span className="font-serif text-[0.9375rem]"> {title}</span> : null}
+      </p>
+      <button
+        type="button"
+        onClick={onFocusCurrent}
+        className="text-gold-ink shrink-0 rounded-sm border-0 bg-transparent p-0 font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
+      >
+        Review ↑
+      </button>
     </div>
   );
 }

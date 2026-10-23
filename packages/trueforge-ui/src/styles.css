@@ -308,24 +308,10 @@
     max-width: 7rem;
   }
 
-  [data-slot='aui_composer-shell'] .aui-composer-reasoning-button {
-    max-width: 6rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button,
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button {
+  /* Send and its running-state Stop are 32px; give both the 44px touch target here. */
+  [data-slot='aui_composer-shell'] [data-slot='aui_composer-send'],
+  [data-slot='aui_composer-shell'] [data-slot='aui_composer-stop'] {
     width: 2.75rem;
-    height: 2.75rem;
-  }
-
-  /* The running-state Cancel replaces Send and inherits the 32px `sm` height; pin it to the same
-   * 44px touch target explicitly rather than relying on min-height alone. */
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
     height: 2.75rem;
   }
 }

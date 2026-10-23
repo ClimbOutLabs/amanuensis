@@ -207,6 +207,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
             <Button
               variant="primary"
               size="small"
+              data-approval-primary
               title={APPROVAL_CHOICES.approve.hint}
               onClick={sendNow}
               disabled={disabled}
