@@ -4,7 +4,7 @@ import { createContext, useContext, type FC, type ReactNode } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
 
-import { AVATAR_ALT } from './AmanAvatarMotion.js';
+import { avatarAltText } from './AmanAvatarMotion.js';
 
 const AmanPandaSourceContext = createContext<string | null>(null);
 
@@ -36,7 +36,7 @@ export const AmanPandaRoundTicket: FC<{ src: string | null; name: string; classN
     <div className={cn('aui-ticket aui-ticket--punch flex items-center gap-3 p-3', className)}>
       <img
         src={src}
-        alt={AVATAR_ALT}
+        alt={avatarAltText(name)}
         className="size-[3.4rem] shrink-0 rounded-full border-[0.125rem] border-gold object-cover"
       />
       <div className="min-w-0">
