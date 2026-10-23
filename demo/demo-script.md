@@ -14,7 +14,7 @@ Presenter: "Your AI assistant knows your mother's birthday, your boss's mood and
 
 "On screen" says what the presenter types and which parts of the interface appear. It never fixes Aman's wording or figures: the answers are generated live. The facts each answer should carry are listed per fixture in `fixtures/mailbox/EXPECTATIONS.md`; check them there during rehearsal.
 
-The demo day is Monday 19 October 2026. Maya rents at Travessa das Gaivotas 4 in Lisbon and has a GP appointment on Thursday 22 October 2026 at 09:30 with Dra. Helena Rocha at Brightwater Family Clinic.
+Every date counts from the day the demo is seeded. The examples here use Monday 19 October 2026, the day the committed mailbox snapshot was made. Maya rents at Travessa das Gaivotas 4 in Lisbon and has a GP appointment three days later, on Thursday 22 October 2026 at 09:30 with Dra. Helena Rocha at Brightwater Family Clinic.
 
 ### 1. Memory (20 seconds) serves Idea, Tech
 

@@ -1,12 +1,15 @@
 // Shared by the test mailbox scripts: both read settings from environment
 // variables first, then from a gitignored `.env.test-mailbox` file, and both
-// deliver only the messages listed in demo-set.json.
+// deliver only the messages listed in demo-set.json, made for one day (today
+// in Lisbon unless a day is given) by generate-fixtures.mjs.
 
 import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder } from 'node:util';
+import { DEMO_TIME_ZONE, dayInZone } from '../../packages/trueforge/src/cli/demoSeed/storyDays.mjs';
+import { buildMessages } from '../fixtures/mailbox/generate-fixtures.mjs';
 
 const defaultFixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'mailbox');
 
@@ -31,10 +34,11 @@ export function parseEnvFile(text) {
   return values;
 }
 
-export function loadDemoSet({ fixtureDir = defaultFixtureDir } = {}) {
+export function loadDemoSet({ fixtureDir = defaultFixtureDir, today } = {}) {
   const manifest = JSON.parse(readFileSync(path.join(fixtureDir, 'demo-set.json'), 'utf8'));
+  const generated = buildMessages({ today: today ?? dayInZone({ timeZone: DEMO_TIME_ZONE }) });
   return manifest.files.map(({ file, language }) => {
-    const raw = readFileSync(path.join(fixtureDir, file));
+    const raw = Buffer.from(generated[file], 'utf8');
     const header = name => {
       const match = new RegExp(`^${name}:[ \\t]*(.*(?:\\r?\\n[ \\t].*)*)`, 'im').exec(raw.toString('latin1'));
       return match === null ? '' : match[1].replace(/\r?\n[ \t]+/g, ' ').trim();
