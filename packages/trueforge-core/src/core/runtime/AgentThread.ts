@@ -69,7 +69,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
-import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
+import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -242,8 +242,9 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
-  claimsUnbackedAction,
+  findUnbackedClaim,
   REPEATED_ACTION_RESULT,
+  stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
@@ -3626,6 +3627,14 @@ export class AgentThread {
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
+      // The reply has already streamed, so it stays as written and the note corrects it. The note is
+      // saved with the reply, so the model reads the correction on its next turn.
+      const unbackedClaim = findUnbackedClaim({
+        text: replyText,
+        successfulWrites,
+        stepKinds: this.toolCallMemo.turn.stepKindsThisTurn,
+        sandboxOn: this.sandbox !== undefined,
+      });
       // The model is told why a reply did not finish and says so in its own words. The host adds a line
       // only when the reply has none, so the person is never left with nothing; a reply with words
       // still gets the checks below, so it cannot claim the step that did not run as done.
@@ -3635,9 +3644,9 @@ export class AgentThread {
           ? unfinishedNotice(unfinishedKind)
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
-            : claimsUnbackedAction({ text: replyText, successfulWrites })
-              ? UNBACKED_CLAIM_NOTE
-              : undefined;
+            : unbackedClaim === undefined
+              ? undefined
+              : UNBACKED_CLAIM_NOTES[unbackedClaim];
       if (notice !== undefined) {
         const withNotice = noticeAfter({ text: replyText, notice });
         result.value.output.content = replyText + withNotice;
@@ -4368,8 +4377,15 @@ export class AgentThread {
       });
       // Calls with no metadata count as writes, as isReadOnlyCall treats them.
       const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
-      if (result.disposition === 'executed_ok' && !result.failure && writes) {
-        nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+      if (result.disposition === 'executed_ok' && !result.failure) {
+        if (writes) {
+          nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+        }
+        if (result.toolCallInfo !== undefined) {
+          for (const kind of stepKindsOf(result.toolCallInfo)) {
+            nextToolCallMemo.turn.stepKindsThisTurn.add(kind);
+          }
+        }
       }
     }
     this.metrics.total_sub_agents += createThreadEvents.length;
