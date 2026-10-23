@@ -9,6 +9,7 @@ import {
   type OutboundGuardVerdict,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
+import { isTrackingImageLink } from '@truefoundry/trueforge-core/core/chatImages';
 
 import type { ChatImageOrigin, ChatImageWithData, IChatImageStore } from '../../db/chatImageStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
@@ -262,6 +263,14 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     const inReply = facts.replyTexts.some(text => url !== undefined && replyImageUrls(text).has(url));
     if (url === undefined || !inReply) {
       throw new ChatImageNotFoundError('That image link is not in this turn.');
+    }
+    // A picture the model copied from an email is offered once, on the email images line, never inline;
+    // a tracking pixel is never offered at all.
+    const fromEmail = [...facts.emailImageLinks.values()].some(links =>
+      links.some(link => normalizeImageLink(link) === url),
+    );
+    if (fromEmail || isTrackingImageLink(url)) {
+      return { status: 'done', images: [] };
     }
     const source_key = `reply:${url}`;
     const hit = await cached({ ref, source_key });

@@ -13,3 +13,14 @@ export const CHAT_IMAGE_REFUSAL_TEXT: Record<ChatImageRefusal, string> = {
 
 /** Shown when a request for an image fails outright. */
 export const CHAT_IMAGE_ERROR_TEXT = "The image couldn't be loaded. Try again later.";
+
+/** Shown when some or all of the images the person chose to load from their emails failed to download. */
+export function emailImagesFailedText({ failed, total }: { failed: number; total: number }): string {
+  let what: string;
+  if (failed < total) {
+    what = `${String(failed)} of ${String(total)} images couldn't be downloaded.`;
+  } else {
+    what = failed === 1 ? "The image couldn't be downloaded." : `The ${String(failed)} images couldn't be downloaded.`;
+  }
+  return `${what} Check your connection, then choose Try again.`;
+}
