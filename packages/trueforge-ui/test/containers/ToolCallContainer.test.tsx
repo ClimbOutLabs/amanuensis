@@ -94,6 +94,14 @@ function renderPendingApprovalMessage(
   );
 }
 
+/** The new approval ticket is on screen, and nothing of the old radio-button card is. */
+function expectNewCardOnly() {
+  expect(document.querySelector('[data-role="approval-ticket"]')).not.toBeNull();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Tool Approval Required/i)).not.toBeInTheDocument();
+}
+
 describe('ToolCallContainer', () => {
   it('renders a running tool call without a result', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'search_docs', args: {} }]);
@@ -610,14 +618,16 @@ describe('ToolCallContainer', () => {
       </SlotsProvider>,
     );
 
-    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: 'nested-approval-1', approved: true }),
+      expect.objectContaining({ approvalId: 'nested-approval-1', approved: true, optionId: 'allow-once' }),
     );
   });
 
-  it('auto-expands and shows the approval bar while an approval is pending', () => {
+  it('shows the approval card while an approval is pending', () => {
     renderPendingApprovalMessage([
       {
         type: 'tool-call',
@@ -628,9 +638,10 @@ describe('ToolCallContainer', () => {
         approval: { id: 'approval-1', approved: undefined },
       },
     ]);
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /in this chat/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /in this chat/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('keeps a pending approval visible — the disclosure locks open while approval waits', () => {
@@ -657,8 +668,9 @@ describe('ToolCallContainer', () => {
     expect(
       screen.queryByRole('button', { name: /Expand agent details|Collapse agent details/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('routes a root Approve through the runtime onRespondToToolApproval callback', () => {
@@ -676,7 +688,7 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -707,7 +719,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve for this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -736,12 +748,13 @@ describe('ToolCallContainer', () => {
     ]);
 
     expect(screen.getByText('pnpm test')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
-  it('includes the denial reason when Deny is submitted', () => {
+  it('sends the declared denial when Not now is pressed', () => {
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
       [
@@ -756,72 +769,57 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('radio', { name: 'Deny' }));
-    fireEvent.change(screen.getByPlaceholderText('Enter reason for denial'), {
-      target: { value: 'Denied by user' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalId: 'approval-1',
-        approved: false,
-        reason: 'Denied by user',
-      }),
+      expect.objectContaining({ approvalId: 'approval-1', approved: false }),
     );
   });
 
-  it('renders declared approval options with their labels', () => {
-    renderPendingApprovalMessage([
-      {
-        type: 'tool-call',
-        toolCallId: '1',
-        toolName: 'run_migration',
-        args: {},
-        interrupt: { type: 'human', payload: {} },
-        approval: {
-          id: 'approval-1',
-          approved: undefined,
-          options: [
-            { id: 'opt-allow', kind: 'allow-once' },
-            { id: 'opt-deny', kind: 'reject-once' },
-          ],
+  it('answers with the option ids the call declared', () => {
+    const onRespondToToolApproval = vi.fn();
+    renderPendingApprovalMessage(
+      [
+        {
+          type: 'tool-call',
+          toolCallId: '1',
+          toolName: 'run_migration',
+          args: {},
+          interrupt: { type: 'human', payload: {} },
+          approval: {
+            id: 'approval-1',
+            approved: undefined,
+            options: [
+              { id: 'opt-allow', kind: 'allow-once' },
+              { id: 'opt-deny', kind: 'reject-once' },
+            ],
+          },
         },
-      },
-    ]);
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+      ],
+      { onRespondToToolApproval },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    expect(onRespondToToolApproval).toHaveBeenLastCalledWith(
+      expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'opt-allow' }),
+    );
   });
 
-  it('forwards confirmation copy and grants to the denial option', () => {
+  it('shows the call in plain fields and never the raw Request block while the approval waits', () => {
     renderPendingApprovalMessage([
       {
         type: 'tool-call',
         toolCallId: '1',
-        toolName: 'run_migration',
+        toolName: 'draft_email',
         args: {},
+        argsText: JSON.stringify({ to: 'sam@example.test', subject: 'Garden club', body: 'See you at noon.' }),
         interrupt: { type: 'human', payload: {} },
-        approval: {
-          id: 'approval-1',
-          approved: undefined,
-          options: [
-            { id: 'opt-allow', kind: 'allow-once' },
-            {
-              id: 'opt-deny',
-              kind: 'reject-once',
-              grants: ['database:write'],
-              confirm: {
-                title: 'Confirm denial',
-                description: 'The migration will not run.',
-              },
-            },
-          ],
-        },
+        approval: { id: 'approval-1', approved: undefined },
       },
     ]);
-    fireEvent.click(screen.getByRole('radio', { name: 'Deny' }));
-    expect(screen.getByText('Confirm denial')).toBeInTheDocument();
-    expect(screen.getByText('The migration will not run.')).toBeInTheDocument();
-    expect(screen.getByText('database:write')).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.queryByTestId('tfy-tool-call-content-block')).not.toBeInTheDocument();
+    expect(screen.queryByText('Request')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "draft email"?' })).toBeInTheDocument();
+    expect(screen.getByText(/subject: Garden club/)).toBeInTheDocument();
   });
 
   it.each([
@@ -914,7 +912,8 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getAllByText('This request ended. Ask again if you still need it.')).toHaveLength(1);
-      expect(screen.getAllByRole('radio', { name: 'Approve' })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Allow it' })).toHaveLength(1);
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     });
 
     it('expires the older connector card read back from saved history, and keeps the newest one answerable', async () => {
@@ -1073,7 +1072,7 @@ describe('ToolCallContainer: held search request', () => {
     expect(container.innerHTML).not.toContain(rawKey);
   });
 
-  it('shows the masked arguments while the hold waits for an answer', async () => {
+  it('shows the masked arguments on the card while the hold waits, with no raw Request block', async () => {
     const { container } = renderHeldSearch(
       {
         interrupt: { type: 'human', payload: {} },
@@ -1088,7 +1087,8 @@ describe('ToolCallContainer: held search request', () => {
       },
       { type: 'requires-action', reason: 'tool-calls' },
     );
-    expect(await screen.findAllByTestId('tfy-tool-call-content-block')).toHaveLength(1);
+    expect(await screen.findByText('query: how do I rotate ws••••••3x safely')).toBeInTheDocument();
+    expect(screen.queryByTestId('tfy-tool-call-content-block')).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(rawKey);
   });
 });
