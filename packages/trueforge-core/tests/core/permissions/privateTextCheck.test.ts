@@ -631,6 +631,8 @@ describe('hasEncodedText', () => {
     ['a numeric character reference without its semicolon', 'Tenant: &#79ttilie'],
     ['a hex character reference', 'Tenant: &#x4F;ttilie'],
     ['a named character reference', 'Tenant: &Oacute;ttilie'],
+    ['an unpadded base64 header encoded-word', 'From: =?UTF-8?B?T3R0aWxpZSBWYW5l?= <ov@example.test>'],
+    ['a quoted-printable header encoded-word', 'From: =?UTF-8?Q?Ottilie_Vane?= <ov@example.test>'],
   ])('flags %s', (_label, text) => {
     expect(hasEncodedText(text)).toBe(true);
   });

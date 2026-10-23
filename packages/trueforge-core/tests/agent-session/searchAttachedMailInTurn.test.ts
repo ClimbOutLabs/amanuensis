@@ -55,3 +55,42 @@ describe('a mail attached through the upload path', () => {
     expect(chat.callTool).not.toHaveBeenCalled();
   });
 });
+
+describe('a mail saved as .txt whose only encoding is the sender name', () => {
+  it.each([
+    ['base64', '=?UTF-8?B?T3R0aWxpZSBWYW5l?='],
+    ['quoted-printable', '=?UTF-8?Q?Ottilie_Vane?='],
+  ])('asks before a search for the %s-encoded sender name', async (_form, encodedName) => {
+    const sandbox = makeStubPublicSandbox();
+    jest
+      .spyOn(sandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
+    const chat = await setupSearchChat({ sandbox });
+    chat.create.mockImplementationOnce(() => searchStream({ id: 'call-1', query: 'Ottilie Vane lease' }));
+    chat.create.mockImplementation(() => textStream('Done.'));
+    const mail = [`From: ${encodedName} <ov@example.test>`, 'Subject: Lease', '', 'The lease is attached.'].join(
+      '\r\n',
+    );
+
+    const turn = await chat.run({
+      messages: [
+        {
+          type: EventType.USER_MESSAGE,
+          content: [
+            { type: 'text', text: 'Who sent this?' },
+            {
+              type: 'file',
+              name: 'lease.eml.txt',
+              data: `data:text/plain;base64,${Buffer.from(mail).toString('base64')}`,
+            },
+          ],
+        },
+      ],
+    });
+    const state = (await chat.session.getTurn(turn.id))?.state;
+
+    expect(state).toMatchObject({ status: 'done', required_actions: [{ type: EventType.TOOL_APPROVAL_REQUIRED }] });
+    expect(JSON.stringify(state)).toContain(HOLD_SAY.private_unchecked);
+    expect(chat.callTool).not.toHaveBeenCalled();
+  });
+});

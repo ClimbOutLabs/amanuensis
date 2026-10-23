@@ -249,12 +249,12 @@ function isEncodedToken(token: string): boolean {
 }
 
 /**
- * Escapes and character references a reader decodes into other letters: quoted-printable escapes and soft line
- * breaks, `\u` and `\x` escapes, numeric and named character references, and short padded base64. Percent escapes
- * are left out, since the fingerprints already read them decoded.
+ * Escapes and character references a reader decodes into other letters: mail header encoded-words of any length,
+ * quoted-printable escapes and soft line breaks, `\u` and `\x` escapes, numeric and named character references, and
+ * short padded base64. Percent escapes are left out, since the fingerprints already read them decoded.
  */
 const ENCODED_ESCAPE =
-  /=[0-9A-F]{2}|=\r?\n|\\u\{?[0-9A-Fa-f]{2,6}|\\x[0-9A-Fa-f]{2}|&#(?:[0-9]+|[xX][0-9A-Fa-f]+)|&[A-Za-z][A-Za-z0-9]{1,31};|(?<![A-Za-z0-9+/])(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)(?![A-Za-z0-9+/=])/;
+  /=\?[^?\s]+\?[BbQq]\?|=[0-9A-F]{2}|=\r?\n|\\u\{?[0-9A-Fa-f]{2,6}|\\x[0-9A-Fa-f]{2}|&#(?:[0-9]+|[xX][0-9A-Fa-f]+)|&[A-Za-z][A-Za-z0-9]{1,31};|(?<![A-Za-z0-9+/])(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)(?![A-Za-z0-9+/=])/;
 
 /**
  * Whether the text holds any run written in an encoding, so the words a reader decodes from it are not its bytes and
