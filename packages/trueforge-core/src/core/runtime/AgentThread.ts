@@ -73,7 +73,7 @@ import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
+import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   allowsSearchChatGrant,
@@ -3434,12 +3434,13 @@ export class AgentThread {
     }
 
     // A cut or malformed model stream (ModelStreamFault, thrown by the ILLM client; see
-    // VercelAILLM) is a model fault, not a host fault: it is retried, not treated as fatal. On
-    // the first fault this attempts one retry, forcing context compaction first (the same
-    // compaction path the ordinary preLLM threshold check uses, forced regardless of threshold;
-    // see executeContextProcessors's forceCompaction option) so the retry runs under a shorter
-    // context. A second fault in a row ends the turn with a specific, actionable error instead of
-    // the generic fatal_error the outer catch in execute() would otherwise produce for it.
+    // VercelAILLM) is a model fault, not a host fault: it is retried once, not treated as fatal.
+    // Most faults (a timeout, a dropped connection) have nothing to do with history size, so the
+    // retry sends the same history. Only a fault the provider says is about context length forces
+    // compaction first. Size alone needs no check here: the token guard above already shortened or
+    // stopped any request whose estimate reaches the model's context length. A second fault in a
+    // row ends the turn with a specific, actionable error instead of the generic fatal_error the
+    // outer catch in execute() would otherwise produce for it.
     const MAX_MODEL_STREAM_FAULT_ATTEMPTS = 2;
     let modelMessageUsage: ModelMessageUsage | undefined;
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
@@ -3537,16 +3538,25 @@ export class AgentThread {
           throw error;
         }
         if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          // A repetition fault carries its own actionable guidance; surfacing the
-          // generic context-too-long text for it would mislead the user.
+          // A repetition fault carries its own actionable guidance, and only a context-length
+          // fault is blamed on the chat's length; anything else would mislead the user.
           const message =
             error instanceof ModelOutputRepetitionError
               ? error.message
-              : "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model";
+              : isContextLengthError(error)
+                ? 'The chat is too long for this model. Start a new chat or use a different model.'
+                : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
           yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
-        this.logger.warn('Model stream fault; compacting context and retrying the call once', {
+        if (!isContextLengthError(error)) {
+          this.logger.warn('Model stream fault; retrying the call once with the same history', {
+            ...extractErrorLogFields(error),
+            attempt,
+          });
+          continue;
+        }
+        this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
           ...extractErrorLogFields(error),
           attempt,
         });

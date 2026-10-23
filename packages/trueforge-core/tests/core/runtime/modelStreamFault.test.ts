@@ -71,40 +71,119 @@ class RecordingCompaction implements PreLLMAgentContextProcessor {
   }
 }
 
-describe('ModelStreamFault retry', () => {
-  it('compacts context and retries once after a single stream fault, then completes normally', async () => {
-    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
-      create.mock.calls.length === 1 ? faultingStream() : finalStream('Recovered answer.'),
-    );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
-    const compaction = new RecordingCompaction();
-    const thread = new AgentThread({
-      threadId: 'main',
-      title: 'Main',
-      toolCallMemo: undefined,
-      turnToolCallLedger: undefined,
-      taskState: undefined,
-      isRequestContinuation: undefined,
-      tracing: NOOP_AGENT_TRACING,
-      logger: makeSilentLogger(),
-      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
-      context: [{ role: 'user', content: 'A question.' }],
-      capabilities: [{ preLLMProcessors: [compaction] }],
-    });
+/** Runs one turn on a short chat whose first model call streams `firstAttempt` and whose retry answers. */
+async function runShortChatWithOneFault({
+  firstAttempt,
+  contextLength,
+}: {
+  firstAttempt: () => AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown>;
+  contextLength: number | undefined;
+}): Promise<{
+  calls: number;
+  forcedFlags: boolean[];
+  compactionEvents: number;
+  doneEvent: InternalThreadDoneEvent | undefined;
+}> {
+  const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+    create.mock.calls.length === 1 ? firstAttempt() : finalStream('Recovered answer.'),
+  );
+  const modelClient: ILLM = { create, createNonStream: jest.fn() };
+  const compaction = new RecordingCompaction();
+  const thread = new AgentThread({
+    threadId: 'main',
+    title: 'Main',
+    toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
+    taskState: undefined,
+    isRequestContinuation: undefined,
+    tracing: NOOP_AGENT_TRACING,
+    logger: makeSilentLogger(),
+    definition: {
+      modelClient,
+      modelId: undefined,
+      configuredModels: undefined,
+      instruction: 'test',
+      toolSets: [],
+      modelProperties: { contextLength },
+    },
+    context: [{ role: 'user', content: 'A question.' }],
+    capabilities: [{ preLLMProcessors: [compaction] }],
+  });
 
-    let doneEvent: InternalThreadDoneEvent | undefined;
-    for await (const event of thread.execute({ signal: new AbortController().signal })) {
-      if (event.type === InternalEventType.AGENT_DONE) {
-        doneEvent = event;
-      }
+  let doneEvent: InternalThreadDoneEvent | undefined;
+  let compactionEvents = 0;
+  for await (const event of thread.execute({ signal: new AbortController().signal })) {
+    if (event.type === InternalEventType.AGENT_DONE) {
+      doneEvent = event;
     }
+    if (event.type === EventType.AGENT_CONTEXT_OVERWRITE) {
+      compactionEvents += 1;
+    }
+  }
+  return { calls: create.mock.calls.length, forcedFlags: compaction.forcedFlags, compactionEvents, doneEvent };
+}
+
+/** A provider answering that the prompt does not fit, the way vLLM words it, through the real stream mapping. */
+function contextLengthErrorStream(): AsyncGenerator<
+  ExtendedChatCompletionChunk,
+  RawAssistantMessageWithUsage,
+  unknown
+> {
+  async function* parts(): AsyncGenerator<TextStreamPart<ToolSet>> {
+    await Promise.resolve();
+    const cause = Object.assign(
+      new Error(
+        "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens. Please reduce the length of the messages.",
+      ),
+      { data: { message: '', type: 'BadRequestError', param: null, code: 400 } },
+    );
+    yield { type: 'error', error: cause };
+  }
+  return mapStreamToChunks({ stream: parts(), chunkMeta: { id: 'test-id', created: 0, model: 'test-model' } });
+}
+
+describe('ModelStreamFault retry', () => {
+  it('retries a dropped stream on a short chat with the same history, without shortening it', async () => {
+    const run = await runShortChatWithOneFault({ firstAttempt: faultingStream, contextLength: 128_000 });
 
     // One call faults, one call recovers: no third attempt.
-    expect(create).toHaveBeenCalledTimes(2);
-    // The ordinary preLLM pass before the first attempt is not forced; the pass triggered by the
-    // fault, before the retry, is forced regardless of the configured compaction threshold.
-    expect(compaction.forcedFlags).toEqual([false, true]);
-    expect(doneEvent?.status).toBe('done');
+    expect(run.calls).toBe(2);
+    // Only the ordinary preLLM pass runs; the fault is not about context length, so nothing is shortened.
+    expect(run.forcedFlags).toEqual([false]);
+    expect(run.compactionEvents).toBe(0);
+    expect(run.doneEvent?.status).toBe('done');
+  });
+
+  it('shortens history once and retries when the provider says the prompt is too long', async () => {
+    const run = await runShortChatWithOneFault({ firstAttempt: contextLengthErrorStream, contextLength: 128_000 });
+
+    expect(run.calls).toBe(2);
+    expect(run.forcedFlags).toEqual([false, true]);
+    expect(run.compactionEvents).toBe(1);
+    expect(run.doneEvent?.status).toBe('done');
+  });
+
+  it('retries without shortening on a model whose context length is unknown', async () => {
+    const run = await runShortChatWithOneFault({ firstAttempt: faultingStream, contextLength: undefined });
+
+    expect(run.calls).toBe(2);
+    expect(run.forcedFlags).toEqual([false]);
+    expect(run.compactionEvents).toBe(0);
+    expect(run.doneEvent?.status).toBe('done');
+  });
+
+  it('still shortens on a model whose context length is unknown when the fault names the context length', async () => {
+    async function* contextFault(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+      await Promise.resolve();
+      throw new ModelStreamFault('The stream broke.', {
+        cause: new Error('prompt is too long: 210000 tokens > 200000 maximum'),
+      });
+    }
+    const run = await runShortChatWithOneFault({ firstAttempt: contextFault, contextLength: undefined });
+
+    expect(run.calls).toBe(2);
+    expect(run.forcedFlags).toEqual([false, true]);
+    expect(run.doneEvent?.status).toBe('done');
   });
 
   it('ends the turn with reason model_stream_fault after a second stream fault in a row', async () => {
@@ -137,14 +216,15 @@ describe('ModelStreamFault retry', () => {
     // Exactly two attempts: the first fault triggers the one retry, and the retry's own fault
     // ends the turn instead of retrying again.
     expect(create).toHaveBeenCalledTimes(2);
-    expect(compaction.forcedFlags).toEqual([false, true]);
+    expect(compaction.forcedFlags).toEqual([false]);
     expect(doneEvent?.status).toBe('error');
     expect(doneEvent?.handoff_cause).toBe('model_stream_fault');
     if (doneEvent?.status !== 'error') {
       throw new Error('expected an error-status AGENT_DONE event');
     }
+    // A dropped stream is not blamed on the chat's length.
     expect(doneEvent.error).toBe(
-      "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model",
+      "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.",
     );
   });
 
