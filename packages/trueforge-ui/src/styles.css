@@ -336,10 +336,10 @@
   min-width: 15rem;
   width: 17.5rem;
   flex-direction: column;
-  gap: 1rem;
-  border-left: 1px solid var(--border);
+  gap: 0.75rem;
+  border-left: 0.0625rem solid var(--border);
   background: var(--sidebar-bg);
-  padding: 1.25rem 0.75rem 0.75rem;
+  padding: 0.875rem 1rem;
   color: var(--text-primary);
   /* Tall rail content (e.g. the permissions audit feed) scrolls inside the rail
    * instead of stretching the page and pushing the chat composer below the fold. */
@@ -347,12 +347,11 @@
   overflow-y: auto;
 }
 
-/* Collapsed the rail keeps only its toggle, so the chat surface takes the freed grid width
- * and nothing inside the rail is clipped. */
+/* Collapsed, the rail is the 3rem poster frame and nothing else, so the chat takes the freed width. */
 .aman-runtime-rail--collapsed {
-  width: 2.75rem;
+  width: 3.5rem;
   min-width: 0;
-  padding: 1.25rem 0.375rem 0.75rem;
+  padding: 0.875rem 0.25rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -363,20 +362,24 @@
 
 .aman-runtime-rail__toolbar {
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
+.aman-runtime-rail--collapsed .aman-runtime-rail__toolbar {
+  justify-content: center;
+}
+
+/* A ghost button: no border, no fill until hovered. */
 .aman-runtime-rail__collapse-toggle {
   display: inline-flex;
-  min-width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  padding: 0 0.5rem;
+  padding: 0;
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -386,115 +389,142 @@
   color: var(--text-primary);
 }
 
-/* Expanded, no control in the rail is icon-only: the chevron carries a word beside it. */
-.aman-runtime-rail__button-label {
-  font-size: 0.75rem;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-/* Collapsed the rail is a dot and a chevron, so the compact status is the only readout;
- * its aria-label and tooltip carry the connection state and the active model name. */
+/* Collapsed: the poster frame, with the status dot on its lower-right corner. */
 .aman-runtime-rail__compact-status {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 0.25rem 0;
+  position: relative;
+  width: 3rem;
+  height: 3rem;
+  flex: none;
 }
 
-.aman-runtime-rail--collapsed .aman-runtime-rail__compact-status {
-  display: flex;
-}
-
-/* The panda sits in a ticket frame at the top of the rail: the picture, then its caption. */
-.aman-runtime-rail__avatar-card {
+.aman-runtime-rail__compact-poster {
+  display: block;
   width: 100%;
+  height: 100%;
+  border-radius: 0.75rem;
+  object-fit: cover;
 }
 
-/* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
-   all four edges lets the frame's glow show through instead of a hard cut. In light, multiply
-   takes the picture's light areas into the glow, so its white backing disappears. The gradients
-   are alpha ramps, not rendered colour, so the rule names no colour of its own. */
+.aman-runtime-rail__compact-status .aman-runtime-rail__status-dot {
+  position: absolute;
+  right: -0.125rem;
+  bottom: -0.125rem;
+  box-shadow: 0 0 0 0.125rem var(--sidebar-bg);
+}
+
+/* The panda's picture is the only box in the rail: rounded corners, no border, no padding.
+ * The fade is a child, so it cannot leave the rounded frame. */
 .aman-runtime-rail__avatar {
-  width: 100%;
-  max-width: 15rem;
-  height: auto;
-  object-fit: contain;
-  mix-blend-mode: multiply;
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  position: relative;
+  width: 15.5rem;
+  max-width: 100%;
+  height: 11.625rem;
+  overflow: hidden;
+  border-radius: 0.75rem;
 }
 
-/* Dark: multiply would darken the panda's blacks and whites, so the picture is drawn as it is
-   and only its edges fade into the glow through a radial mask. */
-.aui-theme-root.dark .aman-runtime-rail__avatar {
+.aman-runtime-rail__avatar-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+/* The art is drawn on a pale scene, so multiply takes its light areas into the rail. */
+.aman-runtime-rail__picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: multiply;
+}
+
+/* Dark: multiply would darken the picture's blacks and whites, so it is drawn as it is. */
+.aui-theme-root.dark .aman-runtime-rail__picture {
   mix-blend-mode: normal;
-  -webkit-mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
-  mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
+}
+
+.aman-runtime-rail__fade {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3.5rem;
+  background: linear-gradient(to bottom, transparent, var(--paper));
+  pointer-events: none;
 }
 
 .aman-runtime-rail__avatar-fallback {
-  width: 2.625rem;
-  height: 2.625rem;
-  object-fit: contain;
   display: grid;
+  width: 100%;
+  height: 100%;
   place-items: center;
   color: var(--text-primary);
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+/* The name block: the chosen name in the serif, its role in secondary text two pixels below. */
+.aman-runtime-rail__identity {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.aman-runtime-rail__identity h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.aui-panda__role {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
 .aman-runtime-rail__status {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
-/* Status colours come from the theme's semantic tokens so both palettes and both modes
- * stay in step; the halo is the same hue mixed down rather than a second literal. */
+/* Status colours come from the theme's semantic tokens, so both palettes and both modes stay in step. */
 .aman-runtime-rail__status-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
   border-radius: 999px;
   background: var(--success-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--success-bg) 14%, transparent);
 }
 
-.aman-runtime-rail__status[data-status='connecting'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='connecting'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__status[data-status='degraded'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='degraded'] .aman-runtime-rail__status-dot {
+.aman-runtime-rail__status[data-tone='busy'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='busy'] .aman-runtime-rail__status-dot {
+  background: var(--gold);
+}
+
+.aman-runtime-rail__status[data-tone='warning'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='warning'] .aman-runtime-rail__status-dot {
   background: var(--warning-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning-bg) 14%, transparent);
 }
 
-.aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='offline'] .aman-runtime-rail__status-dot {
+.aman-runtime-rail__status[data-tone='error'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='error'] .aman-runtime-rail__status-dot {
   background: var(--failure-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--failure-bg) 14%, transparent);
-}
-
-.aman-runtime-rail__latency {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .aman-runtime-rail__retry {
   margin-left: auto;
   padding: 0.15rem 0.6rem;
-  border: 1px solid var(--border);
+  border: 0.0625rem solid var(--border);
   border-radius: 999px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
@@ -504,16 +534,67 @@
   background: color-mix(in oklab, var(--text-primary) 8%, transparent);
 }
 
-.aman-runtime-rail__identity {
-  padding: 0.25rem 0 1rem;
+/* Grouped rail sections: a secondary label over one value line. */
+.aman-runtime-rail__section {
+  display: grid;
+  gap: 0.375rem;
 }
 
-.aman-runtime-rail__identity h2 {
+.aman-runtime-rail__section-label {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.aman-runtime-rail__section-value {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The folded rows: a hairline above each, the chevron on the left of the label. */
+.aman-runtime-rail__details {
+  border-top: 0.0625rem solid var(--border);
+}
+
+.aman-runtime-rail__details:last-of-type {
+  border-bottom: 0.0625rem solid var(--border);
+}
+
+.aman-runtime-rail__details-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.aman-runtime-rail__details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.aman-runtime-rail__fold-chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.aman-runtime-rail__details[open] .aman-runtime-rail__fold-chevron {
+  transform: rotate(90deg);
+}
+
+.aman-runtime-rail__details-body {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0 0.75rem 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
 }
 
 .aman-runtime-rail__rules {
@@ -522,95 +603,20 @@
   margin: 0;
   padding: 0;
   color: var(--text-primary);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   list-style: none;
 }
 
-/* Grouped rail sections: small-caps label over one value line. The top border carries
- * the separation the old identity divider used to provide. */
-.aman-runtime-rail__section {
-  display: grid;
-  gap: 0.375rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
-.aman-runtime-rail__section-label {
+.aman-runtime-rail__row-text {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.aman-runtime-rail__section-value {
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .aman-runtime-rail__link {
   justify-self: start;
   color: var(--gold-ink);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   text-decoration: underline;
   text-underline-offset: 0.125rem;
-}
-
-.aman-runtime-rail__section-value a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* One disclosure at the foot of the rail holds the diagnostics; `margin-top: auto`
- * keeps it and the release line at the bottom however few sections are shown. */
-.aman-runtime-rail__details {
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
-.aman-runtime-rail__details-summary {
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.aman-runtime-rail__details-list {
-  display: grid;
-  margin: 0.5rem 0 0;
-  gap: 0.15rem;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-}
-
-.aman-runtime-rail__details-list dt {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.aman-runtime-rail__details-list dd {
-  overflow-wrap: anywhere;
-  margin: 0 0 0.35rem;
-  color: var(--text-primary);
-}
-
-/* The release line is the smallest thing in the rail, and the last. */
-.aman-runtime-rail__footer {
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Chat text: type-scale sizing with airy leading for reading rhythm. */
@@ -1811,6 +1817,20 @@
   border-top: 0.0625rem dotted var(--border);
 }
 
+/* Inside the Activity row the receipt is a plain list: no card, border or monospace face. */
+.aman-runtime-rail .aui-receipt {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+}
+
+.aman-runtime-rail .aui-receipt .aui-row + .aui-row {
+  border-top: 0.0625rem solid var(--border);
+}
+
 /* The rail is too narrow for verb and state side by side: the state sits under its verb. */
 .aman-runtime-rail .aui-receipt .aui-row--2 {
   grid-template-columns: minmax(0, 1fr);
@@ -1819,36 +1839,6 @@
 
 .aman-runtime-rail .aui-receipt .aui-row--2 > .state {
   justify-self: start;
-}
-
-/* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
-   instead of a white card. The hairline stays gold. */
-.aui-panda {
-  display: grid;
-  justify-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem;
-  border-color: var(--gold-line);
-  background-color: var(--panda-glow-to);
-  background-image: radial-gradient(ellipse at 50% 40%, var(--panda-glow-from), var(--panda-glow-to) 75%), var(--grain);
-  isolation: isolate;
-}
-
-.aui-panda__caption {
-  display: grid;
-  gap: 0.1rem;
-  width: 100%;
-  padding: 0 0.25rem 0.25rem;
-}
-
-/* The caption sits on the glow, not the card, so it takes the primary text colour: the glow's
-   worst point is too light for the secondary one in light mode. */
-.aui-panda__role {
-  margin: 0;
-  color: var(--text-primary);
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
 }
 
 /* An action in a row is a button; it keeps the look of the link it replaces. */
