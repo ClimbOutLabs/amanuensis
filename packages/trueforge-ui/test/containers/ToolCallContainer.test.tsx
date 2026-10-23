@@ -128,7 +128,7 @@ describe('ToolCallContainer', () => {
 
   it('renders a running tool call without a result', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'search_docs', args: {} }]);
-    expect(screen.getByText('search_docs')).toBeInTheDocument();
+    expect(screen.getByText('Search docs')).toBeInTheDocument();
     expect(screen.queryByText('Result:')).not.toBeInTheDocument();
   });
 
@@ -143,7 +143,7 @@ describe('ToolCallContainer', () => {
         result: '2026-07-01T00:00:00Z',
       },
     ]);
-    fireEvent.click(screen.getByText('get_current_datetime'));
+    fireEvent.click(screen.getByText('Get current datetime'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('"tz"'));
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
@@ -214,7 +214,7 @@ describe('ToolCallContainer', () => {
         isError: true,
       },
     ]);
-    fireEvent.click(screen.getByText('flaky_tool'));
+    fireEvent.click(screen.getByText('Flaky tool'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveTextContent('boom');
   });
@@ -237,7 +237,7 @@ describe('ToolCallContainer', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: 'screened-1', toolName: 'fetch_url', args: {}, result }]);
 
     expect(screen.getByText('Content withheld')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('fetch_url'));
+    fireEvent.click(screen.getByText('Fetch url'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveAttribute('data-content', '<html>RED-TEAM-CANARY-7Q2X9</html>');
   });
@@ -1088,8 +1088,8 @@ describe('ToolCallContainer: held search request', () => {
 
   it('shows the masked arguments in the Request block of an answered hold, never the raw key', async () => {
     const { container } = renderHeldSearch({ result: 'ok' });
-    await screen.findByText('web_search');
-    fireEvent.click(screen.getByText('web_search'));
+    await screen.findByText('Searched the web');
+    fireEvent.click(screen.getByText('Searched the web'));
     const blocks = await screen.findAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', 'query: how do I rotate ws••••••3x safely');
     expect(container.innerHTML).not.toContain(rawKey);

@@ -140,19 +140,16 @@ function pluralize(count: number, singular: string): string {
 function buildInternalsSummary({
   toolCount,
   thinkingCount,
-  recalledItems,
   helperCalls,
 }: {
   toolCount: number;
   thinkingCount: number;
-  recalledItems: number;
   helperCalls: number;
 }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
-  if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
   if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   // An answer with nothing else to list still gets a toggle for its model usage.
   return segments.length > 0 ? segments.join(' · ') : 'Details';
@@ -164,12 +161,6 @@ type GroupKey = `group-agentSteps-${number}` | 'group-reasoning' | 'group-interi
 function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
   return `group-agentSteps-${runIndex}`;
 }
-
-const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
-  'waiting-for-model': 'Waiting for model',
-  'executing-tools': 'Executing tools',
-  'waiting-for-approval': 'Waiting for approval',
-};
 
 const BRIEF_WRITING_LINE = 'Putting your brief together…';
 
@@ -249,7 +240,6 @@ export function AssistantMessageContainer() {
   // thinking, no memory, no usage, and no errors renders no internals row at all.
   const recall = memoryContext?.recall;
   const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
-  const recalledItems = recall?.stats.items ?? 0;
   const hasMemory = recall != null || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
   const helperUsage = modelUsage !== undefined && modelUsage.helperCalls > 0 ? modelUsage : undefined;
@@ -288,25 +278,13 @@ export function AssistantMessageContainer() {
       !attention;
     if (trivial) return null;
 
-    // A paused-for-approval turn is not "running" but still needs a live label —
-    // it is the one state that requires the user to act.
-    const liveLabel = isLive
-      ? phase !== undefined
-        ? PHASE_LIVE_LABELS[phase]
-        : 'Thinking…'
-      : phase === 'waiting-for-approval'
-        ? PHASE_LIVE_LABELS['waiting-for-approval']
-        : undefined;
-
     return (
       <AgentInternalsDisclosure
         summary={buildInternalsSummary({
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
-          recalledItems: isHost ? recalledItems : 0,
           helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
-        liveLabel={liveLabel}
         isRunning={isLive}
         attention={attention}
         lockOpen={messageStatus === 'requires-action' && (isLast || phase === 'waiting-for-approval')}

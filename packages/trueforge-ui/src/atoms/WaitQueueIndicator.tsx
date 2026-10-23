@@ -1,9 +1,6 @@
 'use client';
 
-import { Fragment } from 'react';
-
 import {
-  buildLongWaitAnnouncement,
   buildLongWaitNote,
   LONG_WAIT_MS,
   type WaitQueueSnapshot,
@@ -34,16 +31,10 @@ function spriteStateFor(activeStation: WaitStationId | null): StateSpriteState {
 }
 
 /**
- * The wait queue, Disneyland-style: a winding station track (where the turn has
- * been and where it is headed) plus the state sprite and a microcopy line that
- * names the actual work. Stations only ever change on real events — see
- * `deriveWaitQueue`.
- *
- * Screen-reader discipline: the `role="status"` line carries the microcopy, the
- * latest ticks, and the long-wait note, so station transitions announce exactly
- * once. The ticking elapsed clock and decorative track stay `aria-hidden`, and
- * React only mutates the live text when it actually changes — timer re-renders
- * are silent.
+ * A running reply's one status line: the state sprite and plain words for the actual work, from
+ * `deriveWaitQueue`. After a quiet spell the same line says how long it has been, so a slow model
+ * reads as still working rather than stuck. Finished steps go to screen readers only, so nothing
+ * stacks under the line.
  */
 export function WaitQueueIndicator({
   snapshot,
@@ -53,53 +44,18 @@ export function WaitQueueIndicator({
   className,
 }: WaitQueueIndicatorProps) {
   const longWait = quietMs >= LONG_WAIT_MS;
-  const announcement = longWait
-    ? buildLongWaitAnnouncement({ activeStation: snapshot.activeStation, microcopy: snapshot.microcopy })
-    : undefined;
 
   return (
     <span className={cn('aui-wait-queue', reducedMotion && 'aui-wait-queue--static', className)}>
-      <span className="aui-wait-queue__track" aria-hidden="true">
-        {snapshot.stations.map((station, index) => (
-          <Fragment key={station.id}>
-            {index > 0 && <span className="aui-wait-queue__link" />}
-            <span
-              className={cn(
-                'aui-wait-queue__station',
-                `aui-wait-queue__station--${station.state}`,
-                station.id === 'writing' && station.state === 'active' && 'aui-wait-queue__station--arriving',
-              )}
-            >
-              <span className="aui-wait-queue__dot" />
-              <span className="aui-wait-queue__label">{station.label}</span>
-            </span>
-          </Fragment>
-        ))}
-      </span>
       <span role="status" className="aui-wait-queue__line">
         <StateSprite state={spriteStateFor(snapshot.activeStation)} />
-        <span className="aui-wait-queue__microcopy">{snapshot.microcopy}</span>
+        <span className="aui-wait-queue__microcopy">
+          {longWait
+            ? buildLongWaitNote({ elapsedMs, activeStation: snapshot.activeStation, microcopy: snapshot.microcopy })
+            : snapshot.microcopy}
+        </span>
         {snapshot.ticks.length > 0 && <span className="sr-only"> · {snapshot.ticks.join(' · ')}</span>}
-        {announcement !== undefined && <span className="sr-only"> {announcement}</span>}
       </span>
-      {snapshot.ticks.length > 0 && (
-        <span className="aui-wait-queue__ticks" aria-hidden="true">
-          {snapshot.ticks.map((tick, index) => (
-            <span key={`${tick}-${String(index)}`} className="aui-wait-queue__tick">
-              ✓ {tick}
-            </span>
-          ))}
-        </span>
-      )}
-      {longWait && (
-        <span className="aui-wait-queue__longwait" aria-hidden="true">
-          {buildLongWaitNote({
-            elapsedMs,
-            activeStation: snapshot.activeStation,
-            microcopy: snapshot.microcopy,
-          })}
-        </span>
-      )}
     </span>
   );
 }

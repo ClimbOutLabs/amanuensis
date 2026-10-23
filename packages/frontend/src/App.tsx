@@ -240,7 +240,6 @@ function AmanShell({
         version={version}
         buildRef={buildRef}
         settingsHref="/settings"
-        sessionId={activeSessionId}
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />

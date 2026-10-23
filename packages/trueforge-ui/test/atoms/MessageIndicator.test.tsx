@@ -48,9 +48,9 @@ describe('MessageIndicator', () => {
     const slot = slots[0]?.closest('[data-slot="aui_assistant-message-indicator"]');
     if (!(slot instanceof HTMLElement)) throw new Error('indicator slot not found');
     expect(slot).toHaveClass('host-indicator');
-    // Fresh running turn: the queue opens at Listening.
+    // Fresh running turn: one plain line, with no step names stacked beside it.
     expect(slot).toHaveTextContent('On it…');
-    expect(slot).toHaveTextContent('Listening');
+    expect(slot).not.toHaveTextContent('Listening');
   });
 
   it('keeps the slot contract: one live region per indicator', () => {

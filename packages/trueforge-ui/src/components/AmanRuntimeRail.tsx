@@ -2,7 +2,6 @@ import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import { WORKING_ON_IT_LABEL } from '../atoms/ComposerShell.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
-import { useContextCompactionActive } from '../hooks/useContextCompactionActive.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
@@ -43,12 +42,10 @@ export type AmanRuntimeRailProps = {
   version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
-  /** Where the "Change in Settings" link points; omitted hides the link. */
+  /** Where the panel's Settings link points; omitted hides the link. */
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
-  /** The chat the person is looking at, so the status line can say when its history is being shortened. */
-  sessionId?: string | undefined;
   /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
   pendingApprovalIds?: readonly string[];
   /**
@@ -82,30 +79,26 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
 };
 
 /**
- * The status line: the connection when it is not fine, then the wait on the person, otherwise
- * what the assistant is doing now.
+ * The status line: the connection when it is not fine, then the wait on the person, Ready, or a
+ * failure. While a reply runs it says nothing: the composer and the reply already say so on screen.
  */
 function statusLineLabel({
   status,
   activity,
   waitingOnPerson,
-  compacting,
 }: {
   status: AmanRuntimeRailStatus;
   activity: AmanAvatarActivity;
   waitingOnPerson: boolean;
-  compacting: boolean;
-}): string {
+}): string | null {
   if (status !== 'ready') return STATUS_LABELS[status];
   if (waitingOnPerson) return WAITING_FOR_YOU_LABEL;
-  if (compacting && activity === 'thinking') return 'Tidying up the conversation';
   switch (activity) {
     case 'idle':
       return 'Ready';
     case 'thinking':
-      return WORKING_ON_IT_LABEL;
     case 'writing':
-      return 'Writing the answer';
+      return null;
     case 'waiting':
       return WAITING_FOR_YOU_LABEL;
     case 'error':
@@ -152,7 +145,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   personaName,
   status: statusOverride,
   settingsHref,
-  sessionId,
   pendingApprovalIds = [],
   auditFeed,
 }) => {
@@ -166,8 +158,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const waitingOnPerson = pendingApprovalIds.length > 0;
-  const compacting = useContextCompactionActive(sessionId);
-  const statusLine = statusLineLabel({ status, activity, waitingOnPerson, compacting });
+  const statusLine = statusLineLabel({ status, activity, waitingOnPerson });
+  // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
+  const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
   // A pending approval holds the panda in its waiting state, unless a failure takes the pose.
   const avatarActivity: AmanAvatarActivity = waitingOnPerson && activity !== 'error' ? 'waiting' : activity;
@@ -211,8 +204,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             className="aman-runtime-rail__compact-status"
             data-tone={tone}
             role="img"
-            aria-label={statusLine}
-            title={statusLine}
+            aria-label={compactLabel}
+            title={compactLabel}
           >
             {posterSrc === undefined ? null : (
               <img src={posterSrc} alt="" className="aman-runtime-rail__compact-poster" />
@@ -258,8 +251,12 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           </section>
 
           <div className="aman-runtime-rail__status" data-tone={tone} aria-live="polite">
-            <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-            <span>{statusLine}</span>
+            {statusLine === null ? null : (
+              <>
+                <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
+                <span>{statusLine}</span>
+              </>
+            )}
             {selfProbed && (status === 'offline' || status === 'degraded') && (
               <button
                 type="button"

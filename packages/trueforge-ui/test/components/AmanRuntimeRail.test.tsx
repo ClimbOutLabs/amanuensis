@@ -1,16 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ComposerShell } from '@/atoms/ComposerShell.js';
 import { avatarAltText } from '@/components/AmanAvatarMotion.js';
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
-import { clearContextCompaction, publishContextCompaction } from '@/utils/contextCompactionLive.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
@@ -697,40 +697,46 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(screen.getByText('Waiting for you')).toBeInTheDocument();
   });
 
-  it('says what Aman is doing in the status line and keeps it polite for screen readers', () => {
+  it('says nothing in the status line while a reply runs, and Ready once it is done', () => {
     const { container, rerender } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail status="ready" activity="thinking" />
       </RuntimeHarness>,
     );
-    const status = container.querySelector('.aman-runtime-rail__status');
-    expect(status).toHaveAttribute('aria-live', 'polite');
-    expect(status).toHaveTextContent('Working on it');
+    const status = () => container.querySelector('.aman-runtime-rail__status');
+    expect(status()).toHaveAttribute('aria-live', 'polite');
+    expect(status()).toHaveTextContent(/^$/);
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="ready" activity="writing" />
+      </RuntimeHarness>,
+    );
+    expect(status()).toHaveTextContent(/^$/);
 
     rerender(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail status="ready" activity="idle" />
       </RuntimeHarness>,
     );
-    expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Ready');
+    expect(status()).toHaveTextContent('Ready');
   });
 
-  it('says the conversation is being tidied while this chat is shortened, and only this chat', () => {
-    const { container } = render(
+  it('leaves the composer as the only place a running reply says Working on it', () => {
+    render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail status="ready" activity="thinking" sessionId="chat-1" />
+        <AmanRuntimeRail status="ready" activity="thinking" />
+        <ComposerShell
+          input={<textarea aria-label="Message" />}
+          disabled={false}
+          canSubmit={false}
+          isRunning
+          onSubmit={() => undefined}
+        />
       </RuntimeHarness>,
     );
-    const status = () => container.querySelector('.aman-runtime-rail__status');
-    act(() => publishContextCompaction({ sessionId: 'chat-2', active: true }));
-    expect(status()).toHaveTextContent('Working on it');
 
-    act(() => publishContextCompaction({ sessionId: 'chat-1', active: true }));
-    expect(status()).toHaveTextContent('Tidying up the conversation');
-
-    act(() => publishContextCompaction({ sessionId: 'chat-1', active: false }));
-    expect(status()).toHaveTextContent('Working on it');
-    act(() => clearContextCompaction());
+    expect(screen.getAllByText(/Working on it/)).toHaveLength(1);
   });
 
   it('reads the three rules in plain words from the saved settings', async () => {

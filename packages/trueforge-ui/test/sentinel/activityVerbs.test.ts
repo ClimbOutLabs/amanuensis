@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  ACTIVITY_FALLBACK_VERB,
-  ACTIVITY_STATE_LABELS,
-  activityStateOf,
-  activityVerbOf,
-  receiptRowsOf,
-} from '@/sentinel/activityVerbs.js';
+import { ACTIVITY_STATE_LABELS, activityStateOf, receiptRowsOf } from '@/sentinel/activityVerbs.js';
 import type { SentinelAuditEntry } from '@/sentinel/types.js';
 
 function entry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
@@ -21,17 +15,6 @@ function entry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
     ...overrides,
   };
 }
-
-describe('activityVerbOf', () => {
-  it('reads a known tool as a plain verb phrase', () => {
-    expect(activityVerbOf('web_search')).toBe('Searched the web');
-    expect(activityVerbOf('gmail_read')).toBe('Read your email');
-  });
-
-  it('falls back to a plain phrase, never the raw tool name', () => {
-    expect(activityVerbOf('some_new_tool')).toBe(ACTIVITY_FALLBACK_VERB);
-  });
-});
 
 describe('activityStateOf', () => {
   it('maps each audit outcome to one of the five state words', () => {

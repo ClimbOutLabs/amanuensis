@@ -1,9 +1,32 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ComposerShell } from '@/atoms/ComposerShell.js';
 
 describe('ComposerShell', () => {
+  it('says Working on it while a reply runs, and adds whole minutes once it passes one', () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <ComposerShell
+          input={<textarea aria-label="Message" />}
+          disabled={false}
+          canSubmit={false}
+          isRunning
+          onSubmit={() => undefined}
+        />,
+      );
+      expect(screen.getByRole('status')).toHaveTextContent(/^Working on it$/);
+
+      act(() => {
+        vi.advanceTimersByTime(125_000);
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('Working on it, 2 min');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('composes input, attachments, the status, and Send', () => {
     const onSubmit = vi.fn();
     const { container } = render(

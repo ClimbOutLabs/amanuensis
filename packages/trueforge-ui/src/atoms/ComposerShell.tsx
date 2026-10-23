@@ -1,8 +1,9 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { useSlot } from '../theme/SlotsProvider.js';
+import { elapsedWords } from '../utils/waitQueueJourney.js';
 import { cn } from './lib/cn.js';
 
 export type ComposerShellProps = {
@@ -25,6 +26,28 @@ export type ComposerShellProps = {
 
 /** The one owner of the words for a reply in progress, shown in the composer and the panel. */
 export const WORKING_ON_IT_LABEL = 'Working on it';
+
+/** How long the reply has run, rechecked every quarter minute; the words change once a minute. */
+function useRunningElapsed(): string | undefined {
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return elapsedWords(now - startedAt);
+}
+
+/** Why Send is a Stop right now: a reply is running, and for how long once it passes a minute. */
+function RunningStatus() {
+  const elapsed = useRunningElapsed();
+  return (
+    <span role="status" className="text-text-secondary flex items-center gap-2 text-[0.8125rem]">
+      <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
+      {elapsed === undefined ? WORKING_ON_IT_LABEL : `${WORKING_ON_IT_LABEL}, ${elapsed}`}
+    </span>
+  );
+}
 
 /**
  * The composer card. It holds the attachment chips above the input and one toolbar row below it:
@@ -62,12 +85,7 @@ export function ComposerShell({
       <div className="aui-composer-footer flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="aui-composer-leading flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <ComposerLeftSection disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
-          {isRunning ? (
-            <span role="status" className="text-text-secondary flex items-center gap-2 text-[0.8125rem]">
-              <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
-              {WORKING_ON_IT_LABEL}
-            </span>
-          ) : null}
+          {isRunning ? <RunningStatus /> : null}
           {connectorStatusLabel && (
             <span className="text-text-secondary max-w-[12rem] truncate text-[0.8125rem]">{connectorStatusLabel}</span>
           )}

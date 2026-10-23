@@ -744,74 +744,12 @@
   }
 }
 
-/* ── Wait queue (Disneyland-style turn journey) ──────────────────────────
- * Station dots change ONLY on real turn events (see deriveWaitQueue): the
- * track shows where the turn has been and where it is headed, never fake
- * progress. Motion stays subtle by design; reduced-motion users and the
- * --static modifier get the still show. */
+/* ── A running reply's status line ──────────────────────────────────────
+ * One line: the state sprite and plain words for the actual work, which change only on real turn
+ * events (see deriveWaitQueue). Reduced-motion users and the --static modifier get the still sprite. */
 .aui-wait-queue {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.375rem;
-}
-
-.aui-wait-queue__track {
-  display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-}
-
-.aui-wait-queue__link {
-  width: 0.875rem;
-  height: 1px;
-  background: var(--border);
-  flex: none;
-}
-
-.aui-wait-queue__station {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.aui-wait-queue__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  flex: none;
-}
-
-.aui-wait-queue__label {
-  font-size: 0.6875rem;
-  line-height: 1rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.aui-wait-queue__station--active .aui-wait-queue__dot {
-  background: var(--brand-accent);
-  border-color: var(--brand-accent);
-}
-
-.aui-wait-queue__station--active .aui-wait-queue__label {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.aui-wait-queue__station--done .aui-wait-queue__dot {
-  background: var(--text-secondary);
-  border-color: var(--text-secondary);
-}
-
-.aui-wait-queue__station--pending {
-  opacity: 0.75;
-}
-
-.aui-wait-queue__station--skipped {
-  opacity: 0.45;
 }
 
 .aui-wait-queue__line {
@@ -825,58 +763,6 @@
   color: var(--text-secondary);
 }
 
-.aui-wait-queue__ticks {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-}
-
-.aui-wait-queue__tick {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  color: var(--text-secondary);
-  opacity: 0.85;
-}
-
-.aui-wait-queue__longwait {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  font-style: italic;
-  color: var(--text-secondary);
-}
-
-@keyframes aui-wait-queue-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.4);
-    opacity: 0.7;
-  }
-}
-
-/* The Weenie: when the first tokens arrive and Writing lights up, the dot
- * breathes a soft ring outward — the doors opening, not confetti. */
-@keyframes aui-wait-queue-arrive {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 50%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0.5rem transparent;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--active .aui-wait-queue__dot {
-    animation: aui-wait-queue-pulse 1.6s ease-in-out infinite;
-  }
-  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--arriving .aui-wait-queue__dot {
-    animation: aui-wait-queue-arrive 1.4s ease-out infinite;
-  }
-}
-
 /* ── State sprite: cute CSS-only assistant character ─────────────────────
  * A 1.25rem blob that mirrors the wait-queue station: Listening hops with
  * squash-and-stretch and sound waves, Remembering sways dreamily while
@@ -887,7 +773,7 @@
  * changes. Pure CSS shapes and keyframes, no assets. Body uses the theme
  * accent and eyes use the page background token, so contrast holds across
  * every preset and mode. Animations honor prefers-reduced-motion and the
- * --static modifier, matching the wait-queue track behavior. */
+ * --static modifier. */
 .aui-state-sprite {
   position: relative;
   display: inline-block;

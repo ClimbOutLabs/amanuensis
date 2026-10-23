@@ -65,6 +65,7 @@ import {
   toolCallNotDoneReason,
   toStatus,
 } from '../utils/toolCallParsing.js';
+import { toolStepTitle } from '../utils/toolWords.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedApprovalBridge.js';
@@ -659,7 +660,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
           expanded={expanded}
           onToggle={onToggle}
           awaiting={status === 'running'}
-          awaitingText={durationText ?? 'Awaiting Response…'}
+          awaitingText={durationText}
           outcomeText={outcomeText}
           status={status}
           showResponseLine={status !== 'running' && !!resultDisplay.data}
@@ -685,7 +686,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         expanded={expanded}
         onToggle={onToggle}
         awaiting={status === 'running'}
-        awaitingText={durationText ?? 'Awaiting Response…'}
+        awaitingText={durationText}
         outcomeText={outcomeText}
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
@@ -707,11 +708,11 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
   return (
     <ToolCallCard
-      toolName={part.toolName}
+      toolName={toolStepTitle({ toolName: part.toolName, running: status === 'running' })}
       expanded={expanded}
       onToggle={onToggle}
       awaiting={status === 'running'}
-      awaitingText={durationText ?? 'Awaiting Response…'}
+      awaitingText={durationText}
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
