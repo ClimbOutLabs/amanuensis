@@ -283,6 +283,11 @@ export class ToolSet implements IToolSet {
     this.logger = params.logger;
   }
 
+  /** Only the designated search provider's listed search and page-read tools; the server's own hints never count. */
+  isHostVouchedReadTool(name: string): boolean {
+    return this.searchProvider && this.searchTools.has(name);
+  }
+
   bundleOf(_toolName: string): ToolBundleName | undefined {
     void _toolName;
     return this.bundle;
