@@ -126,6 +126,100 @@ describe('useWaitQueue', () => {
     expect(view.snapshot.stations.find(s => s.id === 'doing')?.state).toBe('skipped');
   });
 
+  it('names reasoning with a live word count while it streams', () => {
+    const view = assistantView(
+      [
+        { role: 'user', content: 'plan my week' },
+        {
+          role: 'assistant',
+          content: [{ type: 'reasoning', text: 'First check the calendar, then the open tasks.' }],
+          status: { type: 'running' },
+        },
+      ],
+      true,
+    );
+
+    expect(view.snapshot.microcopy).toBe('Reasoning… 8 words so far');
+  });
+
+  describe('the quiet clock', () => {
+    function reasoningTurn(text: string): ThreadMessageLike[] {
+      return [
+        { role: 'user', content: 'plan my week' },
+        { role: 'assistant', content: [{ type: 'reasoning', text }], status: { type: 'running' } },
+      ];
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not call a turn slow while reasoning keeps streaming, only once it goes quiet', async () => {
+      const captured: Captured[] = [];
+      const harness = (text: string) => (
+        <RuntimeHarness messages={reasoningTurn(text)} isRunning>
+          <ThreadPrimitive.Messages>{() => <Probe captured={captured} />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>
+      );
+      const latest = () => {
+        const found = captured.filter(entry => entry.role === 'assistant').at(-1);
+        if (!found) throw new Error('no assistant message rendered');
+        return found.view;
+      };
+      let text = 'Start.';
+      const view = render(harness(text));
+      for (let step = 0; step < 4; step += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        text = `${text} More.`;
+        view.rerender(harness(text));
+      }
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(latest().elapsedMs).toBeGreaterThanOrEqual(40_000);
+      expect(latest().longWait).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(latest().quietMs).toBeGreaterThanOrEqual(15_000);
+      expect(latest().longWait).toBe(true);
+    });
+
+    it('drops the slow note on the very render a new token arrives', async () => {
+      const captured: Captured[] = [];
+      const harness = (text: string) => (
+        <RuntimeHarness messages={reasoningTurn(text)} isRunning>
+          <ThreadPrimitive.Messages>{() => <Probe captured={captured} />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>
+      );
+      const view = render(harness('Start.'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(captured.filter(entry => entry.role === 'assistant').at(-1)?.view.longWait).toBe(true);
+
+      const before = captured.length;
+      await act(async () => {
+        view.rerender(harness('Start. More words.'));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const withNewText = captured
+        .slice(before)
+        .filter(entry => entry.role === 'assistant' && entry.view.snapshot.microcopy === 'Reasoning… 3 words so far');
+      expect(withNewText.length).toBeGreaterThan(0);
+      for (const entry of withNewText) {
+        expect(entry.view.longWait).toBe(false);
+      }
+    });
+  });
+
   describe('the long-wait clock', () => {
     const messages: ThreadMessageLike[] = [
       { role: 'user', content: 'hello' },
