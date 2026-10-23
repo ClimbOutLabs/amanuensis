@@ -184,7 +184,7 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       await page.waitForLoadState('networkidle', { timeout: RENDER_TIMEOUT_MS });
       await page.getByText('Image from example.com hidden').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await page.getByText('Image from example.com hidden').count(), 3, `${viewport.name}: reply lines`);
-      await page.getByText('Images hidden', { exact: true }).waitFor();
+      await page.getByText('2 images from the email were not loaded.', { exact: true }).waitFor();
       assert.equal(
         await page.locator('img[data-testid="aui-chat-image"]').count(),
         1,
@@ -217,8 +217,8 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       );
       await page.getByText('Sketch (image not shown)').waitFor();
 
-      // Showing the email's pictures loads them as thumbnails in one row.
-      await showEach(page, 'Show images');
+      // Loading the email's pictures shows them as thumbnails in one row.
+      await showEach(page, 'Load images');
       await waitForImages(page, 4);
       assert.equal(
         await page.locator('[data-testid="aui-email-images"] img').count(),

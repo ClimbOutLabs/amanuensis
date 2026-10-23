@@ -6,6 +6,7 @@ import type {
   ISessionStore,
   Sessions,
   SessionTitleSeed,
+  TerminalTurnState,
   Turn,
   TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
@@ -1128,9 +1129,9 @@ async function logTurnPersonaSwitch(params: {
 }
 
 /**
- * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
- * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
- * of dropping them when a SIGTERM lands in the drain window.
+ * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait, up to the
+ * follow-up time limit, for the TURN_DONE submissions (artifact persistence, memory retain,
+ * profile learning) instead of dropping them when a SIGTERM lands in the drain window.
  */
 export interface DrainTurnEventsInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
@@ -1182,26 +1183,31 @@ export interface DrainTurnEventsInput {
 }
 
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
-  const drain = runTurnEventDrain(input);
+  // Registered before the stream runs so the chat's next turn, which freezes this one first,
+  // always finds it. Settles once this turn's files are saved, or when the drain of a turn that
+  // did not finish ends.
+  const artifactCapture = Promise.withResolvers<undefined>();
+  input.turnDrains.trackArtifactCapture({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    capture: artifactCapture.promise,
+  });
+  const drain = runTurnEventDrain({
+    input,
+    markArtifactsCaptured: () => {
+      artifactCapture.resolve(undefined);
+    },
+  });
   input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
   return drain;
 }
 
-async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
-  const {
-    trackedStream,
-    turnEventStream,
-    sessionId,
-    turnId,
-    executionDeadline,
-    logger,
-    onEvent,
-    memory,
-    artifacts,
-    profileLearning,
-    modelUsage,
-    auto_title,
-  } = input;
+async function runTurnEventDrain(params: {
+  input: DrainTurnEventsInput;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, markArtifactsCaptured } = params;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1209,6 +1215,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // turn that attached one starts out tainted. A turn with neither is the user's own voice:
   // `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -1220,68 +1227,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
-        // First, so the answer's usage is visible before the slower follow-up work below.
-        const flushUsage = async () => {
-          if (modelUsage !== undefined) {
-            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
-          }
-        };
-        await flushUsage();
-        if (memory !== undefined) {
-          // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
-          // it, and the verification pass inside retries a failed retain once.
-          const stored = await submitRetainWithVerification({
-            client: memory.client,
-            sessionId,
-            turnId,
-            userText: memory.userText,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            completedAt: event.state.completed_at,
-            sessionTitle: memory.sessionTitle,
-            origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
-            logger,
-            summarize: memory.summarize,
-            outcomeLog: memory.outcomeLog,
-          });
-          // Only a stored turn can have gone to the persona it started with; a skipped or failed
-          // retain is already explained by its own reason line.
-          if (stored && memory.outcomeLog !== undefined) {
-            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
-          }
-        }
-        if (profileLearning !== undefined) {
-          // The assistant's reply is deliberately not passed here: it is not a source of facts
-          // about the user, so the learning pass only ever sees the user's own turn text.
-          // Awaited so the tracked drain covers the pass; the pass writes its audit event to
-          // the turnEventStream (how an open tab sees it without reloading the turn).
-          await submitProfileLearning({
-            ...profileLearning,
-            sessionId,
-            turnId,
-            completedAt: event.state.completed_at,
-            turnEventStream,
-            logger,
-          });
-        }
-        if (auto_title !== undefined) {
-          // Never blocks the reply: the reply is already complete on the stream.
-          await applyAutoSessionTitle({
-            ...auto_title,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-          });
-        }
-        // The summarization and profile learning calls above record after the first flush.
-        await flushUsage();
-        if (artifacts !== undefined) {
-          await resolveAndSubmitArtifactPersistence({
-            ...artifacts,
-            sessionId,
-            turnId,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            logger,
-          });
-        }
+        // Not awaited here: the stream must finish now, so the chat's next turn waits only on
+        // the artifact step. The drain awaits the rest below, up to its time limit.
+        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
       }
+    }
+    if (followUp !== undefined) {
+      await waitForTurnFollowUp({ followUp, sessionId, turnId, logger });
     }
   } catch (error) {
     if (error instanceof SessionStoreNotFoundError) {
@@ -1298,8 +1250,157 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
     }
   } finally {
+    if (followUp === undefined) {
+      markArtifactsCaptured();
+    }
     executionDeadline.dispose();
   }
+}
+
+/**
+ * The work a finished turn does after its answer: artifacts, usage, title, memory, profile learning.
+ * Never throws; a failure is logged.
+ */
+async function runTurnFollowUp(params: {
+  input: DrainTurnEventsInput;
+  state: Extract<TerminalTurnState, { status: 'done' }>;
+  ingestedToolOutput: boolean;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, auto_title } =
+    input;
+  try {
+    // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
+    // on this step, so its tools cannot change a file before this turn has saved it.
+    try {
+      if (artifacts !== undefined) {
+        await resolveAndSubmitArtifactPersistence({
+          ...artifacts,
+          sessionId,
+          turnId,
+          assistantText: formatAssistantMessageText(state.output?.content),
+          logger,
+        });
+      }
+    } finally {
+      markArtifactsCaptured();
+    }
+    // Before the model calls below, so the answer's usage is visible before that slower work.
+    const flushUsage = async () => {
+      if (modelUsage !== undefined) {
+        await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+      }
+    };
+    await flushUsage();
+    if (auto_title !== undefined) {
+      // Never blocks the reply: the reply is already complete on the stream.
+      await applyAutoSessionTitle({
+        ...auto_title,
+        assistantText: formatAssistantMessageText(state.output?.content),
+      });
+    }
+    if (memory !== undefined) {
+      // Awaited so the verification pass inside can retry a failed retain once.
+      const stored = await submitRetainWithVerification({
+        client: memory.client,
+        sessionId,
+        turnId,
+        userText: memory.userText,
+        assistantText: formatAssistantMessageText(state.output?.content),
+        completedAt: state.completed_at,
+        sessionTitle: memory.sessionTitle,
+        origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        logger,
+        summarize: memory.summarize,
+        outcomeLog: memory.outcomeLog,
+      });
+      // Only a stored turn can have gone to the persona it started with; a skipped or failed
+      // retain is already explained by its own reason line.
+      if (stored && memory.outcomeLog !== undefined) {
+        await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+      }
+    }
+    if (profileLearning !== undefined) {
+      // The assistant's reply is deliberately not passed here: it is not a source of facts
+      // about the user, so the learning pass only ever sees the user's own turn text.
+      // The pass writes its audit event to the turnEventStream (how an open tab sees it
+      // without reloading the turn).
+      await submitProfileLearning({
+        ...profileLearning,
+        sessionId,
+        turnId,
+        completedAt: state.completed_at,
+        turnEventStream,
+        logger,
+      });
+    }
+    // The title, summarization and profile learning calls above record after the first flush.
+    await flushUsage();
+  } catch (error) {
+    logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+}
+
+/** Waits for a turn's follow-up work up to its time limit; past it the work keeps running unwatched. */
+async function waitForTurnFollowUp(params: {
+  followUp: Promise<void>;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { followUp, sessionId, turnId, logger } = params;
+  const timeoutMs = configuration.TURN_FOLLOW_UP_TIMEOUT_MS;
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    followUp.then(() => false),
+    new Promise<boolean>(resolve => {
+      // Unref'd so a pending follow-up never keeps the process alive on its own.
+      timeout = setTimeout(() => {
+        resolve(true);
+      }, timeoutMs);
+      timeout.unref();
+    }),
+  ]).finally(() => {
+    clearTimeout(timeout);
+  });
+  if (timedOut) {
+    logger.warn('Turn follow-up work ran past its time limit; it keeps running in the background', {
+      sessionId,
+      turnId,
+      timeoutMs,
+    });
+  }
+}
+
+/** Longest a turn waits for the previous turn of its chat to save its sandbox files. */
+const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
+
+/**
+ * Starts a created turn's clock. Every path that runs a turn calls this after createTurn froze the
+ * previous turn and before any tool runs: it first waits, up to a short limit, for the chat's
+ * previous turn to save its sandbox files, since this turn reuses that sandbox. The wait never
+ * covers that turn's model calls, and it does not count against this turn's deadline.
+ */
+export async function armTurnExecution(params: {
+  turnDrains: TurnDrainRegistry;
+  sessionId: string;
+  executionDeadline: TurnExecutionDeadline;
+  logger: Logger;
+}): Promise<void> {
+  const { turnDrains, sessionId, executionDeadline, logger } = params;
+  const stillRunning = await turnDrains.waitForArtifactCapture({
+    sessionId,
+    timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+  });
+  if (stillRunning !== undefined) {
+    logger.warn('The previous turn was still saving its files, so this turn started without waiting longer', {
+      sessionId,
+      previousTurnId: stillRunning.turnId,
+      timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+    });
+  }
+  executionDeadline.arm();
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1452,7 +1553,7 @@ export async function beginTurnExecution(params: {
     unattended: params.unattended,
   });
 
-  executionDeadline.arm();
+  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
 
   const trackedStream = deps.activeTurns.track({
     sessionId,
@@ -2583,7 +2684,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
     }
 
-    executionDeadline.arm();
+    await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
 
     const trackedStream = deps.activeTurns.track({
       sessionId,

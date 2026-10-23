@@ -5,7 +5,7 @@ describe('htmlImageLinks', () => {
     const html = `<p>Hi</p><img src="https://example.com/a.png?x=1&amp;y=2" alt="A">
       <IMG SRC='http://example.org/b.gif'><img alt="dup" src="https://example.com/a.png?x=1&amp;y=2">
       <img
-        src=https://example.com/c.webp width=1>`;
+        src=https://example.com/c.webp width=120>`;
     expect(htmlImageLinks({ source: html, max: 20 })).toEqual([
       'https://example.com/a.png?x=1&y=2',
       'http://example.org/b.gif',
@@ -17,6 +17,38 @@ describe('htmlImageLinks', () => {
     const html =
       '<img src="cid:logo@example.com"><img src="data:image/png;base64,AAAA"><img data-src="https://example.com/x.png"><img src="javascript:alert(1)"><imgx src="https://example.com/y.png">';
     expect(htmlImageLinks({ source: html, max: 20 })).toEqual([]);
+  });
+
+  it('leaves out tracking pixels: tiny or hidden images and known tracker hosts', () => {
+    const html = [
+      '<img src="https://example.com/p1.gif" width="1" height="1">',
+      '<img src="https://example.com/p2.gif" height=0>',
+      '<img src="https://example.com/p3.gif" style="display: none">',
+      '<img src="https://example.com/p4.gif" style="width:1px;height:1px">',
+      '<img src="https://news.list-manage.com/track/open.php?u=abc">',
+      '<img src="https://u1.ct.sendgrid.net/wf/open?upn=xyz">',
+      '<img src="https://example.net/pixel.gif">',
+      '<img src="https://example.com/art.png" width="600">',
+    ].join('');
+    expect(htmlImageLinks({ source: html, max: 20 })).toEqual(['https://example.com/art.png']);
+  });
+
+  it('reads the size from the width attribute itself, not from inside another attribute', () => {
+    const html = [
+      '<img src="https://example.com/hero.png?width=1" width="600">',
+      '<img alt="width=1 banner" src="https://example.com/banner.png">',
+      '<img data-width="1" src="https://example.com/wide.png">',
+      '<img style="width: 600px" src="https://example.com/styled.png" width = "1">',
+      '<img src="https://example.com/spaced.gif" height = 1>',
+      '<img src="https://example.com/percent.png" width="1%">',
+      '<img src="https://example.com/important.gif" style="height: 1px !important">',
+    ].join('');
+    expect(htmlImageLinks({ source: html, max: 20 })).toEqual([
+      'https://example.com/hero.png?width=1',
+      'https://example.com/banner.png',
+      'https://example.com/wide.png',
+      'https://example.com/percent.png',
+    ]);
   });
 
   it('stops at the cap', () => {
