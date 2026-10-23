@@ -1,11 +1,17 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import type { ComponentProps } from 'react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { useState, type ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
-import { AmanTour, greetingFor } from '@/components/AmanTour.js';
-import { MORNING_BRIEF, WAITING_PROMPT, WATCHING_PROMPT, type TourCapabilities } from '@/components/tourPrompts.js';
+import { AmanTour, greetingFor, pickHelpArea } from '@/components/AmanTour.js';
+import {
+  HELP_AREAS,
+  MORNING_BRIEF,
+  WAITING_PROMPT,
+  WATCHING_PROMPT,
+  type TourCapabilities,
+} from '@/components/tourPrompts.js';
 
 const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps: true };
 const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false, maps: false };
@@ -49,20 +55,21 @@ describe('AmanTour day ticket', () => {
 
     expect(stub.getByText('Wed 21 Oct')).toBeInTheDocument();
     expect(stub.getByText('1 thing runs on a schedule')).toBeInTheDocument();
-    expect(stub.getByText('2 THINGS NEED YOU')).toBeInTheDocument();
+    expect(stub.getByText('2 things need you')).toBeInTheDocument();
   });
 
-  it('says nothing is waiting and nothing runs when the counts are zero', () => {
+  it('says nothing runs on a schedule when the count is zero, and shows "Nothing needs you" once', () => {
     renderTour();
     const stub = within(screen.getByRole('region', { name: 'Your day' }));
 
-    expect(stub.getByText('Nothing needs you')).toBeInTheDocument();
     expect(stub.getByText('Nothing runs on a schedule yet')).toBeInTheDocument();
+    expect(stub.queryByText('Nothing needs you')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Nothing needs you')).toHaveLength(1);
   });
 
   it('sweeps the waiting count with the highlight piece, and draws no sweep when nothing waits', () => {
     const { container } = renderTour({ waiting: { count: 1, firstId: 'a1' } });
-    expect(container.querySelector('.aui-reward-highlight')).toHaveTextContent('1 THING NEEDS YOU');
+    expect(container.querySelector('.aui-reward-highlight')).toHaveTextContent('1 thing needs you');
   });
 
   it('draws no sweep when nothing waits', () => {
@@ -88,11 +95,11 @@ describe('AmanTour gold fill', () => {
 });
 
 describe('AmanTour tickets', () => {
-  it('makes each of the three tickets a button whose prompt is its accessible description', () => {
+  it('makes each of the three tickets a button whose prompt, or the brief in plain words, is its description', () => {
     renderTour({ waiting: { count: 1, firstId: 'a1' } });
 
     expect(screen.getByRole('button', { name: /Your brief is ready/ })).toHaveAccessibleDescription(
-      MORNING_BRIEF.prompt,
+      'Asks for your morning brief: what to check first, decisions waiting on you, what is coming up, and what is due.',
     );
     expect(screen.getByRole('button', { name: /1 thing needs you/ })).toHaveAccessibleDescription(
       WAITING_PROMPT.prompt,
@@ -133,25 +140,117 @@ describe('AmanTour tickets', () => {
 });
 
 describe('AmanTour chooser', () => {
-  it('shows the five areas as chips, pressed when chosen', () => {
-    renderTour({ helpAreas: ['focus'] });
-    const group = within(screen.getByRole('group', { name: 'What would help you most?' }));
+  function renderChooser(initial: ComponentProps<typeof AmanTour>['helpAreas'] = []) {
+    const onHelpAreasChange = vi.fn();
+    function Controlled() {
+      const [areas, setAreas] = useState(initial);
+      return (
+        <AmanTour
+          capabilities={NONE}
+          helpAreas={areas}
+          onHelpAreasChange={next => {
+            onHelpAreasChange(next);
+            setAreas(next);
+          }}
+          waiting={{ count: 0, firstId: null }}
+          scheduleCount={0}
+          canSend
+          onSend={vi.fn()}
+          onHide={vi.fn()}
+          setup={null}
+        />
+      );
+    }
+    render(<Controlled />);
+    return { onHelpAreasChange };
+  }
 
-    expect(group.getAllByRole('button')).toHaveLength(HELP_AREA_IDS.length);
-    expect(group.getByRole('button', { name: 'Focus and getting started' })).toHaveAttribute('aria-pressed', 'true');
-    expect(group.getByRole('button', { name: 'Family and home' })).toHaveAttribute('aria-pressed', 'false');
+  it('lets one area be chosen at a time: picking a second clears the first, and picking it again clears it', () => {
+    const { onHelpAreasChange } = renderChooser();
+    const focus = screen.getByRole('radio', { name: 'Focus and getting started' });
+    const family = screen.getByRole('radio', { name: 'Family and home' });
+
+    fireEvent.click(focus);
+    expect(focus).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(family);
+    expect(focus).toHaveAttribute('aria-checked', 'false');
+    expect(family).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getAllByRole('radio', { checked: true })).toHaveLength(1);
+
+    fireEvent.click(family);
+    expect(family).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryAllByRole('radio', { checked: true })).toHaveLength(0);
+    expect(onHelpAreasChange).toHaveBeenLastCalledWith([]);
   });
 
-  it('adds a chip at the end when it is tapped, and removes it when it is tapped again', () => {
-    const { props } = renderTour({ helpAreas: ['focus'] });
+  it('is a radio group named by its question', () => {
+    renderChooser();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Family and home' }));
-    expect(props.onHelpAreasChange).toHaveBeenLastCalledWith(['focus', 'family']);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Focus and getting started' }));
-    expect(props.onHelpAreasChange).toHaveBeenLastCalledWith([]);
+    const group = screen.getByRole('radiogroup', { name: 'What would help you most?' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(HELP_AREA_IDS.length);
   });
 
+  it('moves between pills with the arrow keys, choosing each one, and wraps around', () => {
+    renderChooser(['focus']);
+    const focus = screen.getByRole('radio', { name: 'Focus and getting started' });
+    const family = screen.getByRole('radio', { name: 'Family and home' });
+    const last = screen.getByRole('radio', { name: HELP_AREAS.work_money.label });
+
+    expect(focus).toHaveAttribute('tabindex', '0');
+    expect(family).toHaveAttribute('tabindex', '-1');
+
+    act(() => focus.focus());
+    fireEvent.keyDown(focus, { key: 'ArrowRight' });
+    expect(family).toHaveFocus();
+    expect(family).toHaveAttribute('aria-checked', 'true');
+    expect(focus).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.keyDown(family, { key: 'ArrowLeft' });
+    expect(focus).toHaveFocus();
+    expect(focus).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.keyDown(focus, { key: 'ArrowUp' });
+    expect(last).toHaveFocus();
+    expect(last).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('keeps one pill in the tab order: the chosen one, or the first when none is chosen', () => {
+    renderChooser();
+    expect(screen.getByRole('radio', { name: 'Focus and getting started' })).toHaveAttribute('tabindex', '0');
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Caring for someone' }));
+    expect(screen.getByRole('radio', { name: 'Caring for someone' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('radio', { name: 'Focus and getting started' })).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('keeps only the first saved area as the chosen pill when the saved list holds more', () => {
+    renderChooser(['family', 'focus']);
+
+    expect(screen.getByRole('radio', { name: 'Family and home' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Focus and getting started' })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('labels the pills with the shared label class and no monospace', () => {
+    const { container } = renderTour();
+
+    expect(screen.getByRole('heading', { name: 'What would help you most?' })).toHaveClass('aui-tour-label');
+    expect(screen.getByText('Aman is your chief of staff')).toHaveClass('aui-tour-label');
+    expect(container.querySelector('.font-mono')).toBeNull();
+  });
+});
+
+describe('pickHelpArea', () => {
+  it('replaces the chosen area with the new one', () => {
+    expect(pickHelpArea({ current: ['focus'], id: 'family' })).toEqual(['family']);
+  });
+
+  it('clears the choice when the chosen area is picked again', () => {
+    expect(pickHelpArea({ current: ['family'], id: 'family' })).toEqual([]);
+  });
+});
+
+describe('AmanTour capability tickets by area', () => {
   it('shapes the four capability tickets by the chosen areas', () => {
     renderTour({ capabilities: ALL, helpAreas: ['focus'] });
 
@@ -233,7 +332,7 @@ describe('AmanTour assistant name', () => {
     expect(container.textContent).toContain('Maya is your chief of staff');
     expect(screen.getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Get to know Maya/ })).toBeInTheDocument();
-    expect(screen.getByText('Maya', { selector: '.aui-ticket__title' })).toBeInTheDocument();
+    expect(screen.getByText('Maya', { selector: '.aui-tour-title' })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/Aman/);
   });
 

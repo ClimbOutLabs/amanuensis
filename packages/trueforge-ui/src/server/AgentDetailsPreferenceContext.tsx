@@ -82,9 +82,10 @@ export function AgentDetailsPreferenceProvider({ children }: { children: ReactNo
 /**
  * The chat-level "Show agent details" preference for one session, defaulting to `'collapsed'`
  * until the server value is loaded (or when there is no session yet, e.g. a draft chat).
+ * `visible` is the one answer to "is agent detail shown"; every renderer reads it from here.
  */
 export function useAgentDetailsVisibility(sessionId: string | undefined): {
-  visibility: AgentDetailsVisibility;
+  visible: boolean;
   setVisibility: (value: AgentDetailsVisibility) => Promise<void>;
 } {
   const ctx = useContext(AgentDetailsPreferenceContext);
@@ -102,5 +103,5 @@ export function useAgentDetailsVisibility(sessionId: string | undefined): {
     [ctx, sessionId],
   );
 
-  return { visibility, setVisibility };
+  return { visible: visibility === 'expanded', setVisibility };
 }

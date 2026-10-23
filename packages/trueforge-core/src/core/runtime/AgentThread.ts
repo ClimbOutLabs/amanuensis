@@ -120,6 +120,7 @@ import {
   requiresNetwork,
   toDispatchSentinelContext,
 } from '../permissions';
+import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
@@ -250,6 +251,7 @@ import {
   toolResultKind,
   unfinishedKindFor,
   unfinishedNotice,
+  withoutUnfinishedNotices,
   type ForcedAnswer,
   type ToolResultKind,
   type UnfinishedKind,
@@ -1497,6 +1499,14 @@ export function replaceImagePartsForNonVisionModel(
   });
 }
 
+/** An earlier reply as the model reads it: a line an older version added for the person is left out. */
+function withoutHostNotices(message: ChatCompletionMessageParam): ChatCompletionMessageParam {
+  if (message.role !== 'assistant' || typeof message.content !== 'string') {
+    return message;
+  }
+  return { ...message, content: withoutUnfinishedNotices(message.content) };
+}
+
 export class AgentThread {
   readonly threadId: string;
   readonly parent?: AgentParent | undefined;
@@ -2609,7 +2619,7 @@ export class AgentThread {
     const contextMessages = this.context
       .filter(message => !isLegacyIncompleteReasoningMessage(message))
       .filter(isLLMContextMessage)
-      .map(msg => toOpenAIChatMessage(msg));
+      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
 
     messages.push(...contextMessages);
 
@@ -3505,10 +3515,12 @@ export class AgentThread {
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
-      // A reply whose last action did not finish says so, so it cannot read as done over a failure.
+      // The model is told why a reply did not finish and says so in its own words. The host adds a line
+      // only when the reply has none, so the person is never left with nothing; a reply with words
+      // still gets the checks below, so it cannot claim the step that did not run as done.
       const unfinishedKind = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
       const notice =
-        unfinishedKind !== undefined
+        unfinishedKind !== undefined && replyText.trim() === ''
           ? unfinishedNotice(unfinishedKind)
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
@@ -3603,7 +3615,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: `Aman could not run one of the actions in this reply: ${problem} Ask again to try it once more.`,
+                owner_message: `One of the actions in this reply could not run: ${problem} Ask again to try it once more.`,
               },
             },
           };
@@ -3970,7 +3982,7 @@ export class AgentThread {
                 message:
                   `Research tool-call budget exhausted (${String(this.taskState.tool_calls_used)} of ${String(budget)} used). ` +
                   'This call was not executed. Bank remaining findings with record_finding and write the final answer.',
-                owner_message: `Aman stopped a search: it had used all ${String(budget)} tool steps for this question. Ask again to continue with a narrower question.`,
+                owner_message: `A search was stopped: all ${String(budget)} tool steps for this question were used. Ask again with a narrower question.`,
               },
             },
           },
@@ -4007,7 +4019,9 @@ export class AgentThread {
     const admissionProvenance = new Map([...admissions].map(([id, admission]) => [id, admission.admission_provenance]));
     const nextToolCallMemo = cloneToolCallMemoState(toolCallMemo);
     for (const call of openCalls) {
-      if (decisions.get(call.id)?.status === 'deny') {
+      const decision = decisions.get(call.id);
+      // A card that expired unanswered was never turned down, so asking again is not a repeat of a "no".
+      if (decision?.status === 'deny' && !isExpiredApproval(decision)) {
         nextToolCallMemo.deniedApprovalIdentities.add(approvalGrantKey(call.tool_info));
       }
     }
@@ -4562,6 +4576,7 @@ export class AgentThread {
         failure: result.failure,
         unavailable: !toolMapping.has(call.function.name),
         removed: wasRemoved,
+        expired: isExpiredApproval(decisions.get(call.id)),
       });
       // A call to a removed tool was rejected unrun, so it says nothing about the reply's last action.
       if (!wasRemoved) {

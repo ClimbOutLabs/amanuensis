@@ -40,8 +40,8 @@ export const AmanPandaRoundTicket: FC<{ src: string | null; name: string; classN
         className="size-[3.4rem] shrink-0 rounded-full border-[0.125rem] border-gold object-cover"
       />
       <div className="min-w-0">
-        <p className="aui-ticket__title">{name}</p>
-        <p className="aui-ticket__sub">Your chief of staff</p>
+        <p className="aui-tour-title">{name}</p>
+        <p className="aui-tour-label">Your chief of staff</p>
       </div>
     </div>
   );

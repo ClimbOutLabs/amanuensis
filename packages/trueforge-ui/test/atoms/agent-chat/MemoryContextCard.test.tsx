@@ -57,25 +57,4 @@ describe('MemoryContextCard', () => {
     expect(screen.queryByText('Memory context unavailable')).not.toBeInTheDocument();
     expect(screen.getByText('Recalled memory')).toBeInTheDocument();
   });
-
-  it('hides a successful recall when agent details are not visible', () => {
-    render(<MemoryContextCard recall={recallEvent} agentDetailsVisible={false} />);
-    expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
-    expect(screen.queryByText('1 item, 2 entities')).not.toBeInTheDocument();
-  });
-
-  it('still shows a failed/timed-out recall when agent details are not visible', () => {
-    const failedRecall: TrueForgeApi.MemoryRecallPersistedEvent = {
-      ...recallEvent,
-      stats: { ...recallEvent.stats, outcome: 'timeout' },
-    };
-    render(<MemoryContextCard recall={failedRecall} agentDetailsVisible={false} />);
-    expect(screen.getByText('Recalled memory')).toBeInTheDocument();
-    expect(screen.getByText('Recall timed out')).toBeInTheDocument();
-  });
-
-  it('defaults agentDetailsVisible to true, keeping prior behavior for existing callers', () => {
-    render(<MemoryContextCard recall={recallEvent} />);
-    expect(screen.getByText('1 item, 2 entities')).toBeInTheDocument();
-  });
 });

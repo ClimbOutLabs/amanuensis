@@ -27,6 +27,9 @@ function mountProvider(save: (patch: Partial<SentinelUserSettings>, call: number
   const state: { stored: SentinelUserSettings; saves: number } = { stored: INITIAL, saves: 0 };
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
     listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => state.stored),
     updateUserSettings: vi.fn(async (patch: Partial<SentinelUserSettings>) => {

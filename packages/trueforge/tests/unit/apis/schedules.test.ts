@@ -12,6 +12,7 @@ import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authoriz
 import type { RequestContext } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { ScheduleAgentNotFoundError, startScheduleRun } from '../../../src/controller/scheduleDispatch';
+import { BriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -29,6 +30,7 @@ import {
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
@@ -82,7 +84,9 @@ function stubTurnExecutionDeps(
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
     mcpCatalog: McpCatalog.loadShipped(),
+    sentinelSettingsStore: new InMemorySentinelSettingsStore(),
     scheduleStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
     personaStore: { getPersona: () => Promise.resolve(undefined) },
