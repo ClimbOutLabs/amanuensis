@@ -1326,6 +1326,12 @@ export interface SharedServerConfiguration {
    */
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
   /**
+   * Max milliseconds a turn's drain waits for its follow-up work (memory, turn summary, profile
+   * learning, artifacts) after the answer. Past it the work keeps running unwatched.
+   * Env: `TURN_FOLLOW_UP_TIMEOUT_MS`. Default 120000.
+   */
+  TURN_FOLLOW_UP_TIMEOUT_MS: number;
+  /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
    * Default 1380 (23 minutes): must stay above run_code's dispatch deadline
@@ -2141,6 +2147,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_DRAIN_SHUTDOWN_TIMEOUT_MS',
     raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
     defaultValue: 30_000,
+  }),
+  TURN_FOLLOW_UP_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_FOLLOW_UP_TIMEOUT_MS',
+    raw: getEnv('TURN_FOLLOW_UP_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({

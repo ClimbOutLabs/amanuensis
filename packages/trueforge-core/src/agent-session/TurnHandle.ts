@@ -217,13 +217,19 @@ interface StreamingTurnControl {
 /** Turns whose stream runs in this process. Installs are single-replica, so this registry is the only owner. */
 const streamingTurns = new Map<string, StreamingTurnControl>();
 
+/**
+ * Longest a freeze waits for a running stream to write its steps. Past it the store fence
+ * ends the turn anyway, so the next turn of the chat never waits on a stream that is stuck.
+ */
+const CANCEL_SETTLE_TIMEOUT_MS = 10_000;
+
 function streamingTurnKey(input: { session_id: string; turn_id: string }): string {
   return `${input.session_id}\u0000${input.turn_id}`;
 }
 
 /**
  * Cancels a turn this process is streaming and resolves once the stream has written its steps
- * and terminal state. A turn no stream is running for returns at once. Callers must not await
+ * and terminal state, or after 10 s. A turn no stream is running for returns at once. Callers must not await
  * this from the consumer that drives the stream, since the stream cannot finish while that
  * consumer is suspended.
  */
@@ -377,22 +383,41 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       throw new Error('TurnHandle.stream() is only available on turns returned from SessionHandle.createTurn()');
     }
 
-    const key = streamingTurnKey(this.turn);
-    streamingTurns.set(key, this);
+    streamingTurns.set(streamingTurnKey(this.turn), this);
     try {
       yield* this.runStream({ orchestrator, resolver, signal });
     } finally {
-      if (streamingTurns.get(key) === this) {
-        streamingTurns.delete(key);
-      }
-      this.settleStream?.();
+      this.markStreamSettled();
     }
   }
 
-  /** Cancels this stream and resolves once its steps and terminal state are written. */
+  /**
+   * Runs as soon as the terminal state is written, before the terminal event is yielded (and
+   * again when the stream ends): the consumer may do slow work after that event, and a freeze
+   * must not wait on it.
+   */
+  private markStreamSettled(): void {
+    const key = streamingTurnKey(this.turn);
+    if (streamingTurns.get(key) === this) {
+      streamingTurns.delete(key);
+    }
+    this.settleStream?.();
+  }
+
+  /** Cancels this stream and resolves once its steps and terminal state are written, or the wait runs out. */
   async cancelAndSettle(reason: CancellationReason): Promise<void> {
     this.abort?.(reason);
-    await this.streamSettled;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.streamSettled,
+        new Promise<void>(resolve => {
+          timeout = setTimeout(resolve, CANCEL_SETTLE_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async *runStream(parts: {
@@ -456,6 +481,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
               ),
             };
             this.turn = { ...this.turn, state, updated_at: updatedAt };
+            this.markStreamSettled();
             yield {
               type: EventType.TURN_DONE,
               id: newEventId(),
@@ -592,6 +618,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
             turn_done_event: turnDone,
           });
           this.turn = { ...this.turn, state: terminalWrite.state, updated_at: updatedAt };
+          this.markStreamSettled();
 
           // A consumer that already returned will not resume past another yield,
           // so skip publication and let the finally block release its resources.
