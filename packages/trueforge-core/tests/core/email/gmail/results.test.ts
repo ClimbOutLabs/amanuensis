@@ -2,6 +2,7 @@ import { readMessage } from '../../../../src/core/email/gmail/message';
 import {
   addressListIsPlain,
   getDraftResult,
+  LINKED_IMAGES_NOTE,
   listThreadsResult,
   mailboxesOf,
   readEmailResult,
@@ -84,8 +85,10 @@ describe('result shapes', () => {
       }),
     });
     expect(withImages.linked_images).toEqual(['https://example.com/banner.png']);
+    expect(withImages.linked_images_note).toBe(LINKED_IMAGES_NOTE);
     const plain = readEmailResult({ context, message: message({ id: 'm2', body: 'hi' }) });
     expect('linked_images' in plain).toBe(false);
+    expect('linked_images_note' in plain).toBe(false);
   });
 
   it('lists threads with the fields the fetch semantics expect and states coverage', () => {
