@@ -382,6 +382,17 @@ function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<
   });
 }
 
+/** Thrown when a request is still over the model's size limits after compaction. */
+class RequestOverLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestOverLimitError';
+  }
+}
+
+// What the person sees when the chat stays too long for the model even after shortening.
+const CHAT_TOO_LONG_MESSAGE = 'The chat is too long for this model. Start a new chat or use a different model.';
+
 /**
  * Thrown when an async producer stalls without yielding for longer than its
  * no-progress bound. Carries no producer internals; the message is user-facing.
@@ -3263,6 +3274,99 @@ export class AgentThread {
     );
   }
 
+  /**
+   * Checks the request against the character ceiling and the model's token context length. When
+   * it is over and no compaction ran this turn, forces one compaction pass; when it is still over,
+   * throws RequestOverLimitError. Run before every request built from a changed history.
+   */
+  private async *ensureRequestFits({
+    tools,
+    signal,
+    compactedThisTurn,
+  }: {
+    tools: ChatCompletionTool[];
+    signal: AbortSignal | undefined;
+    compactedThisTurn: boolean;
+  }): AsyncGenerator<
+    | ThreadOverwriteContextEvent
+    | ContextCompactionEvent
+    | ContextCompactionStartedEvent
+    | AgentThreadAppendContext
+    | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
+    | InternalCapabilityStateEvent,
+    'fits' | 'aborted',
+    unknown
+  > {
+    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
+    // request before its safety ceiling is checked. If the raw context is already past
+    // the ceiling, force one compaction pass; if it is still past the ceiling after
+    // that, fail fast instead of blocking the event loop on a doomed assembly.
+    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
+      // No double compaction in one turn: when a pass already compacted this turn,
+      // a second forced pass would re-summarize a fresh summary.
+      if (!compactedThisTurn) {
+        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+          yield event;
+        }
+        if (signal?.aborted) {
+          return 'aborted';
+        }
+      }
+      const postCompactionLength = estimateRawContextTextLength(this.context);
+      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
+        throw new RequestOverLimitError(
+          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
+            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
+            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
+            `Start a new chat or reduce the context and try again.`,
+        );
+      }
+    }
+
+    // Token-based pre-flight guard: the character ceiling above does not account for
+    // the model's token context limit. Estimate the full request in tokens
+    // (instruction + definition messages + context + task state + tool definitions)
+    // and force compaction if input tokens plus reserved output tokens would reach
+    // the context length. The safety margin covers additive overhead on top of the
+    // estimate (provider-added BOS token, template overhead, post-compaction
+    // instruction/task-state messages); see TOKEN_BUDGET_SAFETY_MARGIN for its scope
+    // and known limitations.
+    const modelContextLength = this.definition.modelProperties?.contextLength;
+    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
+      const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
+      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
+      const isOverLimit = (estimatedInputTokens: number): boolean =>
+        estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
+      // The estimate bails out at the budget: precision past it cannot change the guard.
+      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
+      if (isOverLimit(estimatedInputTokens)) {
+        // No double compaction in one turn: when a pass already compacted this
+        // turn, skip the forced pass and fail clearly if the estimate is still
+        // over, instead of re-summarizing a fresh summary.
+        if (!compactedThisTurn) {
+          for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+            yield event;
+          }
+          if (signal?.aborted) {
+            return 'aborted';
+          }
+        }
+        // Full-precision estimate for the error message: the early exit above
+        // reports only a lower bound once past the budget.
+        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
+        if (isOverLimit(postCompactionTokens)) {
+          throw new RequestOverLimitError(
+            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
+              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
+              `refusing to send a request the provider would reject. ` +
+              `Start a new chat or reduce the context and try again.`,
+          );
+        }
+      }
+    }
+    return 'fits';
+  }
+
   private async *stepLLMCall(
     tools: ChatCompletionTool[],
     toolMapping: Map<string, MappedMCPTool>,
@@ -3360,72 +3464,9 @@ export class AgentThread {
         this.replyContext = this.buildReplyContext();
       }
     }
-    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
-    // request before its safety ceiling is checked. If the raw context is already past
-    // the ceiling, force one compaction pass; if it is still past the ceiling after
-    // that, fail fast instead of blocking the event loop on a doomed assembly.
-    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
-      // No double compaction in one turn: the normal pre-LLM pass above already
-      // compacted, so a second forced pass would re-summarize a fresh summary.
-      if (!compactedThisTurn) {
-        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-          yield event;
-        }
-        if (signal?.aborted) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-      }
-      const postCompactionLength = estimateRawContextTextLength(this.context);
-      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
-        throw new Error(
-          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
-            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
-            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
-            `Start a new chat or reduce the context and try again.`,
-        );
-      }
-    }
-
-    // Token-based pre-flight guard: the character ceiling above does not account for
-    // the model's token context limit. Estimate the full request in tokens
-    // (instruction + definition messages + context + task state + tool definitions)
-    // and force compaction if input tokens plus reserved output tokens would reach
-    // the context length. The safety margin covers additive overhead on top of the
-    // estimate (provider-added BOS token, template overhead, post-compaction
-    // instruction/task-state messages); see TOKEN_BUDGET_SAFETY_MARGIN for its scope
-    // and known limitations.
-    const modelContextLength = this.definition.modelProperties?.contextLength;
-    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
-      const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
-      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
-      const isOverLimit = (estimatedInputTokens: number): boolean =>
-        estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
-      // The estimate bails out at the budget: precision past it cannot change the guard.
-      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
-      if (isOverLimit(estimatedInputTokens)) {
-        // No double compaction in one turn: when the normal pre-LLM pass above
-        // already compacted, skip the forced pass and fail clearly if the
-        // estimate is still over, instead of re-summarizing a fresh summary.
-        if (!compactedThisTurn) {
-          for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-            yield event;
-          }
-          if (signal?.aborted) {
-            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-          }
-        }
-        // Full-precision estimate for the error message: the early exit above
-        // reports only a lower bound once past the budget.
-        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
-        if (isOverLimit(postCompactionTokens)) {
-          throw new Error(
-            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
-              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
-              `refusing to send a request the provider would reject. ` +
-              `Start a new chat or reduce the context and try again.`,
-          );
-        }
-      }
+    const firstFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn });
+    if (firstFit === 'aborted') {
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
     let requestBody = this.transformToLLMRequest(tools);
@@ -3437,8 +3478,8 @@ export class AgentThread {
     // VercelAILLM) is a model fault, not a host fault: it is retried once, not treated as fatal.
     // Most faults (a timeout, a dropped connection) have nothing to do with history size, so the
     // retry sends the same history. Only a fault the provider says is about context length forces
-    // compaction first. Size alone needs no check here: the token guard above already shortened or
-    // stopped any request whose estimate reaches the model's context length. A second fault in a
+    // compaction first, and the shortened request goes through ensureRequestFits again before it
+    // is sent, so it can be checked or stopped but never shortened twice. A second fault in a
     // row ends the turn with a specific, actionable error instead of the generic fatal_error the
     // outer catch in execute() would otherwise produce for it.
     const MAX_MODEL_STREAM_FAULT_ATTEMPTS = 2;
@@ -3544,7 +3585,7 @@ export class AgentThread {
             error instanceof ModelOutputRepetitionError
               ? error.message
               : isContextLengthError(error)
-                ? 'The chat is too long for this model. Start a new chat or use a different model.'
+                ? CHAT_TOO_LONG_MESSAGE
                 : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
           yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -3578,6 +3619,21 @@ export class AgentThread {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         if (signal?.aborted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+        try {
+          const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
+          if (retryFit === 'aborted') {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+        } catch (fitError) {
+          if (!(fitError instanceof RequestOverLimitError)) {
+            throw fitError;
+          }
+          this.logger.warn('Shortened history is still over the model limit; not retrying', {
+            ...extractErrorLogFields(fitError),
+          });
+          yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         requestBody = this.transformToLLMRequest(tools);

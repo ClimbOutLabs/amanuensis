@@ -49,6 +49,8 @@ async function* finalStream(
 class RecordingCompaction implements PreLLMAgentContextProcessor {
   readonly forcedFlags: boolean[] = [];
 
+  constructor(private readonly summary: string = 'Compacted summary of the turn so far.') {}
+
   async *processPreLLM(
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorOutput, void, unknown> {
@@ -58,7 +60,7 @@ class RecordingCompaction implements PreLLMAgentContextProcessor {
     if (!forced) {
       return;
     }
-    const summaryContext: ContextMessage[] = [{ role: 'assistant', content: 'Compacted summary of the turn so far.' }];
+    const summaryContext: ContextMessage[] = [{ role: 'assistant', content: this.summary }];
     yield {
       type: EventType.AGENT_CONTEXT_OVERWRITE,
       id: newEventId(),
@@ -142,7 +144,80 @@ function contextLengthErrorStream(): AsyncGenerator<
   return mapStreamToChunks({ stream: parts(), chunkMeta: { id: 'test-id', created: 0, model: 'test-model' } });
 }
 
+/** Runs one turn where every model call streams `attempt`, and reports how it ended. */
+async function runTurnWithFaults({
+  attempt,
+  compaction,
+  contextLength,
+}: {
+  attempt: () => AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown>;
+  compaction: RecordingCompaction;
+  contextLength: number;
+}): Promise<{ calls: number; doneEvent: InternalThreadDoneEvent | undefined }> {
+  const create = jest.fn(attempt);
+  const modelClient: ILLM = { create, createNonStream: jest.fn() };
+  const thread = new AgentThread({
+    threadId: 'main',
+    title: 'Main',
+    toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
+    taskState: undefined,
+    isRequestContinuation: undefined,
+    tracing: NOOP_AGENT_TRACING,
+    logger: makeSilentLogger(),
+    definition: {
+      modelClient,
+      modelId: undefined,
+      configuredModels: undefined,
+      instruction: 'test',
+      toolSets: [],
+      modelProperties: { contextLength },
+    },
+    context: [{ role: 'user', content: 'A question.' }],
+    capabilities: [{ preLLMProcessors: [compaction] }],
+  });
+  let doneEvent: InternalThreadDoneEvent | undefined;
+  for await (const event of thread.execute({ signal: new AbortController().signal })) {
+    if (event.type === InternalEventType.AGENT_DONE) {
+      doneEvent = event;
+    }
+  }
+  return { calls: create.mock.calls.length, doneEvent };
+}
+
+const CHAT_TOO_LONG_LINE = 'The chat is too long for this model. Start a new chat or use a different model.';
+
 describe('ModelStreamFault retry', () => {
+  it('checks the shortened history against the context length before the retry is sent', async () => {
+    // The summary alone is far over an 8,000-token limit, so the shortened request cannot fit.
+    const compaction = new RecordingCompaction('word '.repeat(20_000));
+    const run = await runTurnWithFaults({ attempt: contextLengthErrorStream, compaction, contextLength: 8_000 });
+
+    // The retry is never sent, and history is shortened only once.
+    expect(run.calls).toBe(1);
+    expect(compaction.forcedFlags).toEqual([false, true]);
+    expect(run.doneEvent?.status).toBe('error');
+    expect(run.doneEvent?.handoff_cause).toBe('model_stream_fault');
+    if (run.doneEvent?.status !== 'error') {
+      throw new Error('expected an error-status AGENT_DONE event');
+    }
+    expect(run.doneEvent.error).toBe(CHAT_TOO_LONG_LINE);
+  });
+
+  it('shortens only once when the provider says the prompt is too long twice in a row', async () => {
+    const compaction = new RecordingCompaction();
+    const run = await runTurnWithFaults({ attempt: contextLengthErrorStream, compaction, contextLength: 128_000 });
+
+    expect(run.calls).toBe(2);
+    expect(compaction.forcedFlags).toEqual([false, true]);
+    expect(run.doneEvent?.status).toBe('error');
+    expect(run.doneEvent?.handoff_cause).toBe('model_stream_fault');
+    if (run.doneEvent?.status !== 'error') {
+      throw new Error('expected an error-status AGENT_DONE event');
+    }
+    expect(run.doneEvent.error).toBe(CHAT_TOO_LONG_LINE);
+  });
+
   it('retries a dropped stream on a short chat with the same history, without shortening it', async () => {
     const run = await runShortChatWithOneFault({ firstAttempt: faultingStream, contextLength: 128_000 });
 

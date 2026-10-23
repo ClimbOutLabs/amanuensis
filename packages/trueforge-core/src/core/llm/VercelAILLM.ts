@@ -1144,9 +1144,9 @@ export function providerStatusCode(raw: unknown): number | undefined {
 }
 
 // Wording providers use when a request does not fit the model's context window
-// (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama).
+// (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama, llama.cpp).
 const CONTEXT_LENGTH_ERROR_PATTERN =
-  /context[ _-]?length|context[ _-]?window|prompt is too long|input is too long|input token count/i;
+  /context[ _-]?(?:length|window|limit)|available context size|maximum model length|prompt is too long|input is too long|input token count/i;
 
 /**
  * True when a model error says the request did not fit the model's context window. Checks the

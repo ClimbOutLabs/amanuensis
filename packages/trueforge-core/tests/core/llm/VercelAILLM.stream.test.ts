@@ -1037,6 +1037,9 @@ describe('isContextLengthError', () => {
     'Input is too long for requested model.',
     'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
     'context_length_exceeded',
+    'input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again',
+    'The decoder prompt (length 40000) is longer than the maximum model length of 32768.',
+    'the request exceeds the available context size, try increasing it',
   ])('recognizes %s', message => {
     expect(isContextLengthError(new Error(message))).toBe(true);
   });
@@ -1057,6 +1060,29 @@ describe('isContextLengthError', () => {
     expect(isContextLengthError(new ModelStreamFault('The model stream ended without any text.'))).toBe(false);
     expect(isContextLengthError(new Error('terminated', { cause: new Error('other side closed') }))).toBe(false);
     expect(isContextLengthError(new Error('Rate limit reached: too many tokens per minute'))).toBe(false);
+  });
+
+  it.each([
+    'Rate limit reached for requests',
+    'Request timed out.',
+    'socket hang up',
+    'other side closed',
+    'read ECONNRESET',
+    'Bad Request',
+    'Invalid request: messages must not be empty',
+  ])('does not recognize %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(false);
+  });
+
+  it('does not treat a generic 400 answer as a context-length error', () => {
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"message":"Invalid value for temperature","type":"invalid_request_error"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(false);
   });
 });
 
