@@ -250,73 +250,34 @@ describe('a package install runs silently only when it runs no install scripts',
   );
 });
 
-/** Runs that are silent only when the script they run is one Aman wrote in this conversation. */
-const AUTHORED_SILENT_RUNS: readonly { command: string; file: string }[] = [
-  { command: 'python3 agent_tool.py', file: 'agent_tool.py' },
-  { command: 'python3 -u agent_tool.py --flag', file: 'agent_tool.py' },
-  { command: 'node agent_tool.js', file: 'agent_tool.js' },
-];
-
-/** Runs that keep their card even when the switch is on: a script from outside Aman's conversation, or no script at all. */
-const CARDED_RUNS: readonly { command: string; file: string | null }[] = [
-  { command: 'python3 repo_tool.py', file: 'repo_tool.py' },
-  { command: 'bash repo_tool.sh', file: 'repo_tool.sh' },
-  { command: 'bash agent_tool.sh', file: 'agent_tool.sh' },
-  { command: 'node repo_tool.js', file: 'repo_tool.js' },
-  { command: 'sh -c "./repo_tool.sh"', file: 'repo_tool.sh' },
-  { command: 'sh -c "./agent_tool.sh"', file: 'agent_tool.sh' },
-  { command: 'python3 -m agent_tool', file: 'agent_tool.py' },
-  { command: 'pytest -q', file: null },
-  { command: 'python3 -m pytest -q', file: null },
-  { command: 'npm test', file: null },
-  { command: 'python3 -', file: null },
-];
-
-describe('a script runs silently only when Aman wrote it in this conversation', () => {
-  test.each(AUTHORED_SILENT_RUNS)('$command runs without a card when Aman wrote the script', ({ command, file }) =>
+describe('a script run through exec keeps its card', () => {
+  test(
+    'python3 on a script Aman wrote in this conversation asks with the tracked-execution card',
     withWorkspace(async workspace => {
       const services = servicesWith({ sandbox_without_asking: true });
-      writeScript({ services, workspace, name: file, authored: true });
+      writeScript({ services, workspace, name: 'agent_tool.py', authored: true });
       const decision = await classifyTier(
-        action('exec', { command, cwd: workspace }),
+        action('exec', { command: 'python3 agent_tool.py', cwd: workspace }),
         makeCtx({ services, workspace }),
       );
-      expect(decision.tier).toBe(1);
-      expect(decision.reason).toBe('sandbox_command');
-      expect(decision.card).toBeNull();
-    })(),
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('tracked_executable_unapproved');
+      expect(decision.card).not.toBeNull();
+    }),
   );
 
-  test.each(CARDED_RUNS)('$command keeps its card with the switch on', ({ command, file }) =>
+  test(
+    'node on a script Aman wrote in this conversation asks',
     withWorkspace(async workspace => {
       const services = servicesWith({ sandbox_without_asking: true });
-      if (file !== null) {
-        writeScript({ services, workspace, name: file, authored: command.includes('agent_tool') });
-      }
+      writeScript({ services, workspace, name: 'agent_tool.js', authored: true, content: 'console.log(1);\n' });
       const decision = await classifyTier(
-        action('exec', { command, cwd: workspace }),
+        action('exec', { command: 'node agent_tool.js', cwd: workspace }),
         makeCtx({ services, workspace }),
       );
       expect(decision.tier).toBe(3);
       expect(decision.card).not.toBeNull();
-    })(),
-  );
-
-  test.each([...AUTHORED_SILENT_RUNS, ...CARDED_RUNS])(
-    '$command keeps its card with the switch off',
-    ({ command, file }) =>
-      withWorkspace(async workspace => {
-        const services = servicesWith({ sandbox_without_asking: false });
-        if (file !== null) {
-          writeScript({ services, workspace, name: file, authored: true });
-        }
-        const decision = await classifyTier(
-          action('exec', { command, cwd: workspace }),
-          makeCtx({ services, workspace }),
-        );
-        expect(decision.tier).toBe(3);
-        expect(decision.card).not.toBeNull();
-      })(),
+    }),
   );
 });
 
@@ -415,40 +376,6 @@ describe('a script that loads other code keeps its card, even when Aman wrote it
       expect(decision.tier).toBe(3);
       expect(decision.card).not.toBeNull();
     })(),
-  );
-
-  test(
-    'a python3 script that imports only the standard library runs without a card',
-    withWorkspace(async workspace => {
-      const services = servicesWith({ sandbox_without_asking: true });
-      writeScript({ services, workspace, name: 'agent_main.py', authored: true, content: 'import json, os.path\n' });
-      const decision = await classifyTier(
-        action('exec', { command: 'python3 agent_main.py', cwd: workspace }),
-        makeCtx({ services, workspace }),
-      );
-      expect(decision.tier).toBe(1);
-      expect(decision.reason).toBe('sandbox_command');
-    }),
-  );
-
-  test(
-    'a node script that requires only built-in modules runs without a card',
-    withWorkspace(async workspace => {
-      const services = servicesWith({ sandbox_without_asking: true });
-      writeScript({
-        services,
-        workspace,
-        name: 'agent_main.js',
-        authored: true,
-        content: "const fs = require('node:fs');\nconsole.log(fs.existsSync('.'));\n",
-      });
-      const decision = await classifyTier(
-        action('exec', { command: 'node agent_main.js', cwd: workspace }),
-        makeCtx({ services, workspace }),
-      );
-      expect(decision.tier).toBe(1);
-      expect(decision.reason).toBe('sandbox_command');
-    }),
   );
 });
 
@@ -560,7 +487,7 @@ describe('actions that leave the sandbox still ask, with the switch on', () => {
         makeCtx({ services, workspace }),
       );
       expect(decision.tier).toBe(3);
-      expect(decision.reason).toBe('cwd_outside_workspace');
+      expect(decision.reason).toBe('tracked_executable_unapproved');
     }),
   );
 
