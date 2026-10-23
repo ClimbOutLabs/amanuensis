@@ -550,7 +550,10 @@ export class SessionHandle<
       if (earlierTurnUnsaved) {
         webSearchTurn.fingerprintsLost = true;
       }
-      webSearchTurn.personText = await this.personTextForTurn({ input: input.input ?? [], previous });
+      // An unattended run's message is a saved task sent with nobody there, so none of its words are exempt.
+      webSearchTurn.personText = sentinelServices.unattended
+        ? ''
+        : await this.personTextForTurn({ input: input.input ?? [], previous });
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not
