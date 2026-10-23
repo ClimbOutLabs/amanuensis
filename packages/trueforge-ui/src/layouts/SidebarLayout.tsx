@@ -14,11 +14,12 @@ import {
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
-import { auiButtonClass, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
+import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { ShellActions } from '../atoms/ShellActions.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
@@ -42,8 +43,9 @@ const railWidthClassName = 'w-20';
 
 const railActionButtonClassName = cn(sidebarRailButtonClassName, 'text-sidebar-text');
 
+/** The selected rail item: the soft fill the composer's open menu uses, not a solid block. */
 const railSelectedClassName =
-  'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text';
+  'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
 
 function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; mode?: ShellMode }): boolean {
   return !overlayOpen && mode?.status === 'active' && !mode.isCreateAgent;
@@ -55,9 +57,8 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
  * in one scrolling flex column instead of two separately-boxed groups that can paint over
  * each other on a short viewport.
  *
- * Order is the everyday-user order: New Chat, Hide/Show recent chats, Spaces, Schedules,
- * Agents, Build Agent. Sessions lives with the footer actions in `ShellActions`, after
- * Settings.
+ * Order is the everyday-user order: New chat, Chats, Spaces, Schedules, Agents, Build agent.
+ * Sessions, Settings and the other footer actions live in `ShellActions`, below these.
  */
 function SidebarNavItems({
   showHistoryToggle = false,
@@ -86,7 +87,6 @@ function SidebarNavItems({
     mode?.status === 'active' &&
     !mode.isCreateAgent &&
     shell?.historyAgentFilter?.intent !== 'try-agent';
-  const newAgentSelected = !overlayOpen && mode != null && shellIsCreateAgent(mode);
   const historyToggleLabel = historyCollapsed ? 'Show recent chats' : 'Hide recent chats';
 
   const handleNewChat = () => {
@@ -100,14 +100,6 @@ function SidebarNavItems({
     shell?.setSchedulesOpen(false);
     shell?.closeSpaces();
     void Promise.resolve(aui.threads().switchToNewThread()).catch(() => undefined);
-  };
-
-  const handleNewAgent = () => {
-    shell?.setLibraryOpen(false);
-    shell?.setSessionsOpen(false);
-    if (shell?.isComposerEnabled) {
-      shell.openAgentBuilder();
-    }
   };
 
   return (
@@ -125,7 +117,7 @@ function SidebarNavItems({
           onClick={handleNewChat}
         >
           <Icon name="square-pen" size={14} />
-          <span className="text-center">New Chat</span>
+          <span className="text-center">New</span>
         </button>
       ) : null}
       {showHistoryToggle ? (
@@ -143,29 +135,13 @@ function SidebarNavItems({
             onToggleHistoryCollapsed?.();
           }}
         >
-          <Icon name={historyCollapsed ? 'panel-left-open' : 'panel-left-close'} size={14} />
-          <span className="text-center">{historyToggleLabel}</span>
+          <Icon name="message-square-text" size={14} />
+          <span className="text-center">Chats</span>
         </button>
       ) : null}
       <SpacesButton compact />
       <SchedulesButton compact />
       <AgentsLibraryButton compact />
-      {showNewActions && shell?.isComposerEnabled ? (
-        <button
-          type="button"
-          aria-label="Start new agent"
-          title="New Agent"
-          aria-current={newAgentSelected ? 'page' : undefined}
-          className={auiButtonClass({
-            variant: 'ghost',
-            className: cn(railActionButtonClassName, newAgentSelected && railSelectedClassName),
-          })}
-          onClick={handleNewAgent}
-        >
-          <Icon name="agent-2" size={14} />
-          <span className="text-center whitespace-nowrap">Build Agent</span>
-        </button>
-      ) : null}
     </>
   );
 }
@@ -206,7 +182,10 @@ function SidebarRail({
         if (onNavigate == null) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
-        if (target.closest('button') != null) onNavigate();
+        const button = target.closest('button');
+        // Opening the More menu is not a navigation: the drawer stays open while its menu is shown.
+        if (button == null || button.getAttribute('aria-haspopup') === 'menu') return;
+        onNavigate();
       }}
       {...dialogProps}
     >
@@ -222,10 +201,54 @@ function SidebarRail({
           historyCollapsed={historyCollapsed}
           onToggleHistoryCollapsed={onToggleHistoryCollapsed}
         />
-        <ShellActions labeled className="flex-col" />
         <UserAvatar labeled className="mt-1" />
+        <RailMoreMenu />
       </nav>
     </aside>
+  );
+}
+
+/**
+ * The kebab at the bottom of the rail. Everything that is not a rail destination lives here: Build agent,
+ * Sessions, Settings, the theme, Bug report and the host's log-out. It closes on an outside click or Escape.
+ */
+function RailMoreMenu() {
+  const shell = useOptionalShellMode();
+  const showNewActions = shell?.isNewChatEnabled !== false;
+  const handleNewAgent = () => {
+    shell?.setLibraryOpen(false);
+    shell?.setSessionsOpen(false);
+    if (shell?.isComposerEnabled) {
+      shell.openAgentBuilder();
+    }
+  };
+  return (
+    <DropdownMenu
+      align="start"
+      side="top"
+      className="min-w-44 rounded-[1.25rem] border border-border bg-card-bg p-1"
+      trigger={
+        <button
+          type="button"
+          aria-label="More"
+          title="More"
+          className={auiButtonClass({ variant: 'ghost', className: cn(sidebarRailButtonClassName, 'mt-1') })}
+        >
+          <Icon name="ellipsis-vertical" size={14} />
+          <span className="text-center">More</span>
+        </button>
+      }
+    >
+      <div className="flex flex-col">
+        {showNewActions && shell?.isComposerEnabled ? (
+          <button type="button" aria-label="Start new agent" className={railMenuRowClassName} onClick={handleNewAgent}>
+            <Icon name="agent-2" size={14} />
+            Build agent
+          </button>
+        ) : null}
+        <ShellActions labeled rows className="flex-col items-stretch gap-0.5" />
+      </div>
+    </DropdownMenu>
   );
 }
 

@@ -202,7 +202,28 @@ describe('SidebarLayout rail layout', () => {
     localStorage.clear();
   });
 
-  it('renders every rail entry as a sibling of the next in one scrolling flex column, New Chat then toggle then Build Agent', () => {
+  it('lists the destinations in order: New, Chats, Spaces, Agents, then the More menu last', () => {
+    renderSidebarLayoutWithSpaces();
+
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const buttons = Array.from(nav.querySelectorAll('button'));
+    const labelOf = (button: HTMLButtonElement) =>
+      button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '';
+    const order = ['Start new chat', 'Hide recent chats', 'Spaces', 'Agents', 'More'];
+    const positions = order.map(label => buttons.findIndex(button => labelOf(button) === label));
+
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    const newChat = buttons.find(button => labelOf(button) === 'Start new chat');
+    const chats = buttons.find(button => labelOf(button) === 'Hide recent chats');
+    const more = buttons.find(button => labelOf(button) === 'More');
+    expect(buttons[0]).toBe(newChat);
+    expect(buttons[buttons.length - 1]).toBe(more);
+    expect(newChat?.textContent).toContain('New');
+    expect(chats?.textContent).toContain('Chats');
+  });
+
+  it('renders every rail entry as a sibling of the next in one scrolling flex column, New chat then toggle then More', () => {
     renderSidebarLayoutWithSpaces();
 
     const nav = screen.getByRole('navigation', { name: 'Sidebar' });
@@ -210,7 +231,7 @@ describe('SidebarLayout rail layout', () => {
 
     const newChat = screen.getByRole('button', { name: 'Start new chat' });
     const toggle = screen.getByRole('button', { name: 'Hide recent chats' });
-    const buildAgent = screen.getByRole('button', { name: 'Start new agent' });
+    const buildAgent = screen.getByRole('button', { name: 'More' });
 
     // The entry for each (its own wrapper, if the atom renders one, or the button itself)
     // is a direct child of the same flex column, not split across a separately-boxed
@@ -231,13 +252,35 @@ describe('SidebarLayout rail layout', () => {
     expect(toggleEntry.parentElement).toBe(nav);
     expect(buildAgentEntry.parentElement).toBe(nav);
 
-    // Document order: New Chat, toggle, Build Agent as plain siblings rather than elements
+    // Document order: New chat, toggle, More as plain siblings rather than elements
     // absolutely positioned over one another.
     expect(newChat.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(toggle.compareDocumentPosition(buildAgent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     for (const el of [nav, newChat, toggle, buildAgent]) {
       expect(el).not.toHaveStyle({ position: 'absolute' });
+    }
+  });
+});
+
+describe('SidebarLayout More menu', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('moves every destination that is not a rail item into the More menu, and no rail item into it', () => {
+    renderSidebarLayoutWithSpaces();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const menu = screen.getByRole('menu');
+    const names = within(menu)
+      .getAllByRole('button')
+      .map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '');
+
+    // Report a bug renders only when the bug-report feature is wired, as it does on main.
+    expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Switch to dark theme', 'Settings']));
+    for (const railItem of ['Start new chat', 'Hide recent chats', 'Spaces', 'Agents']) {
+      expect(names).not.toContain(railItem);
     }
   });
 });

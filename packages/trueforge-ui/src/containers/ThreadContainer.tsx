@@ -3,7 +3,6 @@
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
-import { RuntimeTourWaiting } from '../components/AmanTourWaiting.js';
 import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
 import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
@@ -118,62 +117,60 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
             <ComposerBusyProvider>
               <AvatarActivityBridge />
               <ApprovalFocusProvider>
-                <RuntimeTourWaiting>
-                  <ThreadPrimitive.Root asChild>
-                    <ThreadRootShell>
-                      {/* The empty chat opens at its top: the first frame is taller than the screen on purpose. */}
-                      <ThreadPrimitive.Viewport asChild autoScroll={!isEmpty}>
-                        <ThreadViewportShell isEmpty={isEmpty}>
-                          {helpHere ? <HelpChatPanel /> : null}
-                          {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
-                          {isEmpty && !isLoading && (
+                <ThreadPrimitive.Root asChild>
+                  <ThreadRootShell>
+                    {/* The empty chat opens at its top: the first frame is taller than the screen on purpose. */}
+                    <ThreadPrimitive.Viewport asChild autoScroll={!isEmpty}>
+                      <ThreadViewportShell isEmpty={isEmpty}>
+                        {helpHere ? <HelpChatPanel /> : null}
+                        {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
+                        {isEmpty && !isLoading && (
+                          <>
+                            {helpHere ? null : <ThreadWorkOnRepoControls />}
+                            {composer}
+                          </>
+                        )}
+                        {isLoading ? (
+                          <MessageListSkeleton />
+                        ) : (
+                          !isEmpty && (
                             <>
-                              {helpHere ? null : <ThreadWorkOnRepoControls />}
-                              {composer}
+                              <HistoryLoaderContainer />
+                              <PendingApprovalsBanner />
+                              <MessageGroup>
+                                <ThreadPrimitive.Messages>
+                                  {({ message }) => (
+                                    <AnimatedMessageShell animate={initialPaintDone.current}>
+                                      <ThreadMessage
+                                        isEditing={message.role === 'user' && message.composer.isEditing}
+                                      />
+                                    </AnimatedMessageShell>
+                                  )}
+                                </ThreadPrimitive.Messages>
+                                <TerminalErrorContainer />
+                                <ChatNoticeContainer />
+                                <ResumeUnavailableContainer />
+                                <ConnectionStatusContainer />
+                              </MessageGroup>
+                              {helpHere ? <HelpChoices /> : null}
                             </>
-                          )}
-                          {isLoading ? (
-                            <MessageListSkeleton />
-                          ) : (
-                            !isEmpty && (
-                              <>
-                                <HistoryLoaderContainer />
-                                <PendingApprovalsBanner />
-                                <MessageGroup>
-                                  <ThreadPrimitive.Messages>
-                                    {({ message }) => (
-                                      <AnimatedMessageShell animate={initialPaintDone.current}>
-                                        <ThreadMessage
-                                          isEditing={message.role === 'user' && message.composer.isEditing}
-                                        />
-                                      </AnimatedMessageShell>
-                                    )}
-                                  </ThreadPrimitive.Messages>
-                                  <TerminalErrorContainer />
-                                  <ChatNoticeContainer />
-                                  <ResumeUnavailableContainer />
-                                  <ConnectionStatusContainer />
-                                </MessageGroup>
-                                {helpHere ? <HelpChoices /> : null}
-                              </>
-                            )
-                          )}
-                        </ThreadViewportShell>
-                      </ThreadPrimitive.Viewport>
+                          )
+                        )}
+                      </ThreadViewportShell>
+                    </ThreadPrimitive.Viewport>
 
-                      {!isLoading && !isEmpty && (
-                        <ThreadComposerAreaShell isEmpty={isEmpty}>
-                          <ThreadPrimitive.ScrollToBottom asChild>
-                            <ScrollToBottomButton />
-                          </ThreadPrimitive.ScrollToBottom>
-                          <ThreadImplementationPlanGrantControls />
-                          <ThreadWorkOnRepoControls />
-                          {composer}
-                        </ThreadComposerAreaShell>
-                      )}
-                    </ThreadRootShell>
-                  </ThreadPrimitive.Root>
-                </RuntimeTourWaiting>
+                    {!isLoading && !isEmpty && (
+                      <ThreadComposerAreaShell isEmpty={isEmpty}>
+                        <ThreadPrimitive.ScrollToBottom asChild>
+                          <ScrollToBottomButton />
+                        </ThreadPrimitive.ScrollToBottom>
+                        <ThreadImplementationPlanGrantControls />
+                        <ThreadWorkOnRepoControls />
+                        {composer}
+                      </ThreadComposerAreaShell>
+                    )}
+                  </ThreadRootShell>
+                </ThreadPrimitive.Root>
               </ApprovalFocusProvider>
             </ComposerBusyProvider>
           </SentinelStateProvider>

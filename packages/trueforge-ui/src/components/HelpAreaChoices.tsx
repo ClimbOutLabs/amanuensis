@@ -21,7 +21,7 @@ export const HelpAreaChoices: FC<{
   <fieldset className="min-w-0 border-0 p-0">
     <legend className="text-sm font-medium text-text-primary">What would help you most?</legend>
     <p className="mt-1 text-sm text-text-secondary">
-      Pick any, and change them any time. They shape the cards on the Tour.
+      Pick any, and change them any time. They show as pills on the home.
     </p>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {HELP_AREA_IDS.map(id => (

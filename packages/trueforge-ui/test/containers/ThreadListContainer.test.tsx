@@ -371,8 +371,8 @@ describe('ThreadListContainer', () => {
     expect(screen.queryByRole('button', { name: 'Unsaved chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start new chat' })).not.toBeInTheDocument();
     expect(screen.queryByText('New Chat')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Chat History' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chats' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chats' })).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot="aui_thread-list-viewport"]')).toHaveClass('aui-scrollbar-hidden');
   });
 
@@ -424,7 +424,7 @@ describe('ThreadListContainer', () => {
       variant: 'recent-history',
     });
 
-    expect(screen.getByText('No recent chats')).toBeInTheDocument();
+    expect(screen.getByText('Your chats will show up here.')).toBeInTheDocument();
   });
 
   it('loads a named history session without leaving the recent list', async () => {
@@ -464,7 +464,7 @@ describe('ThreadListContainer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Named chat' }));
 
     await waitFor(() => expect(screen.getByRole('status', { name: 'Active agent' })).toHaveTextContent('named-agent'));
-    expect(screen.getByRole('heading', { name: 'Chat History' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chats' })).toBeInTheDocument();
   });
 
   it('exposes delete only for remote sessions and delegates deletion to the runtime', async () => {

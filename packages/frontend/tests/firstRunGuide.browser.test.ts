@@ -36,17 +36,20 @@ const VIEWPORTS = [
 ] as const;
 const THEMES = ['light', 'dark'] as const;
 
-/** What the Settings card must show; the screenshot is taken only after this is on screen. */
-const SETTINGS_EXPECTATION = { heading: 'Welcome to Aman', progress: '2 of 3 done.' } as const;
+/** The greeting's words depend on the hour, so only the shape is checked. */
+const GREETING = /^Good (morning|afternoon|evening)/;
 
-/** The tour's compact setup line, for each fixture state that opens the tour. */
-const SUMMARY_EXPECTATIONS = {
-  fresh: '0 of 3 set up →',
-  half: '2 of 3 set up →',
+/** The seven rendered sizes the home allows, in px at 16px to the rem. */
+const ALLOWED_FONT_SIZES = new Set(['28px', '17px', '15px', '14px', '13px', '12px']);
+
+/** What each home state shows: the setup ticket's count, and the first-run lines around it. */
+const EXPECTED = {
+  fresh: { ticket: '0 of 3 done', firstRun: true, productivityGold: false },
+  half: { ticket: '1 of 3 done', firstRun: true, productivityGold: false },
+  done: { ticket: null, firstRun: false, productivityGold: false },
+  brief: { ticket: null, firstRun: false, productivityGold: true },
+  skipped: { ticket: null, firstRun: false, productivityGold: false },
 } as const;
-
-/** The tour's greeting, the first thing an ordinary new chat shows. Its words depend on the hour. */
-const TOUR_HEADING = /^Good (morning|afternoon|evening)/;
 
 async function screenshotDir(): Promise<string> {
   const configured = process.env.AMAN_SCREENSHOT_DIR;
@@ -57,27 +60,39 @@ async function screenshotDir(): Promise<string> {
   return await mkdtemp(join(tmpdir(), 'aman-first-run-'));
 }
 
-async function checkChecklist(page: Page) {
-  const card = page.getByTestId('aman-first-run-guide');
-  await card.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-  await card.getByRole('heading', { name: SETTINGS_EXPECTATION.heading }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-  assert.match(
-    await page.getByTestId('aman-first-run-progress').innerText(),
-    new RegExp(SETTINGS_EXPECTATION.progress),
+async function checkHome(page: Page, state: keyof typeof EXPECTED) {
+  const expected = EXPECTED[state];
+  assert.match(await page.getByRole('heading', { level: 1, name: GREETING }).innerText(), GREETING);
+  assert.equal(await page.getByRole('list', { name: 'What would help you most?' }).getByRole('button').count(), 6);
+  assert.equal(await page.getByRole('button', { name: /^Some things|Draft a reply/ }).count(), 1);
+  const ticket = page.getByTestId('aman-setup-ticket');
+  if (expected.ticket === null) {
+    assert.equal(await ticket.count(), 0, `${state} shows no setup ticket`);
+  } else {
+    assert.ok(await ticket.isVisible(), `${state} shows the setup ticket`);
+    assert.ok((await ticket.innerText()).includes(expected.ticket), `${state} ticket reads ${expected.ticket}`);
+  }
+  const firstRunLine = await page.getByText('What would help you most? Pick one').count();
+  assert.equal(firstRunLine, expected.firstRun ? 1 : 0, `${state} first-run prompt line`);
+  const skip = await page.getByRole('button', { name: 'Skip the tour' }).count();
+  assert.equal(skip, expected.firstRun ? 1 : 0, `${state} Skip shows only on a first run`);
+  const productivityClass = (await page.getByRole('button', { name: 'Productivity' }).getAttribute('class')) ?? '';
+  assert.equal(productivityClass.includes('bg-gold-soft'), expected.productivityGold, `${state} Productivity gold`);
+}
+
+async function checkSizes(page: Page) {
+  const sizes = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-fixture-state] *'))
+      .filter(el =>
+        Array.from(el.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()),
+      )
+      .map(el => getComputedStyle(el).fontSize),
   );
-  // Memory works out of the box, so the checklist never asks about it.
-  assert.doesNotMatch(await card.innerText(), /memory/i);
+  const unexpected = [...new Set(sizes)].filter(size => !ALLOWED_FONT_SIZES.has(size));
+  assert.deepEqual(unexpected, [], 'the home renders only the seven sizes in the type system');
 }
 
-/** The tour keeps only the count of set-up lines, linked to the first open one. */
-async function checkTourSummary(page: Page, state: keyof typeof SUMMARY_EXPECTATIONS) {
-  const summary = page.getByTestId('aman-first-run-summary');
-  await summary.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-  assert.equal((await summary.innerText()).trim(), SUMMARY_EXPECTATIONS[state]);
-  assert.equal(await page.getByTestId('aman-first-run-guide').count(), 0);
-}
-
-test('first-run screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
+test('home screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
   const server = await createServer({
     configFile: false,
@@ -111,6 +126,11 @@ test('first-run screens render in light and dark at desktop and phone width', { 
             timeout: RENDER_TIMEOUT_MS,
           });
           await page.locator(`[data-fixture-state="${state}"]`).waitFor({ timeout: RENDER_TIMEOUT_MS });
+          await page.getByRole('heading', { level: 1, name: GREETING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+          // Let the settle animation finish so the picture shows the resting frame.
+          await page.waitForFunction(() =>
+            document.getAnimations().every(animation => animation.playState !== 'running'),
+          );
         };
         const shoot = async (state: string) => {
           assert.ok(
@@ -120,112 +140,40 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           await page.screenshot({ path: join(outDir, `${state}-${viewport.name}-${theme}.png`), fullPage: true });
         };
 
-        for (const state of ['fresh', 'half'] as const) {
+        for (const state of ['fresh', 'half', 'done', 'brief', 'skipped'] as const) {
           await open(state);
-          await checkTourSummary(page, state);
+          await checkHome(page, state);
+          await checkSizes(page);
           await shoot(state);
         }
-        await open('settings');
-        await checkChecklist(page);
-        await shoot('settings');
 
-        // Once every line is done the tour drops the checklist and keeps its headline.
-        await open('done');
-        await page.getByRole('heading', { name: TOUR_HEADING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.equal(await page.getByTestId('aman-first-run-guide').count(), 0);
-        await shoot('done');
+        // Skip hides the prompt line, the ticket and itself; the pills and the four cards stay.
+        await open('fresh');
+        await page.getByRole('button', { name: 'Skip the tour' }).click();
+        await page.getByRole('heading', { level: 1, name: GREETING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 
-        // Every capability granted: the full prompt set is on screen.
-        await open('connected');
-        await page
-          .getByRole('button', { name: /Find forgotten subscriptions/ })
-          .waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.ok(await page.getByRole('button', { name: /Handle your email/ }).isVisible());
-        assert.ok(await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible());
-        await shoot('connected');
-
-        // The Tour with an area chosen: its cards lead, and the chip shows it is chosen.
-        await open('tour-focus');
-        await page.getByRole('button', { name: /Help me clear my head/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.equal(
-          await page.getByRole('radio', { name: 'Focus and getting started' }).getAttribute('aria-checked'),
-          'true',
-        );
-        await shoot('tour-focus');
-        // Nothing chosen: the capability tickets, and no chip is checked.
-        await open('tour-none');
-        await page.getByRole('button', { name: /Handle your email/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.equal(await page.getByRole('button', { name: /Help me clear my head/ }).count(), 0);
-        assert.equal(
-          await page.getByRole('radio', { name: 'Focus and getting started' }).getAttribute('aria-checked'),
-          'false',
-        );
-        await shoot('tour-none');
-        // Hidden on request: the plain greeting, with a way back to the tour.
-        await open('hidden');
-        await page.getByRole('button', { name: 'Replay the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.equal(await page.getByTestId('aman-tour').count(), 0);
-        await shoot('hidden');
-
-        await open('line');
-        const line = page.getByTestId('aman-name-prompt');
-        await line.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-        assert.match(await line.innerText(), /Aman does not know your name yet/);
-        assert.equal(await page.getByTestId('aman-first-run-guide').count(), 0);
-        await shoot('line');
-
-        await open('panel');
-        const nameField = page.getByLabel('Your name');
-        await nameField.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-        const nameBox = await nameField.boundingBox();
-        const assistantBox = await page.getByLabel('Name', { exact: true }).boundingBox();
-        assert.ok(nameBox != null && assistantBox != null, 'both name fields should have geometry');
-        assert.ok(nameBox.y < assistantBox.y, 'the owner name field comes before the assistant name field');
-        await shoot('panel');
-
-        // The real shell: the top bar, the first frame and the composer share one screen with no page scroll.
+        // The real shell: the top bar, the home and the composer share one screen with no page scroll.
         await open('shell');
-        await page.getByTestId('aman-tour').waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-        // Let the settle and lay animations finish so the picture shows the resting frame.
-        await page.waitForFunction(() =>
-          document.getAnimations().every(animation => animation.playState !== 'running'),
-        );
+        await page
+          .getByRole('button', { name: /Draft a reply/ })
+          .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         await shoot('shell');
         assert.ok(
           (await page.evaluate(() => document.documentElement.scrollHeight)) <= viewport.height,
-          `the first frame scrolls the page at ${viewport.name} ${theme}`,
+          `the home scrolls the page at ${viewport.name} ${theme}`,
         );
-        // Every grid fills its rows: at desktop width each row is complete, on the phone the cards stack.
-        const rowsOf = (selector: string) =>
-          page.evaluate(
-            sel => Array.from(document.querySelectorAll(sel)).map(el => Math.round(el.getBoundingClientRect().top)),
-            selector,
-          );
-        const chipTops = await rowsOf('[role="radiogroup"] [role="radio"]');
-        const ticketTops = await rowsOf('[data-testid="aman-tour"] > ul > li');
-        if (viewport.name === 'desktop') {
-          assert.equal(new Set(chipTops).size, 1, 'the five chips share one row at desktop width');
-          assert.equal(new Set(ticketTops).size, 1, 'the three tickets share one row at desktop width');
-        }
+        // Four cards: a row of four on desktop, one column on the phone.
         const cardLefts = await page.evaluate(() =>
-          Array.from(document.querySelectorAll('[data-testid="aman-tour"] section ul > li')).map(el =>
+          Array.from(document.querySelectorAll('[data-fixture-state="shell"] ul.grid > li')).map(el =>
             Math.round(el.getBoundingClientRect().left),
           ),
         );
-        assert.equal(cardLefts.length, 4, 'four capability tickets');
-        assert.equal(
-          new Set(cardLefts).size,
-          viewport.name === 'desktop' ? 4 : 1,
-          'the capability tickets fill four columns on desktop and one on the phone',
-        );
-        assert.ok(
-          await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible(),
-          'Keep pages in Spaces is on the first frame',
-        );
+        assert.equal(cardLefts.length, 4, 'four cards');
+        assert.equal(new Set(cardLefts).size, 2, 'the cards sit in a two-column grid');
       }
       await context.close();
     }
-    console.log(`first-run screenshots written to ${outDir}`);
+    console.log(`home screenshots written to ${outDir}`);
   } finally {
     await browser?.close();
     await server.close();

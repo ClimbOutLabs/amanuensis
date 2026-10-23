@@ -37,7 +37,7 @@ export function SessionsBrowserButton({ className, compact = false }: SessionsBr
             'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
             compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
             sessionsOpen &&
-              'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+              'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
           ),
         })}
         onClick={() => {
@@ -53,7 +53,7 @@ export function SessionsBrowserButton({ className, compact = false }: SessionsBr
           shell.setSessionsOpen(true);
         }}
       >
-        <Icon name="message-square-text" size={compact ? 14 : undefined} />
+        <Icon name="clock-rotate-left" size={compact ? 14 : undefined} />
         {compact ? (
           <span className="text-center">Sessions</span>
         ) : (

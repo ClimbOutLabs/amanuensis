@@ -13,6 +13,7 @@ import { AgentHistoryFilterButton } from '../atoms/AgentHistoryFilterButton.js';
 import { cn } from '../atoms/lib/cn.js';
 import {
   canReuseMutableShell,
+  filterChatsByTitle,
   readThreadAgentName,
   threadListIndicesByRecency,
   threadListItemIsMutable,
@@ -24,6 +25,7 @@ import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
+import { RecentChatsGroups, type RecentChat } from './RecentChatsGroups.js';
 
 /**
  * Simplified relative to the reference: renders threads in a single flat list
@@ -243,100 +245,89 @@ function FolderSessionRow({
   );
 }
 
-function ThreadListItemsByRecency({
-  indices,
-  onThreadOpen,
-  canDeleteSession,
-  canDeleteResource,
-  canRenameSession,
-}: {
-  indices: number[];
-  onThreadOpen?: () => void;
-  canDeleteSession: boolean;
-  canDeleteResource: (sessionId: string) => boolean;
-  canRenameSession: boolean;
-}) {
+/** One chat the list can show: a loaded row by its index, or a chat only the folder store has. */
+type ChatListEntry = RecentChat & {
+  title: string;
+  remoteId: string | undefined;
+  index: number | null;
+  session: ChatFolderSession | null;
+};
+
+/**
+ * Every chat the list can show, in the order of `indices`, then the chats the folder store knows
+ * that the recent list has not loaded. A chat counts as in a folder only while that folder exists;
+ * a chat whose folder was deleted reads like one that was never filed.
+ */
+function useChatListEntries(indices: readonly number[]): ChatListEntry[] {
   const threadIds = useAuiState(s => s.threads.threadIds);
   const threadItems = useAuiState(s => s.threads.threadItems);
   const chatFolders = useOptionalChatFolders();
-  const server = useOptionalServer();
-  const shell = useOptionalShellMode();
-  const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
 
   const itemByThreadId = new Map<string, (typeof threadItems)[number]>();
   for (const item of threadItems) {
     itemByThreadId.set(item.id, item);
   }
-
-  const allLoadedRemoteIds = new Set<string>();
-  for (const index of indices) {
-    const threadId = threadIds[index];
-    const item = threadId === undefined ? undefined : itemByThreadId.get(threadId);
-    if (item?.remoteId != null) allLoadedRemoteIds.add(item.remoteId);
-  }
-
-  const folderSessionById = new Map<string, ChatFolderSession>();
-  if (chatFolders !== null) {
-    for (const sessions of chatFolders.folderSessions.values()) {
-      for (const session of sessions) {
-        if (!folderSessionById.has(session.sessionId)) {
-          folderSessionById.set(session.sessionId, session);
-        }
-      }
-    }
-    for (const session of chatFolders.unfiledSessions) {
-      if (!folderSessionById.has(session.sessionId)) {
-        folderSessionById.set(session.sessionId, session);
-      }
-    }
-  }
-
-  // The flat list is enough when there are no folders and every chat the folder
-  // store knows is already in the loaded list.
-  const hasFolderOnlySessions = [...folderSessionById.values()].some(
-    session => !allLoadedRemoteIds.has(session.sessionId),
-  );
-  if (chatFolders === null || (chatFolders.folders.length === 0 && !hasFolderOnlySessions)) {
-    return (
-      <>
-        {indices.map(index => (
-          <ThreadListItemByIndex
-            key={threadIds[index] ?? String(index)}
-            index={index}
-            onThreadOpen={onThreadOpen}
-            canDeleteSession={canDeleteSession}
-            canDeleteResource={canDeleteResource}
-            canRenameSession={canRenameSession}
-          />
-        ))}
-      </>
-    );
-  }
-
-  const liveFolderIds = new Set(chatFolders.folders.map(folder => folder.id));
-  // An assignment only counts while its folder exists; a chat whose folder was
-  // deleted reads as unfiled, like a chat that was never filed.
-  const assignmentOf = (sessionId: string): string | undefined => {
-    const folderId = chatFolders.assignments.get(sessionId);
+  const liveFolderIds = new Set((chatFolders?.folders ?? []).map(folder => folder.id));
+  const folderIdOf = (sessionId: string): string | undefined => {
+    const folderId = chatFolders?.assignments.get(sessionId);
     return folderId !== undefined && liveFolderIds.has(folderId) ? folderId : undefined;
   };
 
-  const indexByFolder = new Map<string, number[]>();
-  const unfiled: number[] = [];
+  const entries: ChatListEntry[] = [];
+  const loadedRemoteIds = new Set<string>();
   for (const index of indices) {
     const threadId = threadIds[index];
     const item = threadId === undefined ? undefined : itemByThreadId.get(threadId);
-    const remoteId = item?.remoteId;
-    const folderId = remoteId == null ? undefined : assignmentOf(remoteId);
-    if (folderId === undefined) {
-      unfiled.push(index);
-      continue;
-    }
-    const folderIndices = indexByFolder.get(folderId) ?? [];
-    folderIndices.push(index);
-    indexByFolder.set(folderId, folderIndices);
+    const remoteId = item?.remoteId ?? undefined;
+    if (remoteId !== undefined) loadedRemoteIds.add(remoteId);
+    entries.push({
+      key: threadId ?? String(index),
+      time: item?.lastMessageAt?.getTime() ?? Number.POSITIVE_INFINITY,
+      folderId: remoteId === undefined ? undefined : folderIdOf(remoteId),
+      title: item?.title ?? '',
+      remoteId,
+      index,
+      session: null,
+    });
   }
 
+  if (chatFolders !== null) {
+    // The folder query is complete even when the recent list has not loaded these chats.
+    // Assignments decide the folder, so a chat moved shows in its new folder at once.
+    const sessions = [...[...chatFolders.folderSessions.values()].flat(), ...chatFolders.unfiledSessions];
+    for (const session of sessions) {
+      if (loadedRemoteIds.has(session.sessionId)) continue;
+      loadedRemoteIds.add(session.sessionId);
+      entries.push({
+        key: `folder-session-${session.sessionId}`,
+        time: session.updatedAt.getTime(),
+        folderId: folderIdOf(session.sessionId),
+        title: session.title ?? '',
+        remoteId: session.sessionId,
+        index: null,
+        session,
+      });
+    }
+  }
+  return entries;
+}
+
+/** Draws one chat entry: a loaded row through the runtime, or a folder-store chat directly. */
+function useRenderChatEntry({
+  onThreadOpen,
+  canDeleteSession,
+  canDeleteResource,
+  canRenameSession,
+}: {
+  onThreadOpen?: () => void;
+  canDeleteSession: boolean;
+  canDeleteResource: (sessionId: string) => boolean;
+  canRenameSession: boolean;
+}): (entry: ChatListEntry) => ReactNode {
+  const chatFolders = useOptionalChatFolders();
+  const server = useOptionalServer();
+  const shell = useOptionalShellMode();
+  const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
 
   // Failures reach the delete dialog, which says so and keeps the chat.
@@ -345,134 +336,72 @@ function ThreadListItemsByRecency({
       throw new Error('Deleting chats is not available here.');
     }
     await server.deleteSession({ sessionId });
-    chatFolders.removeFolderSession({ sessionId });
+    chatFolders?.removeFolderSession({ sessionId });
   };
 
-  // Chats with no folder that the recent list has not loaded render from the
-  // folder store alongside the loaded ones, newest first, like a folder section.
-  const unfiledFolderSessions = [...folderSessionById.values()].filter(
-    session => assignmentOf(session.sessionId) === undefined && !allLoadedRemoteIds.has(session.sessionId),
-  );
-  const unfiledEntries: Array<{
-    time: number;
-    key: string;
-    index: number | null;
-    session: ChatFolderSession | null;
-  }> = [
-    ...unfiled.map(index => {
-      const threadId = threadIds[index];
-      const item = threadId === undefined ? undefined : itemByThreadId.get(threadId);
-      return {
-        time: item?.lastMessageAt?.getTime() ?? Number.POSITIVE_INFINITY,
-        key: threadId ?? String(index),
-        index,
-        session: null,
-      };
-    }),
-    ...unfiledFolderSessions.map(session => ({
-      time: session.updatedAt.getTime(),
-      key: `folder-session-${session.sessionId}`,
-      index: null,
-      session,
-    })),
-  ].sort((a, b) => b.time - a.time);
+  return entry => {
+    if (entry.index !== null) {
+      return (
+        <ThreadListItemByIndex
+          key={entry.key}
+          index={entry.index}
+          onThreadOpen={onThreadOpen}
+          canDeleteSession={canDeleteSession}
+          canDeleteResource={canDeleteResource}
+          canRenameSession={canRenameSession}
+        />
+      );
+    }
+    if (entry.session === null || chatFolders === null) return null;
+    return (
+      <FolderSessionRow
+        key={entry.key}
+        session={entry.session}
+        active={entry.session.sessionId === activeRemoteId && !sidebarNavOpen}
+        onThreadOpen={onThreadOpen}
+        canDeleteSession={canDeleteSession}
+        canDeleteResource={canDeleteResource}
+        canRenameSession={canRenameSession}
+        onDeleteSession={deleteFolderSession}
+        onRenamedSession={chatFolders.updateFolderSessionTitle}
+      />
+    );
+  };
+}
 
+const newestFirst = (entries: readonly ChatListEntry[]) => [...entries].sort((a, b) => b.time - a.time);
+
+function ThreadListItemsByRecency({
+  entries,
+  renderEntry,
+}: {
+  entries: readonly ChatListEntry[];
+  renderEntry: (entry: ChatListEntry) => ReactNode;
+}) {
+  const chatFolders = useOptionalChatFolders();
+
+  // The flat list is enough when there are no folders and every chat the folder
+  // store knows is already in the loaded list.
+  const hasFolderOnlySessions = entries.some(entry => entry.session !== null);
+  if (chatFolders === null || (chatFolders.folders.length === 0 && !hasFolderOnlySessions)) {
+    return <>{entries.map(renderEntry)}</>;
+  }
+
+  const unfiledEntries = newestFirst(entries.filter(entry => entry.folderId === undefined));
   return (
     <>
       {chatFolders.folders.map(folder => {
-        const loadedIndices = indexByFolder.get(folder.id) ?? [];
-        const loadedRemoteIds = new Set<string>();
-        for (const index of loadedIndices) {
-          const threadId = threadIds[index];
-          const item = threadId === undefined ? undefined : itemByThreadId.get(threadId);
-          if (item?.remoteId != null) loadedRemoteIds.add(item.remoteId);
-        }
-
-        // The folder query is complete even when the recent list has not loaded these chats.
-        // Assignments decide the folder, so a chat moved here shows in its new folder at once.
-        const folderOnlySessions = [...folderSessionById.values()].filter(
-          session => assignmentOf(session.sessionId) === folder.id && !loadedRemoteIds.has(session.sessionId),
-        );
-        const entries: Array<{
-          time: number;
-          key: string;
-          index: number | null;
-          session: ChatFolderSession | null;
-        }> = [
-          ...loadedIndices.map(index => {
-            const threadId = threadIds[index];
-            const item = threadId === undefined ? undefined : itemByThreadId.get(threadId);
-            return {
-              time: item?.lastMessageAt?.getTime() ?? Number.POSITIVE_INFINITY,
-              key: threadId ?? String(index),
-              index,
-              session: null,
-            };
-          }),
-          ...folderOnlySessions.map(session => ({
-            time: session.updatedAt.getTime(),
-            key: `folder-session-${session.sessionId}`,
-            index: null,
-            session,
-          })),
-        ].sort((a, b) => b.time - a.time);
-
+        const folderEntries = newestFirst(entries.filter(entry => entry.folderId === folder.id));
         return (
-          <ChatFolderSection key={folder.id} folder={folder} count={entries.length}>
-            {entries.map(entry =>
-              entry.index !== null ? (
-                <ThreadListItemByIndex
-                  key={entry.key}
-                  index={entry.index}
-                  onThreadOpen={onThreadOpen}
-                  canDeleteSession={canDeleteSession}
-                  canDeleteResource={canDeleteResource}
-                  canRenameSession={canRenameSession}
-                />
-              ) : entry.session !== null ? (
-                <FolderSessionRow
-                  key={entry.key}
-                  session={entry.session}
-                  active={entry.session.sessionId === activeRemoteId && !sidebarNavOpen}
-                  onThreadOpen={onThreadOpen}
-                  canDeleteSession={canDeleteSession}
-                  canDeleteResource={canDeleteResource}
-                  canRenameSession={canRenameSession}
-                  onDeleteSession={deleteFolderSession}
-                  onRenamedSession={chatFolders.updateFolderSessionTitle}
-                />
-              ) : null,
-            )}
+          <ChatFolderSection key={folder.id} folder={folder} count={folderEntries.length}>
+            {folderEntries.map(renderEntry)}
           </ChatFolderSection>
         );
       })}
       {unfiledEntries.length > 0 ? (
         <section aria-label="Unfiled chats" className="mt-1 flex flex-col gap-0.5">
           <div className="px-2 py-1 text-xs font-semibold text-text-secondary">Unfiled</div>
-          {unfiledEntries.map(entry =>
-            entry.index !== null ? (
-              <ThreadListItemByIndex
-                key={entry.key}
-                index={entry.index}
-                onThreadOpen={onThreadOpen}
-                canDeleteSession={canDeleteSession}
-                canDeleteResource={canDeleteResource}
-                canRenameSession={canRenameSession}
-              />
-            ) : entry.session !== null ? (
-              <FolderSessionRow
-                key={entry.key}
-                session={entry.session}
-                active={entry.session.sessionId === activeRemoteId && !sidebarNavOpen}
-                onThreadOpen={onThreadOpen}
-                canDeleteSession={canDeleteSession}
-                canDeleteResource={canDeleteResource}
-                canRenameSession={canRenameSession}
-                onDeleteSession={deleteFolderSession}
-                onRenamedSession={chatFolders.updateFolderSessionTitle}
-              />
-            ) : null,
-          )}
+          {unfiledEntries.map(renderEntry)}
         </section>
       ) : null}
     </>
@@ -483,17 +412,25 @@ const THREAD_LIST_VIEWPORT_SLOT = 'aui_thread-list-viewport';
 /** How close to the bottom (px) before the next sessions page is fetched. */
 const LOAD_MORE_BOTTOM_PX = 80;
 
+/** The Chats column's search: a toggle in the header, and a field under it while open. */
+type RecentChatsSearch = { open: boolean; query: string; onToggle: () => void; onQueryChange: (query: string) => void };
+
 function RecentChatsSection({
   children,
   viewportRef,
   hideScrollbar,
   collapsible,
+  search,
+  folderHeading,
 }: {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   hideScrollbar: boolean;
   /** `recent-history` renders in a narrow, always-open rail; only `default` collapses. */
   collapsible: boolean;
+  search?: RecentChatsSearch;
+  /** Puts a Folders heading with the new-folder control above the list. */
+  folderHeading: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   const shell = useOptionalShellMode();
@@ -508,8 +445,7 @@ function RecentChatsSection({
       shell.mode.isMutable ||
       shell.pendingSessionId != null ||
       activeRemoteId != null);
-  const heading =
-    shell?.historyAgentFilter == null ? 'Chat History' : `Chats for ${shell.historyAgentFilter.agentName}`;
+  const heading = shell?.historyAgentFilter == null ? 'Chats' : `Chats for ${shell.historyAgentFilter.agentName}`;
   const isOpen = !collapsible || expanded;
 
   return (
@@ -532,8 +468,40 @@ function RecentChatsSection({
           <h2 className="min-w-0 flex-1 truncate px-1.5 py-1 text-sm font-medium text-text-secondary">{heading}</h2>
         )}
         {showFilter ? <AgentHistoryFilterButton /> : null}
-        {chatFolders !== null ? <NewFolderButton /> : null}
+        {search !== undefined ? (
+          <button
+            type="button"
+            aria-label="Search chats"
+            aria-pressed={search.open}
+            title="Search chats"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+            onClick={search.onToggle}
+          >
+            <Icon name="search" className="size-3.5" />
+          </button>
+        ) : null}
+        {chatFolders !== null && !folderHeading ? <NewFolderButton /> : null}
       </div>
+      {search?.open ? (
+        <label className="mx-1 mb-1 flex shrink-0 items-center gap-2 rounded-[1.25rem] border border-border bg-card-bg px-3 py-1.5 focus-within:border-gold-line">
+          <Icon name="search" className="size-3.5 shrink-0 text-text-secondary" />
+          <input
+            type="search"
+            aria-label="Search chats"
+            placeholder="Search chats"
+            value={search.query}
+            onChange={event => search.onQueryChange(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-text-primary outline-none placeholder:text-text-secondary"
+            autoFocus
+          />
+        </label>
+      ) : null}
+      {folderHeading && chatFolders !== null ? (
+        <div className="flex shrink-0 items-center justify-between px-2.5 pt-1 pb-0.5">
+          <h3 className="m-0 text-[0.75rem] font-normal text-text-secondary">Folders</h3>
+          <NewFolderButton />
+        </div>
+      ) : null}
       {isOpen ? (
         <div
           ref={viewportRef}
@@ -559,6 +527,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const hasMore = useAuiState(s => s.threads.hasMore);
   const threadIds = useAuiState(s => s.threads.threadIds);
   const threadItems = useAuiState(s => s.threads.threadItems);
+  const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
   const shell = useOptionalShellMode();
 
   const ThreadListShell = useSlot('ThreadListShell');
@@ -571,6 +540,8 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const ThreadListEmptyState = useSlot('ThreadListEmptyState');
 
   const indices = useThreadListIndicesByRecency(variant);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const viewportRef = useRef<HTMLDivElement>(null);
   const hasMoreRef = useRef(hasMore);
   const auiRef = useRef(aui);
@@ -628,6 +599,8 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
 
   const { allows } = useResourcePermissions({ resourceType: 'session', resourceIds: remoteSessionIds });
   const canDeleteResource = (sessionId: string) => allows(sessionId, 'DELETE');
+  const entries = useChatListEntries(indices);
+  const renderEntry = useRenderChatEntry({ onThreadOpen, canDeleteSession, canDeleteResource, canRenameSession });
 
   // Fill an underflowing viewport; once it scrolls, paginate only near the bottom.
   // Re-measure after commit (threadIds / hasMore) instead of rAF-chaining, which
@@ -682,28 +655,32 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     void Promise.resolve(aui.threads().switchToNewThread()).catch(() => undefined);
   };
 
-  const emptyMessage = isRecentHistory ? 'No recent chats' : undefined;
+  const emptyMessage = isRecentHistory ? 'Your chats will show up here.' : undefined;
   const loadedRemoteSessionIdSet = new Set(loadedRemoteSessionIds);
   const hasFolderOnlySessions = remoteSessionIds.some(sessionId => !loadedRemoteSessionIdSet.has(sessionId));
   const hasFolders = chatFolders !== null && (chatFolders.folders.length > 0 || hasFolderOnlySessions);
+  const shownEntries = isRecentHistory
+    ? filterChatsByTitle({ chats: entries, query: searchOpen ? searchQuery : '' })
+    : entries;
+  const openKey = activeRemoteId == null ? undefined : entries.find(entry => entry.remoteId === activeRemoteId)?.key;
 
   let listBody: ReactNode;
   if (isIdle) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
   } else if (isLoading) {
     listBody = <ThreadListRowSkeleton />;
-  } else if (indices.length === 0 && !hasFolders) {
+  } else if (entries.length === 0 && !hasFolders) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
+  } else if (shownEntries.length === 0 && !hasFolders) {
+    listBody = <ThreadListEmptyState message="No chats match that search." />;
   } else {
     listBody = (
       <ThreadListPrimitive.Root className="flex min-h-0 flex-col gap-0.5">
-        <ThreadListItemsByRecency
-          indices={indices}
-          onThreadOpen={onThreadOpen}
-          canDeleteSession={canDeleteSession}
-          canDeleteResource={canDeleteResource}
-          canRenameSession={canRenameSession}
-        />
+        {isRecentHistory ? (
+          <RecentChatsGroups chats={shownEntries} openKey={openKey} renderRow={renderEntry} />
+        ) : (
+          <ThreadListItemsByRecency entries={shownEntries} renderEntry={renderEntry} />
+        )}
       </ThreadListPrimitive.Root>
     );
   }
@@ -722,7 +699,25 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
         )
       }
     >
-      <RecentChatsSection viewportRef={viewportRef} hideScrollbar={isRecentHistory} collapsible={!isRecentHistory}>
+      <RecentChatsSection
+        viewportRef={viewportRef}
+        hideScrollbar={isRecentHistory}
+        collapsible={!isRecentHistory}
+        folderHeading={isRecentHistory}
+        search={
+          isRecentHistory
+            ? {
+                open: searchOpen,
+                query: searchQuery,
+                onToggle: () => {
+                  setSearchOpen(open => !open);
+                  setSearchQuery('');
+                },
+                onQueryChange: setSearchQuery,
+              }
+            : undefined
+        }
+      >
         {chatFolders?.loadError != null ? (
           <p role="alert" className="mx-2 mb-2 rounded-md bg-failure-bg/12 px-2 py-1.5 text-sm text-failure-bg">
             {chatFolders.loadError}

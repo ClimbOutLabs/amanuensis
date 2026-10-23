@@ -6,12 +6,20 @@ import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useTheme } from '../theme/ThemeProvider.js';
-import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { BugReportButton } from './BugReportButton.js';
-import { auiButtonClass, sidebarRailButtonClassName } from './lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
-export function ShellActions({ className, labeled = false }: { className?: string; labeled?: boolean }) {
+export function ShellActions({
+  className,
+  labeled = false,
+  rows = false,
+}: {
+  className?: string;
+  labeled?: boolean;
+  /** Lays the labeled actions out as menu rows instead of rail tiles. */
+  rows?: boolean;
+}) {
   const shell = useOptionalShellMode();
   const catalog = useOptionalCatalogServer();
   const capabilities = useServerCapabilities();
@@ -21,7 +29,6 @@ export function ShellActions({ className, labeled = false }: { className?: strin
   const isDark = mode === 'dark';
   const themeLabel = isDark ? 'Light' : 'Dark';
   const settingsChromeEnabled = isSettingsChromeEnabled({ catalog, capabilities });
-  const { hidden: tourHidden, setHidden: setTourHidden } = useTourHidden();
 
   const hoverClass = 'hover:bg-secondary-button-hover hover:text-ghost-button-text';
 
@@ -43,28 +50,13 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         className={auiButtonClass({
           variant: 'ghost',
           size: labeled ? undefined : 'icon',
-          className: cn(hoverClass, labeled && sidebarRailButtonClassName),
+          className: cn(hoverClass, labeled && (rows ? railMenuRowClassName : sidebarRailButtonClassName)),
         })}
         onClick={() => setTheme(isDark ? 'light' : 'dark')}
       >
         <Icon name={isDark ? 'sun' : 'moon'} size={labeled ? 14 : undefined} />
         {labeled ? <span className="text-center">{themeLabel}</span> : null}
       </button>
-      {tourHidden ? (
-        <button
-          type="button"
-          title="Replay the tour"
-          className={auiButtonClass({
-            variant: 'ghost',
-            size: labeled ? undefined : 'icon',
-            className: cn(hoverClass, labeled && sidebarRailButtonClassName),
-          })}
-          onClick={() => setTourHidden(false)}
-        >
-          <Icon name="welcome-sparkle" size={labeled ? 14 : undefined} />
-          {labeled ? <span className="text-center">Replay the tour</span> : null}
-        </button>
-      ) : null}
       {shell != null && settingsChromeEnabled ? (
         <button
           type="button"
@@ -77,9 +69,9 @@ export function ShellActions({ className, labeled = false }: { className?: strin
             size: labeled ? undefined : 'icon',
             className: cn(
               hoverClass,
-              labeled && sidebarRailButtonClassName,
+              labeled && (rows ? railMenuRowClassName : sidebarRailButtonClassName),
               shell.settingsOpen &&
-                'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+                'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
             ),
           })}
           onClick={() => shell.setSettingsOpen(true)}
@@ -88,7 +80,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
           {labeled ? <span className="text-center">Settings</span> : null}
         </button>
       ) : null}
-      {labeled ? <SessionsBrowserButton compact /> : null}
+      {labeled ? <SessionsBrowserButton compact={!rows} /> : null}
       <BugReportButton />
       <ActionSlot />
     </div>
