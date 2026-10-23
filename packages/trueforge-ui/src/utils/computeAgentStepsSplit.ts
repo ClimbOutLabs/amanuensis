@@ -18,9 +18,23 @@ export interface AgentStepsRun {
 export interface AgentStepsSplitResult {
   /** Folded runs in part order; every part outside them renders in the main flow. */
   runs: readonly AgentStepsRun[];
+  /** Indices of short status lines written before a later folded step: the model's in-between lines. */
+  interimTextIndices: readonly number[];
   hasFinal: boolean;
   toolCount: number;
   thinkingCount: number;
+}
+
+/** Longest text that can still be an in-between status line; anything longer is part of the answer. */
+const STATUS_LINE_MAX_CHARS = 200;
+
+/**
+ * An in-between status line ("Let me check your calendar."): one short paragraph with no lists, headings or
+ * tables. Any other text before a later step is answer the person must see, so it is never hidden.
+ */
+function isStatusLine(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length <= STATUS_LINE_MAX_CHARS && !trimmed.includes('\n');
 }
 
 /** A map is the answer the user asked to see, so its call never folds into agent internals. */
@@ -63,8 +77,13 @@ export function computeAgentStepsSplit(parts: readonly AgentStepPart[]): AgentSt
   });
 
   const runs = collectRuns({ parts, folded });
+  const lastRunEnd = runs.at(-1)?.end ?? 0;
+  const interimTextIndices = parts.flatMap((part, index) =>
+    index < lastRunEnd && !folded[index] && part.type === 'text' && isStatusLine(part.text ?? '') ? [index] : [],
+  );
   return {
     runs,
+    interimTextIndices,
     hasFinal,
     toolCount: runs.reduce((sum, run) => sum + run.toolCount, 0),
     thinkingCount: runs.reduce((sum, run) => sum + run.thinkingCount, 0),
