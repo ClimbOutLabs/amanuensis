@@ -58,7 +58,7 @@ assert_lines_landed() { # letters first|again
       assert_eq "$(file_value .env.mail-email MCP_EMAIL_SERVER_PASSWORD)" "'$MAIL_LINE'" "$label email app password"
       assert_eq "$(sed -n 5p "$SB_STATE/imap_stdin")" "$MAIL_LINE" "$label the sign-in check got the email app password"
       ;;
-    *) assert_no_path "$AMAN_HOME/instances/main/.env.mail-email" ;;
+    *) assert_eq "$(file_value .env.mail-email MCP_EMAIL_SERVER_PASSWORD)" "" "$label no email app password saved" ;;
   esac
   if [ "$2" = first ]; then
     assert_eq "$(cat "$SB_STATE/hash_stdin")" "$SIGNIN_PW" "$label sign-in password"

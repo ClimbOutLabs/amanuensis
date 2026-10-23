@@ -120,6 +120,8 @@ services:
       # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
       MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
+      # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
+      MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -219,15 +221,27 @@ services:
       MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
       # Where the wrapper records the hash of the list it started with. The server waits on it.
       AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
+      # The account agent: the account file it owns, its private-network port, and its own path in the image.
+      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+      AMAN_MAIL_ACCOUNT_PORT: '9559'
+      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
+      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
       # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
       MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
     volumes:
       - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
+      - ./ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro
+      - ./ops/compose/mail-email/email_check.py:/usr/local/bin/aman-mail-email-check:ro
+      # The account file itself, so the agent can save accounts the Settings card sends. In this dev
+      # stack the file must exist before the sidecar starts (an empty file means no account):
+      # create it once with: touch .env.mail-email
+      - ./.env.mail-email:/account/.env.mail-email
       - mail-policy:/policy:ro
       - mail-policy-status:/mail-status
       - mail-email-data:/data
     expose:
       - '9557'
+      - '9559'
     restart: unless-stopped
 
   # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private to the

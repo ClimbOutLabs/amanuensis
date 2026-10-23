@@ -46,8 +46,28 @@ describe('mail and calendar sidecars', () => {
 
   it('mail-email exposes its MCP port only to the Compose network', () => {
     const service = serviceNamed('mail-email');
-    expect(service.expose).toEqual(['9557']);
+    expect(service.expose).toEqual(['9557', '9559']);
     expect(service.command).toEqual(['streamable-http', '--host', '0.0.0.0', '--port', '9557']);
+  });
+
+  it('mail-email runs the account agent on the private network, holding the one account file', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.environment?.['AMAN_MAIL_ACCOUNT_PORT']).toBe('9559');
+    expect(service.volumes).toContain('./.env.mail-email:/account/.env.mail-email');
+    expect(service.volumes).toContain(
+      './ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro',
+    );
+    expect(service.volumes).toContain(
+      './ops/compose/mail-email/email_check.py:/usr/local/bin/aman-mail-email-check:ro',
+    );
+    // The account agent's port is exposed to the Compose network only, never published.
+    expect(service.ports).toBeUndefined();
+  });
+
+  it('the server is pointed at the account agent, never at the Docker socket', () => {
+    const service = serviceNamed('server');
+    expect(service.environment?.['MAIL_EMAIL_ACCOUNT_URL']).toBe('http://mail-email:9559');
+    expect(service.volumes?.some(volume => volume.includes('docker.sock'))).toBe(false);
   });
 
   it('mail-email accepts requests only under its service name', () => {

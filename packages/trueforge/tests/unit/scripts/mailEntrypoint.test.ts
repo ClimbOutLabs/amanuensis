@@ -6,6 +6,8 @@ import { join, resolve } from 'path';
 import { allowedRecipientsFileHash } from '../../../src/runtime/mailAllowedRecipients';
 
 const ENTRYPOINT = resolve(__dirname, '../../../../../ops/compose/mail-email/entrypoint.sh');
+const ACCOUNT_AGENT = resolve(__dirname, '../../../../../ops/compose/mail-email/account_agent.py');
+const EMAIL_CHECK = resolve(__dirname, '../../../../../ops/compose/mail-email/email_check.py');
 
 const LIST_V1 = 'db_location = "/data/db.sqlite3"\nallowed_recipients = ["dana@example.com"]\n';
 const LIST_V2 = 'db_location = "/data/db.sqlite3"\nallowed_recipients = ["dana@example.com", "sam@example.com"]\n';
@@ -35,6 +37,7 @@ describe('mail-email entrypoint wrapper', () => {
   let status: string;
   let starts: string;
   let envLog: string;
+  let accountFile: string;
   let wrapper: ChildProcess | undefined;
 
   beforeEach(async () => {
@@ -43,21 +46,30 @@ describe('mail-email entrypoint wrapper', () => {
     status = join(dir, 'status', 'loaded.sha256');
     starts = join(dir, 'starts.log');
     envLog = join(dir, 'env.log');
+    accountFile = join(dir, '.env.mail-email');
     await writeFile(policy, LIST_V1);
+    await writeFile(accountFile, '');
     await mkdir(join(dir, 'status'));
     // A stand-in server: it logs each start and then runs as the only process, so a signal reaches it.
     const bin = join(dir, 'bin');
     await mkdir(bin);
     await writeFile(
       join(bin, 'mcp-email-server'),
-      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\nexec sleep 1000\n`,
+      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\necho "addr:\${MCP_EMAIL_SERVER_EMAIL_ADDRESS-unset}" >> "${envLog}"\nexec sleep 1000\n`,
     );
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   });
 
   afterEach(async () => {
     if (wrapper !== undefined && wrapper.exitCode === null) {
-      wrapper.kill('SIGKILL');
+      // TERM lets the wrapper's trap stop the account agent and the server with it;
+      // a bare KILL would leave the agent holding its port for the next test.
+      const exited = new Promise(resolve => wrapper?.once('exit', resolve));
+      wrapper.kill('SIGTERM');
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 3_000))]);
+      if (wrapper.exitCode === null) {
+        wrapper.kill('SIGKILL');
+      }
     }
     await rm(dir, { recursive: true, force: true });
   });
@@ -68,6 +80,10 @@ describe('mail-email entrypoint wrapper', () => {
         PATH: `${join(dir, 'bin')}:${process.env['PATH'] ?? ''}`,
         MCP_EMAIL_SERVER_CONFIG_PATH: policy,
         AMAN_MAIL_STATUS_FILE: status,
+        AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
+        AMAN_MAIL_ACCOUNT_PORT: '19759',
+        AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
         ...extraEnv,
       },
       stdio: 'ignore',
@@ -97,8 +113,35 @@ describe('mail-email entrypoint wrapper', () => {
   it('starts the server without an env recipient list, so the list file always decides', async () => {
     startWrapper({ MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS: 'stranger@example.net' });
     await eventually(async () => (await readOrEmpty(envLog)) !== '');
-    expect(await readOrEmpty(envLog)).toBe('unset');
+    expect((await readOrEmpty(envLog)).split('\n')[0]).toBe('unset');
   }, 20_000);
+
+  it('restarts the server with the saved account when the account file changes', async () => {
+    startWrapper();
+    await eventually(async () => (await readOrEmpty(status)) !== '');
+    expect(await readOrEmpty(envLog)).toContain('addr:unset');
+    await writeFile(
+      accountFile,
+      [
+        '# Written by the installer for the Email connector. Keep it private: it holds the app password.',
+        'MCP_EMAIL_SERVER_EMAIL_ADDRESS=person@example.com',
+        "MCP_EMAIL_SERVER_PASSWORD='<redacted>'",
+        'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.com',
+        'MCP_EMAIL_SERVER_IMAP_PORT=993',
+        'MCP_EMAIL_SERVER_IMAP_SSL=true',
+        'MCP_EMAIL_SERVER_IMAP_START_SSL=false',
+        'MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=true',
+        'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.com',
+        'MCP_EMAIL_SERVER_SMTP_PORT=465',
+        'MCP_EMAIL_SERVER_SMTP_SSL=true',
+        'MCP_EMAIL_SERVER_SMTP_START_SSL=false',
+        'MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true',
+        '',
+      ].join('\n'),
+    );
+    await eventually(async () => (await readOrEmpty(envLog)).includes('addr:person@example.com'));
+    expect(await startCount()).toBeGreaterThanOrEqual(2);
+  }, 30_000);
 
   it('stops the server when it is told to stop', async () => {
     const child = startWrapper();

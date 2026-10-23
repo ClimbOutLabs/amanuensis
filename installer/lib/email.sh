@@ -415,7 +415,12 @@ cmd_instance_email() {
   warn_if_installed_older
   dir=$(instance_dir "$name")
   if [ "$OPT_REMOVE" = 1 ]; then
+    # The saved password is deleted for good. The file itself is then recreated empty, because the
+    # sidecar mounts it and a missing file would be created as a folder on the next start, which
+    # would break the account file; empty means no account is connected.
     if [ -f "$dir/.env.mail-email" ]; then rm -f -- "$dir/.env.mail-email"; fi
+    : >"$dir/.env.mail-email"
+    chmod 600 "$dir/.env.mail-email"
     if email_link_remove "$dir/.env"; then changed=1; fi
     if [ "$changed" = 1 ]; then
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"

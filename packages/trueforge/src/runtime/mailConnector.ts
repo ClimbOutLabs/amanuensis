@@ -77,3 +77,18 @@ export async function registerMailConnectorAtBoot({
     logger.warn('Email connector could not be registered', extractErrorLogFields(error));
   }
 }
+
+/**
+ * Removes the Email connector's registration, when the saved account is removed through
+ * Settings. A connector left registered with no account behind it would offer mail tools that
+ * can only fail, so removal through the card removes the registration too.
+ */
+export async function unregisterMailConnector({
+  mcpServerStore,
+  tenant_id,
+}: {
+  mcpServerStore: Pick<IMcpServerStore, 'deleteServer'>;
+  tenant_id: string;
+}): Promise<void> {
+  await mcpServerStore.deleteServer({ tenant_id, name: MAIL_CONNECTOR_NAME });
+}

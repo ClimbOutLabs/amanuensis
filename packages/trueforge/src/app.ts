@@ -21,6 +21,7 @@ import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
@@ -802,6 +803,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         googleConnectionStore: deps.googleConnectionStore,
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Browser session only, like Google's: the email account is the instance owner's, and its app
+  // password passes through the save call to the sidecar only.
+  app.route(
+    EMAIL_SETTINGS_BASE_PATH,
+    withAuth(
+      createEmailAccountRouter({
+        fetchImpl: undefined,
+        resolveRequestContext,
+        logger: deps.logger,
+        mcpServerStore: deps.resolveMcpServerStore(),
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),

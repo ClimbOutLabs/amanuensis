@@ -50,6 +50,15 @@ assert_secret_only_in_account_file() {
   assert_not_contains "$ERR" "$EMAIL_PW" "stderr"
 }
 
+# No account is saved: the account file is absent, or present and empty of any account. The file
+# itself is created with the instance (the sidecar mounts it), so an empty file is the no-account state.
+assert_no_mail_account() {
+  local file="$AMAN_HOME/instances/main/.env.mail-email"
+  if [ -f "$file" ]; then
+    assert_not_contains "$(cat "$file")" "MCP_EMAIL_SERVER_EMAIL_ADDRESS" "no account is saved"
+  fi
+}
+
 test_presets_write_their_servers() {
   t_begin "each preset writes its servers, encryption and certificate check"
   sandbox_new
@@ -148,7 +157,7 @@ test_outlook_families_are_skipped() {
     run_install instance email main --email-provider gmail --email-address "$address"
     assert_rc 0
     assert_flat_contains "$OUT$ERR" "Microsoft addresses, such as Outlook, Hotmail, Live and MSN, need a Microsoft sign-in" "$address"
-    assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+    assert_no_mail_account
   done
   sandbox_drop
 }
@@ -178,7 +187,7 @@ test_yes_without_email_flags_skips_the_step() {
   install_python_stub
   install_machine
   assert_rc 0
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   assert_not_contains "$OUT" "Connect an email account"
   sandbox_drop
 }
@@ -232,7 +241,7 @@ test_instance_command_adds_changes_and_removes() {
   assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
   run_install instance email main --remove
   assert_rc 0
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   assert_eq "$(mail_link_lines)" 0 "connector line gone after remove"
   assert_flat_contains "$OUT$ERR" "The Email connector is removed. Any saved app password has been deleted from this computer."
   sandbox_drop
@@ -374,7 +383,7 @@ test_instance_email_needs_the_connector_installed() {
   mail_run --email-provider gmail --email-address a@gmail.com --email-password-stdin
   assert_rc 1
   assert_flat_contains "$ERR" "has no email connector yet. Run install.sh upgrade first"
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   sandbox_drop
 }
 

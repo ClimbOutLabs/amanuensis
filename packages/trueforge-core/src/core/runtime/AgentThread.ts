@@ -170,6 +170,7 @@ import {
   assistantMessageContentToStringForSubAgent,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
   estimateTokensForContextMessages,
@@ -1824,6 +1825,7 @@ export class AgentThread {
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
+    capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
 
     if (this.sandbox && loaded('sandbox')) {
       this.sandbox.buildInstruction(capabilities);
