@@ -21,7 +21,6 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
-import { LOAD_BUNDLE_TOOL_NAME } from './ToolBundles';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
 const DEFERRED_TOOLS_INSTRUCTION = 'deferred-tools-instructions';
@@ -274,7 +273,7 @@ export class DeferredTool extends LocalToolMCP {
   private serverNotFoundText(mcpServer: string): string {
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with its bundle first.`;
+    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.`;
   }
 
   private serverNotFoundResponse(mcpServer: string): CallToolResponse {

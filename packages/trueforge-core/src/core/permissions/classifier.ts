@@ -161,11 +161,14 @@ import {
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateDetailCheckable,
+  privateDetailCheckNeeded,
   privateFingerprintsUsable,
   privateTextForChecks,
   SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_CHAT_GRANTED_SILENT_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1956,6 +1959,7 @@ async function classifySearchProviderTool(input: {
       earlier: ctx.web_search.sentText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: true,
     });
     if (leak !== null) {
       return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
@@ -1978,6 +1982,26 @@ async function classifySearchProviderTool(input: {
     }
     if (privateReadHeld) {
       return heldPrivate();
+    }
+  }
+  // Recalled memory, the profile, an attached file and earlier turns' reads leave fingerprints too. No grant lifts
+  // this check, and a chat whose fingerprints miss a text asks, since the check cannot vouch for the search.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_unchecked);
+    }
+    const leak = fingerprintLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended
+        ? privateDetailSkipped()
+        : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
     }
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
@@ -2034,6 +2058,20 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
   });
 }
 
+/** Said to the owner when a scheduled run's search is skipped because it carried a private detail. */
+const PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE =
+  'One lookup was skipped, because it would have shared something private about you.';
+
+/** A search that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateDetailSkipped(): TierDecision {
+  return autoDenyDecision({
+    reason: 'private_text_check',
+    reason_detail: 'It would have shared a private detail about you.',
+    owner_message: PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE,
+    sensitive_read: false,
+  });
+}
+
 /**
  * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
  * read does not mark the chat as holding a secret.
@@ -2064,6 +2102,24 @@ async function classifyMapsSilently(input: {
     chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
   ) {
     return undefined;
+  }
+  // The profile, recalled memory and attached files are checked too: a map may name a place from them, never a
+  // person, a contact or a number. A chat whose kept details miss a text shows the card.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return undefined;
+    }
+    const leak = fingerprintLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended ? privateDetailSkipped() : undefined;
+    }
   }
   const readMode = hasReadPrivateData(ctx.web_search);
   const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;

@@ -164,7 +164,7 @@ describe('call_tool naming a built-in tool', () => {
     expect(info.pre_dispatch_failure?.message).toContain(
       'Built-in tools are called directly by name, never through call_tool',
     );
-    expect(info.pre_dispatch_failure?.message).toContain('load_bundle');
+    expect(info.pre_dispatch_failure?.message).not.toContain('load_bundle');
     const stamped = await stamp({ sentinel: makeSentinel(), info, canonical_params: wrapper, connector: undefined });
     expect(stamped).toBe(info);
 

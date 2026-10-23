@@ -347,7 +347,7 @@ describe('create_schedule', () => {
       args: MORNING_BRIEF,
       decision: { status: 'deny', reason: 'not now' },
     });
-    expect(resultText(denied.result)).toContain('User denied tool call');
+    expect(resultText(denied.result)).toContain('The person said no to this.');
     const direct = await built.tools.callTool({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(isCallToolResponseResult(direct) && direct.result.isError).toBe(true);
     expect(await built.listAll()).toEqual([]);
@@ -669,7 +669,7 @@ function scriptedModel(): ILLM['create'] {
       ? 'Do the first small step now. Your check-in is set.'
       : said.includes('They did not say no')
         ? 'Do the first small step now. The check-in request expired before you answered, so it is not set.'
-        : said.includes('User denied')
+        : said.includes('The person said no to this.')
           ? 'Do the first small step now. No check-in, as you asked.'
           : 'Do the first small step now. I could not set the check-in.';
     return scriptedStream({ role: 'assistant', content: reply });

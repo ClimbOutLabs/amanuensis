@@ -4,6 +4,7 @@ import * as TrueForge from "../index.js";
 
 export type TurnStreamingEvent = 
     | TrueForge.ContextCompactionEvent
+    | TrueForge.ContextCompactionStartedEvent
     | TrueForge.MemoryRecallPersistedEvent
     | TrueForge.ModelUsagePersistedEvent
     | TrueForge.ProfileLearnedPersistedEvent

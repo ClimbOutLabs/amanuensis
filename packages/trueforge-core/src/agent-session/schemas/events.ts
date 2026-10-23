@@ -7,6 +7,7 @@ import { z } from '@hono/zod-openapi';
 import type { WithRegisteredPassthrough } from '../../core/events/PassthroughEvents';
 import {
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   EventIdSchema,
   EventType as HarnessEventType,
@@ -80,6 +81,7 @@ export const SessionEventSchema = z
     ToolApprovalRequiredEventSchema,
     ToolResponseRequiredEventSchema,
     ContextCompactionEventSchema,
+    ContextCompactionStartedEventSchema,
   ])
   .openapi('SessionEvent');
 

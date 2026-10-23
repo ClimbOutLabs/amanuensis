@@ -1011,6 +1011,43 @@ describe('runDataImport reads what compaction writes', () => {
   });
 });
 
+describe('runDataImport reads the compaction start note', () => {
+  it('keeps a compaction start event and leaves out one whose shape changed', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-compaction-started');
+    try {
+      const withStarts = await editScheduledTurn(archive, ({ turnEntry }) => {
+        const events = listAt(turnEntry['events'], 'events');
+        events.push({
+          type: 'agent.context.compaction_started',
+          id: 'event-compaction-started',
+          created_at: '2026-09-10T06:00:10.000Z',
+          thread_id: 'main',
+          mode: 'conversation',
+          tokens_before: 5000.5,
+        });
+        // A later build may record this note differently; the chat must still import.
+        events.push({
+          type: 'agent.context.compaction_started',
+          id: 'event-compaction-started-newer',
+          created_at: '2026-09-10T06:00:20.000Z',
+          thread_id: 'main',
+          mode: 'a-newer-mode',
+        });
+      });
+      await runDataImport(importDeps(target), importRequest(withStarts));
+      const { events } = await importedScheduledChat(target);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'agent.context.compaction_started', id: 'event-compaction-started' }),
+      );
+      expect(events).not.toContainEqual(expect.objectContaining({ id: 'event-compaction-started-newer' }));
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport keeps model usage', () => {
   it("restores a turn's aman.model.usage event", async () => {
     const { source, archive } = await seededArchive();
