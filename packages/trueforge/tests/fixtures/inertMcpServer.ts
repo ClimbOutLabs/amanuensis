@@ -128,8 +128,6 @@ export interface InertMcpServer {
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
   sever: () => void;
-  /** Answers every later request only after `ms`, like a slow connector; 0 answers at once again. */
-  setResponseDelay: (ms: number) => void;
   restore: () => void;
   /** Sets the result shape the next (and every subsequent) `ask_memory` call answers with. */
   setAskMemoryMode: (mode: MemoryToolMode) => void;
@@ -448,7 +446,6 @@ export async function startInertMcpServer(options?: {
   let severed = false;
   let redirect: InertRedirect | undefined;
   let requestCount = 0;
-  let responseDelayMs = 0;
   let lastAuthorizationHeader: string | undefined;
   let running = false;
   let boundPort: number | undefined;
@@ -461,9 +458,6 @@ export async function startInertMcpServer(options?: {
     }
 
     requestCount += 1;
-    if (responseDelayMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, responseDelayMs));
-    }
     if (redirect !== undefined) {
       req.resume();
       res.writeHead(redirect.status, { location: `${redirect.to}${req.url ?? '/'}` });
@@ -617,9 +611,6 @@ export async function startInertMcpServer(options?: {
           released.resolve();
         },
       };
-    },
-    setResponseDelay: ms => {
-      responseDelayMs = ms;
     },
     sever: () => {
       severed = true;

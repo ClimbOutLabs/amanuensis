@@ -33,6 +33,8 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 const SLOW: ModelPacing = { firstTokenMs: 8_000, reasoningMs: 6_000, wordDelayMs: 150 };
 /** Still slow, for the replies that call the model ten times. */
 const SLOW_STEPS: ModelPacing = { firstTokenMs: 2_000, reasoningMs: 1_000, wordDelayMs: 100 };
+/** How long the server keeps preparing a reply before it exists, in the journey that cancels then. */
+const ADMISSION_MS = 10_000;
 const SCENARIO_LIMIT_MS = 240_000;
 const REPLY_LIMIT_MS = 60_000;
 const UI_LIMIT_MS = 30_000;
@@ -335,7 +337,7 @@ async function chatText(page: Page): Promise<string> {
 
 async function freshPage(): Promise<Page> {
   api.model.setPacing(undefined);
-  api.mcp.setResponseDelay(0);
+  api.setAdmissionDelay(0);
   return await context.newPage();
 }
 
@@ -431,8 +433,8 @@ journey('3. Cancel in the first seconds, before the model is called: it stays st
   const page = await freshPage();
   const sessionId = await quickChat(page, 'Journey early cancel');
   const callsBefore = replyCalls().length;
-  // A slow connector keeps the reply in its setup for several seconds, as a slow self-hosted setup does.
-  api.mcp.setResponseDelay(6_000);
+  // The server is still preparing the reply, before it exists, as a library check on a slow model keeps it.
+  api.setAdmissionDelay(ADMISSION_MS);
   api.model.setPacing(SLOW);
   await send(page, 'Early cancel: tell me about Lantern Row');
   await page.getByRole('button', { name: CANCEL, exact: true }).waitFor({ timeout: UI_LIMIT_MS });
@@ -440,8 +442,8 @@ journey('3. Cancel in the first seconds, before the model is called: it stays st
   assert.equal(replyCalls().length, callsBefore, 'the model was not called yet when Cancel was pressed');
   await page.getByRole('button', { name: CANCEL, exact: true }).click();
   await waitForIdle(page, 'the cancelled reply', UI_LIMIT_MS);
-  // Long enough for the slow setup to finish and the model to be reached, if anything still runs.
-  await pause(15_000);
+  // Long enough for the preparation to finish and the model to be reached, if anything still runs.
+  await pause(ADMISSION_MS + 10_000);
   assert.equal(replyCalls().length, callsBefore, 'no model call happened after Cancel');
   assert.notEqual(await lastTurnStatus(sessionId), 'running', 'the server does not keep the reply running');
   assert.equal(await page.getByRole('button', { name: CANCEL, exact: true }).count(), 0, 'the chat shows it stopped');
@@ -536,15 +538,26 @@ journey(
       api.model.setPacing(SLOW_STEPS);
       await send(page, `${RUN_DIRECTIVE_PREFIX}${SEARCH_AGAIN_DIRECTIVE} when does the bakery open?`);
       await page.getByRole('button', { name: DENY }).first().waitFor({ timeout: REPLY_LIMIT_MS });
-      const callsAtDeny = replyCalls().length;
       const searchedSightings = await watchChatFor(page, 'Searched the web');
-      await page.getByRole('button', { name: DENY }).first().click();
-      let secondCard = false;
-      await until('the reply finishing after the "no"', REPLY_LIMIT_MS, async () => {
-        secondCard = secondCard || (await page.getByRole('button', { name: DENY }).count()) > 0;
-        return secondCard || (replyCalls().length > callsAtDeny && (await settled(page)));
+      // The person says no to every card, as the owner did.
+      let cardsAfterNo = -1;
+      let callsAtLastNo = 0;
+      await until('the reply finishing after each "no"', REPLY_LIMIT_MS * 2, async () => {
+        const card = page.getByRole('button', { name: DENY }).first();
+        if (await card.isVisible()) {
+          cardsAfterNo += 1;
+          callsAtLastNo = replyCalls().length;
+          await card.click();
+          await card.waitFor({ state: 'hidden', timeout: UI_LIMIT_MS });
+          return false;
+        }
+        return replyCalls().length > callsAtLastNo && (await settled(page));
       });
-      assert.equal(secondCard, false, 'no second search card appeared in the same reply');
+      assert.equal(
+        cardsAfterNo,
+        0,
+        `no new search card appears in the same reply after a "no" (${String(cardsAfterNo)} did)`,
+      );
       assert.equal(await searchedSightings(), 0, 'the declined search never shows as "Searched the web" in the chat');
       assert.equal(api.mcp.webSearchInvocations(), searchesBefore, 'no search ran');
     } finally {
@@ -664,6 +677,39 @@ journey(
     } finally {
       configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS = originalThreshold;
     }
+  },
+);
+
+journey(
+  "10. two sends while the last reply's background work still runs: every new reply reaches the model or ends plainly",
+  SCENARIO_LIMIT_MS,
+  async () => {
+    const first = await freshPage();
+    const sessionId = await quickChat(first, 'Journey busy chat');
+    const second = await context.newPage();
+    await openChat(second, sessionId);
+    api.model.setPacing(SLOW);
+    const repliesBefore = await assistantReplies(first).getByText(FINAL_TEXT).count();
+    await send(first, 'Busy chat: tell me about Lantern Row');
+    await waitForReplyText(first, 'the reply before the two sends', repliesBefore + 1);
+    // The reply is written; its background work (naming the chat, summing it up) still waits on the slow model.
+    await until("the reply's background work running on the model", UI_LIMIT_MS, () =>
+      api.model.calls().some(call => call.request.tools.length === 0 && call.outcome() === 'open'),
+    );
+    const turnsBefore = await turnCount(sessionId);
+    await openChat(second, sessionId);
+    // On a slow model the server prepares each reply for a while before it exists, so both sends wait there together.
+    api.setAdmissionDelay(ADMISSION_MS);
+    await input(first).fill('Busy chat one: Lantern Row');
+    await input(second).fill('Busy chat two: Lantern Row');
+    await Promise.all([input(first).press('Enter'), input(second).press('Enter')]);
+
+    await until('every new reply reaching the model or ending', REPLY_LIMIT_MS * 2, async () => {
+      const newTurns = (await turns(sessionId)).slice(turnsBefore);
+      return newTurns.length > 0 && newTurns.every(turn => turn.status !== 'running');
+    });
+    await waitForIdle(first, 'the first window', UI_LIMIT_MS);
+    await waitForIdle(second, 'the second window', UI_LIMIT_MS);
   },
 );
 

@@ -57,11 +57,16 @@ export const RESEARCH_DIRECTIVE = 'research';
 export const RESEARCH_SEARCHES = 7;
 export const RESEARCH_FETCHES = 2;
 /**
- * Searches the web once; whatever the search answers, even a refusal, it rewords the query and
- * searches again, then answers. Built to show what a second search looks like after a "no".
+ * Searches the web; whatever the search answers, even a "no", it rewords the query and searches
+ * again, three times, then answers. Built to show what the searches after a "no" look like.
  */
 export const SEARCH_AGAIN_DIRECTIVE = 'search_again';
-export const SEARCH_AGAIN_QUERIES = ['Lantern Row bakery opening hours', 'Lantern Row bakery hours today'] as const;
+export const SEARCH_AGAIN_QUERIES = [
+  'Lantern Row bakery opening hours',
+  'Lantern Row bakery hours today',
+  'when does the bakery on Lantern Row open',
+  'Lantern Row bakery Saturday hours',
+] as const;
 /** Text streamed as hidden reasoning while `ModelPacing.reasoningMs` runs. */
 export const REASONING_TEXT = 'Thinking it through. ';
 
