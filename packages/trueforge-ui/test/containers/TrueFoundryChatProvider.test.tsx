@@ -33,8 +33,26 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryReload: () => reloadSpy,
 }));
 
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
+
+import { ChatNoticeContainer } from '@/containers/ChatNoticeContainer.js';
 import { TrueFoundryChatProvider } from '@/containers/TrueFoundryChatProvider.js';
-import { LiveConnectionLostError } from '@/utils/liveConnection.js';
+import { ComposerBusyProvider } from '@/hooks/useComposerBusyState.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '@/utils/liveConnection.js';
+import { sendRefusalText, type TurnRefusalCode } from '@/utils/turnRefusal.js';
+
+function renderWithNotice(onError: (error: unknown) => void) {
+  render(
+    <TrueFoundryChatProvider server={createMockAgentUIServer()} agentName="my-agent" onError={onError}>
+      <ComposerBusyProvider>
+        <ChatNoticeContainer />
+      </ComposerBusyProvider>
+    </TrueFoundryChatProvider>,
+  );
+  const forwardedOnError = runtimeSpy.mock.calls[0]?.[0]?.onError;
+  if (forwardedOnError === undefined) throw new Error('Expected runtime onError handler');
+  return forwardedOnError;
+}
 
 describe('TrueFoundryChatProvider', () => {
   beforeEach(() => {
@@ -58,6 +76,48 @@ describe('TrueFoundryChatProvider', () => {
 
     expect(onError).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each<[TurnRefusalCode, number]>([
+    ['previous_turn_running', 1],
+    ['turn_could_not_start', 0],
+  ])('says in one line in the chat why a send was refused (%s), never the server text', async (code, reloads) => {
+    const onError = vi.fn();
+    const forwardedOnError = renderWithNotice(onError);
+    const refused = Object.assign(new Error('Previous turn 01m5 is still running; freezeAndGetTurn must be called'), {
+      statusCode: 409,
+      body: { error: { message: 'Previous turn 01m5 is still running', type: 'conflict', code } },
+    });
+
+    await act(async () => {
+      forwardedOnError(refused);
+      await Promise.resolve();
+    });
+
+    // Not reported as an error, so the typed text stays and no toast repeats the line.
+    expect(onError).not.toHaveBeenCalled();
+    // Only a reply still running is there to re-attach to.
+    expect(reloadSpy).toHaveBeenCalledTimes(reloads);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      sendRefusalText({ refusal: code, assistantName: DEFAULT_ASSISTANT_NAME }),
+    );
+    expect(screen.queryByText(/freezeAndGetTurn/)).not.toBeInTheDocument();
+  });
+
+  it('says in one line that a restart stopped the reply instead of reporting an error', async () => {
+    const onError = vi.fn();
+    const forwardedOnError = renderWithNotice(onError);
+
+    await act(async () => {
+      forwardedOnError(new ReplyStoppedByRestartError({ cause: new Error('Request failed (412)') }));
+      await Promise.resolve();
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      sendRefusalText({ refusal: 'stopped_by_restart', assistantName: DEFAULT_ASSISTANT_NAME }),
+    );
   });
 
   it('forwards legacy runtime options and supplies the default attachment adapter', () => {
@@ -230,37 +290,5 @@ describe('TrueFoundryChatProvider', () => {
     });
 
     expect(await screen.findByText('runtime failed')).toBeInTheDocument();
-  });
-
-  it.each([
-    [
-      'previous_turn_running',
-      'Still working',
-      'Aman is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
-    ],
-    ['turn_could_not_start', 'Reply did not start', 'That reply could not start. Send your message again.'],
-  ])('shows a refused send (%s) in plain words, never the server text', async (code, title, description) => {
-    render(
-      <TrueFoundryChatProvider server={createMockAgentUIServer()} agentName="my-agent">
-        <div>chat-child</div>
-      </TrueFoundryChatProvider>,
-    );
-    const options = runtimeSpy.mock.calls[0]?.[0];
-    if (options?.onError === undefined) {
-      throw new Error('Expected runtime onError handler');
-    }
-    const refused = Object.assign(new Error('Previous turn 01m5 is still running; freezeAndGetTurn must be called'), {
-      statusCode: 409,
-      body: { error: { message: 'Previous turn 01m5 is still running', type: 'conflict', code } },
-    });
-
-    act(() => {
-      options.onError?.(refused);
-    });
-
-    expect(await screen.findByText(title)).toBeInTheDocument();
-    expect(screen.getByText(description)).toBeInTheDocument();
-    expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/freezeAndGetTurn/)).not.toBeInTheDocument();
   });
 });
