@@ -327,6 +327,9 @@
   background: var(--sidebar-bg);
   padding: 0.875rem 1rem;
   color: var(--text-primary);
+  /* One face for the whole panel; only the assistant's name takes the greeting's face. */
+  font-family: var(--font-sans);
+  letter-spacing: normal;
   /* Tall rail content (e.g. the permissions audit feed) scrolls inside the rail
    * instead of stretching the page and pushing the chat composer below the fold. */
   min-height: 0;
@@ -355,24 +358,29 @@
   justify-content: center;
 }
 
-/* A ghost button: no border, no fill until hovered. */
+/* Hide or show the panel: a clear 2rem button with a visible edge in both themes. */
 .aman-runtime-rail__collapse-toggle {
   display: inline-flex;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   align-items: center;
   justify-content: center;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  background: var(--card-bg);
   padding: 0;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
 .aman-runtime-rail__collapse-toggle:hover {
-  background: color-mix(in oklab, var(--text-primary) 8%, transparent);
-  color: var(--text-primary);
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+}
+
+.aman-runtime-rail__collapse-toggle:focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
 }
 
 /* Collapsed: the poster frame, with the status dot on its lower-right corner. */
@@ -398,8 +406,8 @@
   box-shadow: 0 0 0 0.125rem var(--sidebar-bg);
 }
 
-/* The panda's picture is the only box in the rail: rounded corners, no border, no padding.
- * The fade is a child, so it cannot leave the rounded frame. */
+/* The panda's picture is the only box in the rail: rounded corners, no border, no padding, and
+ * nothing drawn over it. */
 .aman-runtime-rail__avatar {
   position: relative;
   width: 15.5rem;
@@ -426,16 +434,6 @@
 /* Dark: multiply would darken the picture's blacks and whites, so it is drawn as it is. */
 .aui-theme-root.dark .aman-runtime-rail__picture {
   mix-blend-mode: normal;
-}
-
-.aman-runtime-rail__fade {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 3.5rem;
-  background: linear-gradient(to bottom, transparent, var(--paper));
-  pointer-events: none;
 }
 
 .aman-runtime-rail__avatar-fallback {
@@ -575,12 +573,13 @@
   transform: rotate(90deg);
 }
 
+/* Every folded section's rows share one size and color. */
 .aman-runtime-rail__details-body {
   display: grid;
   gap: 0.5rem;
   padding: 0 0 0.75rem 1.25rem;
-  color: var(--text-secondary);
-  font-size: 0.8125rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
 }
 
 .aman-runtime-rail__rules {
@@ -588,8 +587,6 @@
   gap: 0.25rem;
   margin: 0;
   padding: 0;
-  color: var(--text-primary);
-  font-size: 0.875rem;
   list-style: none;
 }
 
@@ -603,6 +600,12 @@
   font-size: 0.8125rem;
   text-decoration: underline;
   text-underline-offset: 0.125rem;
+}
+
+/* The panel's one way to Settings, at its foot. */
+.aman-runtime-rail__settings {
+  margin-top: auto;
+  align-self: flex-start;
 }
 
 /* Chat text: type-scale sizing with airy leading for reading rhythm. */
@@ -1822,7 +1825,7 @@
   justify-self: start;
   white-space: normal;
   overflow-wrap: anywhere;
-  font-size: 0.8125rem;
+  color: inherit;
 }
 
 /* An action in a row is a button; it keeps the look of the link it replaces. */

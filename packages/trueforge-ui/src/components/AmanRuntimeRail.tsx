@@ -171,7 +171,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const tone = statusToneOf({ status, activity, waitingOnPerson });
   // A pending approval holds the panda in its waiting state, unless a failure takes the pose.
   const avatarActivity: AmanAvatarActivity = waitingOnPerson && activity !== 'error' ? 'waiting' : activity;
-  const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
+  const toggleLabel = collapsed ? 'Show panel' : 'Hide panel';
   const trimmedPersonaName = personaName?.trim();
   const posterSrc = avatarMotion?.poster ?? avatarSrc;
   const toggleCollapsed = useCallback(() => {
@@ -230,8 +230,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             data-section="panda"
             aria-labelledby="aman-runtime-rail-title"
           >
-            {/* The frame is the picture's only box: rounded corners, no border, and the fade
-                sits inside it so nothing can leave the rounded edge. */}
+            {/* The frame is the picture's only box: rounded corners, no border, and nothing drawn over it. */}
             <div className="aman-runtime-rail__avatar">
               {avatarMotion ? (
                 <AmanAvatarMotion
@@ -251,7 +250,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                   {assistantName.slice(0, 1)}
                 </span>
               )}
-              <div className="aman-runtime-rail__fade" aria-hidden="true" />
             </div>
             <div className="aman-runtime-rail__identity">
               <h2 id="aman-runtime-rail-title">{assistantName}</h2>
@@ -300,25 +298,17 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 <li>{settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off'}</li>
               </ul>
             )}
-            {settingsHref === undefined ? null : (
-              <a className="aman-runtime-rail__link" href={settingsHref}>
-                Change in Settings
-              </a>
-            )}
-          </FoldedRow>
-
-          <FoldedRow section="memory" title="Memory">
-            <p className="aman-runtime-rail__row-text">What {assistantName} remembers is in Settings.</p>
-            {settingsHref === undefined ? null : (
-              <a className="aman-runtime-rail__link" href={settingsHref}>
-                Open Settings
-              </a>
-            )}
           </FoldedRow>
 
           <FoldedRow section="activity" title="Activity">
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
           </FoldedRow>
+
+          {settingsHref === undefined ? null : (
+            <a className="aman-runtime-rail__link aman-runtime-rail__settings" href={settingsHref}>
+              Settings
+            </a>
+          )}
         </>
       )}
     </aside>

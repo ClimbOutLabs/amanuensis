@@ -68,7 +68,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    const collapse = screen.getByRole('button', { name: 'Collapse rail' });
+    const collapse = screen.getByRole('button', { name: 'Hide panel' });
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).not.toHaveClass(
       'aman-runtime-rail--collapsed',
@@ -76,7 +76,7 @@ describe('AmanRuntimeRail', () => {
 
     fireEvent.click(collapse);
 
-    const expand = screen.getByRole('button', { name: 'Expand rail' });
+    const expand = screen.getByRole('button', { name: 'Show panel' });
     expect(expand).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
       'aman-runtime-rail--collapsed',
@@ -86,7 +86,7 @@ describe('AmanRuntimeRail', () => {
 
     fireEvent.click(expand);
 
-    expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Hide panel' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     expect(window.localStorage.getItem('aui-runtime-rail-collapsed')).toBe('false');
   });
@@ -142,7 +142,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Show panel' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
       'aman-runtime-rail--collapsed',
     );
@@ -160,7 +160,7 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'Hide panel' })).toHaveAttribute('aria-expanded', 'true');
       expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     } finally {
       getItem.mockRestore();
@@ -179,15 +179,15 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Collapse rail' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Hide panel' }));
 
-      expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Show panel' })).toHaveAttribute('aria-expanded', 'false');
     } finally {
       setItem.mockRestore();
     }
   });
 
-  it('frames the picture with rounded corners and a fade inside the frame, with no border', () => {
+  it('frames the picture with rounded corners, no border, and nothing drawn over it', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
@@ -196,7 +196,7 @@ describe('AmanRuntimeRail', () => {
     const picture = screen.getByRole('img', { name: PANDA_ALT });
     const frame = picture.parentElement;
     expect(frame).toHaveClass('aman-runtime-rail__avatar');
-    expect(frame?.querySelector('.aman-runtime-rail__fade')).not.toBeNull();
+    expect(frame?.children).toHaveLength(1);
 
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
     const ruleOf = (selector: string): string => {
@@ -209,12 +209,9 @@ describe('AmanRuntimeRail', () => {
     expect(frameRule).toMatch(/^\s{2}overflow: hidden;/m);
     expect(frameRule).toMatch(/^\s{2}border-radius: 0\.75rem;/m);
     expect(frameRule).not.toMatch(/border:|padding:|box-shadow/);
-    // The fade is an absolute child at the foot of the frame, fading into the paper colour.
-    const fadeRule = ruleOf('.aman-runtime-rail__fade');
-    expect(fadeRule).toMatch(/^\s{2}position: absolute;/m);
-    expect(fadeRule).toMatch(/^\s{2}bottom: 0;/m);
-    expect(fadeRule).toMatch(/^\s{2}height: 3\.5rem;/m);
-    expect(fadeRule).toContain('linear-gradient(to bottom, transparent, var(--paper))');
+    // Nothing is drawn over the picture: no fade rule, and no gradient anywhere in the panel's rules.
+    expect(stylesheet).not.toContain('.aman-runtime-rail__fade');
+    expect(ruleOf('.aman-runtime-rail__picture')).not.toMatch(/gradient/);
   });
 
   it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
@@ -235,7 +232,7 @@ describe('AmanRuntimeRail', () => {
     expect(container.querySelector('.aman-runtime-rail__footer')).toBeNull();
   });
 
-  it('folds Rules, Memory and Activity closed by default, with the chevron on the left of each label', () => {
+  it('folds Rules and Activity closed by default, with the chevron on the left of each label, and has no Memory row', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" auditFeed={<p>Recent actions body</p>} />
@@ -243,14 +240,14 @@ describe('AmanRuntimeRail', () => {
     );
 
     const rows = Array.from(container.querySelectorAll<HTMLDetailsElement>('details.aman-runtime-rail__details'));
-    expect(rows.map(row => row.dataset.section)).toEqual(['rules', 'memory', 'activity']);
+    expect(rows.map(row => row.dataset.section)).toEqual(['rules', 'activity']);
     for (const row of rows) {
       expect(row.open).toBe(false);
       const summary = row.querySelector('summary');
       expect(summary?.firstElementChild).toHaveClass('aman-runtime-rail__fold-chevron');
     }
     expect(screen.getByText('Rules')).toBeInTheDocument();
-    expect(screen.getByText('Memory')).toBeInTheDocument();
+    expect(screen.queryByText('Memory')).not.toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
   });
 
@@ -285,7 +282,7 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByText('Maria')).not.toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
     expect(container.querySelector('[data-section="account"]')).toBeNull();
-    expect(container.querySelector('[data-section="memory"]')).toHaveTextContent('What Aman remembers is in Settings.');
+    expect(container.querySelector('[data-section="memory"]')).toBeNull();
   });
 
   it('renders an accessible fallback when no avatar is configured', () => {
@@ -660,7 +657,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(screen.queryByText(/Show all/i)).not.toBeInTheDocument();
   });
 
-  it('puts the panda first, then the status line, then Rules, Memory and Activity', async () => {
+  it('puts the panda first, then the status line, Rules and Activity, then one Settings link at the foot', async () => {
     const { container } = render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
@@ -677,11 +674,15 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     const order = Array.from(container.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order).toEqual(['panda', 'rules', 'memory', 'activity']);
+    expect(order).toEqual(['panda', 'rules', 'activity']);
     expect(container.querySelector('[data-section="activity"]')).toContainElement(
       screen.getByText('Recent actions body'),
     );
-    expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
+    const settingsLinks = screen.getAllByRole('link', { name: /Settings/ });
+    expect(settingsLinks).toHaveLength(1);
+    expect(settingsLinks[0]).toHaveTextContent(/^Settings$/);
+    expect(settingsLinks[0]).toHaveAttribute('href', '/settings');
+    expect(container.querySelector('aside')?.lastElementChild).toBe(settingsLinks[0]);
   });
 
   it('shows one pending signal: no Needs you ticket, and the status line says the approval is waiting', () => {
