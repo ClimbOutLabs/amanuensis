@@ -34,6 +34,14 @@ vi.mock('@/containers/SettingsBuilder/SandboxSettings.js', () => ({
   default: () => <div>Sandbox settings content</div>,
 }));
 
+vi.mock('@/containers/SettingsBuilder/ThemeSettings.js', () => ({
+  default: () => <div>Theme settings content</div>,
+}));
+
+vi.mock('@/containers/SettingsBuilder/MemorySection.js', () => ({
+  default: () => <div>Memory settings content</div>,
+}));
+
 vi.mock('@/containers/SettingsBuilder/PersonaSettings.js', () => ({
   default: () => <div>Persona settings content</div>,
 }));
@@ -162,10 +170,10 @@ describe('TruefoundrySettingsBuilder', () => {
     const { rerender } = render(<TestShell server={createServer()} />);
     await openSettings();
 
-    expect(screen.getByRole('button', { name: 'Models' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: 'Connectors' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Skills' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sandbox' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Connectors' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Skills' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Sandbox' })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Model settings content')).toBeInTheDocument();
     });
@@ -174,17 +182,17 @@ describe('TruefoundrySettingsBuilder', () => {
     rerender(<TestShell server={createServer({ skills: true })} runCodeStatus />);
     await openSettings();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
     await waitFor(() => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sandbox' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sandbox' }));
     await waitFor(() => {
       expect(screen.getByText('Sandbox settings content')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Connectors' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Connectors' }));
     await waitFor(() => {
       expect(screen.getByText('Connector settings content')).toBeInTheDocument();
     });
@@ -195,14 +203,14 @@ describe('TruefoundrySettingsBuilder', () => {
     await openSettings();
 
     // Roles are assigned here, not on the page that manages provider connections.
-    fireEvent.click(screen.getByRole('button', { name: 'Roles and Personas' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Roles and Personas' }));
     await waitFor(() => {
       expect(screen.getByText('Model role settings content')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Roles and Personas' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Roles and Personas' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText('Model settings content')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Models' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
     await waitFor(() => {
       expect(screen.getByText('Model settings content')).toBeInTheDocument();
     });
@@ -229,18 +237,18 @@ describe('TruefoundrySettingsBuilder', () => {
     render(<TestShell server={createServer()} personalization />);
     await openSettings();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Personalization' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Personalization' }));
 
     await waitFor(() => {
       expect(screen.getByText('Personalization settings content')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Personalization' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Personalization' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('resets a stale optional section when its catalog disappears', async () => {
     const { rerender } = render(<TestShell server={createServer({ skills: true })} />);
     await openSettings();
-    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
 
     await waitFor(() => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
@@ -249,12 +257,12 @@ describe('TruefoundrySettingsBuilder', () => {
     rerender(<TestShell server={createServer()} />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Models' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
     });
     await waitFor(() => {
       expect(screen.getByText('Model settings content')).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: 'Skills' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Skills' })).not.toBeInTheDocument();
   });
 
   it('closes on Escape without leaking the event to a parent handler', async () => {
@@ -312,10 +320,111 @@ describe('TruefoundrySettingsBuilder', () => {
     });
   });
 
+  it('highlights exactly the tab whose section is shown, for every tab', async () => {
+    render(<TestShell server={createServer({ skills: true })} personalization runCodeStatus />);
+    await openSettings();
+
+    const cases: Array<{ tab: string; content?: string }> = [
+      { tab: 'Models', content: 'Model settings content' },
+      { tab: 'Roles and Personas', content: 'Model role settings content' },
+      { tab: 'Connectors', content: 'Connector settings content' },
+      { tab: 'Memory', content: 'Memory settings content' },
+      { tab: 'Themes', content: 'Theme settings content' },
+      { tab: 'Skills', content: 'Skill settings content' },
+      { tab: 'Sandbox', content: 'Sandbox settings content' },
+      { tab: 'Personalization', content: 'Personalization settings content' },
+    ];
+    for (const { tab, content } of cases) {
+      fireEvent.click(screen.getByRole('tab', { name: tab }));
+
+      const selected = screen.getAllByRole('tab').filter(item => item.getAttribute('aria-selected') === 'true');
+      expect(selected.map(item => item.textContent)).toEqual([tab]);
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', selected[0]?.id);
+      if (content !== undefined) {
+        await waitFor(() => {
+          expect(screen.getByText(content)).toBeInTheDocument();
+        });
+      }
+    }
+  });
+
+  it('opens on Models with Models highlighted on a fresh open', async () => {
+    render(<TestShell server={createServer({ skills: true })} personalization runCodeStatus />);
+    await openSettings();
+
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'settings-tab-models');
+    await waitFor(() => {
+      expect(screen.getByText('Model settings content')).toBeInTheDocument();
+    });
+  });
+
+  it('keeps the highlighted tab on the section shown after closing and reopening', async () => {
+    render(<TestShell server={createServer()} personalization />);
+    await openSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Personalization' }));
+    await waitFor(() => {
+      expect(screen.getByText('Personalization settings content')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await openSettings();
+
+    expect(screen.getByRole('tab', { name: 'Personalization' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'false');
+    await waitFor(() => {
+      expect(screen.getByText('Personalization settings content')).toBeInTheDocument();
+    });
+  });
+
+  it('moves between tabs with the arrow, Home and End keys', async () => {
+    render(<TestShell server={createServer()} />);
+    await openSettings();
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Models' }), { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Roles and Personas' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Roles and Personas' })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Roles and Personas' }), { key: 'End' });
+    expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Themes' }), { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Models' })).toHaveFocus();
+  });
+
+  it('scrolls the selected tab into view inside the tab strip', async () => {
+    const rectOf = (left: number, width: number): DOMRect => ({
+      x: left,
+      y: 0,
+      left,
+      top: 0,
+      width,
+      height: 0,
+      right: left + width,
+      bottom: 0,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tablist') return rectOf(0, 300);
+      if (this.getAttribute('aria-selected') === 'true') return rectOf(400, 100);
+      return rectOf(0, 100);
+    });
+    try {
+      render(<TestShell server={createServer()} />);
+      await openSettings();
+
+      // The selected tab sits at 400 to 500 inside a 300 wide strip, so the strip scrolls to centre it.
+      expect(screen.getByRole('tablist', { name: 'Settings sections' }).scrollLeft).toBe(300);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('does not reopen settings when a stale optional section is reset while closed', async () => {
     const { rerender } = render(<TestShell server={createServer({ skills: true })} />);
     await openSettings();
-    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
     await waitFor(() => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
     });

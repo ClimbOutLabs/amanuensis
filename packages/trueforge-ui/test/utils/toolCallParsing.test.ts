@@ -170,8 +170,33 @@ describe('toolCallParsing', () => {
     });
   });
 
+  it('says an expired card was not answered in time, and keeps "you said no" for a real decline', () => {
+    const expired = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'denied',
+        remediation: {
+          reason_code: 'approval_expired',
+          message: 'Nothing was done.',
+          suggested_action: 'request_approval',
+        },
+      },
+      result: { error: 'ignored' },
+    });
+    expect(parseToolNotDoneReason(expired)).toBe('nobody answered in time');
+    expect(parseToolResultDisposition(expired)?.label).toBe('Expired');
+
+    const declined = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'denied' },
+      result: { error: 'User denied tool call: not now' },
+    });
+    expect(parseToolNotDoneReason(declined)).toBe('you said no');
+    expect(parseToolResultDisposition(declined)?.label).toBe('Denied');
+  });
+
   it('shows the plain line for a call refused before it started, and only for a refusal that asks the owner', () => {
-    const owner = 'Aman stopped a search: it had used all 40 tool steps for this question.';
+    const owner = 'A search was stopped: all 40 tool steps for this question were used.';
     const refused = JSON.stringify({
       schema_version: 'tool.response.v2',
       outcome: {

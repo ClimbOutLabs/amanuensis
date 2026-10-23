@@ -30,6 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { APPROVAL_EXPIRED_REASON_CODE, isExpiredApproval } from '../permissions/approvalExpiry';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
@@ -50,7 +51,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallResponse } from './ToolSet';
+import { deniedToolCallRemediation, deniedToolCallResponse } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -1524,7 +1525,7 @@ export async function executeToolCalls({
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
           disposition: 'denied',
-          remediation: undefined,
+          remediation: deniedToolCallRemediation(approvalDecision.reason),
           admissionProvenance: admission,
         };
       }
@@ -2102,14 +2103,16 @@ export async function executeToolCalls({
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
       }
-      const status = approvalDecisions.get(toolCall.id)?.status;
+      const decision = approvalDecisions.get(toolCall.id);
+      const status = decision?.status;
       const asked = info.tier === 3 || (info.approval_token_id ?? null) !== null;
-      let outcome: 'approved' | 'denied' | 'ran';
+      let outcome: 'approved' | 'denied' | 'auto_denied' | 'ran';
       if (asked) {
         if (status !== 'allow' && status !== 'deny') {
           continue;
         }
-        outcome = status === 'allow' ? 'approved' : 'denied';
+        // A card nobody answered in time must not read as "You declined" in the activity log.
+        outcome = status === 'allow' ? 'approved' : isExpiredApproval(decision) ? 'auto_denied' : 'denied';
       } else if (disposition === 'executed_ok' || disposition === 'executed_nonzero') {
         outcome = 'ran';
       } else {
@@ -2127,7 +2130,7 @@ export async function executeToolCalls({
             ? `Allowed for this chat, no card shown: ${heldCallAuditText(info)}`
             : heldCallAuditText(info),
         outcome,
-        auto_deny_reason: null,
+        auto_deny_reason: outcome === 'auto_denied' ? APPROVAL_EXPIRED_REASON_CODE : null,
       });
     }
   }

@@ -1804,7 +1804,7 @@ describe('runDataImport at scale', () => {
           makeCreateTurnInput({
             sessionId,
             turnId,
-            update_session_title_if_not_exist: `Bulk chat ${String(index)}`,
+            update_session_title_if_not_exist: { title: `Bulk chat ${String(index)}`, source: 'first_message' },
             new_context_appends: [
               {
                 thread_id: 'main',
@@ -3016,7 +3016,9 @@ async function seedLongChat(
       makeCreateTurnInput({
         sessionId,
         turnId,
-        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
+        ...(previousTurnId === undefined
+          ? { update_session_title_if_not_exist: { title: 'Long chat', source: 'first_message' } }
+          : { previousTurnId }),
         new_context_appends: [
           {
             thread_id: MAIN_THREAD_ID,

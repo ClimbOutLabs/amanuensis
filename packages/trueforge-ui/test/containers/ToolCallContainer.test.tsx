@@ -943,6 +943,9 @@ describe('ToolCallContainer', () => {
       });
       const api: SentinelApi = {
         listAuditEntries: vi.fn(async () => []),
+        listBriefItemCompletions: async () => [],
+        markBriefItemDone: async () => undefined,
+        unmarkBriefItemDone: async () => undefined,
         listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
         getUserSettings: vi.fn(async () => ({
           offline_mode: false,
@@ -1024,6 +1027,9 @@ describe('ToolCallContainer: held search request', () => {
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => ({
         offline_mode: false,

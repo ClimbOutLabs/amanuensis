@@ -10,7 +10,7 @@ export const ScrollToBottomButton = forwardRef<HTMLSpanElement, ScrollToBottomBu
   ({ className, disabled, ...rest }, ref) => {
     if (disabled) return null;
     return (
-      <span ref={ref} className={cn('absolute -top-14 z-10 inline-flex self-center')}>
+      <span ref={ref} className={cn('absolute right-4 -top-14 z-10 inline-flex')}>
         <button
           type="button"
           aria-label="Scroll to bottom"
