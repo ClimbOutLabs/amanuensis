@@ -23,14 +23,18 @@ export function DraftComposerActionsMenu({ actions, disabled }: DraftComposerAct
     <DropdownMenu
       align="start"
       side="top"
-      className="w-48"
+      className="w-56"
       trigger={
         <button
           type="button"
           aria-label="Add"
           title="Add"
           disabled={disabled}
-          className={auiButtonClass({ variant: 'ghost', size: 'icon', className: 'size-8 rounded-full' })}
+          className={auiButtonClass({
+            variant: 'ghost',
+            size: 'icon',
+            className: 'size-8 rounded-full border border-border',
+          })}
         >
           <Icon name="plus" className="size-4" />
         </button>
@@ -39,7 +43,7 @@ export function DraftComposerActionsMenu({ actions, disabled }: DraftComposerAct
       {actions.map(action => (
         <DropdownMenuItem key={action.id} onClick={action.onSelect}>
           <Icon name={action.icon} className="text-text-secondary size-4 shrink-0" />
-          <span>{action.label}</span>
+          <span className="text-[0.8125rem]">{action.label}</span>
         </DropdownMenuItem>
       ))}
     </DropdownMenu>
