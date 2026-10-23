@@ -240,7 +240,7 @@ export class ToolSet implements IToolSet {
      * host names the chat it belongs to. Set by the host only, alongside `pages`.
      */
     pagesScope?: FetchedPageScope | undefined;
-    /** The bundle every tool of this connector is sent with. Set by the host only; absent sends them on every request. */
+    /** The guidance topic every tool of this connector is grouped under. Set by the host only; absent groups them under none. */
     bundle?: ToolBundleName | undefined;
     /**
      * How long a web search or page read may take before it is stopped and the model gets a plain

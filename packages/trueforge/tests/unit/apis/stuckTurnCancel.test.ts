@@ -131,7 +131,7 @@ describe('a model that goes silent after a tool result', () => {
     // The second model request is the continuation after the tool result; the provider stalls on it.
     await waitFor({
       read: () => Promise.resolve(server.model.requests().length),
-      ready: count => count >= 3,
+      ready: count => count >= 2,
       budgetMs: 30_000,
     });
 

@@ -4353,7 +4353,7 @@ describe('Sandbox skills without a network', () => {
       expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
       expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
       const builder = new InstructionBuilder('prompt');
-      sandbox.buildInstruction(builder);
+      sandbox.buildSkillsInstruction(builder);
       const prompt = builder.build();
       expect(prompt).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
       expect(prompt).not.toContain('alpha: unavailable');

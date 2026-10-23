@@ -275,7 +275,7 @@ import {
   type TaskState,
 } from './taskState';
 import { TaskStateToolSet } from './TaskStateToolSet';
-import type { ToolBundleName } from './toolBundleCatalog';
+import { TOOL_BUNDLE_NAMES, type ToolBundleName } from './toolBundleCatalog';
 import { ToolBundles } from './ToolBundles';
 import {
   buildIngestedDocumentTextPart,
@@ -1528,9 +1528,11 @@ export class AgentThread {
   private postToolCallContextProcessor: PostToolCallAgentContextProcessor[];
 
   private instruction: string | undefined;
-  // Per-reply block (date, person). Fixed for the thread's life: a thread that
-  // crosses UTC midnight keeps the date its reply started with.
+  // Per-reply block (date, person, a bound repository's state). Only the date is
+  // fixed: a thread that crosses UTC midnight keeps the date its reply started with.
+  // The block is rebuilt when a bound repository's branch or head changes.
   private replyContext: string;
+  private readonly replyDate = new Date();
   private toolResponseProcessors: ToolResponseProcessor[];
   private untrustedTextScreens: readonly UntrustedTextScreen[];
   private instructionBuilders: readonly {
@@ -1539,7 +1541,7 @@ export class AgentThread {
   }[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
-  // Built-in tools sent only when a turn needs them. Absent for a read-only definition, which offers no tools.
+  // Built-in tools' guidance, read on demand. Absent for a read-only definition, which offers no tools.
   private readonly toolBundles: ToolBundles | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
@@ -1690,8 +1692,16 @@ export class AgentThread {
       ? undefined
       : new ToolBundles({
           tracing: this.tracing,
-          sectionBundles: new Set((input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle]))),
-          routeSignals: () => ({ repositoryAttached: this.sandbox?.getBoundRepositoryContext() !== undefined }),
+          // The web guidance says how to treat current facts, which matters most when no tool can fetch them.
+          sectionBundles: new Set([
+            'web',
+            ...(input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle])),
+          ]),
+          guidance: bundle => {
+            const builder = new InstructionBuilder('bundle-guidance');
+            this.addBundleGuidance(builder, bundle);
+            return builder.build();
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
@@ -1736,16 +1746,16 @@ export class AgentThread {
     }
 
     this.instruction = this.buildInstruction(this.definition.instruction);
-    // Built once per reply, never per step: the static instruction above stays
-    // byte-identical across days and people, so provider prefix caching holds.
+    // Kept out of the static instruction above, so it stays byte-identical across
+    // days and people and provider prefix caching holds.
     this.replyContext = this.buildReplyContext();
   }
 
   /**
    * The per-reply block, sent right after the static instruction. Today's date and the
    * person's name change between replies, so they live here instead of in the static
-   * instruction. Built once when the thread starts, so every step of a reply sends the
-   * same bytes. Sub-agents get the date only.
+   * instruction. The date is fixed when the thread starts; a bound repository's branch and
+   * head are rebuilt here when they change. Sub-agents get the date only.
    */
   private buildReplyContext(): string {
     const builder = new InstructionBuilder('reply-context');
@@ -1756,8 +1766,8 @@ export class AgentThread {
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
     // time of day. The get_current_datetime tool remains for precise time.
-    const dateUtc = new Date().toISOString().slice(0, 10);
-    const local = resolveLocalTime(new Date(), this.definition.clientTimezone);
+    const dateUtc = this.replyDate.toISOString().slice(0, 10);
+    const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
     const localDateClause = local.isFallback
       ? ''
       : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
@@ -1770,7 +1780,33 @@ export class AgentThread {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
       builder.addSection('person', `The person you work for is ${personName}.`, true);
     }
+    // A chat bound to a repository needs its live branch and commands on every reply, not only
+    // when the model reads the sandbox guidance; here it leaves the cached prefix untouched.
+    if (this.toolBundles !== undefined && this.sandbox?.getBoundRepositoryContext() !== undefined) {
+      this.addBundleGuidance(builder.beginSection('repository-context'), 'sandbox');
+    }
     return builder.build();
+  }
+
+  /** A bundle's prompt sections. */
+  private addBundleGuidance(builder: InstructionBuilder, bundle: ToolBundleName): void {
+    if (bundle === 'web') {
+      builder.addSection(
+        'source-discovery',
+        createSourceDiscoveryContract({
+          shellCanFetch: this.sandbox?.hasNetwork() === true,
+        }),
+      );
+      builder.addSection('web-images', WEB_IMAGES_PROMPT);
+    }
+    if (bundle === 'sandbox') {
+      this.sandbox?.buildInstruction(builder);
+    }
+    for (const instruction of this.instructionBuilders) {
+      if (instruction.bundle === bundle) {
+        instruction.build(builder);
+      }
+    }
   }
 
   private buildInstruction(userInstruction?: string): string {
@@ -1809,31 +1845,13 @@ export class AgentThread {
         `You are running as the model "${modelId}". Your training data ends before this model was released, so newer models, tools and events exist that you have never read about. When the question is what is newest or whether something exists, trust search results and the user over your memory.${configuredModelsClause}`,
       );
     }
-    // A bundle's sections go out with its tools. A thread without bundles sends every section.
-    const loaded = (bundle: ToolBundleName | undefined) =>
-      bundle === undefined || this.toolBundles === undefined || this.toolBundles.isLoaded(bundle);
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
-    // The sandbox bundle's guidance and its exec tool go out together, and only when this chat has a sandbox.
-    const sandboxLoaded = this.sandbox !== undefined && loaded('sandbox');
-    if (loaded('web')) {
-      capabilities.addSection(
-        'source-discovery',
-        createSourceDiscoveryContract({ shellCanFetch: sandboxLoaded && this.sandbox?.hasNetwork() === true }),
-      );
-    }
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
-    if (loaded('web')) {
-      capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
-    }
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
-
-    if (this.sandbox && loaded('sandbox')) {
-      this.sandbox.buildInstruction(capabilities);
-    }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
     if (this.sandbox === undefined && !this.parent) {
@@ -1844,12 +1862,20 @@ export class AgentThread {
       }
     }
     this.toolBundles?.buildInstruction(capabilities);
+    this.sandbox?.buildSkillsInstruction(capabilities);
     if (this.deferredTool) {
       this.deferredTool.buildInstruction(capabilities);
     }
     for (const { bundle, build } of this.instructionBuilders) {
-      if (loaded(bundle)) {
+      if (bundle === undefined) {
         build(capabilities);
+      }
+    }
+    // With bundles, a bundle's guidance goes out at the end of the chat when the model reads it, so
+    // this prompt stays byte-identical for the whole chat. A thread without bundles sends it all here.
+    if (this.toolBundles === undefined) {
+      for (const bundle of TOOL_BUNDLE_NAMES) {
+        this.addBundleGuidance(capabilities, bundle);
       }
     }
     if (!this.parent && userInstruction?.trim()) {
@@ -3260,7 +3286,12 @@ export class AgentThread {
     ) {
       // Every model request atomically refreshes Sandbox Git state. Rebuild only
       // when that state changed, keeping ordinary prompt construction deterministic.
-      this.instruction = this.buildInstruction(this.definition.instruction);
+      // With bundles the state rides in the per-reply block, so the system prompt stays put.
+      if (this.toolBundles === undefined) {
+        this.instruction = this.buildInstruction(this.definition.instruction);
+      } else {
+        this.replyContext = this.buildReplyContext();
+      }
     }
     // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
     // request before its safety ceiling is checked. If the raw context is already past
@@ -3358,6 +3389,7 @@ export class AgentThread {
       } satisfies ModelMessageEvent;
 
       let firstDeltaTimestamped = false;
+      let firstTokenMs: number | null = null;
       const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
@@ -3394,7 +3426,8 @@ export class AgentThread {
           if (event) {
             if (!firstDeltaTimestamped) {
               firstDeltaTimestamped = true;
-              this.metrics.time_to_first_token_ms ??= Date.now() - modelRequestStartedAt;
+              firstTokenMs = Date.now() - modelRequestStartedAt;
+              this.metrics.time_to_first_token_ms ??= firstTokenMs;
               yield { ...event, created_at: new Date().toISOString() };
             } else {
               yield event;
@@ -3415,6 +3448,15 @@ export class AgentThread {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         result = attemptResult;
+        // One line per model step, so a slow step shows in the logs without a trace viewer.
+        this.logger.info('Model step finished', {
+          threadId: this.threadId,
+          step: this.metrics.iterations,
+          attempt,
+          firstTokenMs,
+          durationMs: Date.now() - modelRequestStartedAt,
+          toolCount: tools.length,
+        });
         break;
       } catch (error) {
         // Cancellation and every non-stream-fault error keep their existing handling
@@ -3558,7 +3600,7 @@ export class AgentThread {
               tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
             }),
       },
-      // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
+      // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
     });
@@ -5095,10 +5137,6 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            if (this.toolBundles?.refresh(this.context) === true) {
-              // Routing and loads add bundles, and a bundle's prompt sections go out with its tools.
-              this.instruction = this.buildInstruction(this.definition.instruction);
-            }
             const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
             const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;

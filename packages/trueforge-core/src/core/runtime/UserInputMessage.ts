@@ -112,7 +112,7 @@ export function extractBase64(dataUri: string): Buffer {
 const UPLOADED_FILES_HEADING = 'Uploaded files (';
 
 /** True for the note that lists the files a person attached to their message. */
-export function isUploadedFilesAnnouncement(text: string): boolean {
+function isUploadedFilesAnnouncement(text: string): boolean {
   return text.startsWith(`${SYSTEM_TAG_START}${UPLOADED_FILES_HEADING}`);
 }
 
