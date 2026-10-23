@@ -4,6 +4,7 @@ import { parseToolNotDoneReason } from '@/utils/toolCallParsing.js';
 import {
   buildLongWaitAnnouncement,
   buildLongWaitNote,
+  COMPACTING_LINE,
   deriveWaitQueue,
   LONG_WAIT_MS,
   type WaitQueueInput,
@@ -75,6 +76,24 @@ describe('deriveWaitQueue', () => {
 
     expect(stationState(snapshot, 'remembering')).toBe('done');
     expect(snapshot.ticks).toEqual([]);
+  });
+
+  it('says the history is being tidied while compaction runs, and gives way once writing starts', () => {
+    const compacting = deriveWaitQueue(input({ compacting: true }));
+    expect(compacting.microcopy).toBe(COMPACTING_LINE);
+    expect(
+      buildLongWaitNote({
+        elapsedMs: 125_000,
+        activeStation: compacting.activeStation,
+        microcopy: compacting.microcopy,
+      }),
+    ).toMatch(/^Still tidying up the conversation, /);
+    expect(
+      buildLongWaitAnnouncement({ activeStation: compacting.activeStation, microcopy: compacting.microcopy }),
+    ).toBe('Still tidying up the conversation. This can take a few minutes.');
+
+    const writing = deriveWaitQueue(input({ compacting: true, parts: [part({ type: 'text' })] }));
+    expect(writing.microcopy).toBe('Writing…');
   });
 
   it('lights Writing when the first tokens stream', () => {

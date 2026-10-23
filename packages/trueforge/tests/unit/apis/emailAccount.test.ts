@@ -3,6 +3,12 @@ import { Hono } from 'hono';
 import { createLogger } from 'winston';
 import { EMAIL_SETTINGS_BASE_PATH, createEmailAccountRouter } from '../../../src/apis/emailAccount';
 import configuration from '../../../src/config';
+import type {
+  DeleteMcpServerInput,
+  IMcpServerStore,
+  McpServerRecord,
+  UpsertMcpServerInput,
+} from '../../../src/db/mcpServerStore';
 import {
   MAIL_CONNECTOR_UNREACHABLE_MESSAGE,
   MAIL_SERVER_UNREACHABLE_MESSAGE,
@@ -23,8 +29,12 @@ type AgentCall = { method: string; url: string; body: string | undefined };
 function makeFakeAgent() {
   const calls: AgentCall[] = [];
   let replies: AgentReply[] = [];
-  const fetchImpl = async (url: string, init?: { method?: string; body?: string }): Promise<Response> => {
-    calls.push({ method: init?.method ?? 'GET', url, body: init?.body });
+  const fetchImpl = async (input: string | Request | URL, init?: RequestInit): Promise<Response> => {
+    calls.push({
+      method: init?.method ?? 'GET',
+      url: String(input),
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    });
     const reply = replies.shift();
     if (reply === undefined) {
       throw new Error('the fake agent ran out of replies');
@@ -63,23 +73,24 @@ const CONNECTED: AgentBody = {
 
 /** A fake MCP store for the connector registration the save and remove handlers keep in step. */
 function makeFakeStore() {
-  const rows = new Map<string, { tenant_id: string; name: string; manifest: { url?: string }; first_party: boolean }>();
-  return {
-    rows,
-    store: {
-      upsertServer: async (row: {
-        tenant_id: string;
-        name: string;
-        manifest: { url?: string };
-        first_party: boolean;
-      }) => {
-        rows.set(`${row.tenant_id}:${row.name}`, row);
-      },
-      deleteServer: async (input: { tenant_id: string; name: string }) => {
-        rows.delete(`${input.tenant_id}:${input.name}`);
-      },
+  const rows = new Map<string, UpsertMcpServerInput>();
+  const store: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer'> = {
+    upsertServer: (input: UpsertMcpServerInput): Promise<McpServerRecord> => {
+      rows.set(`${input.tenant_id}:${String(input.name)}`, input);
+      return Promise.resolve({
+        id: 'fake-id',
+        tenant_id: input.tenant_id,
+        name: input.name,
+        manifest: input.manifest,
+        first_party: input.first_party,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      });
     },
+    deleteServer: (input: DeleteMcpServerInput): Promise<boolean> =>
+      Promise.resolve(rows.delete(`${input.tenant_id}:${input.name}`)),
   };
+  return { rows, store };
 }
 
 describe('the email settings endpoints', () => {
@@ -134,12 +145,11 @@ describe('the email settings endpoints', () => {
     }
     // The save and remove routes sit on the base path itself, with no trailing slash.
     const suffix = input.path === '/' ? '' : input.path;
-    const response = await app.request(`http://localhost${BASE}${suffix}`, {
-      method: input.method,
-      headers,
-      body:
-        input.body === undefined ? undefined : typeof input.body === 'string' ? input.body : JSON.stringify(input.body),
-    });
+    const init: RequestInit = { method: input.method, headers };
+    if (input.body !== undefined) {
+      init.body = typeof input.body === 'string' ? input.body : JSON.stringify(input.body);
+    }
+    const response = await app.request(`http://localhost${BASE}${suffix}`, init);
     return { status: response.status, text: await response.text() };
   }
 
@@ -222,7 +232,7 @@ describe('the email settings endpoints', () => {
     const registered = [...fakeStore.rows.values()];
     expect(registered).toHaveLength(1);
     expect(registered[0]?.name).toBe('Email');
-    expect(registered[0]?.manifest.url).toBe('http://127.0.0.1:1/mcp');
+    expect(registered[0]?.manifest).toMatchObject({ type: 'remote', url: 'http://127.0.0.1:1/mcp' });
   });
 
   it('a refused sign-in shows the refused line and saves nothing', async () => {

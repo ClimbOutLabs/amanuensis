@@ -57,12 +57,11 @@ describe('the mail account agent', () => {
   }
 
   async function agentCall(method: string, body?: unknown): Promise<{ status: number; text: string }> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const init: RequestInit = { method, headers: { 'content-type': 'application/json' } };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`, init);
     return { status: response.status, text: await response.text() };
   }
 

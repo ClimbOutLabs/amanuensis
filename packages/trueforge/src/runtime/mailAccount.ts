@@ -68,19 +68,23 @@ export interface MailAccountSaveRequest {
   smtp_port: number | undefined;
 }
 
+/** One field of an agent response body; the body is untrusted, so every field stays unknown until checked. */
+function agentField(body: object, key: string): unknown {
+  return new Map<string, unknown>(Object.entries(body)).get(key);
+}
+
 /** The agent's public account view, as parsed from its response; unknown shapes parse to null. */
 function parseAgentAccount(body: unknown): PublicMailAccount | null {
   if (typeof body !== 'object' || body === null) {
     return null;
   }
-  const fields = new Map(Object.entries(body));
-  const address = fields.get('address');
-  const imapHost = fields.get('imap_host');
-  const imapPort = fields.get('imap_port');
-  const imapMode = fields.get('imap_mode');
-  const smtpHost = fields.get('smtp_host');
-  const smtpPort = fields.get('smtp_port');
-  const smtpMode = fields.get('smtp_mode');
+  const address = agentField(body, 'address');
+  const imapHost = agentField(body, 'imap_host');
+  const imapPort = agentField(body, 'imap_port');
+  const imapMode = agentField(body, 'imap_mode');
+  const smtpHost = agentField(body, 'smtp_host');
+  const smtpPort = agentField(body, 'smtp_port');
+  const smtpMode = agentField(body, 'smtp_mode');
   if (
     typeof address !== 'string' ||
     typeof imapHost !== 'string' ||
@@ -107,7 +111,7 @@ function stateFromAgentBody(body: unknown): MailAccountState {
   if (typeof body !== 'object' || body === null) {
     throw new MailAccountError('connector_unreachable', MAIL_CONNECTOR_UNREACHABLE_MESSAGE);
   }
-  const connected = new Map(Object.entries(body)).get('connected');
+  const connected = agentField(body, 'connected');
   if (connected !== true) {
     return { connected: false, sign_in: null, account: null };
   }
@@ -115,7 +119,7 @@ function stateFromAgentBody(body: unknown): MailAccountState {
   if (account === null) {
     throw new MailAccountError('connector_unreachable', MAIL_CONNECTOR_UNREACHABLE_MESSAGE);
   }
-  const signIn = new Map(Object.entries(body)).get('sign_in');
+  const signIn = agentField(body, 'sign_in');
   return {
     connected: true,
     sign_in: signIn === 'refused' ? 'refused' : signIn === 'unreachable' ? 'unreachable' : 'ok',
@@ -127,7 +131,7 @@ function agentErrorKind(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) {
     return null;
   }
-  const error = new Map(Object.entries(body)).get('error');
+  const error = agentField(body, 'error');
   return typeof error === 'string' ? error : null;
 }
 

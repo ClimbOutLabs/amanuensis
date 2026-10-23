@@ -1451,6 +1451,13 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // is wired into every non-child agent regardless of whether the conversation is engineering
     // work. Conversation mode otherwise. See CompactionSessionMode.
     const mode: CompactionSessionMode = boundOrSandboxCoding ? 'coding' : 'conversation';
+    yield {
+      type: EventType.AGENT_CONTEXT_COMPACTION_STARTED,
+      id: newEventId(),
+      created_at: new Date().toISOString(),
+      mode,
+      tokens_before: contextTokens,
+    };
 
     // An explicit threshold above the model's usable window must not size a tail that alone
     // overflows it, so the tail is sized from the threshold the window can actually reach.

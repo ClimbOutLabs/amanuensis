@@ -10,7 +10,6 @@ import {
   EMAIL_PROVIDER_PRESETS,
   mailProviderKeyForHosts,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/presets';
-import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration, { mailMcpUrlFromAccountUrl } from '../config';
@@ -82,11 +81,6 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
     });
   };
 
-  const failure = (c: Context, error: MailAccountError): Response => {
-    const status = error.failure === 'connector_unreachable' ? 502 : 400;
-    return c.json({ error: { message: error.message, type: error.failure } }, status);
-  };
-
   const statusHandler: RouteHandler<typeof getEmailAccountStatusRoute> = async c => {
     if (configuration.MAIL_EMAIL_ACCOUNT_URL === undefined) {
       return c.json({ data: unavailableBody() }, 200);
@@ -95,7 +89,8 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
       return c.json({ data: statusBody(await getMailAccountState(clientDeps())) }, 200);
     } catch (caught) {
       if (caught instanceof MailAccountError) {
-        return failure(c, caught);
+        // A status read can only fail one way: the connector could not be reached.
+        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
       }
       throw caught;
     }
@@ -120,7 +115,9 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
       return c.json({ data: statusBody(state) }, 201);
     } catch (caught) {
       if (caught instanceof MailAccountError) {
-        return failure(c, caught);
+        return caught.failure === 'connector_unreachable'
+          ? c.json({ error: { message: caught.message, type: caught.failure } }, 502)
+          : c.json({ error: { message: caught.message, type: caught.failure } }, 400);
       }
       throw caught;
     }
@@ -134,7 +131,8 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
       return c.json({ data: statusBody(state) }, 200);
     } catch (caught) {
       if (caught instanceof MailAccountError) {
-        return failure(c, caught);
+        // A removal can only fail one way: the connector could not be reached.
+        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
       }
       throw caught;
     }

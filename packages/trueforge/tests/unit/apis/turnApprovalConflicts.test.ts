@@ -325,9 +325,14 @@ describe('POST /{session_id}/turns approval conflicts', () => {
   });
 
   it.each([
-    [new PreviousTurnRunningError(TIP_TURN_ID), 'previous_turn_running'],
-    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists'],
-  ])('maps a store conflict to 409 with code %#', async (error, code) => {
+    [
+      new PreviousTurnRunningError(TIP_TURN_ID),
+      'previous_turn_running',
+      // A person reads this one, so it never carries the store's turn ids.
+      'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    ],
+    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists', new TurnAlreadyExistsError(TIP_TURN_ID).message],
+  ])('maps a store conflict to 409 with code %#', async (error, code, message) => {
     const app = await buildApp({ status: 'allow' });
     rejectCreateTurnWith(error);
 
@@ -335,7 +340,7 @@ describe('POST /{session_id}/turns approval conflicts', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: { message: error.message, type: 'conflict', code },
+      error: { message, type: 'conflict', code },
     });
   });
 

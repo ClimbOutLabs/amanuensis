@@ -2,6 +2,12 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
+import type {
+  DeleteMcpServerInput,
+  IMcpServerStore,
+  McpServerRecord,
+  UpsertMcpServerInput,
+} from '../../../src/db/mcpServerStore';
 import {
   getMailAccountState,
   MAIL_SIGN_IN_REFUSED_MESSAGE,
@@ -83,8 +89,8 @@ describe('resolving a save from the Settings form', () => {
     });
     expect(resolved.ok).toBe(true);
     if (resolved.ok) {
-      expect(resolved.payload.imap_mode).toBe('ssl');
-      expect(resolved.payload.smtp_mode).toBe('starttls');
+      expect(resolved.payload['imap_mode']).toBe('ssl');
+      expect(resolved.payload['smtp_mode']).toBe('starttls');
     }
   });
 
@@ -113,7 +119,7 @@ describe('resolving a save from the Settings form', () => {
     });
     expect(resolved.ok).toBe(true);
     if (resolved.ok) {
-      expect(resolved.payload.password).toBe('CANARYAPPPASSWORD7f3d9');
+      expect(resolved.payload['password']).toBe('CANARYAPPPASSWORD7f3d9');
     }
   });
 });
@@ -191,26 +197,24 @@ describe('the account agent client', () => {
 
 describe('keeping the connector registration in step', () => {
   function makeFakeStore() {
-    const rows = new Map<
-      string,
-      { tenant_id: string; name: string; manifest: { url?: string }; first_party: boolean }
-    >();
-    return {
-      rows,
-      store: {
-        upsertServer: async (row: {
-          tenant_id: string;
-          name: string;
-          manifest: { url?: string };
-          first_party: boolean;
-        }) => {
-          rows.set(`${row.tenant_id}:${row.name}`, row);
-        },
-        deleteServer: async (input: { tenant_id: string; name: string }) => {
-          rows.delete(`${input.tenant_id}:${input.name}`);
-        },
+    const rows = new Map<string, UpsertMcpServerInput>();
+    const store: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer'> = {
+      upsertServer: (input: UpsertMcpServerInput): Promise<McpServerRecord> => {
+        rows.set(`${input.tenant_id}:${String(input.name)}`, input);
+        return Promise.resolve({
+          id: 'fake-id',
+          tenant_id: input.tenant_id,
+          name: input.name,
+          manifest: input.manifest,
+          first_party: input.first_party,
+          created_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        });
       },
+      deleteServer: (input: DeleteMcpServerInput): Promise<boolean> =>
+        Promise.resolve(rows.delete(`${input.tenant_id}:${input.name}`)),
     };
+    return { rows, store };
   }
 
   it('registers once, updates in place, and unregisters on remove', async () => {
@@ -229,7 +233,7 @@ describe('keeping the connector registration in step', () => {
     expect(fake.rows.size).toBe(1);
     const row = [...fake.rows.values()][0];
     expect(row?.name).toBe('Email');
-    expect(row?.manifest.url).toBe('http://127.0.0.1:1/mcp');
+    expect(row?.manifest).toMatchObject({ type: 'remote', url: 'http://127.0.0.1:1/mcp' });
     await syncMailConnectorWithAccount({ ...deps, state: NOT_CONNECTED_STATE });
     expect(fake.rows.size).toBe(0);
   });

@@ -171,6 +171,8 @@ function makeThread(input: {
   create: ILLM['create'];
   context?: ContextMessage[];
   turnToolCallLedger?: TurnToolCallLedger | undefined;
+  /** Research budget charged to web_search calls; absent means no budget. */
+  searchBudget?: number;
 }) {
   return new AgentThread({
     threadId: 'main',
@@ -187,6 +189,9 @@ function makeThread(input: {
       configuredModels: undefined,
       instruction: 'test',
       toolSets: [input.toolSet],
+      ...(input.searchBudget === undefined
+        ? {}
+        : { toolCallBudget: input.searchBudget, budgetedTools: ['web_search'] }),
     },
     context: input.context ?? [{ role: 'user', content: 'Please add the appointment.' }],
   });
@@ -637,6 +642,158 @@ describe('per-turn tool loop guard', () => {
     expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     expect(deliveredText(events)).toBe('Both appointments are in place.');
+  });
+});
+
+/**
+ * A tool set shaped like a live chat: the search provider's web_search and web_fetch held for the
+ * person's OK, a read-only map lookup that always asks, and a draft_email that changes something.
+ * delete_note, wipe_note and update_record are third-party writes whose server wrongly says they
+ * are read-only. All are tier 3; only the search provider's calls and the map lookup are reads.
+ */
+function makeResearchToolSet() {
+  const toolSet = makeMockIMCPServer({
+    name: 'research',
+    preload: true,
+    tools: ['web_search', 'web_fetch', 'render_map', 'draft_email', 'delete_note', 'wipe_note', 'update_record'].map(
+      name => ({
+        name,
+        description: name,
+        inputSchema: { type: 'object' as const, properties: { text: { type: 'string' } }, required: ['text'] },
+        preload: true,
+      }),
+    ),
+  });
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) => {
+    const base = {
+      type: 'mcp' as const,
+      mcp_server_id: toolSet.id,
+      mcp_server_name: toolSet.name,
+      original_tool_name: params.name,
+      is_approval_required: false,
+      tier: 3 as const,
+    };
+    switch (params.name) {
+      case 'web_search':
+        return Promise.resolve({ ...base, search_provider_call: true as const, tier_reason: 'mcp_search_setting_ask' });
+      case 'web_fetch':
+        return Promise.resolve({
+          ...base,
+          read_only_hint: true,
+          open_world_hint: true,
+          search_provider_call: true as const,
+          tier_reason: 'mcp_search_unreturned_url',
+        });
+      case 'render_map':
+        return Promise.resolve({ ...base, read_only_hint: true, open_world_hint: true, tier_reason: 'maps_tool' });
+      case 'delete_note':
+        return Promise.resolve({ ...base, read_only_hint: true, tier_reason: 'mcp_destructive_hint' });
+      case 'wipe_note':
+        return Promise.resolve({
+          ...base,
+          read_only_hint: true,
+          effect: 'inspect' as const,
+          tier_reason: 'mcp_destructive_hint',
+        });
+      case 'update_record':
+        return Promise.resolve({ ...base, read_only_hint: true, tier_reason: 'unrecognized_tool' });
+      default:
+        return Promise.resolve({
+          ...base,
+          read_only_hint: false,
+          open_world_hint: true,
+          tier_reason: 'connector_send',
+        });
+    }
+  });
+  jest.mocked(toolSet.callTool).mockImplementation(() => Promise.resolve(toolResultResponse({ text: '{"ok":true}' })));
+  return toolSet;
+}
+
+/** One reply per batch of calls, in order, then a plain final answer. */
+function scriptedCalls(batches: { name: string; text: string }[][]): ILLM['create'] {
+  let round = 0;
+  return jest.fn((_request: LLMCreateParamsStreaming) => {
+    const batch = batches[round];
+    round += 1;
+    return batch === undefined
+      ? replyStream({ text: 'Here is what I found.' })
+      : replyStream({
+          calls: batch.map((call, index) => ({
+            id: `call-${String(round)}-${String(index)}`,
+            name: call.name,
+            args: { text: call.text },
+          })),
+        });
+  });
+}
+
+describe('write cap counts only calls that change something', () => {
+  it('does not stop a reply that makes seven different web searches; only the search budget applies', async () => {
+    const toolSet = makeResearchToolSet();
+    const searches = Array.from({ length: 7 }, (_, index) => [{ name: 'web_search', text: `query ${String(index)}` }]);
+    const thread = makeThread({ toolSet, searchBudget: 6, create: scriptedCalls(searches) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(Array.from({ length: 6 }, () => 'web_search'));
+    const results = toolResults(thread);
+    expect(results.some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
+    expect(results.at(-1)?.content).toContain('Research tool-call budget exhausted');
+    expect(events.at(-1)).not.toMatchObject({ error: WRITE_CAP_STOP_MESSAGE });
+  });
+
+  it('still stops a reply at five writes when it makes six, after searches that did not count', async () => {
+    const toolSet = makeResearchToolSet();
+    const calls = [
+      Array.from({ length: 4 }, (_, index) => ({ name: 'web_search', text: `query ${String(index)}` })),
+      Array.from({ length: 6 }, (_, index) => ({ name: 'draft_email', text: `draft ${String(index)}` })),
+    ];
+    const thread = makeThread({ toolSet, searchBudget: 6, create: scriptedCalls(calls) });
+    const events = await drain(thread);
+
+    const ran = callToolNames(toolSet);
+    expect(ran.filter(name => name === 'web_search')).toHaveLength(4);
+    expect(ran.filter(name => name === 'draft_email')).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('does not count page reads or map lookups as writes', async () => {
+    const toolSet = makeResearchToolSet();
+    const calls = [
+      Array.from({ length: 6 }, (_, index) => ({ name: 'web_fetch', text: `https://example.com/${String(index)}` })),
+      Array.from({ length: 6 }, (_, index) => ({ name: 'render_map', text: `Place ${String(index)}` })),
+    ];
+    const thread = makeThread({ toolSet, searchBudget: 6, create: scriptedCalls(calls) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toHaveLength(12);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+    expect(deliveredText(events)).toBe('Here is what I found.');
+  });
+
+  it.each([
+    ['delete_note', 'a read-only hint next to a destructive hint'],
+    ['wipe_note', 'a read-only hint that made it an inspection, next to a destructive hint'],
+    ['update_record', 'a read-only hint on a tool the host does not recognise'],
+  ])('still stops %s at five when its server gives %s', async name => {
+    const toolSet = makeResearchToolSet();
+    const calls = Array.from({ length: 7 }, (_, index) => [{ name, text: `note ${String(index)}` }]);
+    const thread = makeThread({ toolSet, create: scriptedCalls(calls) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(Array.from({ length: MAX_WRITE_CALLS_PER_TURN }, () => name));
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
   });
 });
 
