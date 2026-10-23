@@ -134,7 +134,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
-import { keepSubAgentAnswerText } from '../permissions/webSearch';
+import { keepSubAgentAnswerText, recordPrivateContextText } from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -3066,13 +3066,16 @@ export class AgentThread {
           },
           this.threadId,
         );
-        extractedTextParts.push(
-          await this.screenIngestedText({
-            part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
-            file: { filename: file.filename, path: file.path },
-            signal,
-          }),
-        );
+        const ingested = await this.screenIngestedText({
+          part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
+          file: { filename: file.filename, path: file.path },
+          signal,
+        });
+        // An attached file is the person's own: a later search that carries its details asks first.
+        if (this.sentinel !== undefined) {
+          recordPrivateContextText({ state: this.sentinel.web_search, text: ingested.text });
+        }
+        extractedTextParts.push(ingested);
       } else {
         const issue = document.issue ?? 'Extraction produced no text';
         yield buildDocumentIngestionEvent(

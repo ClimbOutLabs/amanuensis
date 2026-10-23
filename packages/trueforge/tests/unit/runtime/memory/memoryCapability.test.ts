@@ -4,6 +4,8 @@ import type {
   ContextMessage,
 } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InstructionBuilder, InternalEventType } from '@truefoundry/trueforge-core/core';
+import { fingerprintLeak } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import winston from 'winston';
 import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../../../src/runtime/internalSourceGuard';
 import type {
@@ -754,6 +756,45 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
     expect(passthroughEvent(events)['sweep']).toMatchObject({ verified: 0, retried: 0, abandoned: 0, pending: 1 });
+  });
+});
+
+describe('HindsightMemoryProcessor private details for the search check', () => {
+  it("keeps the injected block's details, so a search that carries them asks and a plain one does not", async () => {
+    const recall = jest.fn().mockResolvedValue({
+      ok: true,
+      results: [
+        { id: '1', type: 'world', occurred_start: '2026-08-14', text: 'Your cousin Wilhelmina Thrupp lives in Leeds.' },
+      ],
+      entities: [],
+    });
+    const webSearch = createWebSearchTurnState();
+    const capability = hindsightMemoryCapability({
+      client: makeClient({ recall }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      webSearch,
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'how is my cousin' }])));
+
+    const leak = (query: string) =>
+      fingerprintLeak({
+        mode: 'search',
+        strings: { values: [query], scalars: [], keys: [], plumbing: [] },
+        earlier: '',
+        entries: webSearch.chatFingerprints.entries,
+        has_text: webSearch.chatFingerprints.has_text,
+      });
+    expect(webSearch.privateContextKept).toBe(true);
+    expect(leak('wilhelmina thrupp leeds')).not.toBeNull();
+    expect(leak('things to do in Leeds')).toBeNull();
   });
 });
 

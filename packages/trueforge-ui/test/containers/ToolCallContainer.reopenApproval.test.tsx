@@ -194,7 +194,7 @@ describe('a reopened chat with one held search', () => {
         expect(live.includes('Allow searches in this chat')).toBe(search.can_chat_allow);
         expect(live).not.toContain('Approve for this chat');
         expect(live).not.toContain('Always allow this tool');
-        expect(live.slice(0, 2)).toEqual(['Allow it', 'Not now']);
+        expect(live.slice(0, 3)).toEqual(['Allow it', 'Change it', 'Not now']);
       });
     });
   }

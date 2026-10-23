@@ -47,6 +47,69 @@ const RECIPIENT = /(?:"[^"]*"|[^,"])+/g;
 /** An address written in words: `maria dot costa at harbour dot example`. */
 const SPELLED_AT = /\s*\bat\b\s*/gi;
 const SPELLED_DOT = /\s*\bdot\b\s*/gi;
+/** Two to four capitalized words in a row, such as a person's full name written in running text. */
+const CAPITALIZED_RUN = /\p{Lu}[\p{Ll}'’-]+(?:[ \t]+\p{Lu}[\p{Ll}'’-]+){1,3}/gu;
+/** Capitalized words that open a sentence or a greeting rather than a name. */
+const NOT_NAME_WORDS = new Set(
+  (
+    'a an the my our your his her their this that these those in on at to from for with and but or if when ' +
+    'we i you he she they it dear hi hello mr mrs ms dr met call ask lunch dinner meeting ' +
+    'monday tuesday wednesday thursday friday saturday sunday january february march april may june july ' +
+    'august september october november december'
+  ).split(' '),
+);
+/** Street words, each with the short form a search may use instead. */
+const STREET_WORDS: ReadonlyMap<string, string> = new Map([
+  ['street', 'st'],
+  ['road', 'rd'],
+  ['avenue', 'ave'],
+  ['lane', 'ln'],
+  ['drive', 'dr'],
+  ['boulevard', 'blvd'],
+  ['court', 'ct'],
+  ['place', 'pl'],
+  ['square', 'sq'],
+  ['terrace', 'tce'],
+  ['way', 'way'],
+  ['crescent', 'cres'],
+]);
+const STREET_WORD = [...STREET_WORDS].flatMap(([long, short]) => [long, short]).join('|');
+/** A house number, up to three words and a street word: `12 Harbour Street`. */
+const STREET_ADDRESS = new RegExp(`\\b\\d{1,5}[A-Za-z]?\\s+(?:[\\p{L}'-]+\\s+){0,3}(?:${STREET_WORD})\\b`, 'giu');
+/** A street word first and the house number after it: `Rua das Flores 12`. */
+const STREET_ADDRESS_NUMBER_LAST =
+  /\b(?:rua|calle|via|rue|avenida|strasse|straße)\s+(?:[\p{L}'-]+\s+){0,3}\d{1,5}\b/giu;
+/** A code of letters and digits, such as an order, booking or account reference. */
+const REFERENCE_CODE = /\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b/g;
+const MIN_REFERENCE_CODE_CHARS = 6;
+const MIN_REFERENCE_CODE_DIGITS = 3;
+/** A date of birth's label; the date is read from the text right after it. */
+const BIRTH_LABEL = /\b(?:born(?:\s+on)?|birthday(?:\s+is)?|date\s+of\s+birth|d\.?o\.?b\.?)\s*(?:is\s*)?[:-]?\s*/gi;
+/** How far after its label a date of birth may start. */
+const BIRTH_DATE_REACH = 40;
+const MONTHS = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+const MONTH_NAME =
+  '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const ISO_DATE = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g;
+const NUMERIC_DATE = /\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b/g;
+const DAY_MONTH_DATE = new RegExp(
+  `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH_NAME}\\.?,?\\s+(\\d{4})\\b`,
+  'gi',
+);
+const MONTH_DAY_DATE = new RegExp(`\\b${MONTH_NAME}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, 'gi');
 
 /**
  * One piece of a private text, kept as a hash so a later check can match it without the text. `length` is
@@ -181,17 +244,121 @@ function fingerprintKey(entry: PrivateFingerprint): string {
   return `${entry.kind}:${String(entry.length)}:${entry.digest}`;
 }
 
+/** Each date the text writes out, as eight digits, year first. A day and month that could be either order give both. */
+function datesIn(text: string): string[] {
+  const dates = new Set<string>();
+  const add = (year: string, month: number, day: number): void => {
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      dates.add(`${year}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}`);
+    }
+  };
+  const monthOf = (name: string): number => MONTHS.findIndex(month => month.startsWith(name.toLowerCase())) + 1;
+  for (const [, year = '', month = '', day = ''] of text.matchAll(ISO_DATE)) {
+    add(year, Number(month), Number(day));
+  }
+  for (const [, first = '', second = '', year = ''] of text.matchAll(NUMERIC_DATE)) {
+    add(year, Number(second), Number(first));
+    add(year, Number(first), Number(second));
+  }
+  for (const [, day = '', month = '', year = ''] of text.matchAll(DAY_MONTH_DATE)) {
+    add(year, monthOf(month), Number(day));
+  }
+  for (const [, month = '', day = '', year = ''] of text.matchAll(MONTH_DAY_DATE)) {
+    add(year, monthOf(month), Number(day));
+  }
+  return [...dates];
+}
+
+/** Dates of birth the text gives: a date written right after a label such as `born` or `date of birth`. */
+function birthDatesIn(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(BIRTH_LABEL)) {
+    const start = match.index + match[0].length;
+    const after = text.slice(start, start + BIRTH_DATE_REACH);
+    const first = [ISO_DATE, NUMERIC_DATE, DAY_MONTH_DATE, MONTH_DAY_DATE]
+      .map(pattern => new RegExp(pattern.source, pattern.flags).exec(after))
+      .filter(dated => dated !== null)
+      .sort((left, right) => left.index - right.index)[0];
+    if (first !== undefined) {
+      found.push(...datesIn(first[0]));
+    }
+  }
+  return found;
+}
+
+/** Full names written in running text: two or more capitalized words, without a greeting or weekday before them. */
+function runningTextNames(text: string): string[] {
+  const names: string[] = [];
+  for (const match of text.matchAll(CAPITALIZED_RUN)) {
+    const words = match[0].split(/[ \t]+/);
+    const first = words.findIndex(word => !NOT_NAME_WORDS.has(word.toLowerCase()));
+    const kept = first < 0 ? [] : words.slice(first);
+    if (kept.length >= MIN_NAME_WORDS && compactForm(kept.join('')).length >= MIN_NAME_CHARS) {
+      names.push(kept.join(' '));
+    }
+  }
+  return names;
+}
+
+/**
+ * A name and the shorter forms a search may write it in: with three or more words, each two words in a row and the
+ * first with the last, so `Dr Rafe Ollerenshaw` and `Ana Maria Reis` are found as `Rafe Ollerenshaw` and `Ana Reis`.
+ */
+function nameForms(name: string): string[] {
+  const words = name.split(/\s+/).filter(word => word !== '');
+  if (words.length < 3) {
+    return [name];
+  }
+  const pairs = words.slice(1).map((word, index) => `${words[index] ?? ''} ${word}`);
+  return [name, ...pairs, `${words[0] ?? ''} ${words[words.length - 1] ?? ''}`];
+}
+
+/** Street addresses, compact, each also with its street word in the other of its long and short forms. */
+function streetAddressesIn(text: string): string[] {
+  const found: string[] = [];
+  for (const pattern of [STREET_ADDRESS, STREET_ADDRESS_NUMBER_LAST]) {
+    for (const match of text.matchAll(pattern)) {
+      const words = wordsOf(match[0]);
+      found.push(words.join(''));
+      const swapped = words.map(word => {
+        const short = STREET_WORDS.get(word);
+        const long = [...STREET_WORDS].find(([, abbreviation]) => abbreviation === word)?.[0];
+        return short ?? long ?? word;
+      });
+      found.push(swapped.join(''));
+    }
+  }
+  return found;
+}
+
+/** Codes of letters and digits, such as an order or account reference, compact. */
+function referenceCodesIn(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(REFERENCE_CODE)) {
+    const code = compactForm(match[0]);
+    const digits = digitsOf(code).length;
+    if (code.length >= MIN_REFERENCE_CODE_CHARS && digits >= MIN_REFERENCE_CODE_DIGITS && digits < code.length) {
+      found.push(code);
+    }
+  }
+  return found;
+}
+
 /**
  * Fingerprints of the private texts, each folded the same way the outgoing text is, so a copy matches however
- * it was written. A name is kept both spaced and run together, since either can appear in the outgoing text.
+ * it was written. A header name is kept both spaced and run together, since either can appear in the outgoing
+ * text. Names from running text, street addresses and reference codes are kept compact as phrases, so only a
+ * search checks them: a map may name a place or an address the private text gives. `word_runs` also keeps every
+ * run of copied words; a source the host adds to every reply leaves it off, since its ordinary wording would
+ * hold ordinary searches.
  */
-export function fingerprintsOf(privateTexts: readonly string[]): PrivateFingerprint[] {
+export function fingerprintsOf(input: { texts: readonly string[]; word_runs: boolean }): PrivateFingerprint[] {
   const found = new Map<string, PrivateFingerprint>();
   const add = (kind: PrivateFingerprint['kind'], length: number, value: string): void => {
     const entry = { kind, length, digest: digestOf({ kind, value }) };
     found.set(fingerprintKey(entry), entry);
   };
-  for (const raw of privateTexts) {
+  for (const raw of input.texts) {
     const text = scanForm(raw);
     for (const match of addressForm(text).matchAll(EMAIL)) {
       const email = compactForm(match[0]);
@@ -209,16 +376,26 @@ export function fingerprintsOf(privateTexts: readonly string[]): PrivateFingerpr
     for (const match of text.matchAll(DIGIT_RUN)) {
       add('number', match[0].length, match[0]);
     }
-    for (const name of namesIn(text)) {
+    for (const date of birthDatesIn(text)) {
+      add('number', date.length, date);
+    }
+    for (const name of namesIn(text).flatMap(nameForms)) {
       const words = wordsOf(name);
       if (compactForm(name).length >= MIN_NAME_CHARS) {
         add('name', words.length, words.join(' '));
         add('name', 1, words.join(''));
       }
     }
-    for (const run of wordRunsCompact(text, COPIED_WORDS)) {
-      if (run.length >= MIN_PHRASE_CHARS) {
-        add('phrase', run.length, run);
+    const runningNames = runningTextNames(text).flatMap(nameForms);
+    for (const detail of [...runningNames, ...streetAddressesIn(text), ...referenceCodesIn(text)]) {
+      const compact = compactForm(detail);
+      add('phrase', compact.length, compact);
+    }
+    if (input.word_runs) {
+      for (const run of wordRunsCompact(text, COPIED_WORDS)) {
+        if (run.length >= MIN_PHRASE_CHARS) {
+          add('phrase', run.length, run);
+        }
       }
     }
   }
@@ -229,9 +406,13 @@ export function fingerprintsOf(privateTexts: readonly string[]): PrivateFingerpr
  * Adds the fingerprints of one more private text to a chat's kept state. Returns false, and keeps nothing more,
  * once the chat is over its cap, so the caller can mark the state lost.
  */
-export function addPrivateFingerprints(input: { state: ChatPrivateFingerprints; text: string }): boolean {
+export function addPrivateFingerprints(input: {
+  state: ChatPrivateFingerprints;
+  text: string;
+  word_runs: boolean;
+}): boolean {
   const merged = new Map(input.state.entries.map(entry => [fingerprintKey(entry), entry]));
-  for (const entry of fingerprintsOf([input.text])) {
+  for (const entry of fingerprintsOf({ texts: [input.text], word_runs: input.word_runs })) {
     merged.set(fingerprintKey(entry), entry);
   }
   if (merged.size > MAX_PRIVATE_FINGERPRINTS) {
@@ -285,7 +466,7 @@ export function fingerprintLeak(input: {
   if (copied('phone', digits)) {
     return 'contact';
   }
-  if (copied('number', digits)) {
+  if (copied('number', digits) || datesIn(text).some(date => copied('number', date))) {
     return 'number';
   }
   // Whole words only: the words are compared as a run of whole words, so `Ann Lee` is not inside `Dann Leeds`.
@@ -323,7 +504,7 @@ export function privateTextLeak(input: {
     mode: input.mode,
     strings: input.strings,
     earlier: input.earlier,
-    entries: fingerprintsOf(input.privateTexts),
+    entries: fingerprintsOf({ texts: input.privateTexts, word_runs: true }),
     has_text: input.privateTexts.length > 0,
   });
 }

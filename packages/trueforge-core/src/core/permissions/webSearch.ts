@@ -27,6 +27,9 @@ export const SEARCH_AFTER_READ_SILENT_REASON = 'mcp_search_after_read_checked';
 /** Reason code for a search that ran without asking under "Allow searches in this chat". */
 export const SEARCH_CHAT_GRANTED_SILENT_REASON = 'mcp_search_chat_granted';
 
+/** Reason code for a search held because it carries a detail from the person's private data, or cannot be checked. */
+export const SEARCH_PRIVATE_DETAIL_REASON = 'mcp_search_private_detail';
+
 /** Reason code for a search held because the chat has read private data. */
 export const SEARCH_AFTER_PRIVATE_READ_REASON = 'mcp_search_after_private_read';
 
@@ -47,6 +50,7 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_unreturned_url',
   'mcp_search_host_limit',
   SEARCH_AFTER_PRIVATE_READ_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
@@ -95,6 +99,8 @@ export interface WebSearchTurnState {
   privateTextsKept: number;
   /** True when the private mark came from saved state or old context, whose text this turn never saw. */
   privateTextLost: boolean;
+  /** True once the host put a private text of its own before the model this turn, such as recalled memory. */
+  privateContextKept: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -114,6 +120,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     privateReadCalls: 0,
     privateTextsKept: 0,
     privateTextLost: false,
+    privateContextKept: false,
     admission: Promise.resolve(),
   };
 }
@@ -310,7 +317,7 @@ export function keepSubAgentAnswerText(input: { state: WebSearchTurnState; text:
 function keepText(input: { state: WebSearchTurnState; text: string }): void {
   const { state, text } = input;
   // Fingerprints are kept even after the turn's own text was lost, since a later turn checks them.
-  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text })) {
+  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: true })) {
     state.fingerprintsLost = true;
   }
   if (state.privateTextLost) {
@@ -356,6 +363,22 @@ function scannableResultText(result: CallToolResult): string | undefined {
     return undefined;
   }
   return resultTexts(result).join('\n');
+}
+
+/**
+ * Keeps the details of a private text the host itself puts before the model: recalled memory, the person's profile,
+ * or the text of a file they attached. It is not a private read, so it never holds a search on its own; a search
+ * that carries one of its names, contacts, numbers or addresses asks first, in this turn and in later turns.
+ */
+export function recordPrivateContextText(input: { state: WebSearchTurnState; text: string }): void {
+  const { state, text } = input;
+  if (text.trim() === '') {
+    return;
+  }
+  state.privateContextKept = true;
+  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: false })) {
+    state.fingerprintsLost = true;
+  }
 }
 
 /**
@@ -416,7 +439,9 @@ export function chatPrivateReadHeld(input: { state: WebSearchTurnState; markedIn
 
 /** Whether this turn holds private-text fingerprints, or a lost one, that the chat's saved record must take in. */
 export function hasPrivateFingerprintsToSave(state: WebSearchTurnState): boolean {
-  return state.privateReadCalls > 0 || state.fingerprintsLost || state.chatFingerprints.secret;
+  return (
+    state.privateReadCalls > 0 || state.privateContextKept || state.fingerprintsLost || state.chatFingerprints.secret
+  );
 }
 
 /** The chat's fingerprints as the next turn of this chat loads them. */
@@ -427,6 +452,19 @@ export function chatFingerprintsAfterTurn(state: WebSearchTurnState): ChatPrivat
     secret: state.chatFingerprints.secret,
     entries: state.chatFingerprints.entries,
   };
+}
+
+/**
+ * Whether every search must be checked against the chat's kept fingerprints: the chat holds some, or lost one.
+ * Only a chat that never saw private text, here or in an earlier turn, skips the check.
+ */
+export function privateDetailCheckNeeded(state: WebSearchTurnState): boolean {
+  return state.chatFingerprints.has_text || state.fingerprintsLost || !state.chatFingerprints.complete;
+}
+
+/** Whether the kept fingerprints cover every private text the chat saw, so a check against them is whole. */
+export function privateDetailCheckable(state: WebSearchTurnState): boolean {
+  return state.chatFingerprints.complete && !state.fingerprintsLost;
 }
 
 /**

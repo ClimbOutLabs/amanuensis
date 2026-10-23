@@ -1,4 +1,5 @@
 import { InstructionBuilder, rootAgentIdentity } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import {
   buildPersonalizationContext,
   isPersonalizationUnchanged,
@@ -55,7 +56,7 @@ describe('personalization context', () => {
     const complete: PersonalizationProfile = { ...profile, digest: personalizationDigest(profile) };
     const context = buildPersonalizationContext(complete);
     const builder = InstructionBuilder.createSystemPrompt('root');
-    const capability = personalizationContextCapability(context);
+    const capability = personalizationContextCapability({ context, webSearch: createWebSearchTurnState() });
     capability.instructionBuilders?.[0]?.(builder);
 
     expect(context.profile_revision).toBe(2);
@@ -80,8 +81,30 @@ describe('personalization context', () => {
     const complete: PersonalizationProfile = { ...profile, digest: personalizationDigest(profile) };
     const context = buildPersonalizationContext(complete);
 
-    expect(personalizationCapabilitiesForTurn(context, false)).toHaveLength(1);
-    expect(personalizationCapabilitiesForTurn(context, true)).toEqual([]);
+    const webSearch = createWebSearchTurnState();
+    expect(personalizationCapabilitiesForTurn({ context, isSubAgent: false, webSearch })).toHaveLength(1);
+    expect(personalizationCapabilitiesForTurn({ context, isSubAgent: true, webSearch })).toEqual([]);
+  });
+
+  it("keeps the profile's details for the search check before each model call", async () => {
+    const named: PersonalizationProfile = { ...profile, user_name: 'Sam Rivera' };
+    const context = buildPersonalizationContext({ ...named, digest: personalizationDigest(named) });
+    const webSearch = createWebSearchTurnState();
+    const capability = personalizationContextCapability({ context, webSearch });
+    expect(webSearch.chatFingerprints.has_text).toBe(false);
+
+    for (const processor of capability.preLLMProcessors ?? []) {
+      for await (const output of processor.processPreLLM({
+        threadId: 'main',
+        context: [],
+        currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
+      })) {
+        void output;
+      }
+    }
+
+    expect(webSearch.chatFingerprints.has_text).toBe(true);
+    expect(webSearch.privateContextKept).toBe(true);
   });
 
   it('renders the learned profile last, with its provenance preamble', () => {

@@ -1,5 +1,5 @@
 import type { OutboundStrings } from '../../../src/core/permissions/outboundGuard';
-import { privateTextLeak } from '../../../src/core/permissions/privateTextCheck';
+import { fingerprintLeak, fingerprintsOf, privateTextLeak } from '../../../src/core/permissions/privateTextCheck';
 
 function outgoing(...values: string[]): OutboundStrings {
   return { values, scalars: [], keys: [], plumbing: [] };
@@ -368,7 +368,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     ).toBeNull();
   });
 
-  it('passes a place named after Directions to: in the body, which is not a header', () => {
+  it('finds a name from the body in a search, but lets a map name that place', () => {
     expect(
       privateTextLeak({
         earlier: '',
@@ -376,7 +376,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
         strings: outgoing('Park Clinic Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
       }),
-    ).toBeNull();
+    ).toBe('phrase');
     expect(
       privateTextLeak({
         earlier: '',
@@ -445,5 +445,63 @@ describe('privateTextLeak keeps public places passing', () => {
     expect(
       privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Harbour Clinic Lisbon'), privateTexts: [MAIL] }),
     ).toBeNull();
+  });
+});
+
+describe('privateTextLeak finds the details a private note gives in running text', () => {
+  const NOTE =
+    'My sister Inês Example lives at 48 Quillon Road. Her order ZX-55821Q ships soon. ' +
+    'She was born on 14 March 1987 and her account is 7731904.';
+
+  it.each([
+    ['a full name', 'Ines Example birthday ideas'],
+    ['a street address with its street word shortened', 'houses near 48 Quillon Rd'],
+    ['an order code', 'track zx55821q'],
+    ['a date of birth written another way', 'people born 1987-03-14'],
+    ['a date of birth written with a month name', 'March 14, 1987 horoscope'],
+    ['an account number', 'account 7731904 balance'],
+  ])('finds %s', (_label, query) => {
+    expect(privateTextLeak({ earlier: '', mode: 'search', strings: outgoing(query), privateTexts: [NOTE] })).not.toBe(
+      null,
+    );
+  });
+
+  it('passes a public search that shares only common words or a single first name with the note', () => {
+    for (const query of ['best road bikes 2026', 'what to buy my sister for her birthday', 'Ines meaning of name']) {
+      expect(
+        privateTextLeak({ earlier: '', mode: 'search', strings: outgoing(query), privateTexts: [NOTE] }),
+      ).toBeNull();
+    }
+  });
+
+  it('does not take a weekday or a greeting before a name as part of it', () => {
+    const greeting = 'Dear Maria Costa, see you Monday Joana Pires.';
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('joana pires'), privateTexts: [greeting] }),
+    ).toBe('phrase');
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('dear maria'), privateTexts: [greeting] }),
+    ).toBeNull();
+  });
+
+  it('lets a map name an address from the note', () => {
+    expect(
+      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('48 Quillon Road'), privateTexts: [NOTE] }),
+    ).toBeNull();
+  });
+});
+
+describe('fingerprintsOf without word runs', () => {
+  it('keeps names and numbers but not ordinary five-word runs', () => {
+    const text = 'Remember that the opening hours of the museum changed. Lunch with Ana Reis on 4417829.';
+    const withRuns = fingerprintsOf({ texts: [text], word_runs: true });
+    const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false });
+    const leak = (entries: typeof withRuns, query: string) =>
+      fingerprintLeak({ mode: 'search', strings: outgoing(query), earlier: '', entries, has_text: true });
+
+    expect(leak(withRuns, 'the opening hours of the louvre')).toBe('phrase');
+    expect(leak(withoutRuns, 'the opening hours of the louvre')).toBeNull();
+    expect(leak(withoutRuns, 'ana reis')).toBe('phrase');
+    expect(leak(withoutRuns, 'ref 4417829')).toBe('number');
   });
 });

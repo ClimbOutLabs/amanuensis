@@ -161,11 +161,14 @@ import {
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateDetailCheckable,
+  privateDetailCheckNeeded,
   privateFingerprintsUsable,
   privateTextForChecks,
   SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_CHAT_GRANTED_SILENT_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1980,6 +1983,25 @@ async function classifySearchProviderTool(input: {
       return heldPrivate();
     }
   }
+  // Recalled memory, the profile, an attached file and earlier turns' reads leave fingerprints too. No grant lifts
+  // this check, and a chat whose fingerprints miss a text asks, since the check cannot vouch for the search.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_unchecked);
+    }
+    const leak = fingerprintLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended
+        ? privateDetailSkipped(leak)
+        : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
+    }
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', HOLD_SAY.search_limit);
   }
@@ -2030,6 +2052,20 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
     reason: 'private_text_check',
     reason_detail: `It would have shared ${leakWords(leak)} from your mail or calendar.`,
     owner_message: PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE,
+    sensitive_read: false,
+  });
+}
+
+/** Said to the owner when a scheduled run's search is skipped because it carried a private detail. */
+const PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE =
+  'One lookup was skipped, because it would have shared something private about you.';
+
+/** A search that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateDetailSkipped(leak: PrivateTextLeak): TierDecision {
+  return autoDenyDecision({
+    reason: 'private_text_check',
+    reason_detail: `It would have shared ${leakWords(leak)} from your private data.`,
+    owner_message: PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE,
     sensitive_read: false,
   });
 }
