@@ -27,16 +27,16 @@ export function DraftComposerActionsMenu({ actions, disabled }: DraftComposerAct
       trigger={
         <button
           type="button"
-          aria-label="Add"
-          title="Add"
+          title="Add files and tools"
           disabled={disabled}
           className={auiButtonClass({
             variant: 'ghost',
-            size: 'icon',
-            className: 'size-8 rounded-full border border-border',
+            size: 'small',
+            className: 'h-8 gap-1 rounded-full border border-border px-2.5 text-[0.8125rem] font-normal',
           })}
         >
           <Icon name="plus" className="size-4" />
+          Add
         </button>
       }
     >

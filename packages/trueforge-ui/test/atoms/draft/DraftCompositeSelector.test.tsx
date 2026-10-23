@@ -191,6 +191,55 @@ describe('DraftCompositeSelector', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: /Slack/ })).not.toBeInTheDocument();
   });
 
+  it('names connectors in plain words and labels its sections in sentence case', async () => {
+    agentSpec = { ...agentSpec, mcpServers: [{ id: 'parallel-web', name: 'parallel-web' }] };
+    renderSelector({
+      getMcp: async () => [
+        { id: 'parallel-web', name: 'parallel-web', authenticated: true },
+        { id: 'github', name: 'github', authenticated: true },
+      ],
+    });
+    openAddOns();
+
+    expect(await screen.findByRole('menuitemcheckbox', { name: /Web search/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: /GitHub/ })).toBeInTheDocument();
+    expect(screen.queryByText('parallel-web')).not.toBeInTheDocument();
+    const selected = screen.getByText(/^Selected \(\d+\)$/);
+    expect(selected).not.toHaveClass('uppercase');
+    expect(screen.getByText(/^Available \(\d+\)$/)).not.toHaveClass('uppercase');
+  });
+
+  it('opens the add-ons picker downward from a composer near the top, inside the screen', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(400, 380, 32, 32));
+    try {
+      renderSelector();
+      openAddOns();
+
+      const picker = await screen.findByRole('dialog', { name: 'Add to composer' });
+      expect(picker.style.position).toBe('fixed');
+      const top = Number.parseFloat(picker.style.top);
+      const height = Number.parseFloat(picker.style.height);
+      expect(top).toBeGreaterThan(380);
+      expect(top + height).toBeLessThanOrEqual(900 - 8);
+      expect(Number.parseFloat(picker.style.left) + Number.parseFloat(picker.style.width)).toBeLessThanOrEqual(
+        1440 - 8,
+      );
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it('shows Add with its words on the plus button, never a bare icon', () => {
+    renderSelector();
+    const add = screen.getByRole('button', { name: 'Add' });
+    expect(add).toHaveTextContent('Add');
+    expect(add).toHaveAttribute('title', 'Add files and tools');
+  });
+
   it('puts attaching and add-ons in one plus menu, with no standalone attach control', () => {
     const onAttach = vi.fn();
     renderSelector({ onAttach });

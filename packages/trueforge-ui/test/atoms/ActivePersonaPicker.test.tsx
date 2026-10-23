@@ -72,7 +72,7 @@ function renderPicker(overrides: Partial<PersonaApi>, personas: Persona[] = [ZAR
 }
 
 async function openMenu() {
-  const trigger = await screen.findByRole('button', { name: 'Choose who answers this chat' });
+  const trigger = await screen.findByTitle('Choose an agent');
   expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
   expect(trigger).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(trigger);
@@ -106,10 +106,10 @@ describe('ActivePersonaPicker', () => {
 
     await openMenu();
 
-    expect(screen.getByRole('menuitem', { name: 'Default assistant' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Aman' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Zara' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Nova' })).toBeInTheDocument();
-    // No active speaker, so nothing is rendered as the chip.
+    // No specialist answers, so the control names the assistant itself.
     expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument();
   });
 
@@ -147,7 +147,7 @@ describe('ActivePersonaPicker', () => {
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Zara');
 
     await openMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Default assistant' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Aman' }));
 
     await waitFor(() => {
       expect(setSessionPersona).toHaveBeenCalledWith('sess-1', null);
