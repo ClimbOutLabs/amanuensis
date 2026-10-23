@@ -258,9 +258,9 @@ describe('ThemeProvider', () => {
         mode: 'light',
         dataPreset: 'midnight',
         tokens: {
-          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-bg': 'oklch(0.824 0.072 245.6)',
           '--primary-button-text': '#1a2332',
-          '--focus-ring': 'oklch(0.503 0.095 84.8)',
+          '--focus-ring': 'oklch(0.466 0.113 250.3)',
         },
       },
       {
@@ -269,9 +269,9 @@ describe('ThemeProvider', () => {
         mode: 'dark',
         tokens: {
           '--primary-bg': '#111a29',
-          '--primary-button-bg': 'oklch(0.809 0.138 85.2)',
+          '--primary-button-bg': 'oklch(0.881 0.054 246.7)',
           '--primary-button-text': '#0d1420',
-          '--focus-ring': 'oklch(0.809 0.138 85.2)',
+          '--focus-ring': 'oklch(0.881 0.054 246.7)',
         },
       },
       {
