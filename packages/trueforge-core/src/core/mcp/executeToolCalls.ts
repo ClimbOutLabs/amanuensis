@@ -968,8 +968,7 @@ export function prepareSideEffectToolCalls({
       toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
-      toolCall.tool_info.effect === 'inspect' ||
-      (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
+      isReadOnlyToolInfo(toolCall.tool_info) ||
       approvalDecisions.get(toolCall.id)?.status === 'deny' ||
       (toolCall.tool_info.is_approval_required === true && approvalDecisions.get(toolCall.id)?.status !== 'allow')
     ) {
@@ -1106,6 +1105,15 @@ export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 240_000;
  * this default.
  */
 export const DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS = 1_260_000;
+
+/**
+ * The side-effect classification: a call that only reads, by the host's inspect classification or
+ * the tool's own read-only annotation. A tool with no annotation, or one classified with any other
+ * effect, counts as changing something.
+ */
+export function isReadOnlyToolInfo(info: Pick<InternalToolCallInfo, 'effect' | 'read_only_hint'>): boolean {
+  return info.effect === 'inspect' || (info.effect === undefined && info.read_only_hint === true);
+}
 
 /**
  * the long provisioning-sized deadline belongs to sandbox/run_code alone. Tool identity
@@ -1589,9 +1597,7 @@ export async function executeToolCalls({
         };
       }
       const shouldMemoize =
-        toolCall.tool_info.effect === 'inspect' ||
-        (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
-        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        isReadOnlyToolInfo(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,

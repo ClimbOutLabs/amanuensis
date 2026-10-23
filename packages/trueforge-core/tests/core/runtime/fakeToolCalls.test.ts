@@ -50,6 +50,7 @@ const CREATE_SCHEMA = {
       properties: { date_time: { type: 'string' }, time_zone: { type: 'string' } },
       required: ['date_time'],
     },
+    notify_guests: { type: 'boolean' },
   },
   required: ['title', 'start'],
 };
@@ -60,7 +61,7 @@ const VALID_CREATE_ARGS = {
   end: { date_time: '2026-10-27T15:00:00', time_zone: 'America/New_York' },
 };
 
-function makeToolSet(approvalRequired = false) {
+function makeToolSet(approvalRequired = false, readOnlyTools: ReadonlySet<string> = new Set()) {
   const toolSet = makeMockIMCPServer({
     name: 'google_calendar',
     preload: true,
@@ -100,6 +101,7 @@ function makeToolSet(approvalRequired = false) {
       mcp_server_name: toolSet.name,
       original_tool_name: params.name,
       is_approval_required: approvalRequired && params.name === 'create_event',
+      ...(readOnlyTools.has(params.name) ? { read_only_hint: true } : {}),
     }),
   );
   jest.mocked(toolSet.callTool).mockImplementation(() => Promise.resolve(toolResultResponse({ text: '{"ok":true}' })));
@@ -207,6 +209,12 @@ function toolResults(thread: AgentThread): { tool_call_id: string; content: stri
       (message): message is { role: 'tool'; tool_call_id: string; content: string } =>
         'role' in message && message.role === 'tool',
     );
+}
+
+/** The error text a refused call's result carries, read out of its JSON envelope. */
+function refusalError(content: string | undefined): unknown {
+  const parsed: unknown = JSON.parse(content ?? '{}');
+  return isRecord(parsed) && isRecord(parsed['result']) ? parsed['result']['error'] : undefined;
 }
 
 function lastAssistant(thread: AgentThread) {
@@ -338,11 +346,64 @@ describe('argument checking', () => {
     const refused = results.find(
       result => result.tool_call_id.endsWith('fetch-1') || result.content.includes('full_content'),
     );
-    expect(refused?.content).toContain('full_content should be true or false');
+    expect(refusalError(refused?.content)).toContain(
+      'full_content must be true or false, for example "full_content": true, or leave it out',
+    );
     expect(refused?.content).toContain('was not sent');
     // Nothing the person sees carries a provider's raw validation text.
     expect(JSON.stringify(events)).not.toContain('invalid_type');
     expect(JSON.stringify(events)).not.toContain('anyOf');
+  });
+
+  it('runs a read-only web_fetch once with an unusable full_content left out', async () => {
+    const toolSet = makeToolSet(false, new Set(['web_fetch']));
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [
+            {
+              id: 'fetch-1',
+              name: 'web_fetch',
+              args: { urls: ['https://example.com'], full_content: '> ' },
+            },
+          ],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['web_fetch']);
+    const sent = jest.mocked(toolSet.callTool).mock.calls[0]?.[0];
+    expect(sent?.arguments).toEqual({ urls: ['https://example.com'] });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('still refuses a tool that changes something when its optional true-or-false value is unusable', async () => {
+    const toolSet = makeToolSet(false, new Set(['web_fetch']));
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [{ id: 'create-1', name: 'create_event', args: { ...VALID_CREATE_ARGS, notify_guests: '> ' } }],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    const results = toolResults(thread);
+    expect(results).toHaveLength(1);
+    expect(refusalError(results[0]?.content)).toContain(
+      'notify_guests must be true or false, for example "notify_guests": true, or leave it out',
+    );
   });
 
   it('runs a call whose arguments streamed as empty text when the tool needs none', async () => {
@@ -376,7 +437,7 @@ describe('argument checking', () => {
     expect(toolSet.callTool).not.toHaveBeenCalled();
     const results = toolResults(thread);
     expect(results).toHaveLength(1);
-    expect(results[0]?.content).toContain('urls should be a list (this one is required)');
+    expect(results[0]?.content).toContain('urls must be a list (this one is required)');
     expect(results[0]?.content).not.toContain('not complete');
   });
 

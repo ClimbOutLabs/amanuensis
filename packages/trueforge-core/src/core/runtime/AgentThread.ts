@@ -63,6 +63,7 @@ import {
   type LLMUserMessage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
+  type RawToolCall,
   type RegisteredCommandExecution,
   type ThinkingBlock,
 } from '../llm/LLMTypes';
@@ -93,6 +94,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  isReadOnlyToolInfo,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   NO_PROGRESS_NUDGE_AT,
@@ -135,6 +137,7 @@ import {
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { keepSubAgentAnswerText } from '../permissions/webSearch';
+import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -230,6 +233,8 @@ import {
   type ClosableToolOutcome,
 } from './OpenToolCallCloser';
 import {
+  BLOCKED_CALLS_PARENT_MESSAGE,
+  blockedCallsStopMessage,
   claimsUnbackedAction,
   REPEATED_ACTION_RESULT,
   TOOL_MARKUP_RETRY_MESSAGE,
@@ -1362,6 +1367,36 @@ export async function classifyUnstampedToolCall(input: {
   return { ...info, ...stampSentinelDecision({ decision }) };
 }
 
+/**
+ * The called tools that change nothing, by the same side-effect classification dispatch uses.
+ * Read from each tool's own metadata before its arguments are trusted; a tool whose metadata
+ * cannot be read counts as one that changes something.
+ */
+async function readOnlyToolNames({
+  calls,
+  toolMapping,
+}: {
+  calls: readonly RawToolCall[];
+  toolMapping: Map<string, MappedMCPTool>;
+}): Promise<Set<string>> {
+  const readOnly = new Set<string>();
+  for (const name of new Set(calls.map(call => call.function.name))) {
+    const toolInfo = toolMapping.get(name);
+    if (toolInfo === undefined) {
+      continue;
+    }
+    const info = await resolveToolCallInfo({
+      toolInfo,
+      params: { name: toolInfo.originalToolName },
+      resolveUnderlyingTool: false,
+    });
+    if (isReadOnlyToolInfo(info)) {
+      readOnly.add(name);
+    }
+  }
+  return readOnly;
+}
+
 async function enrichAssistantMessage({
   assistantMessage,
   toolMapping,
@@ -2425,9 +2460,14 @@ export class AgentThread {
   private *recoverFromLoopOrExit(input: {
     recoveryNote: string;
     errorMessage: string;
+    /** What the parent model reads when a helper stops this way; undefined sends it errorMessage. */
+    parentErrorMessage: string | undefined;
   }): Generator<AgentThreadEvent, StepOutcome, unknown> {
     if (this.loopRecoveryAttemptedThisTurn) {
-      yield this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      const done = this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      yield input.parentErrorMessage === undefined || done.send_to_parent === undefined
+        ? done
+        : { ...done, send_to_parent: { ...done.send_to_parent, content: input.parentErrorMessage } };
       return 'exit';
     }
     this.loopRecoveryAttemptedThisTurn = true;
@@ -3523,6 +3563,7 @@ export class AgentThread {
       // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
+      readOnlyTools: await readOnlyToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
@@ -4744,6 +4785,7 @@ export class AgentThread {
           "Your tool calls keep being blocked by this conversation's tool policy: the tools are not allowed here, and retrying them or trying variants cannot succeed. Write your final answer now: tell the user in plain language what you tried to do, what is not permitted in this conversation, what you were able to accomplish, and ask how they would like to proceed. Do not make any more tool calls — just answer.",
         errorMessage:
           'The model made three tool calls blocked by the conversation tool policy in this turn, ignoring the earlier host note about it, so the turn was stopped. Policy-blocked calls cannot succeed by retrying; the model must use allowed tools or explain the limitation to the user.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveEmptyInspectionBatches >= EMPTY_INSPECTION_STOP_AT) {
@@ -4752,14 +4794,15 @@ export class AgentThread {
           'Your inspections keep returning no matches. Write your final answer now based on what you have found so far, stating clearly what was not found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive inspections that returned no matches, ignoring the earlier host note about it, so the turn was stopped. Do not keep rephrasing the same search; use the evidence already collected or change strategy.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveNoProgressBatches >= NO_PROGRESS_STOP_AT) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote:
           'Your tool calls keep getting blocked before they run. Write your final answer now: explain what you tried, what blocked it, and what you know so far. Do not make any more tool calls — just answer.',
-        errorMessage:
-          'The model made five consecutive tool calls that were blocked before they ran, ignoring the earlier host note about it, so the turn was stopped. Retrying differently-shaped arguments will not help; read the actual blocking error, fix its root cause, or ask the user.',
+        errorMessage: blockedCallsStopMessage(assistantDisplayName(this.definition.identity?.assistantName)),
+        parentErrorMessage: BLOCKED_CALLS_PARENT_MESSAGE,
       });
     }
     if (nextToolCallMemo.consecutiveFailedBatches >= FAILED_BATCH_STOP_AT) {
@@ -4768,6 +4811,7 @@ export class AgentThread {
           'Your tool calls keep failing. Write your final answer now: report what you tried, what failed, and what you have learned so far. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive tool calls that all failed, ignoring the earlier host note about it, so the turn was stopped. Trying another variant will not help; the tool or environment is not working. Report what failed and what is already known.',
+        parentErrorMessage: undefined,
       });
     }
     // Hard cap, one stage past the INSPECTION_WARNING_LIMIT nudge above: that nudge fires once
@@ -4781,6 +4825,7 @@ export class AgentThread {
           'You have made many inspections without making progress. Write your final answer now summarizing what you found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
+        parentErrorMessage: undefined,
       });
     }
     for (const name of unavailableToolNames) {
@@ -4796,6 +4841,7 @@ export class AgentThread {
         recoveryNote:
           'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
         errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4803,6 +4849,7 @@ export class AgentThread {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
         errorMessage: `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4842,6 +4889,7 @@ export class AgentThread {
           repeatedVerification,
           repeatedGithubFileRead,
         }),
+        parentErrorMessage: undefined,
       });
     }
     if (authRequirementInfo.length > 0) {
