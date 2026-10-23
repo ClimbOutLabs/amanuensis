@@ -652,6 +652,8 @@ journey(
     configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS = 200;
     try {
       const repliesBefore = await assistantReplies(page).getByText(FINAL_TEXT).count();
+      const linesBefore = shorteningLines(await chatText(page));
+      const callsBefore = api.model.calls().length;
       api.model.setPacing(SLOW);
       await send(page, 'Details: tell me about Lantern Row');
       const details = assistantReplies(page).last().getByTestId('assistant-message-agent-internals');
@@ -660,9 +662,14 @@ journey(
       let shorteningSeen = false;
       let shortening = false;
       await until('the reply finishing with details on', REPLY_LIMIT_MS * 2, async () => {
-        shortening = shortening || api.model.calls().some(call => isShorteningCall(call) && call.outcome() === 'open');
-        if (shortening && !shorteningSeen) {
-          shorteningSeen = /\b(shorten|compact|summari[sz]|making room)/i.test(await chatText(page));
+        // Only while this reply's shortening is still running, and only a line that was not there before.
+        const shorteningNow = api.model
+          .calls()
+          .slice(callsBefore)
+          .some(call => isShorteningCall(call) && call.outcome() === 'open');
+        shortening = shortening || shorteningNow;
+        if (shorteningNow && !shorteningSeen) {
+          shorteningSeen = shorteningLines(await chatText(page)).some(line => !linesBefore.includes(line));
         }
         const replyDone = (await assistantReplies(page).getByText(FINAL_TEXT).count()) > repliesBefore;
         if (!replyDone) {
@@ -712,6 +719,13 @@ journey(
     await waitForIdle(second, 'the second window', UI_LIMIT_MS);
   },
 );
+
+/** Each stretch of chat text saying the history is being shortened now, not that it was. */
+function shorteningLines(text: string): string[] {
+  return [...text.matchAll(/[^.\n]*\b(shortening|compacting|summari[sz]ing|making room)\b[^.\n]*/gi)].map(match =>
+    match[0].trim(),
+  );
+}
 
 /** The model call that summarizes older history: it carries the transcript and offers no tools. */
 function isShorteningCall(call: ModelCall): boolean {
