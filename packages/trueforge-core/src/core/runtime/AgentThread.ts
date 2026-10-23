@@ -3003,6 +3003,8 @@ export class AgentThread {
         );
 
         let terminalDocumentProgress: DocumentFileProgress | undefined;
+        // What extraction returns, after its page limits: only it says whether pages were left unread.
+        let returnedIssue: string | null | undefined;
         try {
           const extraction = await extractDocumentsFromSandbox(
             this.sandbox,
@@ -3016,6 +3018,7 @@ export class AgentThread {
             budget,
           );
           const document = extraction.documents[0];
+          returnedIssue = document?.issue;
           if (terminalDocumentProgress === undefined && document !== undefined) {
             // Defensive: onFileProgress above should always have fired for the one file requested.
             terminalDocumentProgress = {
@@ -3096,7 +3099,11 @@ export class AgentThread {
               source: 'attachment',
             });
           }
-          keptFiles.add(file.path);
+          // A file read only in part (a page limit, a page with no text) is not covered: the model can still read
+          // the rest, and nothing here would see it.
+          if (returnedIssue === null) {
+            keptFiles.add(file.path);
+          }
           extractedTextParts.push(ingested);
         } else {
           const issue = document.issue ?? 'Extraction produced no text';

@@ -12,6 +12,7 @@ import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../src/core/mcp/ToolSet';
 import { createSentinelHostContext, defaultSentinelServices } from '../../src/core/permissions';
 import type { AuditRecordInput } from '../../src/core/permissions/audit';
+import type { Sandbox } from '../../src/core/sandbox/Sandbox';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 export const OWNER = { subject_id: 'user-1', subject_type: 'user' as const, subject_display_name: 'user-1' };
@@ -76,6 +77,8 @@ export async function setupSearchChat(
     search_without_asking?: boolean;
     /** The model's reasoning effort, sent with every model call. */
     reasoning_effort?: string;
+    /** A sandbox for the chat, so files the person attaches are staged and read as they are in the app. */
+    sandbox?: Sandbox;
   } = {},
 ) {
   // Each test is its own chat: the record of unsaved turns lives for the whole process.
@@ -124,7 +127,9 @@ export async function setupSearchChat(
   const modelClient = makeMockILLM({ create });
   // Each turn gets its own resolver, and so its own search state, as the server builds them.
   const resolverForTurn = (): ITurnResourceResolver => {
-    const base = makeTestResolver({ modelClient });
+    const base = makeTestResolver(
+      options.sandbox === undefined ? { modelClient } : { modelClient, sandbox: options.sandbox },
+    );
     return {
       get logger() {
         return base.logger;
@@ -177,11 +182,12 @@ export async function setupSearchChat(
     created_by_subject: OWNER,
     agent: {
       type: 'inline',
-      spec: makeAgentSpec(
-        options.reasoning_effort === undefined
+      spec: makeAgentSpec({
+        ...(options.reasoning_effort === undefined
           ? {}
-          : { model: { name: 'test-provider/test-model', params: { reasoning_effort: options.reasoning_effort } } },
-      ),
+          : { model: { name: 'test-provider/test-model', params: { reasoning_effort: options.reasoning_effort } } }),
+        ...(options.sandbox === undefined ? {} : { config: { sandbox: { enabled: true } } }),
+      }),
     },
     external_id: null,
     source: null,

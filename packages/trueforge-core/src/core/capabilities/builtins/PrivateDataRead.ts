@@ -45,18 +45,27 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
   );
 }
 
-/** How many files the person attached across the conversation, by the notes that announce them. */
+/**
+ * How many files the person attached across the conversation. Each message counts the larger of the files its note
+ * announces and the pictures it carries: a picture sent straight to the model, with no sandbox, has no note, and a
+ * picture that was also staged appears in both, so it is counted once.
+ */
 function attachedFilesInContext(context: AgentThreadExecutionContext['context']): number {
   let count = 0;
   for (const message of context) {
     if (!isLLMContextMessage(message) || message.role !== 'user' || typeof message.content === 'string') {
       continue;
     }
+    let announced = 0;
+    let pictures = 0;
     for (const part of message.content) {
       if (part.type === 'text') {
-        count += uploadedFilesCount(part.text);
+        announced += uploadedFilesCount(part.text);
+      } else if (part.type === 'image_url') {
+        pictures += 1;
       }
     }
+    count += Math.max(announced, pictures);
   }
   return count;
 }
