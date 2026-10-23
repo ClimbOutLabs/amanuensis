@@ -97,7 +97,7 @@ async function seedProfile(params: {
 }
 
 describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
-  it('does not resolve until memory retain, profile learning, and artifact persistence all finish', async () => {
+  it('does not resolve until artifact persistence, memory retain, and profile learning all finish', async () => {
     const retainGate = Promise.withResolvers<void>();
     const profileGate = Promise.withResolvers<void>();
     const artifactsGate = Promise.withResolvers<void>();
@@ -199,7 +199,14 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         drainSettled = true;
       });
 
-      // The drain reaches the retain submission and waits on its gate.
+      // Artifact persistence runs first, ahead of any model call, and the drain waits on it.
+      await waitFor(() => sessionsGet.mock.calls.length > 0);
+      await tick();
+      expect(retain).not.toHaveBeenCalled();
+      expect(drainSettled).toBe(false);
+
+      // Releasing artifact persistence lets the retain start; the drain still waits.
+      artifactsGate.resolve();
       await waitFor(() => retain.mock.calls.length > 0);
       await tick();
       expect(drainSettled).toBe(false);
@@ -210,14 +217,8 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       await tick();
       expect(drainSettled).toBe(false);
 
-      // Releasing profile learning lets artifact persistence start; the drain still waits.
+      // Releasing profile learning lets the drain finish and unregister.
       profileGate.resolve();
-      await waitFor(() => sessionsGet.mock.calls.length > 0);
-      await tick();
-      expect(drainSettled).toBe(false);
-
-      // Releasing artifact persistence lets the drain finish and unregister.
-      artifactsGate.resolve();
       await drainPromise;
       expect(drainSettled).toBe(true);
       expect(turnDrains.size).toBe(0);

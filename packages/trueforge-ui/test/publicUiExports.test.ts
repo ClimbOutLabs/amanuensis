@@ -204,8 +204,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'PermissionApprovalCard',
   'Toast',
   'ToastStack',
-  'ToolApprovalBar',
-  'ToolApprovalContainer',
   'ToolCallCard',
   'ToolCallContainer',
   'ToolCallContentBlock',
