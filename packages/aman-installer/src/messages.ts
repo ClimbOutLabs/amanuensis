@@ -21,6 +21,7 @@ export const HELP_LINES: readonly string[] = [
   'Aman installer. It sets up Aman on this computer and checks that things work.',
   'Run aman --version to see which version this is.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
+  'Run aman status to see what is installed and whether it is running.',
 ];
 
 export const DOCKER_NOT_INSTALLED: Record<SystemKind, Problem> = {
@@ -136,6 +137,54 @@ export function memoryReadyLine(sizeText: string): string {
 
 export const ALL_READY_LINE = 'Docker is ready for Aman on this computer.';
 
+export const NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman on this computer, then run aman status again.',
+};
+
+export const STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run the installer again from the folder Aman was installed from, then run aman status again.',
+};
+
+export const STATE_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: 'Wait for it to finish, then run aman status again.',
+};
+
+export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
+  windows: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Open Docker Desktop from the Start menu, then run aman status again.',
+  },
+  darwin: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Open Docker Desktop from Launchpad, then run aman status again.',
+  },
+  linux: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Start Docker Engine on this computer, then run aman status again.',
+  },
+};
+
+export function statusInstalledLine(version: string): string {
+  return `Aman is installed, version ${version}.`;
+}
+
+export type InstanceState = 'running' | 'partly running' | 'stopped' | 'unknown';
+
+export function statusInstanceLine(name: string, state: InstanceState, address: string | null): string {
+  if (state === 'unknown') {
+    return `Instance ${name}: whether it is running is unknown.`;
+  }
+  if (address === null) {
+    return `Instance ${name} is ${state}.`;
+  }
+  return `Instance ${name} is ${state} at ${address}.`;
+}
+
+export const NO_INSTANCES_LINE = 'No instance has been made yet.';
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -146,6 +195,7 @@ export function allMessageLines(): string[] {
     lines.push(problemText(COMPOSE_MISSING[kind]));
     lines.push(problemText(LOW_MEMORY[kind]));
     lines.push(problemText(MEMORY_NOT_REPORTED[kind]));
+    lines.push(problemText(DOCKER_NOT_ANSWERING[kind]));
   }
   lines.push(problemText(ENGINE_VERSION_MISSING));
   lines.push(problemText(unknownCommandProblem('example')));
@@ -155,5 +205,14 @@ export function allMessageLines(): string[] {
   lines.push(composeReadyLine('0.0.0'));
   lines.push(memoryReadyLine('0 GB'));
   lines.push(ALL_READY_LINE);
+  lines.push(problemText(NOT_INSTALLED));
+  lines.push(problemText(STATE_UNREADABLE));
+  lines.push(problemText(STATE_BUSY));
+  lines.push(statusInstalledLine('aman-app:0'));
+  lines.push(statusInstanceLine('main', 'running', 'http://127.0.0.1:8791'));
+  lines.push(statusInstanceLine('main', 'partly running', 'http://127.0.0.1:8791'));
+  lines.push(statusInstanceLine('main', 'stopped', null));
+  lines.push(statusInstanceLine('main', 'unknown', null));
+  lines.push(NO_INSTANCES_LINE);
   return lines;
 }

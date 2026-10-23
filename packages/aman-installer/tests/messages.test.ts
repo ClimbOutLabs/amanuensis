@@ -4,11 +4,15 @@ import { test } from 'node:test';
 
 import {
   COMPOSE_MISSING,
+  DOCKER_NOT_ANSWERING,
   DOCKER_NOT_INSTALLED,
   DOCKER_NOT_RUNNING,
   ENGINE_VERSION_MISSING,
   LOW_MEMORY,
   MEMORY_NOT_REPORTED,
+  NOT_INSTALLED,
+  STATE_BUSY,
+  STATE_UNREADABLE,
   UNKNOWN_DOCTOR_CHECK,
   allMessageLines,
   problemText,
@@ -41,8 +45,22 @@ function sentenceCount(text: string): number {
 }
 
 function allProblems(): Problem[] {
-  const problems: Problem[] = [ENGINE_VERSION_MISSING, UNKNOWN_DOCTOR_CHECK, unknownCommandProblem('example')];
-  for (const record of [DOCKER_NOT_INSTALLED, DOCKER_NOT_RUNNING, COMPOSE_MISSING, LOW_MEMORY, MEMORY_NOT_REPORTED]) {
+  const problems: Problem[] = [
+    ENGINE_VERSION_MISSING,
+    UNKNOWN_DOCTOR_CHECK,
+    unknownCommandProblem('example'),
+    NOT_INSTALLED,
+    STATE_UNREADABLE,
+    STATE_BUSY,
+  ];
+  for (const record of [
+    DOCKER_NOT_INSTALLED,
+    DOCKER_NOT_RUNNING,
+    COMPOSE_MISSING,
+    LOW_MEMORY,
+    MEMORY_NOT_REPORTED,
+    DOCKER_NOT_ANSWERING,
+  ]) {
     problems.push(record.windows, record.darwin, record.linux);
   }
   return problems;

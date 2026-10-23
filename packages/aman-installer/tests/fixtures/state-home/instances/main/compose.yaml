@@ -1,0 +1,4 @@
+name: aman-main
+services:
+  app:
+    image: aman-app:abc123def456
