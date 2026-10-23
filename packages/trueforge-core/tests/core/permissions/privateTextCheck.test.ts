@@ -368,7 +368,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     ).toBeNull();
   });
 
-  it('finds a name from the body in a search, but lets a map name that place', () => {
+  it('finds a name from the body in a search and in a map', () => {
     expect(
       privateTextLeak({
         earlier: '',
@@ -376,7 +376,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
         strings: outgoing('Park Clinic Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
       }),
-    ).toBe('phrase');
+    ).toBe('name');
     expect(
       privateTextLeak({
         earlier: '',
@@ -384,7 +384,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
         strings: outgoing('Park Clinic, Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
       }),
-    ).toBeNull();
+    ).toBe('name');
   });
 });
 
@@ -478,7 +478,7 @@ describe('privateTextLeak finds the details a private note gives in running text
     const greeting = 'Dear Maria Costa, see you Monday Joana Pires.';
     expect(
       privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('joana pires'), privateTexts: [greeting] }),
-    ).toBe('phrase');
+    ).toBe('name');
     expect(
       privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('dear maria'), privateTexts: [greeting] }),
     ).toBeNull();
@@ -497,11 +497,61 @@ describe('fingerprintsOf without word runs', () => {
     const withRuns = fingerprintsOf({ texts: [text], word_runs: true });
     const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false });
     const leak = (entries: typeof withRuns, query: string) =>
-      fingerprintLeak({ mode: 'search', strings: outgoing(query), earlier: '', entries, has_text: true });
+      fingerprintLeak({
+        mode: 'search',
+        strings: outgoing(query),
+        earlier: '',
+        entries,
+        has_text: true,
+        encoded_runs: false,
+      });
 
     expect(leak(withRuns, 'the opening hours of the louvre')).toBe('phrase');
     expect(leak(withoutRuns, 'the opening hours of the louvre')).toBeNull();
-    expect(leak(withoutRuns, 'ana reis')).toBe('phrase');
+    expect(leak(withoutRuns, 'ana reis')).toBe('name');
     expect(leak(withoutRuns, 'ref 4417829')).toBe('number');
+  });
+});
+
+describe('fingerprintLeak for the check every search gets', () => {
+  const memoryOnly = (text: string) => fingerprintsOf({ texts: [text], word_runs: false });
+  const leak = (input: { entries: ReturnType<typeof fingerprintsOf>; query: string; earlier?: string }) =>
+    fingerprintLeak({
+      mode: 'search',
+      strings: outgoing(input.query),
+      earlier: input.earlier ?? '',
+      entries: input.entries,
+      has_text: true,
+      encoded_runs: false,
+    });
+
+  it('leaves links and provider fields to the outbound guard, so a name-only profile does not hold them', () => {
+    const profile = memoryOnly('<user-name>Teodoro Brambleworth</user-name>');
+    expect(leak({ entries: profile, query: 'https://docs.python.org/3/library/asyncio.html' })).toBeNull();
+    expect(leak({ entries: profile, query: 'https://www.nytimes.com/2024/10/23/technology/ai-chips.html' })).toBeNull();
+    expect(
+      leak({
+        entries: profile,
+        query: 'weather in Lisbon',
+        earlier: 'latest chip news search_depth advanced topic news max_results 5',
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['Al Green is coming to dinner.', 'royal greenwich observatory'],
+    ['Book 2 dr appointments next week.', 'buy 2 dresses online'],
+    ['Set up a 3 way call with the bank.', '3 way switch wiring'],
+    ['Flying to New York in May.', 'renew yorkshire passport'],
+  ])('matches only whole words: %s does not hold %s', (memory, query) => {
+    expect(leak({ entries: memoryOnly(memory), query })).toBeNull();
+  });
+
+  it('still holds the whole name, an address and a profile name in any case', () => {
+    expect(leak({ entries: memoryOnly('Al Green is coming to dinner.'), query: 'al green tour dates' })).toBe('name');
+    expect(leak({ entries: memoryOnly('She lives at 48 Harrowgate Road.'), query: '48 harrowgate rd' })).toBe('phrase');
+    expect(leak({ entries: memoryOnly('<user-name>sam rivera</user-name>'), query: 'Sam Rivera linkedin' })).toBe(
+      'name',
+    );
   });
 });

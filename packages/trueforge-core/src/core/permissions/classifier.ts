@@ -1959,6 +1959,7 @@ async function classifySearchProviderTool(input: {
       earlier: ctx.web_search.sentText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: true,
     });
     if (leak !== null) {
       return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
@@ -1995,10 +1996,11 @@ async function classifySearchProviderTool(input: {
       earlier: ctx.web_search.sentText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
     });
     if (leak !== null) {
       return ctx.services.unattended
-        ? privateDetailSkipped(leak)
+        ? privateDetailSkipped()
         : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
     }
   }
@@ -2061,10 +2063,10 @@ const PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE =
   'One lookup was skipped, because it would have shared something private about you.';
 
 /** A search that is skipped rather than asked, for a scheduled run with nobody to answer. */
-function privateDetailSkipped(leak: PrivateTextLeak): TierDecision {
+function privateDetailSkipped(): TierDecision {
   return autoDenyDecision({
     reason: 'private_text_check',
-    reason_detail: `It would have shared ${leakWords(leak)} from your private data.`,
+    reason_detail: 'It would have shared a private detail about you.',
     owner_message: PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE,
     sensitive_read: false,
   });

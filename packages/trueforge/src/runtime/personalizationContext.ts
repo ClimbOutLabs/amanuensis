@@ -12,6 +12,7 @@ export function personalizationContextCapability(input: {
   webSearch: WebSearchTurnState;
 }): AgentCapability {
   const { context, webSearch } = input;
+  let recorded = false;
   return {
     instructionBuilders: [
       builder => {
@@ -20,10 +21,13 @@ export function personalizationContextCapability(input: {
     ],
     preLLMProcessors: [
       {
-        // Kept before each model call, after the turn has loaded the chat's saved fingerprints.
+        // Kept at the turn's first model call, after the turn has loaded the chat's saved fingerprints.
         // eslint-disable-next-line @typescript-eslint/require-await -- records only; it adds nothing to the context
         processPreLLM: async function* () {
-          recordPrivateContextText({ state: webSearch, text: context.injected_context });
+          if (!recorded) {
+            recorded = true;
+            recordPrivateContextText({ state: webSearch, text: context.injected_context, once_only: false });
+          }
           yield* [];
         },
       },

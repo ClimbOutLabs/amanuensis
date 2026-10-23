@@ -101,6 +101,11 @@ export interface WebSearchTurnState {
   privateTextLost: boolean;
   /** True once the host put a private text of its own before the model this turn, such as recalled memory. */
   privateContextKept: boolean;
+  /**
+   * True once such a text was one the host does not put before the model again on later turns, such as an
+   * attached file's text. The profile and recalled memory are put there each turn, so they are not counted.
+   */
+  onceOnlyContextKept: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -121,6 +126,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     privateTextsKept: 0,
     privateTextLost: false,
     privateContextKept: false,
+    onceOnlyContextKept: false,
     admission: Promise.resolve(),
   };
 }
@@ -370,12 +376,20 @@ function scannableResultText(result: CallToolResult): string | undefined {
  * or the text of a file they attached. It is not a private read, so it never holds a search on its own; a search
  * that carries one of its names, contacts, numbers or addresses asks first, in this turn and in later turns.
  */
-export function recordPrivateContextText(input: { state: WebSearchTurnState; text: string }): void {
+export function recordPrivateContextText(input: {
+  state: WebSearchTurnState;
+  text: string;
+  /** False for a text the host puts before the model again each turn, such as the profile or recalled memory. */
+  once_only: boolean;
+}): void {
   const { state, text } = input;
   if (text.trim() === '') {
     return;
   }
   state.privateContextKept = true;
+  if (input.once_only) {
+    state.onceOnlyContextKept = true;
+  }
   if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: false })) {
     state.fingerprintsLost = true;
   }
@@ -441,6 +455,16 @@ export function chatPrivateReadHeld(input: { state: WebSearchTurnState; markedIn
 export function hasPrivateFingerprintsToSave(state: WebSearchTurnState): boolean {
   return (
     state.privateReadCalls > 0 || state.privateContextKept || state.fingerprintsLost || state.chatFingerprints.secret
+  );
+}
+
+/**
+ * Whether a later turn that starts before this one saves would miss fingerprints it cannot get back. The profile and
+ * recalled memory are put before the model again each turn, so they alone never make a later turn distrust the record.
+ */
+export function hasUnrepeatedPrivateFingerprints(state: WebSearchTurnState): boolean {
+  return (
+    state.privateReadCalls > 0 || state.onceOnlyContextKept || state.fingerprintsLost || state.chatFingerprints.secret
   );
 }
 

@@ -1628,7 +1628,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
     if (this.webSearch !== undefined) {
-      recordPrivateContextText({ state: this.webSearch, text: formatted.block });
+      recordPrivateContextText({ state: this.webSearch, text: formatted.block, once_only: false });
     }
     // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.

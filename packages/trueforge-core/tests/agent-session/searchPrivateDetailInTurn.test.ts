@@ -5,12 +5,16 @@
  */
 import { EventType } from '../../src/agent-session/schemas/events';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
+import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
 import {
+  markPrivateDataRead,
   recordPrivateContextText,
+  recordPrivateReadText,
   recordPrivateToolResult,
   type WebSearchTurnState,
 } from '../../src/core/permissions/webSearch';
-import { searchStream, setupSearchChat, textStream } from './searchTurnHarness';
+import { drain, searchStream, setupSearchChat, textStream } from './searchTurnHarness';
+import { mintTestTurnId } from './testHelpers';
 
 /** Invented details only. */
 const MEMORY =
@@ -35,12 +39,15 @@ interface Source {
   query: string;
   /** The person's own message. */
   message: string;
+  /** Why the card asks when searches run without asking: a read chat's own check, or the private-detail check. */
+  say: string;
 }
 
+/** Text the host puts before the model each turn (memory, profile), or once (an attached file's text). */
 const context =
-  (text: string) =>
+  (text: string, once_only: boolean) =>
   (state: WebSearchTurnState): void => {
-    recordPrivateContextText({ state, text });
+    recordPrivateContextText({ state, text, once_only });
   };
 const read =
   (tool_name: string, text: string) =>
@@ -49,17 +56,54 @@ const read =
   };
 
 const SOURCES: Source[] = [
-  { name: 'memory', record: context(MEMORY), query: '48 Harrowgate Rd house prices', message: 'What is near there?' },
-  { name: 'profile', record: context(PROFILE), query: 'Teodoro Brambleworth nurse', message: 'Find me online' },
-  { name: 'calendar', record: read('list_events', CALENDAR), query: 'Rafe Ollerenshaw reviews', message: 'Who is he?' },
-  { name: 'mail', record: read('read_email', MAIL), query: 'track order KQ-80442', message: 'Where is my parcel?' },
-  { name: 'notes', record: read('get_space', NOTES), query: 'who owns 07700 900461', message: 'Whose number is it?' },
-  { name: 'attachment', record: context(ATTACHMENT), query: 'Casimir Pendlebury lease', message: 'Check the tenant' },
+  {
+    name: 'memory',
+    record: context(MEMORY, false),
+    query: '48 Harrowgate Rd house prices',
+    message: 'What is near there?',
+    say: HOLD_SAY.private_detail,
+  },
+  {
+    name: 'profile',
+    record: context(PROFILE, false),
+    query: 'Teodoro Brambleworth nurse',
+    message: 'Find me online',
+    say: HOLD_SAY.private_detail,
+  },
+  {
+    name: 'calendar',
+    record: read('list_events', CALENDAR),
+    query: 'Rafe Ollerenshaw reviews',
+    message: 'Who is he?',
+    say: HOLD_SAY.private_read,
+  },
+  {
+    name: 'mail',
+    record: read('read_email', MAIL),
+    query: 'track order KQ-80442',
+    message: 'Where is my parcel?',
+    say: HOLD_SAY.private_read,
+  },
+  {
+    name: 'notes',
+    record: read('get_space', NOTES),
+    query: 'who owns 07700 900461',
+    message: 'Whose number is it?',
+    say: HOLD_SAY.private_read,
+  },
+  {
+    name: 'attachment',
+    record: context(ATTACHMENT, true),
+    query: 'Casimir Pendlebury lease',
+    message: 'Check the tenant',
+    say: HOLD_SAY.private_detail,
+  },
   {
     name: 'a name from the message that memory holds',
-    record: context(MEMORY),
+    record: context(MEMORY, false),
     query: 'Ines Quillfeather new job',
     message: 'Look up Inês Quillfeather for me',
+    say: HOLD_SAY.private_detail,
   },
 ];
 
@@ -89,6 +133,9 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
         expect(JSON.stringify(state)).toContain(source.query);
         expect(callTool).not.toHaveBeenCalled();
         expect(create).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort }));
+        // The card's sentence names why it asks: the setting when it is off, else the private check that caught it.
+        const say = search_without_asking ? source.say : HOLD_SAY.search_setting;
+        expect(JSON.stringify(state)).toContain(say);
       },
     );
   });
@@ -97,8 +144,8 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
     const { run, resolverForTurn, create, callTool, audit } = await setupSearchChat({ reasoning_effort });
     const resolver = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY });
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY, once_only: false });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, once_only: false });
       return yield* searchStream({ id: 'call-1', query: 'opening hours of the Lisbon Oceanarium' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -110,6 +157,21 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
       expect.objectContaining({ tier: 1, description: 'Searched: opening hours of the Lisbon Oceanarium' }),
     );
   });
+
+  it('runs a second public search in the same reply without asking, after the first one was sent', async () => {
+    const { run, resolverForTurn, create, callTool } = await setupSearchChat({ reasoning_effort });
+    const resolver = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, once_only: false });
+      return yield* searchStream({ id: 'call-1', query: 'asyncio event loop tutorial python 3.13 advanced news' });
+    });
+    create.mockImplementationOnce(() => searchStream({ id: 'call-2', query: 'weather in Lisbon' }));
+    create.mockImplementation(() => textStream('Done.'));
+
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Two things' }], resolver });
+
+    expect(callTool).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('a chat whose earlier turn recalled private details', () => {
@@ -117,7 +179,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const recalling = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY });
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, once_only: false });
       return yield* textStream('Noted.');
     });
     await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Hello' }], resolver: recalling });
@@ -152,7 +214,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const losing = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY });
+      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY, once_only: false });
       losing.webSearchTurn.fingerprintsLost = true;
       return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
     });
@@ -162,5 +224,103 @@ describe('a chat whose earlier turn recalled private details', () => {
 
     expect((await session.getTurn(turn.id))?.state).toMatchObject(HELD);
     expect(callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('a chat with "Allow searches in this chat"', () => {
+  it('still holds a search that carries a recalled private detail', async () => {
+    const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
+    // A mail read, then the owner allows searches in this chat on the held search.
+    const reading = resolverForTurn();
+    markPrivateDataRead(reading.webSearchTurn);
+    recordPrivateReadText({ state: reading.webSearchTurn, text: 'Lunch with Ana on Monday.' });
+    create.mockImplementationOnce(() => textStream('Read it.'));
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Read my mail' }], resolver: reading });
+    create.mockImplementationOnce(() => searchStream({ id: 'call-1', query: 'tallest building in Lisbon' }));
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Look something up' }] });
+    create.mockImplementationOnce(() => textStream('Allowed.'));
+    await run({
+      messages: [
+        {
+          type: EventType.USER_TOOL_APPROVAL,
+          thread_id: 'main',
+          tool_call_id: 'call-1',
+          approval: { status: 'allow', scope: 'chat' },
+        },
+      ],
+    });
+    const searchesBefore = callTool.mock.calls.length;
+
+    const recalling = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, once_only: false });
+      return yield* searchStream({ id: 'call-2', query: 'Ines Quillfeather' });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+    const turn = await run({
+      messages: [{ type: EventType.USER_MESSAGE, content: 'Search for my sister' }],
+      resolver: recalling,
+    });
+
+    expect((await session.getTurn(turn.id))?.state).toMatchObject(HELD);
+    expect(callTool.mock.calls.length).toBe(searchesBefore);
+  });
+});
+
+describe('a turn that starts while a profile-only turn is still running', () => {
+  it('keeps the chat record whole, so a later public search runs without asking', async () => {
+    const { session_id, store, loadChat, run, resolverForTurn, create, callTool } = await setupSearchChat();
+    const first = resolverForTurn();
+    let recorded: () => void = () => undefined;
+    const profileKept = new Promise<void>(resolve => {
+      recorded = resolve;
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    create.mockImplementationOnce(async function* () {
+      recordPrivateContextText({ state: first.webSearchTurn, text: PROFILE, once_only: false });
+      recorded();
+      await gate;
+      return yield* textStream('Hello.');
+    });
+    const running = await (
+      await loadChat()
+    ).createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'Hi' }],
+      signal: new AbortController().signal,
+      resolver: first,
+    });
+    const runningDrained = drain(running).catch(() => undefined);
+    await profileKept;
+
+    const second = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, once_only: false });
+      return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+    const next = await (
+      await loadChat()
+    ).createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }],
+      signal: new AbortController().signal,
+      resolver: second,
+    });
+    const nextDrained = drain(next);
+    release();
+    await Promise.all([runningDrained, nextDrained]);
+
+    expect(callTool).toHaveBeenCalledTimes(1);
+    const saved = await store.getSession({ tenant_id: 't', session_id });
+    expect(saved?.private_fingerprints).toMatchObject({ complete: true, has_text: true });
+
+    create.mockImplementationOnce(() => searchStream({ id: 'call-2', query: 'oldest cafe in Lisbon' }));
+    create.mockImplementation(() => textStream('Done.'));
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'And another' }] });
+    expect(callTool).toHaveBeenCalledTimes(2);
   });
 });

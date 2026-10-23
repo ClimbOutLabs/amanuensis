@@ -105,6 +105,8 @@ describe('personalization context', () => {
 
     expect(webSearch.chatFingerprints.has_text).toBe(true);
     expect(webSearch.privateContextKept).toBe(true);
+    // The profile is put before the model again each turn, so a later turn never distrusts the record over it.
+    expect(webSearch.onceOnlyContextKept).toBe(false);
   });
 
   it('renders the learned profile last, with its provenance preamble', () => {

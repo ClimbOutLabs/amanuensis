@@ -3073,7 +3073,7 @@ export class AgentThread {
         });
         // An attached file is the person's own: a later search that carries its details asks first.
         if (this.sentinel !== undefined) {
-          recordPrivateContextText({ state: this.sentinel.web_search, text: ingested.text });
+          recordPrivateContextText({ state: this.sentinel.web_search, text: ingested.text, once_only: true });
         }
         extractedTextParts.push(ingested);
       } else {

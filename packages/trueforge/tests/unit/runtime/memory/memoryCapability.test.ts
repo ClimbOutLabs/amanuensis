@@ -791,6 +791,7 @@ describe('HindsightMemoryProcessor private details for the search check', () => 
         earlier: '',
         entries: webSearch.chatFingerprints.entries,
         has_text: webSearch.chatFingerprints.has_text,
+        encoded_runs: false,
       });
     expect(webSearch.privateContextKept).toBe(true);
     expect(leak('wilhelmina thrupp leeds')).not.toBeNull();
