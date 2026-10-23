@@ -1461,7 +1461,7 @@ async function abandonTurnThatCouldNotStart(input: {
   abortController: AbortController;
   logger: Logger;
 }): Promise<void> {
-  input.abortController.abort(CancellationReason.Abandoned);
+  input.abortController.abort(CancellationReason.CouldNotStart);
   input.turn.forgetUnstarted();
   await input.resolver.close().catch((closeError: unknown) => {
     input.logger.warn('Failed to close turn resources for a turn that could not start', {
@@ -1470,7 +1470,7 @@ async function abandonTurnThatCouldNotStart(input: {
       ...extractErrorLogFields(closeError),
     });
   });
-  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.Abandoned });
+  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.CouldNotStart });
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -2638,7 +2638,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      * error so the chat never retains a turn that no executor owns.
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
-      abortController.abort(CancellationReason.Abandoned);
+      abortController.abort(CancellationReason.CouldNotStart);
       turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
@@ -2653,7 +2653,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         try {
           // Freezing is idempotent: a response can be lost after the store
           // committed, and retrying returns the existing terminal turn.
-          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.Abandoned });
+          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.CouldNotStart });
           return;
         } catch (freezeError) {
           freezeFailures.push(freezeError);
