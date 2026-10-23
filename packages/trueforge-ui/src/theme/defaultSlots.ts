@@ -96,7 +96,6 @@ import {
 import { ThreadListRow } from '../atoms/ThreadListRow.js';
 import { MessageGroup, ThreadComposerAreaShell, ThreadRootShell, ThreadViewportShell } from '../atoms/ThreadShell.js';
 import { Toast, ToastStack } from '../atoms/Toast.js';
-import { ToolApprovalBar } from '../atoms/ToolApprovalBar.js';
 import { ToolCallCard } from '../atoms/ToolCallCard.js';
 import { ToolCallContentBlock } from '../atoms/ToolCallContentBlock.js';
 import { ToolGroupCard } from '../atoms/ToolGroupCard.js';
@@ -201,7 +200,6 @@ export const defaultSlots = {
   WelcomeScreen,
   ToolCallCard,
   ToolCallContentBlock,
-  ToolApprovalBar,
   ToolGroupCard,
   SubAgentCard,
   SandboxToolCallCard,
