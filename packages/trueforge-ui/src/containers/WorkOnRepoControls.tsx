@@ -17,6 +17,7 @@ import {
 } from '@/components/RepositoryWorkContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from './workOnRepoPanel.js';
 
 export type WorkOnRepoControlsProps = {
@@ -137,6 +138,7 @@ export function WorkOnRepoControls({
   sandboxOff,
   sendMessage,
 }: WorkOnRepoControlsProps) {
+  const assistant = useAssistantDisplayName();
   const api = useRepositoryWork();
   const [binding, setBinding] = useState<SessionRepositoryBinding | null>(null);
   const [repository, setRepository] = useState<RepositorySummary | null>(null);
@@ -416,7 +418,7 @@ export function WorkOnRepoControls({
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-card-bg px-3 py-2.5 shadow-sm">
             <p className="text-[0.8125rem] font-medium text-text-primary">Commands found in this repo</p>
             <p className="text-[0.8125rem] text-text-secondary">
-              Aman found these commands in the repo files. Confirm the ones it may run.
+              {assistant} found these commands in the repo files. Confirm the ones it may run.
             </p>
             <ul className="flex flex-col gap-2">
               {proposals.map(proposal => (
@@ -457,8 +459,8 @@ export function WorkOnRepoControls({
     <div className="flex flex-col gap-2">
       {pendingStart ? (
         <p className="text-[0.8125rem] text-text-secondary">
-          Aman is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on the{' '}
-          {pendingStart.branch} branch.
+          {assistant} is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on
+          the {pendingStart.branch} branch.
         </p>
       ) : null}
       {panelOpen && sandboxOff ? (

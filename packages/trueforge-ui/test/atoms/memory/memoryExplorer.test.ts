@@ -146,21 +146,25 @@ describe('groupMemoriesByDate', () => {
 });
 
 describe('plain-words copy', () => {
-  it('counts memories about you and those that belong to personas', () => {
-    expect(memoryCountCopy({ total: 1240, personas: 86 })).toBe(
-      'Aman remembers 1,240 things about you. 86 belong to personas.',
+  it('counts memories about you and those that belong to specialists, by the display name', () => {
+    expect(memoryCountCopy({ total: 1240, personas: 86, assistant: 'Juniper' })).toBe(
+      'Juniper remembers 1,240 things about you. 86 belong to specialists.',
     );
-    expect(memoryCountCopy({ total: 1, personas: 0 })).toBe(
-      'Aman remembers 1 thing about you. None belong to personas.',
+    expect(memoryCountCopy({ total: 1, personas: 0, assistant: 'Juniper' })).toBe(
+      'Juniper remembers 1 thing about you. None belong to specialists.',
     );
-    expect(memoryCountCopy({ total: 5, personas: 1 })).toBe(
-      'Aman remembers 5 things about you. 1 belongs to a persona.',
+    expect(memoryCountCopy({ total: 5, personas: 1, assistant: 'Juniper' })).toBe(
+      'Juniper remembers 5 things about you. 1 belongs to a specialist.',
     );
   });
 
   it('asks before forgetting several memories', () => {
-    expect(forgetConfirmCopy(12)).toBe("Forget 12 memories? Aman won't use them again.");
-    expect(forgetConfirmCopy(1)).toBe("Forget 1 memory? Aman won't use them again.");
+    expect(forgetConfirmCopy({ count: 12, assistant: 'Juniper' })).toBe(
+      "Forget 12 memories? Juniper won't use them again.",
+    );
+    expect(forgetConfirmCopy({ count: 1, assistant: 'Juniper' })).toBe(
+      "Forget 1 memory? Juniper won't use them again.",
+    );
   });
 
   it('confirms what was forgotten', () => {
@@ -169,9 +173,13 @@ describe('plain-words copy', () => {
   });
 
   it('never shows the internal words in these strings', () => {
-    const strings = [memoryCountCopy({ total: 2, personas: 2 }), forgetConfirmCopy(2), forgottenCopy(2)];
+    const strings = [
+      memoryCountCopy({ total: 2, personas: 2, assistant: 'Juniper' }),
+      forgetConfirmCopy({ count: 2, assistant: 'Juniper' }),
+      forgottenCopy(2),
+    ];
     for (const text of strings) {
-      expect(text).not.toMatch(/vault|namespace|entry/i);
+      expect(text).not.toMatch(/vault|namespace|entry|persona/i);
     }
   });
 });

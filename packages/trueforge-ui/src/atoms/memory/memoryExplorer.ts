@@ -158,19 +158,19 @@ export function formatCount(count: number): string {
   return NUMBER_FORMAT.format(count);
 }
 
-/** "Aman remembers 1,240 things about you. 86 belong to personas." */
-export function memoryCountCopy(options: { total: number; personas: number }): string {
+/** "Juniper remembers 1,240 things about you. 86 belong to specialists." */
+export function memoryCountCopy(options: { total: number; personas: number; assistant: string }): string {
   const thing = options.total === 1 ? 'thing' : 'things';
-  let personas: string;
-  if (options.personas === 0) personas = 'None belong to personas.';
-  else if (options.personas === 1) personas = '1 belongs to a persona.';
-  else personas = `${formatCount(options.personas)} belong to personas.`;
-  return `Aman remembers ${formatCount(options.total)} ${thing} about you. ${personas}`;
+  let specialists: string;
+  if (options.personas === 0) specialists = 'None belong to specialists.';
+  else if (options.personas === 1) specialists = '1 belongs to a specialist.';
+  else specialists = `${formatCount(options.personas)} belong to specialists.`;
+  return `${options.assistant} remembers ${formatCount(options.total)} ${thing} about you. ${specialists}`;
 }
 
-export function forgetConfirmCopy(count: number): string {
+export function forgetConfirmCopy({ count, assistant }: { count: number; assistant: string }): string {
   const noun = count === 1 ? 'memory' : 'memories';
-  return `Forget ${formatCount(count)} ${noun}? Aman won't use them again.`;
+  return `Forget ${formatCount(count)} ${noun}? ${assistant} won't use them again.`;
 }
 
 export function forgottenCopy(count: number): string {

@@ -17,6 +17,7 @@ import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import AddMcpServerForm, { type AddMcpServerDraft } from './AddMcpServerForm.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
@@ -77,6 +78,7 @@ function withoutConnector({ spec, connector }: { spec: AgentSpec; connector: Con
 }
 
 const ConnectorSettings = () => {
+  const assistant = useAssistantDisplayName();
   const { connectorCatalog } = useCatalogServer();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
@@ -631,7 +633,7 @@ const ConnectorSettings = () => {
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
             {locked
-              ? "This demo uses a sample Google account. Aman can only send to the demo's own addresses."
+              ? `This demo uses a sample Google account. ${assistant} can only send to the demo's own addresses.`
               : 'Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own Google account.'}
           </p>
         </div>
@@ -778,7 +780,7 @@ const ConnectorSettings = () => {
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
               Connect. Most need an API key or token from that service.
             </li>
-            <li>Choose it in the message box so Aman can use its tools in that chat.</li>
+            <li>Choose it in the message box so {assistant} can use its tools in that chat.</li>
             <li>
               Use <span className="font-medium text-text-primary">Test connection</span> to see which tools the
               connector offers.

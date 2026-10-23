@@ -90,7 +90,9 @@ describe('Memory explorer', () => {
   it('states the counts in plain words at the top', async () => {
     renderPanel(FIXTURE);
 
-    expect(await screen.findByText('Aman remembers 3 things about you. None belong to personas.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Aman remembers 3 things about you. None belong to specialists.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the list newest first, under date headings', async () => {
@@ -113,7 +115,7 @@ describe('Memory explorer', () => {
 
   it('filters as you type and highlights the match', async () => {
     renderPanel(FIXTURE);
-    await screen.findByText('Aman remembers 3 things about you. None belong to personas.');
+    await screen.findByText('Aman remembers 3 things about you. None belong to specialists.');
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search memories' }), { target: { value: 'morning' } });
 
@@ -197,7 +199,9 @@ describe('Memory explorer', () => {
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS));
 
     await waitFor(() => expect(deleteEntry).toHaveBeenCalledWith('tea'));
-    expect(await screen.findByText('Aman remembers 2 things about you. None belong to personas.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Aman remembers 2 things about you. None belong to specialists.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the first-run note with a way to Memory settings when nothing is remembered yet', async () => {
@@ -216,7 +220,7 @@ describe('Memory explorer', () => {
     renderPanel(many);
 
     expect(
-      await screen.findByText('Aman remembers 10,000 things about you. None belong to personas.'),
+      await screen.findByText('Aman remembers 10,000 things about you. None belong to specialists.'),
     ).toBeInTheDocument();
     expect(screen.getAllByRole('listitem')).toHaveLength(50);
     expect(screen.getByText('Showing 50 of 10,000')).toBeInTheDocument();

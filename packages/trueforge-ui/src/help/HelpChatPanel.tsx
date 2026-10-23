@@ -169,7 +169,7 @@ function phaseLine(session: HelpSession): ReactNode {
   switch (session.phase) {
     case 'pending':
     case 'checking':
-      return 'Checking Aman. This takes a few seconds.';
+      return 'Checking the app. This takes a few seconds.';
     case 'joining':
       return 'Iris is joining this chat.';
     case 'unavailable':
