@@ -82,7 +82,7 @@ import {
   listTurnsRoute,
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
@@ -2022,7 +2022,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
   };
 
-  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+  const admitAndExecuteTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    admission: TurnAdmission,
+  ) => {
     const { session_id: sessionId } = c.req.valid('param');
     const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
@@ -2691,6 +2694,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId: turn.id,
       abortController,
       stream: turn.stream(),
+      admission,
     });
 
     // Held for the whole turn; the stream's sequence counter dies with it.
@@ -2783,6 +2787,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       });
       await stream.close();
     });
+  };
+
+  // Registered for the whole request: a Cancel that comes before the turn exists must still stop it.
+  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+    const admission = deps.activeTurns.admit({ sessionId: c.req.valid('param').session_id });
+    try {
+      return await admitAndExecuteTurn(c, admission);
+    } finally {
+      admission.release();
+    }
   };
 
   const subscribeTurnHandler: RouteHandler<typeof subscribeTurnRoute> = async c => {

@@ -606,6 +606,8 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
+    // A turn still being set up is not the chat's last turn yet, so it is stopped here too.
+    deps.activeTurns.cancelAdmissions({ sessionId, abortReason: CancellationReason.ClientCancelled });
     const turnId = session.record.last_turn_id;
     if (!turnId) {
       return c.json({}, 200);

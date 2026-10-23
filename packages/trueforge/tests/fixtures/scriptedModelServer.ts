@@ -47,6 +47,12 @@ export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
 export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
 export const STALLED_ANSWER_START = 'Here is what I found so far';
 /**
+ * Calls the write tool; once it has answered (a denial counts), the model thinks out loud a little at a
+ * time and never finishes, the shape of a self-hosted model that thinks for minutes per step.
+ */
+export const THINK_AFTER_WRITE_DIRECTIVE = 'think_after_write';
+const THINKING_CHUNK_INTERVAL_MS = 50;
+/**
  * A question carrying this marker makes the knowledge relevance judge keep no
  * passage, so a library lookup for it is a near-miss.
  */
@@ -58,6 +64,8 @@ export interface ScriptedModelServer {
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /** Thinking streams still open: a cancelled turn must hang up every one of them. */
+  openThinkingStreams: () => number;
   close: () => Promise<void>;
 }
 
@@ -418,6 +426,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
   // Stalled streams stay open until the caller hangs up or the fixture closes.
   const stalled = new Set<ServerResponse>();
+  const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -462,6 +471,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       progress.toolResults === 0
     ) {
       requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
+      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
@@ -548,6 +559,22 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       res.on('close', () => stalled.delete(res));
       return;
     }
+    if (toolCalls.length === 0 && progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults > 0) {
+      thinking.add(res);
+      const timer = setInterval(() => {
+        const chunk = chunkEnvelope({
+          index: 0,
+          delta: { role: 'assistant', reasoning_content: 'Still weighing it. ' },
+          finish_reason: null,
+        });
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }, THINKING_CHUNK_INTERVAL_MS);
+      res.on('close', () => {
+        clearInterval(timer);
+        thinking.delete(res);
+      });
+      return;
+    }
     const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -580,9 +607,10 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        for (const res of stalled) {
+        for (const res of [...stalled, ...thinking]) {
           res.destroy();
         }
         httpServer.closeAllConnections();
