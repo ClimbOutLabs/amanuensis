@@ -145,7 +145,7 @@ function ComposerBody({
                   event.preventDefault();
                   stop();
                 }}
-                className="text-text-primary placeholder:text-text-secondary max-h-[8lh] min-h-10 w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-1 text-[0.9375rem] leading-normal shadow-none outline-none disabled:cursor-not-allowed"
+                className="text-text-primary placeholder:text-text-muted max-h-[8lh] min-h-10 w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-1 text-[0.9375rem] leading-normal shadow-none outline-none disabled:cursor-not-allowed"
               />
             }
             className={cn(

@@ -491,7 +491,7 @@ function RecentChatsSection({
             placeholder="Search chats"
             value={search.query}
             onChange={event => search.onQueryChange(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-text-primary outline-none placeholder:text-text-secondary"
+            className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-text-primary outline-none placeholder:text-text-muted"
             autoFocus
           />
         </label>

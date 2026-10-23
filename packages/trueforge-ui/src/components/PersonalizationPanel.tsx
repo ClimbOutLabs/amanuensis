@@ -17,7 +17,7 @@ import {
 } from './PersonalizationContext.js';
 
 const inputClassName =
-  'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary/70 focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
+  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 export type PersonalizationPanelProps = {
   /** Optional for standalone use; Settings inherits the host provider. */
@@ -323,7 +323,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 {assistant} updates this from your conversations. Edit or clear it any time.
               </p>
 
-              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-secondary-bg px-3 py-3">
+              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-input-box-bg px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
                   <p className="mt-0.5 text-xs leading-snug text-text-secondary">
@@ -353,7 +353,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   onChange={event => setDraft(current => ({ ...current, learned_profile: event.target.value }))}
                 />
               ) : (
-                <div className="mt-3 rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm">
+                <div className="mt-3 rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm">
                   <Markdown content={draft.learned_profile} readOnly />
                 </div>
               )}

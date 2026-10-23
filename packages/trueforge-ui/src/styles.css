@@ -60,6 +60,8 @@
     --text-primary: oklch(0.286 0.008 84.6);
     --text-secondary: #746b5d;
     --text-secondary: oklch(0.532 0.024 79);
+    /* Hints such as placeholders: lighter than secondary text, still AA against the input background. */
+    --text-muted: #7b7265;
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -149,6 +151,7 @@
     --text-primary: oklch(0.944 0.021 88.7);
     --text-secondary: #a89a7f;
     --text-secondary: oklch(0.691 0.041 83.8);
+    --text-muted: #a09278;
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -608,6 +611,13 @@
   align-self: flex-start;
 }
 
+/* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
+::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+  opacity: 1;
+}
+
 /* Chat text: type-scale sizing with airy leading for reading rhythm. */
 .aman-chat-text {
   font-size: var(--text-base);
@@ -659,6 +669,7 @@
   --color-input-border: var(--input-border);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
   --color-card-bg: var(--card-bg);
   --color-dropdown-selected-item-bg: var(--dropdown-selected-item-bg);
   --color-dropdown-selected-item-text: var(--dropdown-selected-item-text);
