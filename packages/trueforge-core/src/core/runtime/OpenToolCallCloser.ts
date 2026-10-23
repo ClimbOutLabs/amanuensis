@@ -26,6 +26,7 @@ import {
   type ToolResultRemediation,
 } from '../events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMessage } from '../llm/LLMTypes';
+import { isReadOnlyCall } from '../mcp/executeToolCalls';
 import { deniedToolCallRemediation, deniedToolCallText } from '../mcp/ToolSet';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
@@ -52,16 +53,6 @@ const UNKNOWN_OUTCOME_TOOL_MESSAGE_CONTENT = JSON.stringify({
   error:
     'Tool call outcome unknown: it may have run without its result being recorded. Do not repeat it blindly. Establish whether it already took effect, then continue.',
 });
-
-/**
- * Whether repeating this call cannot cause harm, so the model can be told
- * plainly that it did not run. Read-only work qualifies; everything else is
- * treated as side-effecting, including calls whose metadata is missing, since
- * absent metadata must not resolve to the reassuring answer.
- */
-export function isSafeToRepeat(info: InternalToolCallInfo): boolean {
-  return info.effect === 'inspect' || (info.effect === undefined && info.read_only_hint === true);
-}
 
 export interface ClosableToolOutcome {
   rawContent: string;
@@ -98,7 +89,8 @@ function unresolvedCallOutcome(
   },
 ): ClosableToolOutcome {
   const { preparedToolCallIds, startedToolCallIds } = tracking;
-  if (isSafeToRepeat(info)) {
+  // Repeating a call that only reads cannot cause harm, so the model is told plainly it did not run.
+  if (isReadOnlyCall(info)) {
     return {
       rawContent: DUMMY_TOOL_MESSAGE_CONTENT,
       disposition: 'never_ran',

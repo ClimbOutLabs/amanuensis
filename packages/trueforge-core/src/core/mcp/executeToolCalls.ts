@@ -35,7 +35,8 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
-import { recordPrivateToolResult } from '../permissions/webSearch';
+import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { isSearchAskReason, isSilentSearchReason, recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
@@ -866,10 +867,45 @@ export const IDENTICAL_CALL_STOP_AT = 4;
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
 /**
- * Write calls (tier 3) a turn may run before the host stops it. The call past the cap never
- * runs; the turn ends once the batch that reached the cap has resolved.
+ * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
+ * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
+ * turn ends once the batch that reached the cap has resolved.
  */
 export const MAX_WRITE_CALLS_PER_TURN = 5;
+
+/**
+ * Whether a call only reads and changes nothing: a host-classified inspection, a tool its server
+ * declares read-only, or a call the classifier ran as the search provider's search or page read.
+ * Missing metadata counts as a change, so it never resolves to the reassuring answer.
+ */
+export function isReadOnlyCall(
+  info: Pick<InternalToolCallInfo, 'effect' | 'read_only_hint' | 'search_provider_call' | 'tier_reason'>,
+): boolean {
+  if (info.effect !== undefined) {
+    return info.effect === 'inspect';
+  }
+  if (info.read_only_hint === true) {
+    return true;
+  }
+  return isSearchProviderRead(info);
+}
+
+function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return (
+    info.search_provider_call === true &&
+    info.tier_reason !== undefined &&
+    (isSilentSearchReason(info.tier_reason) || isSearchAskReason(info.tier_reason))
+  );
+}
+
+/**
+ * Whether the host itself ruled a call a read: the search provider's search or page read, or a maps
+ * lookup. Only these skip the write cap; a server's own read-only claim never does, so a write it
+ * wrongly calls read-only still counts.
+ */
+export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+}
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
 
@@ -968,7 +1004,7 @@ export function prepareSideEffectToolCalls({
       toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
-      isReadOnlyToolInfo(toolCall.tool_info) ||
+      isReadOnlyCall(toolCall.tool_info) ||
       approvalDecisions.get(toolCall.id)?.status === 'deny' ||
       (toolCall.tool_info.is_approval_required === true && approvalDecisions.get(toolCall.id)?.status !== 'allow')
     ) {
@@ -1105,15 +1141,6 @@ export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 240_000;
  * this default.
  */
 export const DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS = 1_260_000;
-
-/**
- * The side-effect classification: a call that only reads, by the host's inspect classification or
- * the tool's own read-only annotation. A tool with no annotation, or one classified with any other
- * effect, counts as changing something.
- */
-export function isReadOnlyToolInfo(info: Pick<InternalToolCallInfo, 'effect' | 'read_only_hint'>): boolean {
-  return info.effect === 'inspect' || (info.effect === undefined && info.read_only_hint === true);
-}
 
 /**
  * the long provisioning-sized deadline belongs to sandbox/run_code alone. Tool identity
@@ -1597,7 +1624,7 @@ export async function executeToolCalls({
         };
       }
       const shouldMemoize =
-        isReadOnlyToolInfo(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,
