@@ -58,7 +58,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(error).toBe(
-      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool.",
+      "No server named 'not-a-server'. Servers: parallel-web. The not-a-server connector is not on for this chat. To turn it on, the person opens Add-ons in the composer, goes to Connectors, and turns on not-a-server. If it is not listed there, the person can set it up in Settings, Connectors. Do not try other names; tell the person this.",
     );
   });
 
@@ -197,7 +197,7 @@ describe('DeferredTool get_tool_info rejections', () => {
     });
 
     expect(error).toBe(
-      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool.",
+      "No server named 'not-a-server'. Servers: parallel-web. The not-a-server connector is not on for this chat. To turn it on, the person opens Add-ons in the composer, goes to Connectors, and turns on not-a-server. If it is not listed there, the person can set it up in Settings, Connectors. Do not try other names; tell the person this.",
     );
   });
 

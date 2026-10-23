@@ -336,6 +336,21 @@ describe('ShellRouteSync', () => {
     expect(pathname).toBe('/sessions/new-session');
   });
 
+  it('re-opens the chat the shell last opened when Back returns to it from another chat', async () => {
+    renderSync({ initialEntries: ['/sessions/a'] });
+    await waitFor(() => expect(shell.pendingSessionId).toBe('a'));
+    act(() => setRemoteId('a'));
+    // A sidebar click switches threads in place and leaves the last opened id behind.
+    act(() => setRemoteId('b'));
+    expect(pathname).toBe('/sessions/b');
+    expect(shell.pendingSessionId).toBe('a');
+    const opensBefore = shell.pendingSessionEpoch;
+
+    act(() => navigateTo('/sessions/a'));
+    await waitFor(() => expect(shell.pendingSessionEpoch).toBe(opensBefore + 1));
+    expect(shell.pendingSessionId).toBe('a');
+  });
+
   it('opens settings on boot when initialSettingsOpen is set and pushes the URL', async () => {
     renderSync({ initialEntries: ['/'], initialSettingsOpen: true });
     await waitFor(() => {

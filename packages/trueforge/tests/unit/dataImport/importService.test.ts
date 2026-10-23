@@ -515,6 +515,49 @@ describe('runDataImport', () => {
     }
   });
 
+  it('keeps why a reply stopped when an older export saved a turn the restart ended', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-restart-ended');
+    const ended = { status: 'cancelled', reason: 'abandoned', completed_at: '2026-09-03T18:30:00.000Z' };
+    try {
+      // Format 1 archives come from versions before the could-not-start reason; a restart was saved as abandoned.
+      const older = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        const main = sessions
+          .map(entry => recordAt(entry, 'chat'))
+          .find(entry => {
+            return recordAt(entry['session'], 'session')['session_id'] === SEED_IDS.sessionMain;
+          });
+        const lastTurn = recordAt(listAt(recordAt(main, 'main chat')['turns'], 'turns').at(-1), 'last turn');
+        recordAt(lastTurn['turn'], 'turn')['state'] = ended;
+        for (const event of listAt(lastTurn['events'], 'events')) {
+          const record = recordAt(event, 'event');
+          if (record['type'] === 'turn.done') record['state'] = ended;
+        }
+        setLegacySessions(entries, sessions);
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const turn = await target.stores.sessionStore.getTurn({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-3',
+      });
+      expect(turn?.state).toMatchObject({ status: 'cancelled', reason: 'abandoned' });
+      const events = await target.stores.sessionStore.listTurnEvents({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-3',
+        limit: 100,
+        page_token: undefined,
+        order: 'asc',
+      });
+      const done = events.data.filter(event => event.type === 'turn.done');
+      expect(done).toEqual([expect.objectContaining({ state: expect.objectContaining({ reason: 'abandoned' }) })]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an archive over the byte cap', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-cap');
@@ -1851,7 +1894,7 @@ describe('runDataImport at scale', () => {
           makeCreateTurnInput({
             sessionId,
             turnId,
-            update_session_title_if_not_exist: { title: `Bulk chat ${String(index)}`, source: 'first_message' },
+            update_session_title_if_not_exist: `Bulk chat ${String(index)}`,
             new_context_appends: [
               {
                 thread_id: 'main',
@@ -2491,6 +2534,31 @@ describe('runDataImport keeps permission history and persona choices', () => {
     }
   });
 
+  it('imports an export whose chats say who set their title, keeping each title', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-title-source');
+    try {
+      const titles: (string | null)[] = [];
+      const withTitleSource = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        // Exports made while chats were named after their first reply carry this field.
+        for (const [index, item] of sessions.entries()) {
+          const session = recordAt(recordAt(item, 'chat')['session'], 'session');
+          session['title_source'] = ['first_message', 'auto', 'person'][index % 3];
+          titles.push(typeof session['title'] === 'string' ? session['title'] : null);
+        }
+        setLegacySessions(entries, sessions);
+      });
+      const result = await runDataImport(importDeps(target), importRequest(withTitleSource));
+      expect(result.chats).toBe(3);
+      const imported = await chatsOf(target, 'bob');
+      expect(imported.map(chat => chat.title).sort()).toEqual([...titles].sort());
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an audit row with a tier or outcome the app never writes, and writes nothing', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-bad-audit');
@@ -3065,9 +3133,7 @@ async function seedLongChat(
       makeCreateTurnInput({
         sessionId,
         turnId,
-        ...(previousTurnId === undefined
-          ? { update_session_title_if_not_exist: { title: 'Long chat', source: 'first_message' } }
-          : { previousTurnId }),
+        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
         new_context_appends: [
           {
             thread_id: MAIN_THREAD_ID,

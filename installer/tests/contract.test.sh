@@ -159,6 +159,18 @@ test_image_keeps_app_data_on_the_data_volume() {
   assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "      - data:/data" "the instance mounts its data volume at /data"
 }
 
+test_image_creates_the_send_list_dir() {
+  t_begin "the image creates the send list dir owned by the runtime user, so a fresh send list volume is writable by the server"
+  local repo=$INSTALLER_DIR/.. dockerfile
+  # Docker gives a fresh named volume the ownership of the image dir it mounts over. The server runs as
+  # 10001 and is the only writer of the send list, so both app images create the dir with the owned roots.
+  for dockerfile in "$repo/Dockerfile.dev" "$repo/Dockerfile"; do
+    assert_contains "$(cat "$dockerfile")" "mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy" "$dockerfile creates the send list dir with the owned data roots"
+  done
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- mail-policy:/data/mail-policy" "the instance mounts the send list volume at that dir"
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- mail-policy:/policy:ro" "the connector mounts the same volume read-only"
+}
+
 test_in_image_check_ids_match() {
   t_begin "every check the shim relays from the app container is one the app's doctor knows"
   local repo=$INSTALLER_DIR/.. ids id known
@@ -172,6 +184,7 @@ test_in_image_check_ids_match() {
 test_token_factory_settings_match_the_server
 test_sign_in_settings_match_the_server
 test_image_keeps_app_data_on_the_data_volume
+test_image_creates_the_send_list_dir
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented

@@ -68,9 +68,13 @@ python3 "$agent" &
 agent_pid=$!
 
 # The server creates the list before it starts this sidecar. Until then there is nothing to load.
-while [ ! -f "$policy" ]; do
-  sleep 2
-done
+# Say so once when the wait begins, so a missing list is plain in the log instead of a silent wait.
+if [ ! -f "$policy" ]; then
+  echo "waiting for the send list"
+  while [ ! -f "$policy" ]; do
+    sleep 2
+  done
+fi
 
 start_server "$@"
 while :; do

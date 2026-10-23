@@ -4,8 +4,8 @@ import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
-export const TurnStateCancelledReason: core.serialization.Schema<serializers.TurnStateCancelledReason.Raw, TrueForge.TurnStateCancelledReason> = core.serialization.enum_(["server-execution-timeout", "client-cancelled", "cancelled-for-next-turn", "abandoned"]);
+export const TurnStateCancelledReason: core.serialization.Schema<serializers.TurnStateCancelledReason.Raw, TrueForge.TurnStateCancelledReason> = core.serialization.enum_(["server-execution-timeout", "client-cancelled", "cancelled-for-next-turn", "abandoned", "could-not-start"]);
 
 export declare namespace TurnStateCancelledReason {
-    export type Raw = "server-execution-timeout" | "client-cancelled" | "cancelled-for-next-turn" | "abandoned";
+    export type Raw = "server-execution-timeout" | "client-cancelled" | "cancelled-for-next-turn" | "abandoned" | "could-not-start";
 }

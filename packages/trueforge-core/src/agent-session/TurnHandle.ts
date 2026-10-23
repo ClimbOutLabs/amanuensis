@@ -92,6 +92,9 @@ function cancellationReasonFromAbortReason(abortReason: unknown): CancellationRe
   if (abortReason === CancellationReason.Abandoned) {
     return CancellationReason.Abandoned;
   }
+  if (abortReason === CancellationReason.CouldNotStart) {
+    return CancellationReason.CouldNotStart;
+  }
   return CancellationReason.ClientCancelled;
 }
 

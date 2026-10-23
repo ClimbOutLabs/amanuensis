@@ -43,6 +43,12 @@ export class ActiveTurnRegistry {
   private readonly runs = new Map<string, ActiveTurnRun>();
   private readonly admissions = new Map<string, Set<TurnAdmission>>();
   private alreadyShutDownAbortReason: CancellationReason | undefined;
+  private readonly startedAt = new Date();
+
+  /** True for a turn created before this process started: no run here can own it. */
+  predates(createdAt: Date): boolean {
+    return createdAt < this.startedAt;
+  }
 
   /** Registers a chat turn that is being set up, before it has an id in the store. */
   admit(input: { sessionId: string }): TurnAdmission {

@@ -9,6 +9,8 @@ import { useOptionalMemoryRecall } from '../components/MemoryRecallContext.js';
 import { useMemoryTurnContext } from '../containers/MemoryTurnContextProvider.js';
 import { toolCallNotDoneReason } from '../utils/toolCallParsing.js';
 import {
+  arrivalSignature,
+  countWords,
   deriveWaitQueue,
   LONG_WAIT_MS,
   type WaitQueueMemory,
@@ -20,6 +22,8 @@ import { useContextCompactionActive } from './useContextCompactionActive.js';
 export type WaitQueueView = {
   snapshot: WaitQueueSnapshot;
   elapsedMs: number;
+  /** Time since anything new arrived for this turn: a part, a token, a status change, or a memory landing. */
+  quietMs: number;
   longWait: boolean;
   reducedMotion: boolean;
 };
@@ -29,7 +33,9 @@ function toQueuePart(part: PartState): WaitQueuePart {
   const statusType = part.status.type;
   switch (part.type) {
     case 'text':
-      return { type: 'text', statusType };
+      return { type: 'text', statusType, arrivedChars: part.text.length };
+    case 'reasoning':
+      return { type: 'reasoning', statusType, arrivedChars: part.text.length, reasoningWords: countWords(part.text) };
     case 'tool-call':
       return {
         type: 'tool-call',
@@ -37,6 +43,7 @@ function toQueuePart(part: PartState): WaitQueuePart {
         toolName: part.toolName,
         argsText: part.argsText,
         notDoneReason: toolCallNotDoneReason(part),
+        arrivedChars: part.argsText.length + (part.result === undefined ? 0 : 1),
       };
     default:
       return { type: part.type, statusType };
@@ -52,7 +59,7 @@ function toQueuePart(part: PartState): WaitQueuePart {
  * their turn settles; abandoned ones are pruned lazily by last-seen time, so
  * dead turns can't accumulate and clocks never leak across chats.
  */
-const turnStartMs = new Map<string, { start: number; lastSeen: number }>();
+const turnStartMs = new Map<string, { start: number; lastSeen: number; signature: string; lastArrival: number }>();
 const TURN_CLOCK_TTL_MS = 60 * 60 * 1000;
 
 function pruneStaleTurnClocks(now: number): void {
@@ -61,16 +68,25 @@ function pruneStaleTurnClocks(now: number): void {
   }
 }
 
-/** Returns the turn's start, recording it on first sight and resuming it on remount. */
-function resumeTurnStart(key: string, now: number): number {
+type TurnClock = { start: number; lastArrival: number; signature: string };
+
+/**
+ * Returns the turn's start and when anything last arrived, recording both on first sight and
+ * resuming them on remount. A new signature means something arrived now.
+ */
+function resumeTurnClock({ key, signature, now }: { key: string; signature: string; now: number }): TurnClock {
   const existing = turnStartMs.get(key);
   if (existing !== undefined) {
     existing.lastSeen = now;
-    return existing.start;
+    if (existing.signature !== signature) {
+      existing.signature = signature;
+      existing.lastArrival = now;
+    }
+    return { start: existing.start, lastArrival: existing.lastArrival, signature };
   }
   pruneStaleTurnClocks(now);
-  turnStartMs.set(key, { start: now, lastSeen: now });
-  return now;
+  turnStartMs.set(key, { start: now, lastSeen: now, signature, lastArrival: now });
+  return { start: now, lastArrival: now, signature };
 }
 
 /** Test support: drops all recorded turn starts (module state is shared across tests). */
@@ -117,31 +133,41 @@ export function useWaitQueue(): WaitQueueView {
   // re-render cost is negligible.
   const messageId = useAuiState(s => s.message.id);
   const clockKey = turnId ?? messageId;
-  const [startMs, setStartMs] = useState<number | null>(null);
+  const signature = useMemo(() => arrivalSignature({ parts: queueParts, memory }), [queueParts, memory]);
+  const [clock, setClock] = useState<TurnClock | null>(null);
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!isRunning) {
       // The turn settled: drop its clock so a later turn reusing this message
       // slot starts fresh instead of resuming a dead turn's time.
       turnStartMs.delete(clockKey);
-      setStartMs(null);
+      setClock(null);
       return;
     }
     // A remount mid-turn (e.g. the indicator part cycling across phases)
     // resumes the turn's clock instead of starting a new one.
-    setStartMs(resumeTurnStart(clockKey, Date.now()));
+    setClock(resumeTurnClock({ key: clockKey, signature, now: Date.now() }));
+  }, [isRunning, clockKey, signature]);
+  useEffect(() => {
+    if (!isRunning) return;
     const id = setInterval(() => setTick(tick => tick + 1), 1000);
     return () => clearInterval(id);
-  }, [isRunning, clockKey]);
+  }, [isRunning]);
 
   // Read the clock at render, not from the last tick: a render that is not a tick (or a tick that
   // a busy or hidden tab delivered late) still shows the real time waited, and a settled turn none.
-  const elapsedMs = !isRunning || startMs === null ? 0 : Math.max(0, Date.now() - startMs);
+  const now = Date.now();
+  const elapsedMs = !isRunning || clock === null ? 0 : Math.max(0, now - clock.start);
+  // The clock records an arrival only after commit, so a render whose signature it has not seen yet
+  // is the arrival itself: count it as quiet for 0ms rather than flash the long-wait note.
+  const lastArrival = clock === null || clock.signature !== signature ? now : clock.lastArrival;
+  const quietMs = !isRunning || clock === null ? 0 : Math.max(0, now - lastArrival);
 
   const snapshot = useMemo(
     () => deriveWaitQueue({ isRunning, parts: queueParts, memory, compacting }),
     [isRunning, queueParts, memory, compacting],
   );
 
-  return { snapshot, elapsedMs, longWait: elapsedMs >= LONG_WAIT_MS, reducedMotion };
+  // "Taking longer than usual" is about silence, not total time: a long turn that keeps streaming is not stuck.
+  return { snapshot, elapsedMs, quietMs, longWait: quietMs >= LONG_WAIT_MS, reducedMotion };
 }

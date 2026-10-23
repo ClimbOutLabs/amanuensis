@@ -32,7 +32,7 @@ import type {
   UserMessageContent,
 } from '../../server/types.js';
 import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
-import { LiveConnectionLostError } from '../../utils/liveConnection.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
@@ -542,10 +542,9 @@ async function* subscribeTurnOnce(
  * `turn.done` carrying that state instead of surfacing the raw 412.
  *
  * When the record still says `running`, the turn's executor died with the
- * restart and will never complete on its own: that is reported as a plain,
- * actionable error (the user can cancel the turn and send again) rather than
- * a hung loading state or a synthesized terminal state the server would
- * contradict on the next send.
+ * restart and will never complete on its own. It is cancelled, as the person
+ * would, so the chat is free for the next send, and reported as a reply the
+ * restart stopped rather than a hung loading state.
  */
 async function* fallbackToTurnFinalState(input: {
   client: TrueForge;
@@ -559,11 +558,13 @@ async function* fallbackToTurnFinalState(input: {
   const response = await client.sessions.getTurn(sessionId, turnId);
   const state = response.data.state;
   if (state.status === 'running') {
-    throw new Error(
-      'The server restarted while this turn was running, so its live updates are gone. ' +
-        'Cancel this turn and send your message again, or reload the chat.',
-      { cause: streamGoneError },
-    );
+    try {
+      await client.sessions.cancel(sessionId);
+    } catch (cancelError) {
+      // A send that the server still refuses re-attaches here and tries the cancel again.
+      throw new ReplyStoppedByRestartError({ cause: cancelError });
+    }
+    throw new ReplyStoppedByRestartError({ cause: streamGoneError });
   }
   const sequenceNumber = (cursor.sequence ?? 0) + 1;
   cursor.sequence = sequenceNumber;

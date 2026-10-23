@@ -5,6 +5,12 @@
  * ran, what the person was shown, and what was saved.
  */
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  createSentinelHostContext,
+  createWebSearchTurnState,
+  defaultSentinelServices,
+  ToolSet,
+} from '../../../src/core';
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type {
@@ -13,8 +19,8 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
-import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../../../src/core/llm/replyNotices';
+import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import {
   createToolCallMemoState,
   createTurnToolCallLedger,
@@ -50,6 +56,7 @@ const CREATE_SCHEMA = {
       properties: { date_time: { type: 'string' }, time_zone: { type: 'string' } },
       required: ['date_time'],
     },
+    notify_guests: { type: 'boolean' },
   },
   required: ['title', 'start'],
 };
@@ -60,7 +67,7 @@ const VALID_CREATE_ARGS = {
   end: { date_time: '2026-10-27T15:00:00', time_zone: 'America/New_York' },
 };
 
-function makeToolSet(approvalRequired = false) {
+function makeToolSet(approvalRequired = false, readOnlyTools: ReadonlySet<string> = new Set()) {
   const toolSet = makeMockIMCPServer({
     name: 'google_calendar',
     preload: true,
@@ -100,11 +107,78 @@ function makeToolSet(approvalRequired = false) {
       mcp_server_name: toolSet.name,
       original_tool_name: params.name,
       is_approval_required: approvalRequired && params.name === 'create_event',
+      ...(readOnlyTools.has(params.name) ? { read_only_hint: true } : {}),
     }),
   );
   jest.mocked(toolSet.callTool).mockImplementation(() => Promise.resolve(toolResultResponse({ text: '{"ok":true}' })));
   return toolSet;
 }
+
+/**
+ * The person's designated search provider, classified as in the app with searches allowed without
+ * asking. Its tools publish no annotations at all, so only the host's designation makes them reads.
+ */
+function makeSearchProviderToolSet() {
+  const sentinel = createSentinelHostContext({
+    tenant_id: 't1',
+    created_by: 'u1',
+    conversation_id: 'c1',
+    services: {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      searchWithoutAsking: () => Promise.resolve(true),
+    },
+    web_search: createWebSearchTurnState(),
+  });
+  const source = makeMockIMCPServer({
+    name: 'search_provider',
+    preload: true,
+    tools: [
+      {
+        name: 'web_search',
+        description: 'Search the web',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+        preload: true,
+      },
+      {
+        name: 'web_fetch',
+        description: 'Fetch a page',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            urls: { type: 'array', items: { type: 'string' } },
+            full_content: { type: 'boolean' },
+          },
+          required: ['urls'],
+        },
+        preload: true,
+      },
+    ],
+  });
+  jest.mocked(source.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'mcp',
+      mcp_server_id: source.id,
+      mcp_server_name: source.name,
+      original_tool_name: params.name,
+      is_approval_required: false,
+    }),
+  );
+  jest
+    .mocked(source.callTool)
+    .mockImplementation(() =>
+      Promise.resolve(toolResultResponse({ text: JSON.stringify({ results: [{ url: SEARCH_RESULT_URL }] }) })),
+    );
+  const toolSet = new ToolSet({
+    source,
+    selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
+    preload: true,
+    sentinel,
+    searchProvider: { tools: ['web_search', 'web_fetch'], plumbing_fields: [] },
+  });
+  return { source, toolSet, sentinel };
+}
+
+const SEARCH_RESULT_URL = 'https://example.com/canal';
 
 type CallSpec = { id: string; name: string; args: Record<string, unknown> | string };
 
@@ -167,7 +241,7 @@ async function* replyStream(input: {
 }
 
 function makeThread(input: {
-  toolSet: ReturnType<typeof makeToolSet>;
+  toolSet: IToolSet;
   create: ILLM['create'];
   context?: ContextMessage[];
   turnToolCallLedger?: TurnToolCallLedger | undefined;
@@ -212,6 +286,12 @@ function toolResults(thread: AgentThread): { tool_call_id: string; content: stri
       (message): message is { role: 'tool'; tool_call_id: string; content: string } =>
         'role' in message && message.role === 'tool',
     );
+}
+
+/** The error text a refused call's result carries, read out of its JSON envelope. */
+function refusalError(content: string | undefined): unknown {
+  const parsed: unknown = JSON.parse(content ?? '{}');
+  return isRecord(parsed) && isRecord(parsed['result']) ? parsed['result']['error'] : undefined;
 }
 
 function lastAssistant(thread: AgentThread) {
@@ -292,7 +372,44 @@ describe('leaked markup', () => {
     const events = await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual([]);
-    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTE}`);
+    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTES.change}`);
+  });
+
+  it('adds the clone note when the reply says it cloned a repository and only the clock ran', async () => {
+    const toolSet = makeMockIMCPServer({
+      name: 'clock',
+      preload: true,
+      tools: [
+        { name: 'get_current_datetime', description: 'Current time', inputSchema: { type: 'object' }, preload: true },
+      ],
+    });
+    jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+      Promise.resolve({
+        type: 'mcp',
+        mcp_server_id: toolSet.id,
+        mcp_server_name: toolSet.name,
+        original_tool_name: params.name,
+        read_only_hint: true,
+      }),
+    );
+    jest
+      .mocked(toolSet.callTool)
+      .mockImplementation(() => Promise.resolve(toolResultResponse({ text: '"2026-10-23T09:00:00Z"' })));
+    const reply =
+      "I've cloned the lanternworks/tide-tables repository into your workspace. It has three folders: src, docs and scripts.";
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-clock', name: 'get_current_datetime', args: {} }] });
+      }
+      return replyStream({ text: reply });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['get_current_datetime']);
+    expect(deliveredText(events)).toBe(`${reply}\n\n${UNBACKED_CLAIM_NOTES.clone}`);
   });
 
   it('leaves the reply alone when a write call succeeded in the same turn', async () => {
@@ -343,11 +460,108 @@ describe('argument checking', () => {
     const refused = results.find(
       result => result.tool_call_id.endsWith('fetch-1') || result.content.includes('full_content'),
     );
-    expect(refused?.content).toContain('full_content should be true or false');
+    expect(refusalError(refused?.content)).toContain(
+      'full_content must be true or false, for example "full_content": true, or leave it out',
+    );
     expect(refused?.content).toContain('was not sent');
     // Nothing the person sees carries a provider's raw validation text.
     expect(JSON.stringify(events)).not.toContain('invalid_type');
     expect(JSON.stringify(events)).not.toContain('anyOf');
+  });
+
+  it("runs the search provider's web_fetch once with an unusable full_content left out", async () => {
+    const { source, toolSet, sentinel } = makeSearchProviderToolSet();
+    // An earlier search in this turn returned the page, so reading it runs without asking.
+    sentinel.web_search.resultUrls.add(SEARCH_RESULT_URL);
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [{ id: 'fetch-1', name: 'web_fetch', args: { urls: [SEARCH_RESULT_URL], full_content: '> ' } }],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(jest.mocked(source.callTool).mock.calls.map(call => call[0])).toEqual([
+      { name: 'web_fetch', arguments: { urls: [SEARCH_RESULT_URL] } },
+    ]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it("runs the search provider's unannotated web_fetch once after its search, with full_content left out", async () => {
+    const { source, toolSet } = makeSearchProviderToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'search-1', name: 'web_search', args: { query: 'canal walks' } }] });
+      }
+      if (round === 2) {
+        return replyStream({
+          calls: [{ id: 'fetch-1', name: 'web_fetch', args: { urls: [SEARCH_RESULT_URL], full_content: '> ' } }],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(jest.mocked(source.callTool).mock.calls.map(call => call[0])).toEqual([
+      { name: 'web_search', arguments: { query: 'canal walks' } },
+      { name: 'web_fetch', arguments: { urls: [SEARCH_RESULT_URL] } },
+    ]);
+    expect(JSON.stringify(toolResults(thread))).not.toContain('full_content must be');
+  });
+
+  it('still refuses a tool that changes something when its optional true-or-false value is unusable', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [{ id: 'create-1', name: 'create_event', args: { ...VALID_CREATE_ARGS, notify_guests: '> ' } }],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    const results = toolResults(thread);
+    expect(results).toHaveLength(1);
+    expect(refusalError(results[0]?.content)).toContain(
+      'notify_guests must be true or false, for example "notify_guests": true, or leave it out',
+    );
+  });
+
+  it('still refuses a write that calls itself read-only when its optional true-or-false value is unusable', async () => {
+    const toolSet = makeToolSet(false, new Set(['create_event']));
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [{ id: 'create-1', name: 'create_event', args: { ...VALID_CREATE_ARGS, notify_guests: '> ' } }],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    const results = toolResults(thread);
+    expect(results).toHaveLength(1);
+    expect(refusalError(results[0]?.content)).toContain(
+      'notify_guests must be true or false, for example "notify_guests": true, or leave it out',
+    );
   });
 
   it('runs a call whose arguments streamed as empty text when the tool needs none', async () => {
@@ -381,7 +595,7 @@ describe('argument checking', () => {
     expect(toolSet.callTool).not.toHaveBeenCalled();
     const results = toolResults(thread);
     expect(results).toHaveLength(1);
-    expect(results[0]?.content).toContain('urls should be a list (this one is required)');
+    expect(results[0]?.content).toContain('urls must be a list (this one is required)');
     expect(results[0]?.content).not.toContain('not complete');
   });
 

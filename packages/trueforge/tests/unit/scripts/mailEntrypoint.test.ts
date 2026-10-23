@@ -143,6 +143,40 @@ describe('mail-email entrypoint wrapper', () => {
     expect(await startCount()).toBeGreaterThanOrEqual(2);
   }, 30_000);
 
+  it('logs that it is waiting for the send list, and starts once the list exists', async () => {
+    await rm(policy);
+    let output = '';
+    const child = spawn('sh', [ENTRYPOINT, 'streamable-http', '--port', '9557'], {
+      env: {
+        PATH: `${join(dir, 'bin')}:${process.env['PATH'] ?? ''}`,
+        MCP_EMAIL_SERVER_CONFIG_PATH: policy,
+        AMAN_MAIL_STATUS_FILE: status,
+        AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
+        AMAN_MAIL_ACCOUNT_PORT: '19759',
+        AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    wrapper = child;
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+    });
+    await eventually(async () => output.includes('waiting for the send list'));
+    expect(await startCount()).toBe(0);
+    const firstList = join(dir, 'first.toml');
+    await writeFile(firstList, LIST_V1);
+    await rename(firstList, policy);
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    expect(await startCount()).toBeGreaterThanOrEqual(1);
+    // Stop through the wrapper's own signal path, so the stand-in server stops with it and
+    // no child is left holding this test's output pipe open.
+    const exited = new Promise(resolve => child.once('exit', resolve));
+    child.kill('SIGTERM');
+    await exited;
+    expect(child.exitCode).toBe(0);
+  }, 20_000);
+
   it('stops the server when it is told to stop', async () => {
     const child = startWrapper();
     await eventually(async () => (await readOrEmpty(status)) !== '');

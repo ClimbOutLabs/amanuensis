@@ -16,6 +16,7 @@ import {
   chunkHasSubstance,
   describeStreamError,
   enforceStreamDeadlines,
+  isContextLengthError,
   mapFinishReason,
   mapStreamToChunks,
   ModelOutputRepetitionError,
@@ -914,6 +915,21 @@ describe('mapStreamToChunks', () => {
     expect(rejection).toBeInstanceOf(Error);
   });
 
+  it('raises ModelStreamFault for a provider answer that the prompt is over the context length', async () => {
+    // A shorter history can fix this one definite provider answer, so it takes the retry path.
+    const cause = Object.assign(new Error("This model's maximum context length is 32768 tokens."), {
+      data: { message: '', type: 'BadRequestError', param: null, code: 400 },
+    });
+    const rejection: unknown = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([{ type: 'error', error: cause }]),
+        chunkMeta: CHUNK_META,
+      }),
+    ).catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ModelStreamFault);
+    expect(isContextLengthError(rejection)).toBe(true);
+  });
+
   it('raises ModelStreamFault when the stream ends with no text, no tool call, and no finish signal', async () => {
     // The shape a provider closing the connection mid-response takes: the stream's own async
     // iterable simply ends, with no 'error' part and nothing thrown.
@@ -1013,6 +1029,62 @@ describe('mapStreamToChunks', () => {
 });
 
 // ─────────── chunkHasSubstance ───────────
+
+describe('isContextLengthError', () => {
+  it.each([
+    "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens.",
+    'prompt is too long: 210000 tokens > 200000 maximum',
+    'Input is too long for requested model.',
+    'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+    'context_length_exceeded',
+    'input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again',
+    'The decoder prompt (length 40000) is longer than the maximum model length of 32768.',
+    'the request exceeds the available context size, try increasing it',
+  ])('recognizes %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(true);
+  });
+
+  it('finds the wording in the cause chain and in an API response body', () => {
+    expect(isContextLengthError(new ModelStreamFault('broke', { cause: new Error('prompt is too long') }))).toBe(true);
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"code":"context_length_exceeded"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(true);
+  });
+
+  it('does not treat a dropped stream or a timeout as a context-length error', () => {
+    expect(isContextLengthError(new ModelStreamFault('The model stream ended without any text.'))).toBe(false);
+    expect(isContextLengthError(new Error('terminated', { cause: new Error('other side closed') }))).toBe(false);
+    expect(isContextLengthError(new Error('Rate limit reached: too many tokens per minute'))).toBe(false);
+  });
+
+  it.each([
+    'Rate limit reached for requests',
+    'Request timed out.',
+    'socket hang up',
+    'other side closed',
+    'read ECONNRESET',
+    'Bad Request',
+    'Invalid request: messages must not be empty',
+  ])('does not recognize %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(false);
+  });
+
+  it('does not treat a generic 400 answer as a context-length error', () => {
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"message":"Invalid value for temperature","type":"invalid_request_error"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(false);
+  });
+});
 
 describe('chunkHasSubstance', () => {
   it('rejects a part with no reader-visible content', () => {

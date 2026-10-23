@@ -64,15 +64,16 @@ import {
   type LLMUserMessage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
+  type RawToolCall,
   type RegisteredCommandExecution,
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
-import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
+import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
+import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   allowsSearchChatGrant,
@@ -95,6 +96,8 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  isHostVouchedRead,
+  isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   NO_PROGRESS_NUDGE_AT,
@@ -142,6 +145,7 @@ import {
   recordAttachedFile,
   recordPrivateContextText,
 } from '../permissions/webSearch';
+import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -232,14 +236,16 @@ import {
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
-  isSafeToRepeat,
   OpenToolCallCloser,
   unknownOutcomeCloseout,
   type ClosableToolOutcome,
 } from './OpenToolCallCloser';
 import {
-  claimsUnbackedAction,
+  BLOCKED_CALLS_PARENT_MESSAGE,
+  blockedCallsStopMessage,
+  findUnbackedClaim,
   REPEATED_ACTION_RESULT,
+  stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
@@ -376,6 +382,17 @@ function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<
     );
   });
 }
+
+/** Thrown when a request is still over the model's size limits after compaction. */
+class RequestOverLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestOverLimitError';
+  }
+}
+
+// What the person sees when the chat stays too long for the model even after shortening.
+const CHAT_TOO_LONG_MESSAGE = 'The chat is too long for this model. Start a new chat or use a different model.';
 
 /**
  * Thrown when an async producer stalls without yielding for longer than its
@@ -1387,6 +1404,27 @@ export async function classifyUnstampedToolCall(input: {
   return { ...info, ...stampSentinelDecision({ decision }) };
 }
 
+/**
+ * The called tools whose reads the host itself vouches for, looked up by name before their
+ * arguments are trusted. A server's own read-only claim never counts here.
+ */
+function hostVouchedReadToolNames({
+  calls,
+  toolMapping,
+}: {
+  calls: readonly RawToolCall[];
+  toolMapping: Map<string, MappedMCPTool>;
+}): Set<string> {
+  const vouched = new Set<string>();
+  for (const name of new Set(calls.map(call => call.function.name))) {
+    const toolInfo = toolMapping.get(name);
+    if (toolInfo?.toolSet.isHostVouchedReadTool?.(toolInfo.originalToolName) === true) {
+      vouched.add(name);
+    }
+  }
+  return vouched;
+}
+
 async function enrichAssistantMessage({
   assistantMessage,
   toolMapping,
@@ -1764,6 +1802,7 @@ export class AgentThread {
       this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
+        setUpConnectorNames: this.definition.setUpConnectorNames,
       });
     }
 
@@ -2490,9 +2529,14 @@ export class AgentThread {
   private *recoverFromLoopOrExit(input: {
     recoveryNote: string;
     errorMessage: string;
+    /** What the parent model reads when a helper stops this way; undefined sends it errorMessage. */
+    parentErrorMessage: string | undefined;
   }): Generator<AgentThreadEvent, StepOutcome, unknown> {
     if (this.loopRecoveryAttemptedThisTurn) {
-      yield this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      const done = this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      yield input.parentErrorMessage === undefined || done.send_to_parent === undefined
+        ? done
+        : { ...done, send_to_parent: { ...done.send_to_parent, content: input.parentErrorMessage } };
       return 'exit';
     }
     this.loopRecoveryAttemptedThisTurn = true;
@@ -3232,6 +3276,99 @@ export class AgentThread {
     );
   }
 
+  /**
+   * Checks the request against the character ceiling and the model's token context length. When
+   * it is over and no compaction ran this turn, forces one compaction pass; when it is still over,
+   * throws RequestOverLimitError. Run before every request built from a changed history.
+   */
+  private async *ensureRequestFits({
+    tools,
+    signal,
+    compactedThisTurn,
+  }: {
+    tools: ChatCompletionTool[];
+    signal: AbortSignal | undefined;
+    compactedThisTurn: boolean;
+  }): AsyncGenerator<
+    | ThreadOverwriteContextEvent
+    | ContextCompactionEvent
+    | ContextCompactionStartedEvent
+    | AgentThreadAppendContext
+    | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
+    | InternalCapabilityStateEvent,
+    'fits' | 'aborted',
+    unknown
+  > {
+    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
+    // request before its safety ceiling is checked. If the raw context is already past
+    // the ceiling, force one compaction pass; if it is still past the ceiling after
+    // that, fail fast instead of blocking the event loop on a doomed assembly.
+    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
+      // No double compaction in one turn: when a pass already compacted this turn,
+      // a second forced pass would re-summarize a fresh summary.
+      if (!compactedThisTurn) {
+        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+          yield event;
+        }
+        if (signal?.aborted) {
+          return 'aborted';
+        }
+      }
+      const postCompactionLength = estimateRawContextTextLength(this.context);
+      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
+        throw new RequestOverLimitError(
+          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
+            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
+            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
+            `Start a new chat or reduce the context and try again.`,
+        );
+      }
+    }
+
+    // Token-based pre-flight guard: the character ceiling above does not account for
+    // the model's token context limit. Estimate the full request in tokens
+    // (instruction + definition messages + context + task state + tool definitions)
+    // and force compaction if input tokens plus reserved output tokens would reach
+    // the context length. The safety margin covers additive overhead on top of the
+    // estimate (provider-added BOS token, template overhead, post-compaction
+    // instruction/task-state messages); see TOKEN_BUDGET_SAFETY_MARGIN for its scope
+    // and known limitations.
+    const modelContextLength = this.definition.modelProperties?.contextLength;
+    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
+      const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
+      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
+      const isOverLimit = (estimatedInputTokens: number): boolean =>
+        estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
+      // The estimate bails out at the budget: precision past it cannot change the guard.
+      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
+      if (isOverLimit(estimatedInputTokens)) {
+        // No double compaction in one turn: when a pass already compacted this
+        // turn, skip the forced pass and fail clearly if the estimate is still
+        // over, instead of re-summarizing a fresh summary.
+        if (!compactedThisTurn) {
+          for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+            yield event;
+          }
+          if (signal?.aborted) {
+            return 'aborted';
+          }
+        }
+        // Full-precision estimate for the error message: the early exit above
+        // reports only a lower bound once past the budget.
+        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
+        if (isOverLimit(postCompactionTokens)) {
+          throw new RequestOverLimitError(
+            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
+              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
+              `refusing to send a request the provider would reject. ` +
+              `Start a new chat or reduce the context and try again.`,
+          );
+        }
+      }
+    }
+    return 'fits';
+  }
+
   private async *stepLLMCall(
     tools: ChatCompletionTool[],
     toolMapping: Map<string, MappedMCPTool>,
@@ -3329,72 +3466,9 @@ export class AgentThread {
         this.replyContext = this.buildReplyContext();
       }
     }
-    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
-    // request before its safety ceiling is checked. If the raw context is already past
-    // the ceiling, force one compaction pass; if it is still past the ceiling after
-    // that, fail fast instead of blocking the event loop on a doomed assembly.
-    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
-      // No double compaction in one turn: the normal pre-LLM pass above already
-      // compacted, so a second forced pass would re-summarize a fresh summary.
-      if (!compactedThisTurn) {
-        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-          yield event;
-        }
-        if (signal?.aborted) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-      }
-      const postCompactionLength = estimateRawContextTextLength(this.context);
-      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
-        throw new Error(
-          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
-            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
-            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
-            `Start a new chat or reduce the context and try again.`,
-        );
-      }
-    }
-
-    // Token-based pre-flight guard: the character ceiling above does not account for
-    // the model's token context limit. Estimate the full request in tokens
-    // (instruction + definition messages + context + task state + tool definitions)
-    // and force compaction if input tokens plus reserved output tokens would reach
-    // the context length. The safety margin covers additive overhead on top of the
-    // estimate (provider-added BOS token, template overhead, post-compaction
-    // instruction/task-state messages); see TOKEN_BUDGET_SAFETY_MARGIN for its scope
-    // and known limitations.
-    const modelContextLength = this.definition.modelProperties?.contextLength;
-    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
-      const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
-      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
-      const isOverLimit = (estimatedInputTokens: number): boolean =>
-        estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
-      // The estimate bails out at the budget: precision past it cannot change the guard.
-      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
-      if (isOverLimit(estimatedInputTokens)) {
-        // No double compaction in one turn: when the normal pre-LLM pass above
-        // already compacted, skip the forced pass and fail clearly if the
-        // estimate is still over, instead of re-summarizing a fresh summary.
-        if (!compactedThisTurn) {
-          for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-            yield event;
-          }
-          if (signal?.aborted) {
-            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-          }
-        }
-        // Full-precision estimate for the error message: the early exit above
-        // reports only a lower bound once past the budget.
-        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
-        if (isOverLimit(postCompactionTokens)) {
-          throw new Error(
-            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
-              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
-              `refusing to send a request the provider would reject. ` +
-              `Start a new chat or reduce the context and try again.`,
-          );
-        }
-      }
+    const firstFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn });
+    if (firstFit === 'aborted') {
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
     let requestBody = this.transformToLLMRequest(tools);
@@ -3403,12 +3477,13 @@ export class AgentThread {
     }
 
     // A cut or malformed model stream (ModelStreamFault, thrown by the ILLM client; see
-    // VercelAILLM) is a model fault, not a host fault: it is retried, not treated as fatal. On
-    // the first fault this attempts one retry, forcing context compaction first (the same
-    // compaction path the ordinary preLLM threshold check uses, forced regardless of threshold;
-    // see executeContextProcessors's forceCompaction option) so the retry runs under a shorter
-    // context. A second fault in a row ends the turn with a specific, actionable error instead of
-    // the generic fatal_error the outer catch in execute() would otherwise produce for it.
+    // VercelAILLM) is a model fault, not a host fault: it is retried once, not treated as fatal.
+    // Most faults (a timeout, a dropped connection) have nothing to do with history size, so the
+    // retry sends the same history. Only a fault the provider says is about context length forces
+    // compaction first, and the shortened request goes through ensureRequestFits again before it
+    // is sent, so it can be checked or stopped but never shortened twice. A second fault in a
+    // row ends the turn with a specific, actionable error instead of the generic fatal_error the
+    // outer catch in execute() would otherwise produce for it.
     const MAX_MODEL_STREAM_FAULT_ATTEMPTS = 2;
     let modelMessageUsage: ModelMessageUsage | undefined;
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
@@ -3506,16 +3581,25 @@ export class AgentThread {
           throw error;
         }
         if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          // A repetition fault carries its own actionable guidance; surfacing the
-          // generic context-too-long text for it would mislead the user.
+          // A repetition fault carries its own actionable guidance, and only a context-length
+          // fault is blamed on the chat's length; anything else would mislead the user.
           const message =
             error instanceof ModelOutputRepetitionError
               ? error.message
-              : "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model";
+              : isContextLengthError(error)
+                ? CHAT_TOO_LONG_MESSAGE
+                : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
           yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
-        this.logger.warn('Model stream fault; compacting context and retrying the call once', {
+        if (!isContextLengthError(error)) {
+          this.logger.warn('Model stream fault; retrying the call once with the same history', {
+            ...extractErrorLogFields(error),
+            attempt,
+          });
+          continue;
+        }
+        this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
           ...extractErrorLogFields(error),
           attempt,
         });
@@ -3537,6 +3621,21 @@ export class AgentThread {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         if (signal?.aborted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+        try {
+          const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
+          if (retryFit === 'aborted') {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+        } catch (fitError) {
+          if (!(fitError instanceof RequestOverLimitError)) {
+            throw fitError;
+          }
+          this.logger.warn('Shortened history is still over the model limit; not retrying', {
+            ...extractErrorLogFields(fitError),
+          });
+          yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         requestBody = this.transformToLLMRequest(tools);
@@ -3596,6 +3695,14 @@ export class AgentThread {
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
+      // The reply has already streamed, so it stays as written and the note corrects it. The note is
+      // saved with the reply, so the model reads the correction on its next turn.
+      const unbackedClaim = findUnbackedClaim({
+        text: replyText,
+        successfulWrites,
+        stepKinds: this.toolCallMemo.turn.stepKindsThisTurn,
+        sandboxOn: this.sandbox !== undefined,
+      });
       // The model is told why a reply did not finish and says so in its own words. The host adds a line
       // only when the reply has none, so the person is never left with nothing; a reply with words
       // still gets the checks below, so it cannot claim the step that did not run as done.
@@ -3605,9 +3712,9 @@ export class AgentThread {
           ? unfinishedNotice(unfinishedKind)
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
-            : claimsUnbackedAction({ text: replyText, successfulWrites })
-              ? UNBACKED_CLAIM_NOTE
-              : undefined;
+            : unbackedClaim === undefined
+              ? undefined
+              : UNBACKED_CLAIM_NOTES[unbackedClaim];
       if (notice !== undefined) {
         const withNotice = noticeAfter({ text: replyText, notice });
         result.value.output.content = replyText + withNotice;
@@ -3639,6 +3746,7 @@ export class AgentThread {
       // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
+      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
@@ -3964,9 +4072,10 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A write
-   * (tier 3) past MAX_WRITE_CALLS_PER_TURN is not run either. Both end the turn after their batch
-   * resolves, and the repeat also ends it when the same call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
+   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
+   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
+   * call comes straight after the one before.
    */
   private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
     calls: InternalEnrichedToolCall[];
@@ -4006,8 +4115,14 @@ export class AgentThread {
         repeatStop = repeatStop || consecutive;
         return blocked(call, REPEATED_ACTION_RESULT);
       }
-      // A write held for the owner in an unattended run does not run now, so it does not count.
-      if (call.tool_info.tier === 3 && call.tool_info.held_for_owner === undefined) {
+      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
+      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
+      // held for the owner in an unattended run does not run now.
+      if (
+        call.tool_info.tier === 3 &&
+        !isHostVouchedRead(call.tool_info) &&
+        call.tool_info.held_for_owner === undefined
+      ) {
         if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked(call, WRITE_CAP_BLOCKED_RESULT);
@@ -4328,10 +4443,17 @@ export class AgentThread {
         disposition: result.disposition,
         reasonCode: result.remediation?.reason_code ?? null,
       });
-      // Calls with no metadata count as writes, as isSafeToRepeat treats them.
-      const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
-      if (result.disposition === 'executed_ok' && !result.failure && writes) {
-        nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+      // Calls with no metadata count as writes, as isReadOnlyCall treats them.
+      const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
+      if (result.disposition === 'executed_ok' && !result.failure) {
+        if (writes) {
+          nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+        }
+        if (result.toolCallInfo !== undefined) {
+          for (const kind of stepKindsOf(result.toolCallInfo)) {
+            nextToolCallMemo.turn.stepKindsThisTurn.add(kind);
+          }
+        }
       }
     }
     this.metrics.total_sub_agents += createThreadEvents.length;
@@ -4868,6 +4990,7 @@ export class AgentThread {
           "Your tool calls keep being blocked by this conversation's tool policy: the tools are not allowed here, and retrying them or trying variants cannot succeed. Write your final answer now: tell the user in plain language what you tried to do, what is not permitted in this conversation, what you were able to accomplish, and ask how they would like to proceed. Do not make any more tool calls — just answer.",
         errorMessage:
           'The model made three tool calls blocked by the conversation tool policy in this turn, ignoring the earlier host note about it, so the turn was stopped. Policy-blocked calls cannot succeed by retrying; the model must use allowed tools or explain the limitation to the user.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveEmptyInspectionBatches >= EMPTY_INSPECTION_STOP_AT) {
@@ -4876,14 +4999,15 @@ export class AgentThread {
           'Your inspections keep returning no matches. Write your final answer now based on what you have found so far, stating clearly what was not found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive inspections that returned no matches, ignoring the earlier host note about it, so the turn was stopped. Do not keep rephrasing the same search; use the evidence already collected or change strategy.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveNoProgressBatches >= NO_PROGRESS_STOP_AT) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote:
           'Your tool calls keep getting blocked before they run. Write your final answer now: explain what you tried, what blocked it, and what you know so far. Do not make any more tool calls — just answer.',
-        errorMessage:
-          'The model made five consecutive tool calls that were blocked before they ran, ignoring the earlier host note about it, so the turn was stopped. Retrying differently-shaped arguments will not help; read the actual blocking error, fix its root cause, or ask the user.',
+        errorMessage: blockedCallsStopMessage(assistantDisplayName(this.definition.identity?.assistantName)),
+        parentErrorMessage: BLOCKED_CALLS_PARENT_MESSAGE,
       });
     }
     if (nextToolCallMemo.consecutiveFailedBatches >= FAILED_BATCH_STOP_AT) {
@@ -4892,6 +5016,7 @@ export class AgentThread {
           'Your tool calls keep failing. Write your final answer now: report what you tried, what failed, and what you have learned so far. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive tool calls that all failed, ignoring the earlier host note about it, so the turn was stopped. Trying another variant will not help; the tool or environment is not working. Report what failed and what is already known.',
+        parentErrorMessage: undefined,
       });
     }
     // Hard cap, one stage past the INSPECTION_WARNING_LIMIT nudge above: that nudge fires once
@@ -4905,6 +5030,7 @@ export class AgentThread {
           'You have made many inspections without making progress. Write your final answer now summarizing what you found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
+        parentErrorMessage: undefined,
       });
     }
     for (const name of unavailableToolNames) {
@@ -4920,6 +5046,7 @@ export class AgentThread {
         recoveryNote:
           'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
         errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4927,6 +5054,7 @@ export class AgentThread {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
         errorMessage: `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4966,6 +5094,7 @@ export class AgentThread {
           repeatedVerification,
           repeatedGithubFileRead,
         }),
+        parentErrorMessage: undefined,
       });
     }
     if (authRequirementInfo.length > 0) {

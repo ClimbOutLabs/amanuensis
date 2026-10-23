@@ -2,7 +2,7 @@ import { ToolPolicyBlockedError } from '../../../src/core/errors';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { UNBACKED_CLAIM_NOTES } from '../../../src/core/llm/replyNotices';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
@@ -303,7 +303,7 @@ describe('reply step budget', () => {
 
     const { events } = await runThread({ toolSet, create: model.create });
 
-    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTE));
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTES.change));
   });
 
   it('a retryable error gets one retry, then becomes final', async () => {

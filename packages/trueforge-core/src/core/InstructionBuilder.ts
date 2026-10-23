@@ -48,7 +48,7 @@
  * // </system-prompt>
  */
 
-import { DEFAULT_ASSISTANT_NAME } from './personas/assistantName';
+import { assistantDisplayName } from './personas/assistantName';
 
 /** Names for a root identity. Missing, null or blank values use the fallbacks on `rootAgentIdentity`. */
 export interface RootAgentNames {
@@ -60,17 +60,12 @@ export interface RootAgentNames {
   personName?: string | null | undefined;
 }
 
-function nonBlank(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
-}
-
 /**
  * The static identity of the root assistant. It names only the assistant: the person's name goes in the
  * per-reply block, so this text is identical for every person and never changes between replies.
  */
 export function rootAgentIdentity({ assistantName }: Pick<RootAgentNames, 'assistantName'>): string {
-  const assistant = nonBlank(assistantName) ?? DEFAULT_ASSISTANT_NAME;
+  const assistant = assistantDisplayName(assistantName);
   return `You are ${assistant}, chief of staff to the person you work for. You keep track of their life: appointments, deadlines, messages, plans and promises. You work only for them, on their own computer. Be brief, warm and concrete. Check with them before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
 }
 

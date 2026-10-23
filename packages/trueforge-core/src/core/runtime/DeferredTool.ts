@@ -2,6 +2,8 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import dedent from 'dedent';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { type ConnectorAvailability, connectorUnavailableLine } from '../connectors/connectorAvailability';
+import { isMailConnectorGuess, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
@@ -21,6 +23,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
+import { findBundle, TOOL_BUNDLE_NAMES } from './toolBundleCatalog';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
 const DEFERRED_TOOLS_INSTRUCTION = 'deferred-tools-instructions';
@@ -51,6 +54,8 @@ const ALIASABLE_META_TOOL_NAMES: ReadonlySet<string> = new Set([
 
 /** Cap on how many names a rejection lists, so a server with hundreds of tools stays readable. */
 const MAX_LISTED_NAMES = 20;
+
+const STOP_GUESSING = 'Do not try other names; tell the person this.';
 
 /** Renders a name list for a rejection hint, bounded to {@link MAX_LISTED_NAMES}. */
 function boundedNameList(names: readonly string[]): string {
@@ -123,16 +128,21 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
+  /** Undefined when the list could not be read, so nothing is claimed about what is set up. */
+  private readonly setUpConnectorNames: readonly string[] | undefined;
 
   constructor(
     servers: readonly IToolSet[],
     options: {
       tracing: AgentTracing;
       logger: Logger;
+      /** Every connector set up for the tenant, whether or not this chat has it. */
+      setUpConnectorNames?: readonly string[] | undefined;
     },
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
+    this.setUpConnectorNames = options.setUpConnectorNames;
     this.serverMap = new Map(servers.map(s => [s.name, s]));
     this.tools = this.buildTools();
   }
@@ -159,7 +169,8 @@ export class DeferredTool extends LocalToolMCP {
         ${deferredList}
 
         The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.
-        Built-in tools are called directly by name, never through ${LIST_TOOLS_NAME}.`,
+        Built-in tools are called directly by name, never through ${LIST_TOOLS_NAME}.
+        When a server is not available, the result says why in one line: tell the person that line and never try other server names.`,
     );
   }
 
@@ -267,13 +278,49 @@ export class DeferredTool extends LocalToolMCP {
   }
 
   /**
-   * Short and plain: the connectors that exist, then where built-in tools live. Built-in tools are never on a
-   * connector, so models that look for one through call_tool need the reminder, not a structured rejection.
+   * The set-up connector the model most likely meant: the same name in any case, or the Email connector for a
+   * mail-like guess. Undefined when the name matches nothing that is set up.
+   */
+  private meantConnector(mcpServer: string): string | undefined {
+    const lowered = mcpServer.toLowerCase();
+    const known = [...new Set([...(this.setUpConnectorNames ?? []), ...this.serverMap.keys()])];
+    const sameName = known.find(name => name.toLowerCase() === lowered);
+    if (sameName !== undefined) {
+      return sameName;
+    }
+    return isMailConnectorGuess(mcpServer) && known.includes(MAIL_CONNECTOR_NAME) ? MAIL_CONNECTOR_NAME : undefined;
+  }
+
+  /**
+   * One plain line the model can pass on: the connector's name here, that it is turned off or not set up,
+   * or, for a built-in bundle's name, how to load that bundle. A connector line ends the search.
    */
   private serverNotFoundText(mcpServer: string): string {
+    const meant = this.meantConnector(mcpServer);
+    if (meant !== undefined) {
+      const availability: ConnectorAvailability = this.serverMap.has(meant) ? 'in-chat' : 'turned-off';
+      const line = connectorUnavailableLine({ connector: meant, availability });
+      return availability === 'in-chat' ? `No server named '${mcpServer}'. ${line}` : `${line} ${STOP_GUESSING}`;
+    }
+    const bundle = findBundle({ name: mcpServer, offered: TOOL_BUNDLE_NAMES });
+    if ('found' in bundle) {
+      return `'${mcpServer}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.`;
+    }
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.`;
+    const availability: ConnectorAvailability = this.setUpConnectorNames === undefined ? 'unknown' : 'not-set-up';
+    return `No server named '${mcpServer}'. Servers: ${serverList}. ${connectorUnavailableLine({ connector: mcpServer, availability })} ${STOP_GUESSING}`;
+  }
+
+  /** A connector this chat has that did not answer when its tools were listed. The detail is for the model only. */
+  private notAnsweringResponse(mcpServer: string, error: unknown): CallToolResponse {
+    return toolResultResponse({
+      text: JSON.stringify({
+        error: `The ${mcpServer} connector is set up but is not answering yet. Try again in a minute. Do not try other names; tell the person this if it keeps failing.`,
+        detail: error instanceof Error ? error.message : 'unknown',
+      }),
+      isError: true,
+    });
   }
 
   private serverNotFoundResponse(mcpServer: string): CallToolResponse {
@@ -317,10 +364,7 @@ export class DeferredTool extends LocalToolMCP {
         ...extractErrorLogFields(error),
         mcpServer: input.mcp_server,
       });
-      return toolResultResponse({
-        text: JSON.stringify({ error: `Failed to list tools for '${input.mcp_server}'.` }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -374,12 +418,7 @@ export class DeferredTool extends LocalToolMCP {
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: `Failed to get tool info: ${error instanceof Error ? error.message : 'unknown'}`,
-        }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -432,12 +471,7 @@ export class DeferredTool extends LocalToolMCP {
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: `Failed to get output schema: ${error instanceof Error ? error.message : 'unknown'}`,
-        }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -535,11 +569,21 @@ export class DeferredTool extends LocalToolMCP {
           });
         }
 
+        let resolved: CallToolResponse | ResolvedServerTools;
         try {
-          const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
-          if (!isResolvedServerTools(resolved)) {
-            return resolved;
-          }
+          resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
+        } catch (error) {
+          this.logger.error('call_tool could not list tools', {
+            ...extractErrorLogFields(error),
+            mcpServer: input.mcp_server,
+            toolName: input.tool_name,
+          });
+          return this.notAnsweringResponse(input.mcp_server, error);
+        }
+        if (!isResolvedServerTools(resolved)) {
+          return resolved;
+        }
+        try {
           if (!resolved.tools.some(t => t.name === input.tool_name)) {
             return toolResultResponse({
               text: JSON.stringify({

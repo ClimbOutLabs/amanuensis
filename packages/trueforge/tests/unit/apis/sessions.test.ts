@@ -32,7 +32,8 @@ function silentLogger(): { warn: jest.Mock } {
   return { warn: jest.fn() };
 }
 
-function turnRecord(turnId: string, state: TurnState): TurnRecord {
+/** A turn record; by default made by this process, after its registry started. */
+function turnRecord(turnId: string, state: TurnState, createdAt: Date = new Date()): TurnRecord {
   return {
     turn_id: turnId,
     session_id: SESSION_ID,
@@ -42,8 +43,8 @@ function turnRecord(turnId: string, state: TurnState): TurnRecord {
     state,
     input: [],
     snapshot: { threads: {}, mcp_servers: null, sandbox_info: null },
-    created_at: new Date('2026-07-31T00:00:00.000Z'),
-    updated_at: new Date('2026-07-31T00:00:00.000Z'),
+    created_at: createdAt,
+    updated_at: createdAt,
     custom: null,
   };
 }
@@ -59,7 +60,6 @@ function sessionRecord(overrides: Partial<Pick<SessionRecord, 'repository_id' | 
     created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
     agent: { type: 'reference', id: 'agent-1', name: 'test-agent' },
     title: null,
-    title_source: null,
     folder_id: null,
     repository_id: null,
     workspace_cwd: null,
@@ -163,6 +163,19 @@ describe('cancelSessionTurn', () => {
         turn_id: turnId,
         reason: CancellationReason.ClientCancelled,
       }),
+    );
+  });
+
+  it('records a running turn from before this process started as stopped by the restart', async () => {
+    const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
+    const before = turnRecord(turnId, { status: 'running' }, new Date(Date.now() - 60_000));
+    const activeTurns = new ActiveTurnRegistry();
+    const session = sessionHandle();
+
+    await cancelSessionTurn(cancelDeps({ activeTurns, turn: before, session }), { turnId });
+
+    expect(session.freezeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ turn_id: turnId, reason: CancellationReason.Abandoned }),
     );
   });
 
