@@ -84,7 +84,7 @@ const SOURCES: Source[] = [
     record: read('read_email', MAIL),
     query: 'track order KQ-80442',
     message: 'Where is my parcel?',
-    say: HOLD_SAY.private_read,
+    say: HOLD_SAY.private_detail,
   },
   {
     name: 'notes',

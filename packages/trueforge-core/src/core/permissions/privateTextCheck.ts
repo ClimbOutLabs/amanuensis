@@ -372,7 +372,15 @@ function referenceCodesIn(text: string): string[] {
  * run of copied words; a source the host adds to every reply leaves it off, since its ordinary wording would
  * hold ordinary searches.
  */
-export function fingerprintsOf(input: { texts: readonly string[]; word_runs: boolean }): PrivateFingerprint[] {
+export function fingerprintsOf(input: {
+  texts: readonly string[];
+  word_runs: boolean;
+  /**
+   * Whether names, codes and addresses written in running text are kept too. Only for a text that is the person's
+   * own (a read of their mail, calendar or spaces, their memory, profile or files): a web page's names are not.
+   */
+  running_details: boolean;
+}): PrivateFingerprint[] {
   const found = new Map<string, PrivateFingerprint>();
   const add = (kind: PrivateFingerprint['kind'], length: number, value: string): void => {
     const entry = { kind, length, digest: digestOf({ kind, value }) };
@@ -399,15 +407,16 @@ export function fingerprintsOf(input: { texts: readonly string[]; word_runs: boo
     for (const date of birthDatesIn(text)) {
       add('number', date.length, date);
     }
-    const names = [...namesIn(text), ...runningTextNames(text)].flatMap(nameForms);
-    for (const name of [...names, ...referenceCodesIn(text)]) {
+    const running = input.running_details;
+    const names = [...namesIn(text), ...(running ? runningTextNames(text) : [])].flatMap(nameForms);
+    for (const name of [...names, ...(running ? referenceCodesIn(text) : [])]) {
       const words = wordsOf(name);
       if (compactForm(name).length >= MIN_NAME_CHARS) {
         add('name', words.length, words.join(' '));
         add('name', 1, words.join(''));
       }
     }
-    for (const address of streetAddressesIn(text)) {
+    for (const address of running ? streetAddressesIn(text) : []) {
       add('phrase', address.length, address);
     }
     if (input.word_runs) {
@@ -429,9 +438,11 @@ export function addPrivateFingerprints(input: {
   state: ChatPrivateFingerprints;
   text: string;
   word_runs: boolean;
+  running_details: boolean;
 }): boolean {
   const merged = new Map(input.state.entries.map(entry => [fingerprintKey(entry), entry]));
-  for (const entry of fingerprintsOf({ texts: [input.text], word_runs: input.word_runs })) {
+  const { text, word_runs, running_details } = input;
+  for (const entry of fingerprintsOf({ texts: [text], word_runs, running_details })) {
     merged.set(fingerprintKey(entry), entry);
   }
   if (merged.size > MAX_PRIVATE_FINGERPRINTS) {
@@ -554,7 +565,9 @@ export function privateTextLeak(input: {
     mode: input.mode,
     strings: input.strings,
     earlier: input.earlier,
-    entries: fingerprintsOf({ texts: input.privateTexts, word_runs: true }),
+    // These texts also hold other results kept after a private read, such as web pages, so only what main
+    // fingerprinted is taken here; the chat's kept fingerprints carry the running-text details of the reads.
+    entries: fingerprintsOf({ texts: input.privateTexts, word_runs: true, running_details: false }),
     has_text: input.privateTexts.length > 0,
     encoded_runs: true,
   });

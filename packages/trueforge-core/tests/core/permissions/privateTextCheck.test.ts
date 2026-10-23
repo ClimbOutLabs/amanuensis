@@ -373,7 +373,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
     ).toBeNull();
   });
 
-  it('finds a name from the body in a search and in a map', () => {
+  it('passes a place named after Directions to: in the body, which is not a header', () => {
     expect(
       privateTextLeak({
         earlier: '',
@@ -381,7 +381,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
         strings: outgoing('Park Clinic Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
       }),
-    ).toBe('name');
+    ).toBeNull();
     expect(
       privateTextLeak({
         earlier: '',
@@ -389,7 +389,7 @@ describe('privateTextLeak keeps single words and surnames passing', () => {
         strings: outgoing('Park Clinic, Lisbon'),
         privateTexts: [BODY_DIRECTIONS],
       }),
-    ).toBe('name');
+    ).toBeNull();
   });
 });
 
@@ -453,7 +453,17 @@ describe('privateTextLeak keeps public places passing', () => {
   });
 });
 
-describe('privateTextLeak finds the details a private note gives in running text', () => {
+describe('the chat fingerprints of a private note find the details it gives in running text', () => {
+  const noteLeak = (input: { mode: 'search' | 'maps'; query: string; note: string }) =>
+    fingerprintLeak({
+      mode: input.mode,
+      strings: outgoing(input.query),
+      earlier: '',
+      entries: fingerprintsOf({ texts: [input.note], word_runs: true, running_details: true }),
+      has_text: true,
+      encoded_runs: false,
+    });
+
   const NOTE =
     'My sister Inês Example lives at 48 Quillon Road. Her order ZX-55821Q ships soon. ' +
     'She was born on 14 March 1987 and her account is 7731904.';
@@ -466,41 +476,31 @@ describe('privateTextLeak finds the details a private note gives in running text
     ['a date of birth written with a month name', 'March 14, 1987 horoscope'],
     ['an account number', 'account 7731904 balance'],
   ])('finds %s', (_label, query) => {
-    expect(privateTextLeak({ earlier: '', mode: 'search', strings: outgoing(query), privateTexts: [NOTE] })).not.toBe(
-      null,
-    );
+    expect(noteLeak({ mode: 'search', query: query, note: NOTE })).not.toBe(null);
   });
 
   it('passes a public search that shares only common words or a single first name with the note', () => {
     for (const query of ['best road bikes 2026', 'what to buy my sister for her birthday', 'Ines meaning of name']) {
-      expect(
-        privateTextLeak({ earlier: '', mode: 'search', strings: outgoing(query), privateTexts: [NOTE] }),
-      ).toBeNull();
+      expect(noteLeak({ mode: 'search', query: query, note: NOTE })).toBeNull();
     }
   });
 
   it('does not take a weekday or a greeting before a name as part of it', () => {
     const greeting = 'Dear Maria Costa, see you Monday Joana Pires.';
-    expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('joana pires'), privateTexts: [greeting] }),
-    ).toBe('name');
-    expect(
-      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('dear maria'), privateTexts: [greeting] }),
-    ).toBeNull();
+    expect(noteLeak({ mode: 'search', query: 'joana pires', note: greeting })).toBe('name');
+    expect(noteLeak({ mode: 'search', query: 'dear maria', note: greeting })).toBeNull();
   });
 
   it('lets a map name an address from the note', () => {
-    expect(
-      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('48 Quillon Road'), privateTexts: [NOTE] }),
-    ).toBeNull();
+    expect(noteLeak({ mode: 'maps', query: '48 Quillon Road', note: NOTE })).toBeNull();
   });
 });
 
 describe('fingerprintsOf without word runs', () => {
   it('keeps names and numbers but not ordinary five-word runs', () => {
     const text = 'Remember that the opening hours of the museum changed. Lunch with Ana Reis on 4417829.';
-    const withRuns = fingerprintsOf({ texts: [text], word_runs: true });
-    const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false });
+    const withRuns = fingerprintsOf({ texts: [text], word_runs: true, running_details: true });
+    const withoutRuns = fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
     const leak = (entries: typeof withRuns, query: string) =>
       fingerprintLeak({
         mode: 'search',
@@ -519,7 +519,7 @@ describe('fingerprintsOf without word runs', () => {
 });
 
 describe('fingerprintLeak for the check every search gets', () => {
-  const memoryOnly = (text: string) => fingerprintsOf({ texts: [text], word_runs: false });
+  const memoryOnly = (text: string) => fingerprintsOf({ texts: [text], word_runs: false, running_details: true });
   const leak = (input: { entries: ReturnType<typeof fingerprintsOf>; query: string; earlier?: string }) =>
     fingerprintLeak({
       mode: 'search',
@@ -565,5 +565,14 @@ describe('a chat record saved before attached files were counted', () => {
   it('reads as covering no attached files, so a chat whose history shows one asks', () => {
     const older = { complete: true, has_text: true, secret: false, entries: [] };
     expect(ChatPrivateFingerprintsSchema.parse(older)).toEqual({ ...older, attached_files: 0 });
+  });
+});
+
+describe('privateTextLeak keeps to what a read chat checked before', () => {
+  it('does not take running-text names from a web page kept after a private read', () => {
+    const page = 'Lantern Row Bakery opens at eight. Visit Lantern Row for fresh bread.';
+    expect(
+      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lantern Row bakery'), privateTexts: [page] }),
+    ).toBeNull();
   });
 });

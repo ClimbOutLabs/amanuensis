@@ -308,7 +308,7 @@ const MAX_PRIVATE_TEXT_CHARS = 2_000_000;
 /** Keeps the text a private read's result returned, for the checks on later searches and maps. */
 export function recordPrivateReadText(input: { state: WebSearchTurnState; text: string }): void {
   input.state.privateTextsKept += 1;
-  keepText(input);
+  keepText({ ...input, running_details: true });
 }
 
 /**
@@ -317,13 +317,22 @@ export function recordPrivateReadText(input: { state: WebSearchTurnState; text: 
  * stand in for one that failed.
  */
 export function keepSubAgentAnswerText(input: { state: WebSearchTurnState; text: string }): void {
-  keepText(input);
+  // The answer can also carry what the sub-agent found on the web, so names in its running text are not kept.
+  keepText({ ...input, running_details: false });
 }
 
-function keepText(input: { state: WebSearchTurnState; text: string }): void {
+function keepText(input: { state: WebSearchTurnState; text: string; running_details: boolean }): void {
   const { state, text } = input;
   // Fingerprints are kept even after the turn's own text was lost, since a later turn checks them.
-  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: true })) {
+  if (
+    !state.fingerprintsLost &&
+    !addPrivateFingerprints({
+      state: state.chatFingerprints,
+      text,
+      word_runs: true,
+      running_details: input.running_details,
+    })
+  ) {
     state.fingerprintsLost = true;
   }
   if (state.privateTextLost) {
@@ -396,7 +405,7 @@ export function recordPrivateContextText(input: {
   }
   if (
     !state.fingerprintsLost &&
-    !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: attachment })
+    !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: attachment, running_details: true })
   ) {
     state.fingerprintsLost = true;
   }
@@ -472,7 +481,8 @@ export function recordPrivateToolResult(input: {
     state.fingerprintsLost = true;
     return;
   }
-  keepText({ state, text });
+  // Any other result after a private read, such as a web page or a command's output, is kept as main kept it.
+  keepText({ state, text, running_details: false });
 }
 
 /**
