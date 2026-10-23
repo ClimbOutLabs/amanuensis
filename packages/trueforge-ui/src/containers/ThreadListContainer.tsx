@@ -350,7 +350,7 @@ function RecentChatsSection({
             aria-label="Search chats"
             aria-pressed={search.open}
             title="Search chats"
-            className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
             onClick={search.onToggle}
           >
             <Icon name="search" className="size-3.5" />

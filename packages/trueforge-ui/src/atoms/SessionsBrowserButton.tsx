@@ -37,7 +37,7 @@ export function SessionsBrowserButton({ className, compact = false }: SessionsBr
             'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
             compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
             sessionsOpen &&
-              'bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
+              'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
           ),
         })}
         onClick={() => {

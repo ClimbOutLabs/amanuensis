@@ -44,7 +44,7 @@ const railActionButtonClassName = cn(sidebarRailButtonClassName, 'text-sidebar-t
 
 /** The selected rail item: the soft fill the composer's open menu uses, not a solid block. */
 const railSelectedClassName =
-  'bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
+  'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
 
 function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; mode?: ShellMode }): boolean {
   return !overlayOpen && mode?.status === 'active' && !mode.isCreateAgent;
@@ -163,7 +163,7 @@ function SidebarNavItems({
           onClick={handleNewAgent}
         >
           <Icon name="agent-2" size={14} />
-          <span className="text-center whitespace-nowrap">Build agent</span>
+          <span className="text-center">Build agent</span>
         </button>
       ) : null}
     </>

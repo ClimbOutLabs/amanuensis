@@ -215,9 +215,11 @@ describe('SidebarLayout rail layout', () => {
 
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(buttons[0]).toBe(buttons.find(button => labelOf(button) === 'Start new chat'));
-    expect(within(buttons[positions[0] ?? 0] as HTMLElement).getByText('New chat')).toBeInTheDocument();
-    expect(within(buttons[positions[1] ?? 0] as HTMLElement).getByText('Chats')).toBeInTheDocument();
+    const newChat = buttons.find(button => labelOf(button) === 'Start new chat');
+    const chats = buttons.find(button => labelOf(button) === 'Hide recent chats');
+    expect(buttons[0]).toBe(newChat);
+    expect(newChat?.textContent).toContain('New chat');
+    expect(chats?.textContent).toContain('Chats');
   });
 
   it('renders every rail entry as a sibling of the next in one scrolling flex column, New Chat then toggle then Build Agent', () => {
