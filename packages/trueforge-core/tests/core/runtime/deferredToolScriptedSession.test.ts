@@ -42,11 +42,7 @@ describe('DeferredTool scripted model session', () => {
       JSON.stringify({
         error: `'${name}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through call_tool.`,
       });
-    expect(results).toEqual([
-      bundleName('gmail'),
-      bundleName('sub_agents'),
-      'parallel-web:\n  search, fetch',
-    ]);
+    expect(results).toEqual([bundleName('gmail'), bundleName('sub_agents'), 'parallel-web:\n  search, fetch']);
     expect(results[1]).not.toContain('Do not try other names');
   });
 
