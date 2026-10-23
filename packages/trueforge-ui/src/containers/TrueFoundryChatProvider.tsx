@@ -27,8 +27,8 @@ import {
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
 import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';
-import { isPreviousTurnRunningError } from '../utils/requestErrorCode.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
+import { turnRefusalCode } from '../utils/turnRefusal.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
@@ -166,15 +166,11 @@ function ChatRuntimeScope({
         streamDrops.report();
         return;
       }
-      if (isPreviousTurnRunningError(error)) {
-        // The typed text stays in the composer; the chat re-attaches to the reply still running.
+      const refusal = error instanceof ReplyStoppedByRestartError ? 'stopped_by_restart' : turnRefusalCode(error);
+      if (refusal !== undefined) {
+        // The typed text stays in the composer and the chat says why in one line.
         notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
-        chatNotices.report('previous-turn-running');
-        return;
-      }
-      if (error instanceof ReplyStoppedByRestartError) {
-        notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
-        chatNotices.report('stopped-by-restart');
+        chatNotices.report(refusal);
         return;
       }
       // A surfaced failure is avatar ground truth too: hold the composed error pose, then

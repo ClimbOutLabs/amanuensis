@@ -58,7 +58,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(error).toBe(
-      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool; when one is not in your tool list, call load_bundle with its bundle first.",
+      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool.",
     );
   });
 
@@ -197,7 +197,7 @@ describe('DeferredTool get_tool_info rejections', () => {
     });
 
     expect(error).toBe(
-      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool; when one is not in your tool list, call load_bundle with its bundle first.",
+      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, never through call_tool.",
     );
   });
 

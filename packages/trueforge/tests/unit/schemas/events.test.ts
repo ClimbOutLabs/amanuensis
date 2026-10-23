@@ -116,4 +116,16 @@ describe('wire event schemas', () => {
     const parsed = TurnStreamingEventSchema.safeParse(compactionEvent);
     expect(parsed.success).toBe(true);
   });
+
+  it('accepts the compaction start event in the live streaming union', () => {
+    const parsed = TurnStreamingEventSchema.safeParse({
+      type: 'agent.context.compaction_started',
+      id: 'evt_0000000000000000000000005',
+      created_at: '2026-09-01T09:59:00.000Z',
+      thread_id: 'thread_0000000000000000000000001',
+      mode: 'conversation',
+      tokens_before: 12000,
+    });
+    expect(parsed.success).toBe(true);
+  });
 });

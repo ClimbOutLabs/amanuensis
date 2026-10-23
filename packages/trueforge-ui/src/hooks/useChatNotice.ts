@@ -4,15 +4,11 @@ import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-/**
- * Something about a chat's last send that the person needs to know, told in one plain line:
- * the server refused the send because the previous reply is still running, or a reply stopped
- * because the server restarted under it.
- */
-export type ChatNoticeKind = 'previous-turn-running' | 'stopped-by-restart';
+import type { SendRefusal } from '../utils/turnRefusal.js';
 
+/** Why the chat's last send got no reply, told in one plain line. */
 export type ChatNotice = {
-  kind: ChatNoticeKind;
+  kind: SendRefusal;
   /** The chat it is about; it only shows there. */
   sessionId: string | undefined;
   /** Clears the line once the person sends again. */
@@ -24,12 +20,12 @@ export type ChatNotice = {
  * runtime), and `ChatNoticeProvider` inside the runtime turns a report into what the chat shows.
  */
 export type ChatNoticeChannel = {
-  report: (kind: ChatNoticeKind) => void;
-  subscribe: (listener: (kind: ChatNoticeKind) => void) => () => void;
+  report: (kind: SendRefusal) => void;
+  subscribe: (listener: (kind: SendRefusal) => void) => () => void;
 };
 
 export function createChatNoticeChannel(): ChatNoticeChannel {
-  const listeners = new Set<(kind: ChatNoticeKind) => void>();
+  const listeners = new Set<(kind: SendRefusal) => void>();
   return {
     report: kind => {
       for (const listener of listeners) listener(kind);
@@ -59,13 +55,13 @@ export function useChatNotice(): ChatNotice | null {
 export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeChannel; children?: ReactNode }) {
   const reload = useTrueFoundryReload();
   const sessionId = useAuiState(state => state.threadListItem?.remoteId ?? undefined);
-  const [notice, setNotice] = useState<{ kind: ChatNoticeKind; sessionId: string | undefined } | null>(null);
+  const [notice, setNotice] = useState<{ kind: SendRefusal; sessionId: string | undefined } | null>(null);
 
   useEffect(
     () =>
       channel.subscribe(kind => {
         setNotice({ kind, sessionId });
-        if (kind === 'previous-turn-running') reload();
+        if (kind === 'previous_turn_running') reload();
       }),
     [channel, reload, sessionId],
   );

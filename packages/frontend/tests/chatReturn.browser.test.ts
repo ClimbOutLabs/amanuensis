@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer } from 'vite';
 
+import { sendRefusalText } from '../../trueforge-ui/src/utils/turnRefusal.ts';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import {
   FINAL_TEXT,
@@ -18,8 +19,9 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 const RENDER_TIMEOUT_MS = 45_000;
 /** A name the person chose, so the lines below prove they use it rather than a built-in one. */
 const ASSISTANT_NAME = 'Juniper';
-const STILL_WORKING = `${ASSISTANT_NAME} is still working on your last message. Wait for it to finish, or press Cancel, then send this again.`;
-const STOPPED_BY_RESTART = `This reply stopped when ${ASSISTANT_NAME} restarted. Send your message again.`;
+const STILL_WORKING = sendRefusalText({ refusal: 'previous_turn_running', assistantName: ASSISTANT_NAME });
+const COULD_NOT_START = sendRefusalText({ refusal: 'turn_could_not_start', assistantName: ASSISTANT_NAME });
+const STOPPED_BY_RESTART = sendRefusalText({ refusal: 'stopped_by_restart', assistantName: ASSISTANT_NAME });
 /** How long the server takes to start a reply in the slow-server cases: longer than leaving and coming back. */
 const SLOW_TURN_START_MS = 4_000;
 const TURN_CREATE_PATH = /^\/api\/v1\/sessions\/[^/]+\/turns$/;
@@ -74,6 +76,11 @@ function composer(page: Page) {
 
 function chatRow({ page, title }: { page: Page; title: string }) {
   return page.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: title }).getByRole('button').first();
+}
+
+/** The one line the chat shows under the composer about its last send. */
+function chatNotice(page: Page) {
+  return page.locator('[data-role="host-chat-notice"]');
 }
 
 function cancelButton(page: Page) {
@@ -288,27 +295,10 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
         try {
           await waitForTurnStatus({ api, sessionId: charlie, ready: status => status === 'running' });
 
-          // The server cancels a running reply when the next message arrives; it refuses one with this
-          // answer only when the two race inside it, so this one send gets that answer directly.
-          await page.route(
-            `**/api/v1/sessions/${charlie}/turns`,
-            async route => {
-              await route.fulfill({
-                status: 409,
-                json: {
-                  error: {
-                    message: 'The previous turn is still running.',
-                    type: 'conflict',
-                    code: 'previous_turn_running',
-                  },
-                },
-              });
-            },
-            { times: 1 },
-          );
+          // The server answers one message at a time, so it refuses this send while that reply runs.
           const followUp = 'one more thing';
           await send({ page, text: followUp });
-          await page.getByRole('status').filter({ hasText: STILL_WORKING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+          await chatNotice(page).filter({ hasText: STILL_WORKING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
           await expectLiveReply({ page, message: slowMessage('elsewhere') });
           assert.equal(await composer(page).inputValue(), followUp, 'the typed text is still in the composer');
           assert.deepEqual(
@@ -325,6 +315,33 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       },
     );
 
+    await test.test('a send whose reply could not start keeps the text and says so in one line', async () => {
+      await page.goto(`${origin}/sessions/${alpha}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+      const before = await userMessages(page);
+      // A server too slow to set the reply up in time answers this way.
+      await page.route(
+        `**/api/v1/sessions/${alpha}/turns`,
+        async route => {
+          await route.fulfill({
+            status: 409,
+            json: {
+              error: { message: 'The reply could not start in time.', type: 'conflict', code: 'turn_could_not_start' },
+            },
+          });
+        },
+        { times: 1 },
+      );
+      const text = 'try this once more';
+      await send({ page, text });
+      await chatNotice(page).filter({ hasText: COULD_NOT_START }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+      assert.equal(await composer(page).inputValue(), text, 'the typed text is still in the composer');
+      assert.deepEqual(await userMessages(page), before, 'the refused message is not shown');
+      assert.equal(await cancelButton(page).count(), 0, 'the composer is free');
+      assert.equal(await page.getByText(COULD_NOT_START).count(), 1, 'the line is said once, in the chat');
+      assert.equal(await page.getByText(/Request failed/).count(), 0, 'no raw error');
+    });
+
     await test.test('a reply running when the server restarts ends with one plain line', async () => {
       await page.goto(`${origin}/sessions/${alpha}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -334,7 +351,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
 
       await api.restart();
       await page.reload({ waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-      await page.getByRole('status').filter({ hasText: STOPPED_BY_RESTART }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+      await chatNotice(page).filter({ hasText: STOPPED_BY_RESTART }).waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await cancelButton(page).count(), 0, 'the composer is free');
       assert.equal(await page.getByText('Something went wrong').count(), 0, 'no raw error');
       await waitForTurnStatus({ api, sessionId: alpha, ready: status => status !== 'running' });
@@ -343,8 +360,8 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       const next = slowMessage('after the restart');
       await send({ page, text: next });
       await expectLiveReply({ page, message: next });
-      assert.equal(await page.getByRole('status').filter({ hasText: STOPPED_BY_RESTART }).count(), 0);
-      assert.equal(await page.getByRole('status').filter({ hasText: STILL_WORKING }).count(), 0);
+      assert.equal(await chatNotice(page).filter({ hasText: STOPPED_BY_RESTART }).count(), 0);
+      assert.equal(await chatNotice(page).filter({ hasText: STILL_WORKING }).count(), 0);
       await cancelStopsReply({ page, api, sessionId: alpha });
     });
   } finally {

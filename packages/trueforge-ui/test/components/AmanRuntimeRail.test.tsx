@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
+import { clearContextCompaction, publishContextCompaction } from '@/utils/contextCompactionLive.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
@@ -664,6 +665,24 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </RuntimeHarness>,
     );
     expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Ready');
+  });
+
+  it('says the conversation is being tidied while this chat is shortened, and only this chat', () => {
+    const { container } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="ready" activity="thinking" sessionId="chat-1" />
+      </RuntimeHarness>,
+    );
+    const status = () => container.querySelector('.aman-runtime-rail__status');
+    act(() => publishContextCompaction({ sessionId: 'chat-2', active: true }));
+    expect(status()).toHaveTextContent('Working on it…');
+
+    act(() => publishContextCompaction({ sessionId: 'chat-1', active: true }));
+    expect(status()).toHaveTextContent('Tidying up the conversation');
+
+    act(() => publishContextCompaction({ sessionId: 'chat-1', active: false }));
+    expect(status()).toHaveTextContent('Working on it…');
+    act(() => clearContextCompaction());
   });
 
   it('reads the three rules in plain words from the saved settings', async () => {

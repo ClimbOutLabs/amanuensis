@@ -103,6 +103,29 @@ function expectNewCardOnly() {
 }
 
 describe('ToolCallContainer', () => {
+  it('shows a search the person said no to as not done, never as a completed check', () => {
+    const ToolCallCard = vi.fn((props: ToolCallCardProps) => <div>{props.toolName}</div>);
+    renderToolCallMessage(
+      [
+        {
+          type: 'tool-call',
+          toolCallId: 'search-1',
+          toolName: 'web_search',
+          args: { query: 'Dana Example' },
+          approval: { id: 'search-1', approved: false, reason: 'No thanks' },
+          result: { error: 'No thanks' },
+          isError: true,
+        },
+      ],
+      { ToolCallCard },
+    );
+
+    const props = ToolCallCard.mock.calls.at(-1)?.[0];
+    expect(props?.status).not.toBe('success');
+    expect(props?.status).toBe('muted');
+    expect(props?.outcomeText).toBe('Not done: you said no');
+  });
+
   it('renders a running tool call without a result', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'search_docs', args: {} }]);
     expect(screen.getByText('search_docs')).toBeInTheDocument();

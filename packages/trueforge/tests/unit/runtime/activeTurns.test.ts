@@ -199,4 +199,48 @@ describe('ActiveTurnRegistry', () => {
       void value;
     }
   });
+
+  it('starts a turn already cancelled when Cancel came while it was being set up', async () => {
+    const registry = new ActiveTurnRegistry();
+    const admission = registry.admit({ sessionId: 's1' });
+    registry.cancelAdmissions({ sessionId: 's1', abortReason: CancellationReason.ClientCancelled });
+
+    const abortController = new AbortController();
+    const tracked = registry.track({
+      sessionId: 's1',
+      turnId: 't1',
+      abortController,
+      stream: values([1]),
+      admission,
+    });
+
+    expect(abortController.signal.aborted).toBe(true);
+    expect(abortController.signal.reason).toBe(CancellationReason.ClientCancelled);
+    for await (const value of tracked) {
+      void value;
+    }
+  });
+
+  it('leaves other chats and finished admissions alone', () => {
+    const registry = new ActiveTurnRegistry();
+    const other = registry.admit({ sessionId: 's2' });
+    const released = registry.admit({ sessionId: 's1' });
+    released.release();
+    registry.cancelAdmissions({ sessionId: 's1', abortReason: CancellationReason.ClientCancelled });
+
+    expect(other.cancelReason).toBeUndefined();
+    expect(released.cancelReason).toBeUndefined();
+  });
+
+  it('reaches a tracked turn by its id once it starts, not through its admission', () => {
+    const registry = new ActiveTurnRegistry();
+    const admission = registry.admit({ sessionId: 's1' });
+    const abortController = new AbortController();
+    registry.track({ sessionId: 's1', turnId: 't1', abortController, stream: values([1]), admission });
+
+    registry.cancelAdmissions({ sessionId: 's1', abortReason: CancellationReason.ClientCancelled });
+
+    expect(admission.cancelReason).toBeUndefined();
+    expect(abortController.signal.aborted).toBe(false);
+  });
 });

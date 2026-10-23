@@ -16,7 +16,7 @@ export class LiveConnectionLostError extends Error {
  */
 export class ReplyStoppedByRestartError extends Error {
   constructor(options: { cause: unknown }) {
-    super('This reply stopped when the server restarted. Send your message again.', options);
+    super('The reply stopped because the server restarted.', options);
     this.name = 'ReplyStoppedByRestartError';
   }
 }

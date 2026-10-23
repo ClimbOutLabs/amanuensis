@@ -39,6 +39,7 @@ import { ChatNoticeContainer } from '@/containers/ChatNoticeContainer.js';
 import { TrueFoundryChatProvider } from '@/containers/TrueFoundryChatProvider.js';
 import { ComposerBusyProvider } from '@/hooks/useComposerBusyState.js';
 import { LiveConnectionLostError, ReplyStoppedByRestartError } from '@/utils/liveConnection.js';
+import { sendRefusalText, type TurnRefusalCode } from '@/utils/turnRefusal.js';
 
 function renderWithNotice(onError: (error: unknown) => void) {
   render(
@@ -77,12 +78,15 @@ describe('TrueFoundryChatProvider', () => {
     expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('re-attaches to the running reply and says so in one line when a send is refused as still running', async () => {
+  it.each<[TurnRefusalCode, number]>([
+    ['previous_turn_running', 1],
+    ['turn_could_not_start', 0],
+  ])('says in one line in the chat why a send was refused (%s), never the server text', async (code, reloads) => {
     const onError = vi.fn();
     const forwardedOnError = renderWithNotice(onError);
-    const refused = Object.assign(new Error('Conflict'), {
+    const refused = Object.assign(new Error('Previous turn 01m5 is still running; freezeAndGetTurn must be called'), {
       statusCode: 409,
-      body: { error: { type: 'conflict', code: 'previous_turn_running', message: 'turn is still running' } },
+      body: { error: { message: 'Previous turn 01m5 is still running', type: 'conflict', code } },
     });
 
     await act(async () => {
@@ -90,13 +94,14 @@ describe('TrueFoundryChatProvider', () => {
       await Promise.resolve();
     });
 
+    // Not reported as an error, so the typed text stays and no toast repeats the line.
     expect(onError).not.toHaveBeenCalled();
-    expect(reloadSpy).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByText(
-        `${DEFAULT_ASSISTANT_NAME} is still working on your last message. Wait for it to finish, or press Cancel, then send this again.`,
-      ),
-    ).toBeInTheDocument();
+    // Only a reply still running is there to re-attach to.
+    expect(reloadSpy).toHaveBeenCalledTimes(reloads);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      sendRefusalText({ refusal: code, assistantName: DEFAULT_ASSISTANT_NAME }),
+    );
+    expect(screen.queryByText(/freezeAndGetTurn/)).not.toBeInTheDocument();
   });
 
   it('says in one line that a restart stopped the reply instead of reporting an error', async () => {
@@ -110,9 +115,9 @@ describe('TrueFoundryChatProvider', () => {
 
     expect(onError).not.toHaveBeenCalled();
     expect(reloadSpy).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(`This reply stopped when ${DEFAULT_ASSISTANT_NAME} restarted. Send your message again.`),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      sendRefusalText({ refusal: 'stopped_by_restart', assistantName: DEFAULT_ASSISTANT_NAME }),
+    );
   });
 
   it('forwards legacy runtime options and supplies the default attachment adapter', () => {

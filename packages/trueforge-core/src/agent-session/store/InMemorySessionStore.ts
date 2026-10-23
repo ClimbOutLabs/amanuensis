@@ -732,6 +732,12 @@ export class InMemorySessionStore<
       ) {
         continue;
       }
+      if (input.folder_id !== undefined && stored.record.folder_id !== input.folder_id) {
+        continue;
+      }
+      if (input.no_folder && stored.record.folder_id !== null) {
+        continue;
+      }
       if (createdByOrAgentIds !== undefined) {
         const creatorMatches =
           stored.record.created_by_subject.subject_id === createdByOrAgentIds.created_by_subject_id;
@@ -810,6 +816,14 @@ export class InMemorySessionStore<
     const previousTurnId = input.turn.previous_turn_id;
     if (input.require_previous_turn_is_tip && previousTurnId !== stored.record.last_turn_id) {
       throw new StaleApprovalContinuationError(previousTurnId, stored.record.last_turn_id);
+    }
+    // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+    const tipTurnId = stored.record.last_turn_id;
+    if (tipTurnId !== null) {
+      const tip = this.turns.get(turnKey({ session_id: input.turn.session_id, turn_id: tipTurnId }));
+      if (tip?.state.status === 'running') {
+        throw new PreviousTurnRunningError(tipTurnId);
+      }
     }
     let previousSnapshot: TurnSnapshot | undefined;
     if (previousTurnId !== null) {

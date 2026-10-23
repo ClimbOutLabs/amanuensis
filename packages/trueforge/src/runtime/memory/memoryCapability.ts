@@ -28,6 +28,10 @@ import {
   isUntrustedDocumentText,
   newEventId,
 } from '@truefoundry/trueforge-core/core';
+import {
+  recordPrivateContextText,
+  type WebSearchTurnState,
+} from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { Logger } from 'winston';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 import type {
@@ -1260,6 +1264,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
    * recall: a web query about recalled material is blocked at dispatch.
    */
   private readonly internalSourceState: InternalSourceState | undefined;
+  /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
+  private readonly webSearch: WebSearchTurnState | undefined;
 
   // A thread is per-turn, so instance state (never persisted itself) is naturally per-turn.
   private ranForThisTurn = false;
@@ -1281,6 +1287,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     screenClient?: ScreenClient | undefined;
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
+    webSearch?: WebSearchTurnState | undefined;
   }) {
     this.client = input.client;
     this.config = input.config;
@@ -1291,6 +1298,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.screenClient = input.screenClient;
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
+    this.webSearch = input.webSearch;
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1619,6 +1627,9 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // Injected even when every line was withheld or dropped: the stats line then honestly notes
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
+    if (this.webSearch !== undefined) {
+      recordPrivateContextText({ state: this.webSearch, text: formatted.block, source: 'each_turn' });
+    }
     // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.
     this.cachedLayers = {
@@ -2120,6 +2131,8 @@ export function hindsightMemoryCapability(input: {
    * the turn's tool policy can block web_search as a substitute for recall.
    */
   internalSourceState?: InternalSourceState | undefined;
+  /** The turn's search state, which keeps the injected block's details so a search that carries them asks. */
+  webSearch?: WebSearchTurnState | undefined;
 }): AgentCapability {
   const processor = new HindsightMemoryProcessor({ ...input, screenClient: resolveScreenClient(input) });
   return {

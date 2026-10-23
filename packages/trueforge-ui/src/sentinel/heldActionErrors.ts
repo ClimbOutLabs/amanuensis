@@ -3,7 +3,8 @@
  * what went wrong by status and `error.code`; its own message text is never shown.
  */
 
-import { requestErrorCode } from '../utils/requestErrorCode.js';
+import { apiErrorCode } from '../utils/apiErrorCode.js';
+import { answerRefusalText, turnRefusalCode } from '../utils/turnRefusal.js';
 
 export const HELD_EXPIRED_TEXT = 'Expired, nothing was done. Ask again in chat.';
 
@@ -23,16 +24,19 @@ export type HeldAnswerFailure =
   /** The answer did not reach the server in a way that settles anything; the buttons stay. */
   | { kind: 'retry'; message: string };
 
-export function describeHeldAnswerFailure(error: unknown): HeldAnswerFailure {
+export function describeHeldAnswerFailure(error: unknown, assistantName: string): HeldAnswerFailure {
   if (!(error instanceof Error)) return { kind: 'retry', message: GENERIC_FAILURE };
-  const status: unknown = Reflect.get(error, 'statusCode');
-  const code = requestErrorCode(error);
+  const turnRefusal = turnRefusalCode(error);
+  // Nothing was recorded for these, so the buttons stay for another try.
+  if (turnRefusal !== undefined) {
+    return { kind: 'retry', message: answerRefusalText({ code: turnRefusal, assistantName }) };
+  }
+  const detail = apiErrorCode(error);
+  const status = detail?.statusCode;
+  const code = typeof detail?.code === 'string' ? detail.code : undefined;
   if (status === 409) {
     const refusal = code === undefined ? undefined : REFUSAL_TEXT[code];
     if (refusal !== undefined) return { kind: 'refused', message: refusal, expired: code === 'held_action_expired' };
-    if (code === 'previous_turn_running') {
-      return { kind: 'retry', message: 'This chat is still busy. Try again in a moment.' };
-    }
     return {
       kind: 'refused',
       message: 'This was already answered, or the chat has moved on. Nothing more was done.',

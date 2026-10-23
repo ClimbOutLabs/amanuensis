@@ -196,6 +196,7 @@ export {
   ActionRequiredEventSchema,
   AgentInputUserMessageSchema,
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   EventIdSchema,
   EventType,
@@ -221,6 +222,7 @@ export {
 export type {
   AgentOutputEvent,
   ContextCompactionEvent,
+  ContextCompactionStartedEvent,
   DocumentIngestionEvent,
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,
