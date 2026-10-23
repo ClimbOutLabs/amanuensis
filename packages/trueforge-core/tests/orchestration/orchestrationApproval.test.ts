@@ -4,6 +4,7 @@ import { changeRequestReason } from '../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../src/core/runtime/AgentThreadOrchestrator';
+import { LOAD_BUNDLE_TOOL_NAME } from '../../src/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../core/harnessMocks';
 import {
@@ -57,7 +58,8 @@ const DENY_TOOL_CONTENT = createToolResponseV2({
   remediation: undefined,
 }).model_message.content;
 
-const WRITE_NOTE_TOOLS = [{ function: { name: WRITE_NOTE_TOOL_NAME } }];
+// load_bundle comes first: the web guidance is always offered, so every chat can read it.
+const WRITE_NOTE_TOOLS = [{ function: { name: LOAD_BUNDLE_TOOL_NAME } }, { function: { name: WRITE_NOTE_TOOL_NAME } }];
 
 const EXPECTED_TURN_1_EVENTS = [
   { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },

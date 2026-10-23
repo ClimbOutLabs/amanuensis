@@ -280,17 +280,18 @@ describe('reply prefix stability', () => {
     expect(prefixThroughHistory(secondReply)).toBe(prefixThroughHistory(firstReply));
   });
 
-  it('a reply that routes a bundle keeps the static prefix and brings the guidance in the per-reply block', async () => {
+  it('a web question keeps the static prefix and the tools, with guidance left for the model to read', async () => {
     const [firstReply] = await runReply('Remember that Robin likes tea.');
-    // A question mark routes the web bundle, so this reply loads it.
     const [secondReply] = await runReply('Where does Robin live now?', ['Robin moved to Lisbon in May.']);
     if (!firstReply || !secondReply) {
       throw new Error('expected a model step in both replies');
     }
     expect(JSON.stringify(secondReply.messages[0])).toBe(JSON.stringify(firstReply.messages[0]));
+    expect(JSON.stringify(secondReply.tools)).toBe(JSON.stringify(firstReply.tools));
+    expect(String(secondReply.messages[0]?.content)).toContain('- web: finding and citing sources');
     const replyBlock = secondReply.messages.find(
       message => message.role === 'system' && String(message.content).includes('<reply-context>'),
     );
-    expect(String(replyBlock?.content)).toContain('<source-discovery>');
+    expect(String(replyBlock?.content)).not.toContain('<source-discovery>');
   });
 });
