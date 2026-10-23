@@ -2,12 +2,11 @@
 
 import type { ReactNode } from 'react';
 
-import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
-
 import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
-import { HELP_AREAS, MORNING_BRIEF, visibleTourPrompts, type TourCapabilities } from './tourPrompts.js';
+import { useHomeTopic } from './homeTopic.js';
+import { HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
 
 /** Morning, afternoon or evening, by the local hour. */
 function greetingFor(now: Date): string {
@@ -41,47 +40,8 @@ function NameUnderline() {
   );
 }
 
-type HomeCard = { key: string; title: string; detail: string; prompt: string; icon: string };
-
-/** The four cards under "Some things {name} can do". A click fills the composer; the person sends it. */
-function homeCards(): readonly HomeCard[] {
-  return [
-    {
-      key: 'reply',
-      title: 'Draft a reply',
-      detail: 'Reads the thread, writes it, asks before sending',
-      prompt:
-        'Help me draft a reply to my most recent email that needs one. Read the whole thread first, and ask me before you send anything.',
-      icon: 'square-pen',
-    },
-    {
-      key: 'plan',
-      title: 'Plan your day',
-      detail: 'Finds conflicts and travel time on your calendar',
-      prompt:
-        'Help me plan my day. Check my calendar for conflicts and travel time, then suggest an order for my tasks.',
-      icon: 'calendar-clock',
-    },
-    {
-      key: 'places',
-      title: 'Find places and routes',
-      detail: 'A map with the stops, and how long it takes',
-      prompt: 'Help me find places I need to go today. Show the stops on a map, and how long each route takes.',
-      icon: 'map-pin',
-    },
-    {
-      key: 'schedule',
-      title: 'Run things on a schedule',
-      detail: 'A brief every morning, a check every Friday',
-      prompt:
-        'Help me set something up to run on a schedule: a brief every morning, and a check every Friday. Ask me what to look at first.',
-      icon: 'clock',
-    },
-  ];
-}
-
 const PILL_CLASS =
-  'inline-flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border px-3 font-[inherit] text-[0.8125rem] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
+  'inline-flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border px-3 font-[inherit] text-[0.8125rem] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
 
 const CARD_CLASS =
   'flex cursor-pointer flex-col gap-1 rounded-[0.625rem] border border-border bg-card-bg px-3.5 py-3 text-left font-[inherit] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
@@ -121,11 +81,9 @@ export type AmanTourProps = {
   setupTicket: ReactNode;
   /** Puts the first-run lines away for good. Omitted when the host cannot remember that. */
   onSkip?: () => void;
-  /** Starts a chat with the prompt. */
-  onSend: (prompt: string) => void;
   /** Puts the prompt in the composer so the person can change it before sending. */
   onFill: (prompt: string) => void;
-  /** False until the host reports a model; a prompt cannot run without one. */
+  /** False until the host reports a model; a chat cannot run without one. */
   canSend: boolean;
 };
 
@@ -142,13 +100,13 @@ export function AmanTour({
   firstRun,
   setupTicket,
   onSkip,
-  onSend,
   onFill,
   canSend,
 }: AmanTourProps) {
   const assistant = assistantDisplayName(assistantName);
   const { hello, firstName } = greetingParts({ now, name: userName });
-  const cards = homeCards();
+  const [topic, setTopic] = useHomeTopic();
+  const cards = homeCardsFor({ topic, capabilities });
 
   return (
     <>
@@ -165,7 +123,8 @@ export function AmanTour({
         )}
       </h1>
 
-      <div className="order-1 mx-auto flex w-full max-w-160 flex-col gap-5 px-4 pb-6">
+      {/* pt-4 keeps the first row clear of the composer above; the cards sit a little further down still. */}
+      <div className="order-1 mx-auto flex w-full max-w-160 flex-col gap-5 px-4 pt-4 pb-6">
         {canSend ? null : (
           <p className="m-0 text-center text-[0.8125rem] text-text-secondary">
             Choose a model in Settings before you start a chat.
@@ -174,35 +133,25 @@ export function AmanTour({
 
         {firstRun ? (
           <p className="m-0 text-center text-[0.8125rem] text-text-secondary">
-            What would help you most? Pick one and {assistant} starts there.
+            What would help you most? Pick one to see what {assistant} can do there.
           </p>
         ) : null}
 
         <ul aria-label="What would help you most?" className="m-0 flex list-none flex-wrap justify-center gap-2 p-0">
-          <li>
-            <button
-              type="button"
-              disabled={!canSend}
-              onClick={() => onSend(MORNING_BRIEF.prompt)}
-              className={cn(PILL_CLASS, hasBrief ? 'border-gold-line bg-gold-soft' : 'border-border bg-card-bg')}
-            >
-              {hasBrief ? <span className="size-1.5 rounded-full bg-gold" aria-hidden="true" /> : null}
-              Productivity
-            </button>
-          </li>
-          {HELP_AREA_IDS.map(id => {
-            const first = visibleTourPrompts(HELP_AREAS[id].cards, capabilities)[0];
+          {HOME_TOPIC_IDS.map(id => {
+            const chosen = topic === id;
             return (
               <li key={id}>
                 <button
                   type="button"
-                  disabled={!canSend || first === undefined}
-                  onClick={() => {
-                    if (first !== undefined) onSend(first.prompt);
-                  }}
-                  className={cn(PILL_CLASS, 'border-border bg-card-bg')}
+                  aria-pressed={chosen}
+                  onClick={() => setTopic(chosen ? null : id)}
+                  className={cn(PILL_CLASS, chosen ? 'border-gold-line bg-gold-soft' : 'border-border bg-card-bg')}
                 >
-                  {HELP_AREAS[id].label}
+                  {id === 'productivity' && hasBrief ? (
+                    <span className="size-1.5 rounded-full bg-gold" aria-hidden="true" />
+                  ) : null}
+                  {HOME_TOPICS[id].label}
                 </button>
               </li>
             );
@@ -211,7 +160,7 @@ export function AmanTour({
 
         {firstRun ? setupTicket : null}
 
-        <section className="flex flex-col gap-2.5" aria-labelledby="aman-home-cards-heading">
+        <section className="mt-2 flex flex-col gap-2.5" aria-labelledby="aman-home-cards-heading">
           <h2 id="aman-home-cards-heading" className="m-0 text-[0.8125rem] font-normal text-text-secondary">
             Some things {assistant} can do
           </h2>
@@ -227,7 +176,7 @@ export function AmanTour({
                     )}
                   </span>
                   <span className="aui-face-serif text-[0.9375rem]">{card.title}</span>
-                  <span className="text-[0.8125rem] text-text-secondary">{card.detail}</span>
+                  <span className="text-[0.8125rem] text-text-secondary">{card.detail(assistant)}</span>
                 </button>
               </li>
             ))}

@@ -4,7 +4,7 @@ import type { FC } from 'react';
 
 import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
-import { HELP_AREAS } from './tourPrompts.js';
+import { HOME_TOPICS } from './tourPrompts.js';
 
 /** Adds an area at the end when it is not chosen yet, and removes it when it is; the list keeps the order chosen. */
 export function toggleHelpArea(current: readonly HelpAreaId[], id: HelpAreaId): HelpAreaId[] {
@@ -37,7 +37,7 @@ export const HelpAreaChoices: FC<{
             disabled={disabled}
             onChange={() => onChange(toggleHelpArea(value, id))}
           />
-          <span>{HELP_AREAS[id].label}</span>
+          <span>{HOME_TOPICS[id].label}</span>
         </label>
       ))}
     </div>

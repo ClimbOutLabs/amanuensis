@@ -44,11 +44,11 @@ const ALLOWED_FONT_SIZES = new Set(['28px', '17px', '15px', '14px', '13px', '12p
 
 /** What each home state shows: the setup ticket's count, and the first-run lines around it. */
 const EXPECTED = {
-  fresh: { ticket: '0 of 3 done', firstRun: true, productivityGold: false },
-  half: { ticket: '1 of 3 done', firstRun: true, productivityGold: false },
-  done: { ticket: null, firstRun: false, productivityGold: false },
-  brief: { ticket: null, firstRun: false, productivityGold: true },
-  skipped: { ticket: null, firstRun: false, productivityGold: false },
+  fresh: { ticket: '0 of 3 done', firstRun: true, productivityDot: false },
+  half: { ticket: '1 of 3 done', firstRun: true, productivityDot: false },
+  done: { ticket: null, firstRun: false, productivityDot: false },
+  brief: { ticket: null, firstRun: false, productivityDot: true },
+  skipped: { ticket: null, firstRun: false, productivityDot: false },
 } as const;
 
 async function screenshotDir(): Promise<string> {
@@ -76,8 +76,8 @@ async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   assert.equal(firstRunLine, expected.firstRun ? 1 : 0, `${state} first-run prompt line`);
   const skip = await page.getByRole('button', { name: 'Skip the tour' }).count();
   assert.equal(skip, expected.firstRun ? 1 : 0, `${state} Skip shows only on a first run`);
-  const productivityClass = (await page.getByRole('button', { name: 'Productivity' }).getAttribute('class')) ?? '';
-  assert.equal(productivityClass.includes('bg-gold-soft'), expected.productivityGold, `${state} Productivity gold`);
+  const productivityDot = await page.getByRole('button', { name: 'Productivity' }).locator('.bg-gold').count();
+  assert.equal(productivityDot === 1, expected.productivityDot, `${state} Productivity gold dot`);
 }
 
 async function checkSizes(page: Page) {
@@ -170,6 +170,31 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         );
         assert.equal(cardLefts.length, 4, 'four cards');
         assert.equal(new Set(cardLefts).size, 2, 'the cards sit in a two-column grid');
+
+        // Three groups that read apart: 1rem under the composer, and at least as much before the cards.
+        const gaps = await page.evaluate(() => {
+          const composer = document.querySelector('[data-slot="aui_composer-shell"]')?.getBoundingClientRect();
+          const pills = document.querySelector('ul[aria-label="What would help you most?"]')?.getBoundingClientRect();
+          const cards = document.getElementById('aman-home-cards-heading')?.getBoundingClientRect();
+          if (composer === undefined || pills === undefined || cards === undefined) return null;
+          return { underComposer: pills.top - composer.bottom, beforeCards: cards.top - pills.bottom };
+        });
+        assert.ok(gaps !== null, 'the composer, the pills and the cards are all on screen');
+        assert.ok(gaps.underComposer >= 15.5, `the pills sit 1rem under the composer, got ${gaps.underComposer}px`);
+        assert.ok(
+          gaps.beforeCards >= gaps.underComposer,
+          `the cards sit at least as far below the pills, got ${gaps.beforeCards}px`,
+        );
+
+        // A pill swaps the cards and sends nothing; pressing it again brings the general cards back.
+        const family = page.getByRole('button', { name: 'Family and home' });
+        await family.click();
+        assert.equal(await family.getAttribute('aria-pressed'), 'true');
+        await page.getByRole('button', { name: /Plan a birthday/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.locator('[data-role="user"]').count(), 0, 'choosing a pill sends nothing');
+        await shoot('shell-pill');
+        await family.click();
+        await page.getByRole('button', { name: /Draft a reply/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await context.close();
     }

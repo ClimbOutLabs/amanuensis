@@ -70,6 +70,7 @@ const firstRun: AmanSetupState = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   composer.setText.mockClear();
   composer.send.mockClear();
   server.grantedFeatures = [];
@@ -91,13 +92,15 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(screen.queryByRole('button', { name: 'Productivity' })).not.toBeInTheDocument();
   });
 
-  it('starts the morning brief from Productivity through the composer, and sends it', async () => {
+  it('chooses Productivity without sending, and a card puts the morning brief in the composer for the person to send', async () => {
     renderWelcome({ setup: firstRun });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Productivity' }));
+    expect(composer.send).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
-    expect(composer.send).toHaveBeenCalledTimes(1);
+    expect(composer.send).not.toHaveBeenCalled();
   });
 
   it('shows the setup ticket on a first run and puts it away with Skip for good', async () => {
