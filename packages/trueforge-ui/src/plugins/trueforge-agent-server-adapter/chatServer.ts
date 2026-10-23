@@ -403,13 +403,13 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
- * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * Taps Sentinel approval events off a raw stream or history item before the vendor
+ * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
  * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
-function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
 }
 
@@ -834,6 +834,9 @@ export function createHarnessChatServer(
         ...(limit === undefined ? {} : { limit }),
       });
       const data = page.data.flatMap(item => {
+        // A chat that learns of a waiting call from history (opened mid-turn, or caught up after the
+        // live stream dropped) gets its card here; the chat's one saved-card read may predate the ask.
+        tapSentinelStreamEvent(item.event);
         const converted = toUiEventItem(item);
         return converted === undefined ? [] : [converted];
       });

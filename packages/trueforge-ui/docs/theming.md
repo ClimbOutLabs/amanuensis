@@ -75,7 +75,7 @@ Rebuild in-repo (keep existing atom **names** / slots where possible, change
 props):
 
 - Bubbles: `AssistantMessageBubble`, `UserMessageBubble`, `UserMessageEdit`
-- Tools: `ToolCallCard`, `ToolCallContentBlock`, `ToolApprovalBar`,
+- Tools: `ToolCallCard`, `ToolCallContentBlock`,
   `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`, `AgentStepsCard`,
   `ReasoningCard`
 - Prompts: `AskUserPrompt`, `McpAuthPrompt`, `ResumeUnavailable`
