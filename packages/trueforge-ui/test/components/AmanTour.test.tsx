@@ -6,6 +6,7 @@ import { AmanTour, greetingFor, greetingLine, pickHelpArea } from '@/components/
 import {
   HELP_AREAS,
   KEEP_PAGES_IN_SPACES,
+  MORNING_BRIEF,
   firstFrameCardPrompts,
   type TourCapabilities,
 } from '@/components/tourPrompts.js';
