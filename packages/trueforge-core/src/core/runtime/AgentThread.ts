@@ -95,6 +95,8 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  isHostVouchedRead,
+  isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   NO_PROGRESS_NUDGE_AT,
@@ -231,7 +233,6 @@ import {
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
-  isSafeToRepeat,
   OpenToolCallCloser,
   unknownOutcomeCloseout,
   type ClosableToolOutcome,
@@ -3962,9 +3963,10 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A write
-   * (tier 3) past MAX_WRITE_CALLS_PER_TURN is not run either. Both end the turn after their batch
-   * resolves, and the repeat also ends it when the same call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
+   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
+   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
+   * call comes straight after the one before.
    */
   private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
     calls: InternalEnrichedToolCall[];
@@ -4004,8 +4006,14 @@ export class AgentThread {
         repeatStop = repeatStop || consecutive;
         return blocked(call, REPEATED_ACTION_RESULT);
       }
-      // A write held for the owner in an unattended run does not run now, so it does not count.
-      if (call.tool_info.tier === 3 && call.tool_info.held_for_owner === undefined) {
+      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
+      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
+      // held for the owner in an unattended run does not run now.
+      if (
+        call.tool_info.tier === 3 &&
+        !isHostVouchedRead(call.tool_info) &&
+        call.tool_info.held_for_owner === undefined
+      ) {
         if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked(call, WRITE_CAP_BLOCKED_RESULT);
@@ -4326,8 +4334,8 @@ export class AgentThread {
         disposition: result.disposition,
         reasonCode: result.remediation?.reason_code ?? null,
       });
-      // Calls with no metadata count as writes, as isSafeToRepeat treats them.
-      const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
+      // Calls with no metadata count as writes, as isReadOnlyCall treats them.
+      const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
       if (result.disposition === 'executed_ok' && !result.failure && writes) {
         nextToolCallMemo.turn.successfulWritesThisTurn += 1;
       }
