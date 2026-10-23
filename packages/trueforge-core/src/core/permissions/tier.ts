@@ -86,6 +86,7 @@ export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
   'incomplete_send_card',
+  'lookup_limit',
   'offline_mode',
   'outbound_guard',
   'steered_by_content',

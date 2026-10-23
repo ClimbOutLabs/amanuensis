@@ -17,7 +17,7 @@ import {
  * each link and address the model may name came from. It lives in host memory for one turn and never reaches the model.
  */
 
-/** Silent searches one turn may run before the next one asks. */
+/** Silent lookups one turn may run; the next is stopped with a plain line, never a card. */
 export const SILENT_SEARCH_LIMIT = 20;
 
 /** Reason code for a search or page read the designated provider ran without asking. */
@@ -32,12 +32,7 @@ export function isSilentSearchReason(reason: string): boolean {
 export const SEARCH_STEERED_REASON = 'mcp_search_steered';
 
 /** Reason codes for a designated-provider call that stops for approval, and why. */
-export const SEARCH_ASK_REASONS = [
-  'mcp_search_setting_ask',
-  'mcp_search_guard',
-  'mcp_search_limit',
-  SEARCH_STEERED_REASON,
-] as const;
+export const SEARCH_ASK_REASONS = ['mcp_search_setting_ask', 'mcp_search_guard', SEARCH_STEERED_REASON] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
 export function isSearchAskReason(reason: string): boolean {
@@ -53,7 +48,7 @@ export interface SearchProviderGrant {
 }
 
 export interface WebSearchTurnState {
-  /** Searches that ran without asking this turn. */
+  /** Lookups that ran without asking this turn. */
   silentSearches: number;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;

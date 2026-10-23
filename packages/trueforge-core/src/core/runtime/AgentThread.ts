@@ -1376,6 +1376,8 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params: effectiveParams,
       tool_type: info.type,
+      // A built-in's server name routes it to its own rules; without it a space write reads as an unknown connector tool.
+      ...(info.mcp_server_name === '' ? {} : { mcp_server_name: info.mcp_server_name }),
       ...(connector === undefined
         ? {}
         : {

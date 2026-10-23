@@ -179,6 +179,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
+    case 'lookup_limit':
+      return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
     case 'steered_by_content':
       return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
     default:

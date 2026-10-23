@@ -9,7 +9,7 @@ export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
 export const SEARCH_SERVER_FALLBACK = 'the search provider';
 
 const SEARCH_WHAT_PREFIX = 'Search the web through ';
-const PAGE_WHAT_PREFIX = 'Open a page through ';
+const PAGE_WHAT_PREFIX = 'Open a web page through ';
 
 /** Brand names of the known search providers, by the host their connector or API answers on. */
 const PROVIDER_LABEL_BY_HOST = new Map<string, string>([
@@ -29,7 +29,7 @@ export function searchProviderLabel({ host }: { host: string | undefined }): str
 /** The held card names the lookup in plain words, never the connector's id. */
 const WEB_SEARCH_NAME = 'Web search';
 const WEB_SEARCH_WHAT_PREFIX = `${WEB_SEARCH_NAME}: `;
-const OPEN_PAGE_NAME = 'Open a page';
+const OPEN_PAGE_NAME = 'Open a web page';
 const OPEN_PAGE_WHAT_PREFIX = `${OPEN_PAGE_NAME}: `;
 
 /** Opening of the Tavily search card sentence. */
@@ -51,7 +51,7 @@ export const ASKED_FIRST_SAY = 'It checked with you first.';
 export function holdSay(assistant: string) {
   return {
     search_setting: `Searches are set to ask, so ${assistant} is checking with you first.`,
-    search_limit: `${assistant} has already looked up a lot in this reply.`,
+    search_limit: `${assistant} stopped looking things up, because it already looked up a lot in this reply. Ask again to keep going.`,
     steered: `${assistant} found this link in something it read, and opening it would send more than the link said.`,
     steered_action: `Something ${assistant} read, not you, named who or where this goes.`,
     secret: SECRET_SAY,

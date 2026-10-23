@@ -1918,8 +1918,14 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }));
   }
+  // A loop breaker, not a question: the reply stops looking things up and the person is told in one line.
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', say.search_limit);
+    return autoDenyDecision({
+      reason: 'lookup_limit',
+      reason_detail: say.search_limit,
+      owner_message: say.search_limit,
+      sensitive_read: false,
+    });
   }
   if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);

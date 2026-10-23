@@ -13,8 +13,12 @@ import {
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import type { IToolSet } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
-import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permissions/context';
+import {
+  createSentinelHostContext,
+  defaultSentinelServices,
+} from '@truefoundry/trueforge-core/core/permissions/context';
 import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
+import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
 import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
@@ -251,6 +255,38 @@ describe('a web search after the chat read mail', () => {
     await readMail({ mail, turn: turnResolver.webSearchTurn });
     expect(await search(finder)).toMatchObject({ tier: 1, tier_reason: 'mcp_search_provider' });
     expect(await search(finder, namedSender)).toMatchObject({ tier: 1, is_approval_required: false });
+  });
+
+  it('makes a space the person asked for with no card, through the real built-in tool route', async () => {
+    const turnResolver = resolver();
+    const resolved = await turnResolver.resolveAgentDefinition({
+      spec: spec(),
+      ...OWNER,
+      session_id: 's1',
+      signal: new AbortController().signal,
+      tracing: resolver().createTracing(),
+    });
+    const space = (resolved.extraCapabilities ?? [])
+      .flatMap(capability => capability.systemToolSets ?? [])
+      .find(toolSet => toolSet.name === 'space');
+    if (space === undefined) {
+      throw new Error('expected the Spaces tools to be mounted');
+    }
+    const args = { name: 'Dog breeds', format: 'markdown', body: '# Dog breeds' };
+    const classified = await classifyUnstampedToolCall({
+      sentinel: createSentinelHostContext({
+        tenant_id: OWNER.tenant_id,
+        created_by: OWNER.created_by,
+        conversation_id: 's1',
+        web_search: turnResolver.webSearchTurn,
+      }),
+      canonical_params: args,
+      info: await space.toolCallInfo({ name: 'create_space', arguments: args }),
+    });
+
+    expect(classified).toMatchObject({ tier: 1, tier_reason: 'space_write' });
+    expect(classified.is_approval_required).not.toBe(true);
+    expect(classified.tier3_card ?? null).toBeNull();
   });
 
   describe('through the schedule path', () => {

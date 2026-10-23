@@ -473,7 +473,7 @@ describe('provider plumbing fields on the designated provider', () => {
 });
 
 describe('the loop breaker', () => {
-  it('asks once the turn has run its silent searches', async () => {
+  it('stops the next lookup with a plain line and no card once the turn ran its silent lookups', async () => {
     const h = harness({ searchProvider: true });
     for (let i = 0; i < SILENT_SEARCH_LIMIT; i += 1) {
       expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `topic ${String(i)}` } })).tier).toBe(
@@ -483,20 +483,22 @@ describe('the loop breaker', () => {
     }
     expect(h.host.web_search.silentSearches).toBe(SILENT_SEARCH_LIMIT);
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
-    expect(next.tier).toBe(3);
-    expect(next.is_approval_required).toBe(true);
-    expect(next.tier3_card?.plain_what).toContain(
-      'Aman has already looked up a lot in this reply.',
+    expect(next.is_approval_required).toBe(false);
+    expect(next.tier3_card ?? null).toBeNull();
+    expect(next.pre_dispatch_failure?.owner_message).toBe(
+      'Aman stopped looking things up, because it already looked up a lot in this reply. Ask again to keep going.',
     );
-    expect(next.tier3_card?.why_asked_again).toBeNull();
+    const refused = await runSearch(h, 'one more');
+    expect(isApprovalRequiredResponse(refused)).toBe(false);
+    expect(h.dispatched).toHaveLength(SILENT_SEARCH_LIMIT);
   });
 
-  it('asks in a scheduled run too, so the run holds it', async () => {
+  it('stops it the same way in a scheduled run, rather than holding it for the owner', async () => {
     const h = harness({ searchProvider: true, unattended: true });
     h.host.web_search.silentSearches = SILENT_SEARCH_LIMIT;
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
-    expect(next.tier).toBe(3);
-    expect(next.pre_dispatch_failure).toBeUndefined();
+    expect(next.is_approval_required).toBe(false);
+    expect(next.pre_dispatch_failure).toBeDefined();
   });
 
   it('counts at dispatch, so a batch settled as silent cannot run past the limit', async () => {
@@ -596,10 +598,10 @@ describe('links and where they came from', () => {
     const info = await fetchInfo(h, `${mailLink}sam.rivers@example.com`);
     expect(info.tier).toBe(3);
     expect(info.tier3_card?.plain_what).toBe(
-      `Open a page: ${mailLink}sam.rivers@example.com. Aman found this link in something it read, and opening it would send more than the link said.`,
+      `Open a web page: ${mailLink}sam.rivers@example.com. Aman found this link in something it read, and opening it would send more than the link said.`,
     );
     expect(info.audit_description).toBe(
-      'Open a page through the search provider. Aman found this link in something it read, and opening it would send more than the link said.',
+      'Open a web page through the search provider. Aman found this link in something it read, and opening it would send more than the link said.',
     );
     await h.toolSet.callTool({ name: 'read_page', arguments: { url: `${mailLink}x` } });
     expect(h.dispatched).toEqual([]);
@@ -652,7 +654,7 @@ describe('links and where they came from', () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results, searchWithoutAsking: false });
     const info = await fetchInfo(h, page);
     expect(info.tier3_card?.plain_what).toBe(
-      `Open a page: ${page}. Searches are set to ask, so Aman is checking with you first.`,
+      `Open a web page: ${page}. Searches are set to ask, so Aman is checking with you first.`,
     );
   });
 });
@@ -817,10 +819,12 @@ describe('admission of a batch of searches', () => {
       response => isCallToolResponseResult(response) && response.result.isError === true,
     );
     expect(refused).toHaveLength(5);
-    expect(h.audit).toHaveLength(SILENT_SEARCH_LIMIT);
+    expect(h.audit.filter(row => row.outcome === 'logged')).toHaveLength(SILENT_SEARCH_LIMIT);
+    // Past the allowance the reply stops looking things up: no card, a plain line instead.
     const text = JSON.stringify(refused[0]);
-    expect(text).toContain('not run');
-    expect(text).toContain('sent for approval');
+    expect(text).toContain('Not run');
+    expect(text).toContain('Answer from what you already found');
+    expect(text).not.toContain('approval');
   });
 
   it('tells a scheduled run to continue without the search rather than to ask', async () => {
