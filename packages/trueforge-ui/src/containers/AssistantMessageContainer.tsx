@@ -9,6 +9,7 @@ import {
   type MessageStatus,
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
+import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
@@ -20,7 +21,6 @@ import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { AmanBrief } from '../components/AmanBrief.js';
-import { parseBrief } from '../components/briefSections.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -161,6 +161,8 @@ const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
   'waiting-for-approval': 'Waiting for approval',
 };
 
+const BRIEF_WRITING_LINE = 'Putting your brief together…';
+
 export function AssistantMessageContainer() {
   const AssistantMessageBubble = useSlot('AssistantMessageBubble');
   const MessageActionBar = useSlot('MessageActionBar');
@@ -197,8 +199,10 @@ export function AssistantMessageContainer() {
   const messageId = useAuiState(s => s.message.id);
   const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
   const answerText = useAuiState(s => messageText(s.message.content));
-  // A brief shows its stops and chapters once the answer is done; until then the normal progress shows.
-  const briefSections = answersBrief && !isMessageRunning ? parseBrief(answerText) : null;
+  // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
+  // line shows instead of the raw text; a finished answer without a valid block shows as normal markdown.
+  const brief = answersBrief ? parseMorningBrief(answerText) : null;
+  const briefWriting = answersBrief && brief === null && isMessageRunning;
 
   const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts);
 
@@ -363,7 +367,7 @@ export function AssistantMessageContainer() {
             case 'group-interimText':
               return null;
             case 'text':
-              return <AssistantTextContainer />;
+              return briefWriting ? null : <AssistantTextContainer />;
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
@@ -385,6 +389,11 @@ export function AssistantMessageContainer() {
           }
         }}
       </MessagePrimitive.GroupedParts>
+      {briefWriting ? (
+        <p role="status" className="text-sm text-text-secondary" data-testid="brief-writing">
+          {BRIEF_WRITING_LINE}
+        </p>
+      ) : null}
       {showNotFinished && (
         <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
           This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.
@@ -407,8 +416,8 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {briefSections !== null ? (
-          <AmanBrief sections={briefSections} briefId={turnId ?? messageId} sessionId={sessionId} />
+        {brief !== null ? (
+          <AmanBrief brief={brief} briefId={turnId ?? messageId} sessionId={sessionId} />
         ) : chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
           <ChatImageScope port={chatImagesPort} sessionId={sessionId} turnId={turnId} settled={!isMessageRunning}>
             {messageBody}

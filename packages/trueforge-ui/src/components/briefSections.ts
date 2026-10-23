@@ -1,82 +1,100 @@
-/**
- * Reads a morning brief answer into its four sections. The brief prompt asks for these headings in this
- * order, one line per item, with at most one bracketed next step at the end of a line.
- */
+import {
+  BRIEF_SECTION_VALUES,
+  briefItemKey,
+  type BriefItem,
+  type BriefSection,
+  type MorningBrief,
+} from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
-export const BRIEF_SECTION_IDS = ['coming_up', 'deadlines', 'needs_doing', 'watch_out'] as const;
+export type { BriefItem, BriefSection, MorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
-export type BriefSectionId = (typeof BRIEF_SECTION_IDS)[number];
-
-export const BRIEF_SECTION_TITLES: Record<BriefSectionId, string> = {
+/** Section headings in the order they show. */
+const BRIEF_SECTION_LABELS: Record<BriefSection, string> = {
+  check_first: 'Check first',
+  decision: 'Needs a decision',
   coming_up: 'Coming up',
-  deadlines: 'Deadlines',
-  needs_doing: 'Needs doing',
-  watch_out: 'Watch out',
+  deadline: 'Deadlines',
 };
 
-export type BriefLine = {
-  /** Stable within one brief: section and position. */
-  id: string;
-  text: string;
-  /** The bracketed next step, such as "Draft a reply". Null when the line has none. */
-  action: string | null;
+/** Items shown before the "+ N more items" line. */
+const BRIEF_VISIBLE_LIMIT = 6;
+
+export type BriefViewItem = BriefItem & { key: string };
+
+export type BriefViewSection = {
+  section: BriefSection;
+  label: string;
+  /** Every item in the section, including ones hidden behind "+ N more items". */
+  count: number;
+  items: BriefViewItem[];
 };
 
-export type BriefSection = {
-  id: BriefSectionId;
-  title: string;
-  lines: BriefLine[];
+export type BriefView = {
+  sections: BriefViewSection[];
+  /** Items not shown because of the limit. */
+  hiddenCount: number;
 };
-
-const HEADING_TO_SECTION = new Map<string, BriefSectionId>(
-  BRIEF_SECTION_IDS.map(id => [BRIEF_SECTION_TITLES[id].toLowerCase(), id]),
-);
-
-const TRAILING_ACTION = /\s*\[([^\]]+)\](?:\([^)]*\))?\s*$/;
-const LIST_MARKER = /^(?:[-*+]|\d+[.)])\s+/;
-
-function headingSection(line: string): BriefSectionId | undefined {
-  const bare = line
-    .replace(/^#+\s*/, '')
-    .replace(/[*_]/g, '')
-    .replace(/:\s*$/, '')
-    .trim()
-    .toLowerCase();
-  return HEADING_TO_SECTION.get(bare);
-}
-
-function parseLine({ section, index, raw }: { section: BriefSectionId; index: number; raw: string }): BriefLine {
-  const body = raw.replace(LIST_MARKER, '').trim();
-  const match = TRAILING_ACTION.exec(body);
-  const action = match?.[1]?.trim() ?? null;
-  const text = match === null ? body : body.slice(0, match.index).trim();
-  return { id: `${section}-${String(index)}`, text, action: action === '' ? null : action };
-}
 
 /**
- * The four sections of a brief answer, or null when the answer has none of the headings. Text before
- * the first heading is not part of any section.
+ * The brief's sections for display. Items whose keys are in `hiddenKeys` are left out (done and undone-out),
+ * then only the first `limit` items in display order show unless `expanded` is set.
  */
-export function parseBrief(markdown: string): BriefSection[] | null {
-  const lines: Record<BriefSectionId, BriefLine[]> = { coming_up: [], deadlines: [], needs_doing: [], watch_out: [] };
-  let current: BriefSectionId | null = null;
-  let found = false;
-  for (const raw of markdown.split('\n')) {
-    const trimmed = raw.trim();
-    if (trimmed === '') continue;
-    const heading = headingSection(trimmed);
-    if (heading !== undefined) {
-      current = heading;
-      found = true;
-      continue;
-    }
-    if (current === null) continue;
-    const section: BriefSectionId = current;
-    const line = parseLine({ section, index: lines[section].length, raw: trimmed });
-    if (line.text !== '') lines[section].push(line);
+export function buildBriefView({
+  brief,
+  hiddenKeys,
+  expanded,
+  limit = BRIEF_VISIBLE_LIMIT,
+}: {
+  brief: MorningBrief;
+  hiddenKeys: ReadonlySet<string>;
+  expanded: boolean;
+  limit?: number;
+}): BriefView {
+  // Items with the same section and title are one item, so only the first of them shows.
+  const seen = new Set<string>();
+  const live: BriefViewItem[] = brief.items
+    .map(item => ({ ...item, key: briefItemKey({ section: item.section, title: item.title }) }))
+    .filter(item => {
+      if (seen.has(item.key)) return false;
+      seen.add(item.key);
+      return !hiddenKeys.has(item.key);
+    });
+  let budget = expanded ? Number.POSITIVE_INFINITY : limit;
+  const sections: BriefViewSection[] = [];
+  for (const section of BRIEF_SECTION_VALUES) {
+    const items = live.filter(item => item.section === section);
+    if (items.length === 0) continue;
+    const shown = items.slice(0, Math.max(0, budget));
+    budget -= shown.length;
+    // A section whose items are all past the limit stays out, so no heading shows over nothing.
+    if (shown.length === 0) continue;
+    sections.push({ section, label: BRIEF_SECTION_LABELS[section], count: items.length, items: shown });
   }
-  if (!found) return null;
-  return BRIEF_SECTION_IDS.map(id => ({ id, title: BRIEF_SECTION_TITLES[id], lines: lines[id] }));
+  const shownCount = sections.reduce((total, section) => total + section.items.length, 0);
+  return { sections, hiddenCount: live.length - shownCount };
+}
+
+/** The top bar's title for a brief: "Brief · Tuesday 21 October", cut to 40 characters. */
+export function briefTopBarTitle(now: Date): string {
+  const date = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+  const title = `Brief · ${date}`;
+  return title.length <= 40 ? title : `${title.slice(0, 39)}…`;
+}
+
+/** A calendar time for a Coming up row, in the browser's time zone: "Sun 25 / 3:30pm". */
+export function briefWhenLabel(iso: string): string | undefined {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const day = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric' }).format(date);
+  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .format(date)
+    .replace(' ', '')
+    .toLowerCase();
+  return `${day} / ${time}`;
+}
+
+function pluralize(count: number, singular: string): string {
+  return `${String(count)} ${singular}${count === 1 ? '' : 's'}`;
 }
 
 export type BriefAuditSummary = {
@@ -86,13 +104,22 @@ export type BriefAuditSummary = {
   actionsRan: number;
 };
 
-/** Counts for the brief's footer, read from the chat's audit entries. */
-export function summarizeBriefAudit(entries: readonly { outcome: string }[]): BriefAuditSummary {
+/** Counts for the trust line, read from the chat's audit entries. Brief item marks are not counted. */
+export function summarizeBriefAudit(entries: readonly { outcome: string; action_type: string }[]): BriefAuditSummary {
   let readAllowed = 0;
   let actionsRan = 0;
   for (const entry of entries) {
+    if (entry.action_type.startsWith('brief.')) continue;
     if (entry.outcome === 'logged') readAllowed += 1;
     if (entry.outcome === 'ran' || entry.outcome === 'approved') actionsRan += 1;
   }
   return { readAllowed, actionsRan };
+}
+
+/** The trust line. Only counts the audit log holds; nothing is claimed about sends it does not show. */
+export function briefFooterLine(summary: BriefAuditSummary): string {
+  const parts: string[] = [];
+  if (summary.readAllowed > 0) parts.push(`${pluralize(summary.readAllowed, 'thing')} read, allowed by your settings.`);
+  parts.push(summary.actionsRan === 0 ? 'Nothing was sent.' : `${pluralize(summary.actionsRan, 'action')} ran.`);
+  return parts.join(' ');
 }

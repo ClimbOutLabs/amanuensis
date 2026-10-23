@@ -7404,6 +7404,201 @@ await client.personalization.auditLog.list();
 </dl>
 </details>
 
+## Personalization BriefItems
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListBriefItemCompletionsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.personalization.ListBriefItemsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">markDone</a>({ ...params }) -> TrueForge.MarkBriefItemDoneResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.markDone({
+    itemKey: "item_key",
+    section: "check_first",
+    sessionId: "session_id",
+    title: "title"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.personalization.MarkBriefItemDoneRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">undo</a>(item_key) -> TrueForge.DeleteBriefItemDoneResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.undo("item_key");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**item_key:** `string` — Client key of the brief item.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings FirstRunGuide
 <details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">get</a>() -> TrueForge.GetFirstRunGuideResponse</code></summary>
 <dl>

@@ -8,7 +8,6 @@ import { useCallback, useMemo } from 'react';
 
 const STORAGE_KEY = 'aui-reward-ledger';
 const TEAR_WINDOW_MS = 60_000;
-const HIGHLIGHTS_PER_BRIEF = 3;
 
 /** What the screen shows right now. A reward never plays while anything here is true. */
 export type RewardContext = {
@@ -26,8 +25,6 @@ export type RewardContext = {
 export type RewardRequest =
   /** A finished line: an item completed by the person or Aman. */
   | { kind: 'tick' }
-  /** A line that matters in a brief. At most three per brief. */
-  | { kind: 'highlight'; briefId: string }
   /** An approval the person gave. At most one tear per minute. */
   | { kind: 'tear' }
   /** The day's all-clear: the count of things waiting went to zero. Once a day. */
@@ -46,9 +43,6 @@ export type RewardLedger = {
   lastFirstBriefWeek: string | null;
   /** Milestone keys that have played. */
   milestones: string[];
-  /** The brief the highlight count belongs to, and how many it has used. */
-  highlightBriefId: string | null;
-  highlightCount: number;
   /** Epoch milliseconds of the last tear. */
   lastTearAt: number | null;
   /** Local day of the last note, and its week. */
@@ -60,8 +54,6 @@ export const EMPTY_REWARD_LEDGER: RewardLedger = {
   lastClearDay: null,
   lastFirstBriefWeek: null,
   milestones: [],
-  highlightBriefId: null,
-  highlightCount: 0,
   lastTearAt: null,
   lastNoteDay: null,
   lastNoteWeek: null,
@@ -90,7 +82,7 @@ function isBlocked(context: RewardContext): boolean {
 
 /**
  * Whether `request` may play now. Pure: reads the ledger and the screen, writes nothing.
- * Tear, highlight and note are checked by their caps; all of them stop while
+ * Tear and note are checked by their caps; all of them stop while
  * Aman is working, something waits on the person, or the screen shows an error.
  */
 export function canPlayReward({
@@ -109,10 +101,6 @@ export function canPlayReward({
   switch (request.kind) {
     case 'tick':
       return true;
-    case 'highlight': {
-      if (ledger.highlightBriefId !== request.briefId) return true;
-      return ledger.highlightCount < HIGHLIGHTS_PER_BRIEF;
-    }
     case 'tear':
       return ledger.lastTearAt === null || now.getTime() - ledger.lastTearAt >= TEAR_WINDOW_MS;
     case 'allClear':
@@ -144,14 +132,6 @@ export function recordReward({
   switch (request.kind) {
     case 'tick':
       return ledger;
-    case 'highlight': {
-      const sameBrief = ledger.highlightBriefId === request.briefId;
-      return {
-        ...ledger,
-        highlightBriefId: request.briefId,
-        highlightCount: sameBrief ? ledger.highlightCount + 1 : 1,
-      };
-    }
     case 'tear':
       return { ...ledger, lastTearAt: now.getTime() };
     case 'allClear':
@@ -201,8 +181,6 @@ function isRewardLedger(value: unknown): value is RewardLedger {
     isStringOrNull(field('lastFirstBriefWeek')) &&
     Array.isArray(milestones) &&
     milestones.every(key => typeof key === 'string') &&
-    isStringOrNull(field('highlightBriefId')) &&
-    typeof field('highlightCount') === 'number' &&
     isNumberOrNull(field('lastTearAt')) &&
     isStringOrNull(field('lastNoteDay')) &&
     isStringOrNull(field('lastNoteWeek'))
