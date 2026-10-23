@@ -509,7 +509,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       }
       this.stopCommandExecutionLeaseRenewals();
       if (lifecycle.frozenByStore) {
-        // A turn frozen by the next message still read what it read, so its fingerprints are saved too.
+        // A turn frozen from outside (Cancel) still read what it read, so its fingerprints are saved too.
         try {
           await chatFingerprintSaves.finish({
             session_id: this.turn.session_id,

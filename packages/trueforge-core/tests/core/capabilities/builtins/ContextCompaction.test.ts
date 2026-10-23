@@ -719,7 +719,7 @@ describe('contextCompaction model role', () => {
     if (processor === undefined) throw new Error('expected a preLLMProcessor');
     const events = [];
     for await (const event of processor.processPreLLM({ ...makeExecution(), sandbox })) events.push(event);
-    const overwrite = events[0];
+    const overwrite = events.find(event => event.type === 'agent.context.overwrite');
     if (!overwrite || overwrite.type !== 'agent.context.overwrite') throw new Error('expected compaction overwrite');
     const persisted = JSON.stringify(overwrite.context);
     expect(persisted).toContain('repository_id: authoritative-repository');
@@ -844,7 +844,7 @@ describe('contextCompaction model role', () => {
     if (processor === undefined) throw new Error('expected a preLLMProcessor');
     const events = [];
     for await (const event of processor.processPreLLM(makeExecution())) events.push(event);
-    const overwrite = events[0];
+    const overwrite = events.find(event => event.type === 'agent.context.overwrite');
     if (!overwrite || overwrite.type !== 'agent.context.overwrite') throw new Error('expected compaction overwrite');
     const persisted = JSON.stringify(overwrite.context);
     expect(persisted).toContain('repository_id: bound-without-sandbox');

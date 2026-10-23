@@ -2,6 +2,7 @@ import type { Logger } from 'winston';
 import {
   chatFingerprintsAfterTurn,
   hasPrivateFingerprintsToSave,
+  hasUnrepeatedPrivateFingerprints,
   type WebSearchTurnState,
 } from '../core/permissions/webSearch';
 import type { SetPrivateFingerprintsInput } from './store/ISessionStore';
@@ -22,7 +23,7 @@ class ChatFingerprintSaves {
    */
   begin(input: { session_id: string; state: WebSearchTurnState }): boolean {
     const running = this.running.get(input.session_id) ?? new Set<WebSearchTurnState>();
-    const unsaved = this.failed.has(input.session_id) || [...running].some(hasPrivateFingerprintsToSave);
+    const unsaved = this.failed.has(input.session_id) || [...running].some(hasUnrepeatedPrivateFingerprints);
     running.add(input.state);
     this.running.set(input.session_id, running);
     return unsaved;
@@ -43,8 +44,11 @@ class ChatFingerprintSaves {
       try {
         await input.store.setPrivateFingerprints({ session_id: input.session_id, fingerprints });
       } catch (err: unknown) {
-        // Later turns of this chat in this process run as if a fingerprint were lost, until one stores that.
-        this.failed.add(input.session_id);
+        // Later turns of this chat in this process run as if a fingerprint were lost, until one stores that. Text the
+        // host puts before the model each turn is kept again by the next turn, so losing only that loses nothing.
+        if (hasUnrepeatedPrivateFingerprints(input.state)) {
+          this.failed.add(input.session_id);
+        }
         input.logger?.warn('Saving the chat fingerprints failed', { err });
         return;
       }

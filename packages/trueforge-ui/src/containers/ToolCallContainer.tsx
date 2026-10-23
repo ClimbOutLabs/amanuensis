@@ -57,12 +57,12 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
-  parseToolNotDoneReason,
   parseToolOutputScreen,
-  parseToolResultDisposition,
   resolveSubAgentMeta,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
+  toolCallDisposition,
+  toolCallNotDoneReason,
   toStatus,
 } from '../utils/toolCallParsing.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
@@ -525,7 +525,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
     ) : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
-  const disposition = parseToolResultDisposition(part.result);
+  const disposition = toolCallDisposition(part);
   const outputScreen = parseToolOutputScreen(part.result);
   const outputWasWithheld = outputScreen?.action === 'withheld';
   const status = outputWasWithheld
@@ -534,7 +534,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       ? toStatus(part.status?.type)
       : disposition.tone;
   const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
-  const notDoneReason = outputWasWithheld ? undefined : parseToolNotDoneReason(part.result);
+  const notDoneReason = outputWasWithheld ? undefined : toolCallNotDoneReason(part);
   const outcomeText = outputWasWithheld
     ? outputScreen.label
     : notDoneReason !== undefined

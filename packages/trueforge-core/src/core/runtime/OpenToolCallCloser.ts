@@ -26,8 +26,9 @@ import {
   type ToolResultRemediation,
 } from '../events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMessage } from '../llm/LLMTypes';
+import { awaitsApproval } from '../mcp/approvalGrant';
 import { isReadOnlyCall } from '../mcp/executeToolCalls';
-import { deniedToolCallRemediation, deniedToolCallText } from '../mcp/ToolSet';
+import { deniedToolCallRemediation, deniedToolCallText, REPEATED_DENIAL_REMEDIATION } from '../mcp/ToolSet';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
 import { mergeCurrentContextUsage } from './contextUsage';
@@ -129,9 +130,13 @@ function unresolvedCallOutcome(
  * durable pending state — the approval card the user still has to answer — so nothing is
  * closed while one is open. A decided call that never ran is the opposite: no execution is
  * coming for it, and leaving it open blocks every later user message with nothing on screen
- * to explain why. Closing it states the outcome the user already chose.
+ * to explain why. Closing it states the outcome the user already chose. An undecided call that
+ * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
  */
-export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<string, ClosableToolOutcome> {
+export function getClosableOpenToolCallOutcomes(
+  context: ContextMessage[],
+  deniedApprovalIdentities: ReadonlySet<string>,
+): Map<string, ClosableToolOutcome> {
   const lastIdx = context.findLastIndex(
     (msg): msg is InternalEnrichedAssistantMessage =>
       isLLMContextMessage(msg) && msg.role === 'assistant' && !!msg.tool_calls?.length,
@@ -187,7 +192,16 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
     }
     const decision = decisions.get(toolCall.id);
     if (decision === undefined) {
-      return new Map();
+      if (awaitsApproval({ call: toolCall, decisions, deniedApprovalIdentities })) {
+        return new Map();
+      }
+      closable.set(toolCall.id, {
+        rawContent: deniedToolCallText(undefined),
+        disposition: 'denied',
+        remediation: REPEATED_DENIAL_REMEDIATION,
+        admissionProvenance: { source: 'automatic' },
+      });
+      continue;
     }
     closable.set(
       toolCall.id,
@@ -223,18 +237,26 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
   return closable;
 }
 
-export function getClosableOpenToolCalls(context: ContextMessage[]): Map<string, string> {
+export function getClosableOpenToolCalls(
+  context: ContextMessage[],
+  deniedApprovalIdentities: ReadonlySet<string>,
+): Map<string, string> {
   return new Map(
-    [...getClosableOpenToolCallOutcomes(context)].map(([toolCallId, outcome]) => [toolCallId, outcome.rawContent]),
+    [...getClosableOpenToolCallOutcomes(context, deniedApprovalIdentities)].map(([toolCallId, outcome]) => [
+      toolCallId,
+      outcome.rawContent,
+    ]),
   );
 }
 
 export class OpenToolCallCloser implements PreSendContextProcessor {
+  constructor(private readonly deniedApprovalIdentities: () => ReadonlySet<string>) {}
+
   // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
   async *processPreSend(
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorAppendContext, void, unknown> {
-    const closable = getClosableOpenToolCallOutcomes(execution.context);
+    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities());
     if (closable.size === 0) {
       return;
     }
