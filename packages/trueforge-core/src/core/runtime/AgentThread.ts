@@ -134,7 +134,12 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
-import { keepSubAgentAnswerText } from '../permissions/webSearch';
+import {
+  keepSubAgentAnswerText,
+  markAttachedFileUnreadable,
+  recordAttachedFile,
+  recordPrivateContextText,
+} from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -276,6 +281,7 @@ import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
   buildIngestionUnavailableNote,
+  documentPlainText,
   isEmptyMessageContent,
   processAgentUserInput,
   type AgentInputUserMessage,
@@ -1907,6 +1913,13 @@ export class AgentThread {
           clientSideToolResponses.push(m);
         } else if (isInputUserMessage(m)) {
           const result = await processAgentUserInput(m, this.sandbox, this.definition.modelSupportsVision ?? false);
+          // Kept before the model sees the files, so a search that copies one asks first.
+          const sentinel = this.sentinel;
+          if (sentinel !== undefined) {
+            for (const content of result.attachedFiles) {
+              recordAttachedFile({ state: sentinel.web_search, content });
+            }
+          }
           contextMessages.push(result.message);
           if (result.sandboxCreated) {
             this.pendingSandboxCreatedEvents.push(buildSandboxCreatedEvent(result.sandboxCreated));
@@ -2964,144 +2977,169 @@ export class AgentThread {
       }
     };
 
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      if (file === undefined) {
-        continue;
-      }
-
-      if (signal?.aborted) {
-        // Never reached extraction: no `started` event for these, per the cancellation contract.
-        for (const progress of cancelFrom(files.slice(index))) {
-          yield buildDocumentIngestionEvent(progress, this.threadId);
-          extractedTextParts.push(
-            buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
-          );
+    // A file whose text was not kept, for any reason, leaves the chat unable to check its searches.
+    const keptFiles = new Set<string>();
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        if (file === undefined) {
+          continue;
         }
-        break;
-      }
 
-      yield buildDocumentIngestionEvent(
-        { fileName: file.filename, stagedPath: file.path, phase: 'started' },
-        this.threadId,
-      );
-
-      let terminalDocumentProgress: DocumentFileProgress | undefined;
-      try {
-        const extraction = await extractDocumentsFromSandbox(
-          this.sandbox,
-          [file.path],
-          signal,
-          progress => {
-            if (progress.phase !== 'started') {
-              terminalDocumentProgress = progress;
-            }
-          },
-          budget,
-        );
-        const document = extraction.documents[0];
-        if (terminalDocumentProgress === undefined && document !== undefined) {
-          // Defensive: onFileProgress above should always have fired for the one file requested.
-          terminalDocumentProgress = {
-            phase: document.pages.length > 0 ? 'finished' : 'failed',
-            filename: file.filename,
-            path: file.path,
-            elapsedMs: 0,
-            document,
-          };
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          // The file currently in flight still gets a terminal event; it never leaves `started`
-          // dangling. Remaining, unreached files are cancelled without ever having started.
-          yield buildDocumentIngestionEvent(
-            { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
-            this.threadId,
-          );
-          extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
-          for (const progress of cancelFrom(files.slice(index + 1))) {
+        if (signal?.aborted) {
+          // Never reached extraction: no `started` event for these, per the cancellation contract.
+          for (const progress of cancelFrom(files.slice(index))) {
             yield buildDocumentIngestionEvent(progress, this.threadId);
             extractedTextParts.push(
               buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
             );
           }
-          return;
+          break;
         }
-        const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
-        yield buildDocumentIngestionEvent(
-          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
-          this.threadId,
-        );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-        continue;
-      }
 
-      if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
-        // Should be unreachable (extraction resolved without ever reporting a terminal phase);
-        // still emit a terminal event so `started` is never left dangling.
-        const issue = 'Extraction produced no text';
         yield buildDocumentIngestionEvent(
-          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+          { fileName: file.filename, stagedPath: file.path, phase: 'started' },
           this.threadId,
         );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-        continue;
-      }
 
-      const document = terminalDocumentProgress.document;
-      if (terminalDocumentProgress.phase === 'finished') {
-        yield buildDocumentIngestionEvent(
-          {
-            fileName: file.filename,
-            stagedPath: file.path,
-            phase: 'finished',
-            method:
-              document.extraction_mode === 'text'
-                ? 'native text'
-                : document.extraction_mode === 'ocr'
-                  ? 'OCR'
-                  : 'mixed',
-            pageCount: document.pages.length,
-            elapsedMs: terminalDocumentProgress.elapsedMs,
-          },
-          this.threadId,
-        );
-        extractedTextParts.push(
-          await this.screenIngestedText({
+        let terminalDocumentProgress: DocumentFileProgress | undefined;
+        // What extraction returns, after its page limits: only it says whether pages were left unread.
+        let returnedIssue: string | null | undefined;
+        try {
+          const extraction = await extractDocumentsFromSandbox(
+            this.sandbox,
+            [file.path],
+            signal,
+            progress => {
+              if (progress.phase !== 'started') {
+                terminalDocumentProgress = progress;
+              }
+            },
+            budget,
+          );
+          const document = extraction.documents[0];
+          returnedIssue = document?.issue;
+          if (terminalDocumentProgress === undefined && document !== undefined) {
+            // Defensive: onFileProgress above should always have fired for the one file requested.
+            terminalDocumentProgress = {
+              phase: document.pages.length > 0 ? 'finished' : 'failed',
+              filename: file.filename,
+              path: file.path,
+              elapsedMs: 0,
+              document,
+            };
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            // The file currently in flight still gets a terminal event; it never leaves `started`
+            // dangling. Remaining, unreached files are cancelled without ever having started.
+            yield buildDocumentIngestionEvent(
+              { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
+              this.threadId,
+            );
+            extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
+            for (const progress of cancelFrom(files.slice(index + 1))) {
+              yield buildDocumentIngestionEvent(progress, this.threadId);
+              extractedTextParts.push(
+                buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
+              );
+            }
+            return;
+          }
+          const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
+          yield buildDocumentIngestionEvent(
+            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          continue;
+        }
+
+        if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
+          // Should be unreachable (extraction resolved without ever reporting a terminal phase);
+          // still emit a terminal event so `started` is never left dangling.
+          const issue = 'Extraction produced no text';
+          yield buildDocumentIngestionEvent(
+            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          continue;
+        }
+
+        const document = terminalDocumentProgress.document;
+        if (terminalDocumentProgress.phase === 'finished') {
+          yield buildDocumentIngestionEvent(
+            {
+              fileName: file.filename,
+              stagedPath: file.path,
+              phase: 'finished',
+              method:
+                document.extraction_mode === 'text'
+                  ? 'native text'
+                  : document.extraction_mode === 'ocr'
+                    ? 'OCR'
+                    : 'mixed',
+              pageCount: document.pages.length,
+              elapsedMs: terminalDocumentProgress.elapsedMs,
+            },
+            this.threadId,
+          );
+          const ingested = await this.screenIngestedText({
             part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
             file: { filename: file.filename, path: file.path },
             signal,
-          }),
-        );
-      } else {
-        const issue = document.issue ?? 'Extraction produced no text';
-        yield buildDocumentIngestionEvent(
-          {
-            fileName: file.filename,
-            stagedPath: file.path,
-            phase: 'failed',
-            issue,
-            elapsedMs: terminalDocumentProgress.elapsedMs,
-          },
-          this.threadId,
-        );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          });
+          // An attached file is the person's own: a later search that carries its details asks first. The whole text
+          // is kept, since the model can read past the part shown here.
+          if (this.sentinel !== undefined) {
+            recordPrivateContextText({
+              state: this.sentinel.web_search,
+              text: documentPlainText(document),
+              source: 'attachment',
+            });
+          }
+          // A file read only in part (a page limit, a page with no text) is not covered: the model can still read
+          // the rest, and nothing here would see it.
+          if (returnedIssue === null) {
+            keptFiles.add(file.path);
+          }
+          extractedTextParts.push(ingested);
+        } else {
+          const issue = document.issue ?? 'Extraction produced no text';
+          yield buildDocumentIngestionEvent(
+            {
+              fileName: file.filename,
+              stagedPath: file.path,
+              phase: 'failed',
+              issue,
+              elapsedMs: terminalDocumentProgress.elapsedMs,
+            },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+        }
       }
-    }
 
-    // Append extracted text parts to context as a synthetic user message so the model sees them
-    // before the LLM call. This message contains the extracted text from the staged documents.
-    if (extractedTextParts.length > 0) {
-      const contextMessage: ContextMessage = {
-        role: 'user',
-        content: extractedTextParts,
-      };
-      yield* this.appendToContext({
-        context: [contextMessage],
-        output: [],
-        currentContextUsage: undefined,
-        usage: undefined,
-      });
+      // Append extracted text parts to context as a synthetic user message so the model sees them
+      // before the LLM call. This message contains the extracted text from the staged documents.
+      if (extractedTextParts.length > 0) {
+        const contextMessage: ContextMessage = {
+          role: 'user',
+          content: extractedTextParts,
+        };
+        yield* this.appendToContext({
+          context: [contextMessage],
+          output: [],
+          currentContextUsage: undefined,
+          usage: undefined,
+        });
+      }
+    } finally {
+      const sentinel = this.sentinel;
+      if (sentinel !== undefined && files.some(file => !keptFiles.has(file.path))) {
+        markAttachedFileUnreadable(sentinel.web_search);
+      }
     }
   }
 
