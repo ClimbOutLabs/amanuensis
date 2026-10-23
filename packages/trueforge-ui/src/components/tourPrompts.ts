@@ -57,10 +57,10 @@ export const KEEP_PAGES_IN_SPACES: TourPrompt = {
   illustration: 'spaces',
 };
 
-/** The featured card above the Try a day row. It needs no capability, so it always shows. */
+/** The brief: the first card of the Productivity pill. It needs no capability, so it always shows. */
 export const MORNING_BRIEF: TourPrompt = {
   key: 'brief',
-  label: 'Your morning brief',
+  label: 'Open the brief',
   prompt: MORNING_BRIEF_PROMPT,
 };
 
@@ -113,6 +113,21 @@ const FORGOTTEN_SUBSCRIPTIONS: TourPrompt = {
     "Look through my email for subscriptions and renewals. List what I'm paying for, how much and how often, and flag anything I may have forgotten about.",
   needs: ['email'],
   illustration: 'subscriptions',
+};
+
+/** The Productivity pill's starter: what the assistant has noticed, asked in plain words. */
+export const WATCHING_PROMPT: TourPrompt = {
+  key: 'watching',
+  label: 'What have you noticed?',
+  prompt: 'What have you noticed for me lately that I should know about? Keep it short.',
+};
+
+/** The Productivity pill's starter: the answer the person owes right now. */
+export const WAITING_PROMPT: TourPrompt = {
+  key: 'waiting',
+  label: 'What is waiting for me?',
+  prompt:
+    'What is waiting for my answer right now? List each thing, and tell me which one matters most so I can start there.',
 };
 
 /** The cards each help area offers, in the order they are tried. */
@@ -249,6 +264,10 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
       },
     ],
   },
+  productivity: {
+    label: 'Productivity',
+    cards: [MORNING_BRIEF, WAITING_PROMPT, WATCHING_PROMPT, PLAN_DAY],
+  },
   work_money: {
     label: 'Work and money',
     cards: [
@@ -279,21 +298,6 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
       },
     ],
   },
-};
-
-/** The first frame's "Quietly watching" ticket: what Aman has noticed, asked in plain words. */
-export const WATCHING_PROMPT: TourPrompt = {
-  key: 'watching',
-  label: 'Quietly watching',
-  prompt: 'What have you noticed for me lately that I should know about? Keep it short.',
-};
-
-/** The first frame's "Needs you" ticket: the answer the person owes right now. */
-export const WAITING_PROMPT: TourPrompt = {
-  key: 'waiting',
-  label: 'Needs you',
-  prompt:
-    'What is waiting for my answer right now? List each thing, and tell me which one matters most so I can start there.',
 };
 
 /** The "What Aman can do" list: one card per capability, each a tap away from a chat. */

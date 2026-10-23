@@ -230,7 +230,7 @@ export const AmanFirstRunGuide: FC<{
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="aman-first-run-heading" className="text-base font-semibold tracking-tight">
+          <h2 id="aman-first-run-heading" className="aui-section-heading">
             {allDone ? 'You are all set' : placement === 'chat' ? 'Get set up' : 'Welcome to Aman'}
           </h2>
           <p className="mt-0.5 text-sm text-text-secondary" data-testid="aman-first-run-progress">

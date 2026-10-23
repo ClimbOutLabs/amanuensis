@@ -28,6 +28,14 @@ const findStylesheet = (): string => {
   }
 };
 
+/** The one declaration block for a selector; the count check keeps a second block from being read by mistake. */
+const ruleFor = (stylesheet: string, selector: string): string => {
+  const opening = `${selector} {`;
+  expect(stylesheet.split(opening)).toHaveLength(2);
+  const rule = stylesheet.slice(stylesheet.indexOf(opening));
+  return rule.slice(0, rule.indexOf('}') + 1);
+};
+
 describe('AmanRuntimeRail', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -181,7 +189,7 @@ describe('AmanRuntimeRail', () => {
     }
   });
 
-  it('shows the picture in a plain frame: no tinted card, no shadow, no dot, no mask or blend on the picture', () => {
+  it('shows the picture in a plain frame, with its fade inside the frame and the caption below it', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
@@ -194,25 +202,33 @@ describe('AmanRuntimeRail', () => {
     }
     const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
     expect(avatar).toHaveClass('aman-runtime-rail__avatar');
+    const frame = container.querySelector('.aman-runtime-rail__frame');
+    const fade = container.querySelector('.aman-runtime-rail__frame-fade');
+    expect(frame).toContainElement(avatar);
+    expect(frame).toContainElement(fade as HTMLElement);
+    expect(frame).not.toContainElement(screen.getByRole('heading', { name: 'Aman' }));
+    expect(frame).not.toContainElement(container.querySelector('.aman-runtime-rail__role') as HTMLElement);
 
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
-    const selector = '.aman-runtime-rail__avatar {';
-    // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations.
-    expect(stylesheet.split(selector)).toHaveLength(2);
-    const rule = stylesheet.slice(stylesheet.indexOf(selector));
-    const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
-
+    const frameRule = ruleFor(stylesheet, '.aman-runtime-rail__frame');
     // The frame is the theme's border token, the panel's corner radius and the rail background.
-    expect(avatarRule).toContain('border: 0.0625rem solid var(--border);');
-    expect(avatarRule).toContain('border-radius: 0.5rem;');
-    expect(avatarRule).toContain('background-color: var(--sidebar-bg);');
-    expect(avatarRule).toContain('height: 10rem;');
-    // The picture is drawn as it is: no mask, gradient, blend or filter sits on it, so nothing
-    // can bleed past the frame's edge.
+    expect(frameRule).toContain('border: 0.0625rem solid var(--border);');
+    expect(frameRule).toContain('border-radius: 0.5rem;');
+    expect(frameRule).toContain('background-color: var(--sidebar-bg);');
+    expect(frameRule).toContain('height: 10rem;');
+    expect(frameRule).toContain('overflow: hidden;');
+
+    // The picture is drawn as it is: no mask, gradient, blend or filter sits on it.
+    const avatarRule = ruleFor(stylesheet, '.aman-runtime-rail__avatar');
     expect(avatarRule).not.toMatch(/mask|gradient|blend|filter|opacity/);
     expect(avatarRule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(avatarRule).not.toMatch(/\bpx\b/);
+
+    // The fade is absolute inside the frame and pinned to its bottom edge, so it ends at that edge.
+    const fadeRule = ruleFor(stylesheet, '.aman-runtime-rail__frame-fade');
+    expect(fadeRule).toContain('position: absolute;');
+    expect(fadeRule).toContain('inset: auto 0 0;');
+    expect(fadeRule).toMatch(/linear-gradient\(to bottom, transparent, var\(--sidebar-bg\)\)/);
   });
 
   it('calls the build line a release, with a shortened reference', () => {

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AmanHomeStatus, AmanStarters, type AmanHomeStatusProps } from '@/components/AmanHome.js';
+import { AmanStarters } from '@/components/AmanHome.js';
 import {
   HELP_AREAS,
   MORNING_BRIEF,
@@ -12,63 +12,6 @@ import {
 } from '@/components/tourPrompts.js';
 
 const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps: true };
-
-function renderStatus(overrides: Partial<AmanHomeStatusProps> = {}) {
-  const props: AmanHomeStatusProps = {
-    assistantName: 'Maya',
-    waitingCount: 0,
-    scheduleCount: 0,
-    canSend: true,
-    onSend: vi.fn(),
-    ...overrides,
-  };
-  const { container } = render(<AmanHomeStatus {...props} />);
-  return { props, container };
-}
-
-describe('AmanHomeStatus', () => {
-  it('reads as one quiet line with the brief, the waiting count and the schedules', () => {
-    const { container } = renderStatus();
-
-    expect(container.textContent).toBe(
-      'Your brief is ready (Open the brief)·Nothing needs you (Check what is waiting)·Nothing runs on a schedule yet·Ask what Maya has noticed',
-    );
-  });
-
-  it('says how many things need the person, and links to the waiting check', () => {
-    renderStatus({ waitingCount: 1 });
-    expect(screen.getByText(/^1 thing needs you/)).toBeInTheDocument();
-
-    renderStatus({ waitingCount: 3 });
-    expect(screen.getByText(/^3 things need you/)).toBeInTheDocument();
-  });
-
-  it('says how many things run on a schedule, with no link on that part', () => {
-    const { container } = renderStatus({ scheduleCount: 2 });
-
-    expect(container.textContent).toContain('2 things run on a schedule');
-    expect(screen.queryByRole('button', { name: /2 things run/ })).not.toBeInTheDocument();
-  });
-
-  it('sends the brief, waiting and watching prompts through the composer', () => {
-    const { props } = renderStatus();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open the brief' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Check what is waiting' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ask what Maya has noticed' }));
-
-    expect(props.onSend).toHaveBeenNthCalledWith(1, MORNING_BRIEF.prompt);
-    expect(props.onSend).toHaveBeenNthCalledWith(2, WAITING_PROMPT.prompt);
-    expect(props.onSend).toHaveBeenNthCalledWith(3, WATCHING_PROMPT.prompt);
-  });
-
-  it('turns every link off when no model is set', () => {
-    renderStatus({ canSend: false });
-
-    expect(screen.getByRole('button', { name: 'Open the brief' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Check what is waiting' })).toBeDisabled();
-  });
-});
 
 describe('AmanStarters', () => {
   it('shows nothing until the person picks a help area', () => {
@@ -98,6 +41,19 @@ describe('AmanStarters', () => {
       familyFirst?.label,
       focusSecond?.label,
     ]);
+  });
+
+  it('offers the brief first when the Productivity pill is picked, then its two starters', () => {
+    const onSend = vi.fn();
+    render(<AmanStarters helpAreas={['productivity']} capabilities={ALL} canSend onSend={onSend} />);
+
+    expect(screen.getAllByRole('button').map(button => button.textContent)).toEqual([
+      'Open the brief',
+      WAITING_PROMPT.label,
+      WATCHING_PROMPT.label,
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the brief' }));
+    expect(onSend).toHaveBeenCalledWith(MORNING_BRIEF.prompt);
   });
 
   it('sends the starter it was given through the composer', () => {

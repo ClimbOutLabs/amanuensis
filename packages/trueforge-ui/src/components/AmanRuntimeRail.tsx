@@ -223,21 +223,27 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             data-section="panda"
             aria-labelledby="aman-runtime-rail-title"
           >
-            {avatarMotion ? (
-              <AmanAvatarMotion
-                activity={avatarActivity}
-                sources={avatarMotion}
-                className="aman-runtime-rail__avatar"
-              />
-            ) : avatarSrc ? (
-              <img src={avatarSrc} alt={AVATAR_ALT} className="aman-runtime-rail__avatar" />
-            ) : (
-              <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label={AVATAR_ALT}>
-                A
-              </span>
-            )}
+            {/* The frame holds the picture and its fade, so the fade ends at the frame's edge. */}
+            <div className="aman-runtime-rail__frame">
+              {avatarMotion ? (
+                <AmanAvatarMotion
+                  activity={avatarActivity}
+                  sources={avatarMotion}
+                  className="aman-runtime-rail__avatar"
+                />
+              ) : avatarSrc ? (
+                <img src={avatarSrc} alt={AVATAR_ALT} className="aman-runtime-rail__avatar" />
+              ) : (
+                <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label={AVATAR_ALT}>
+                  A
+                </span>
+              )}
+              <span className="aman-runtime-rail__frame-fade" aria-hidden="true" />
+            </div>
             <div className="aman-runtime-rail__identity">
-              <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
+              <h2 id="aman-runtime-rail-title" className="aui-section-heading">
+                {assistantDisplayName(profile?.assistant_name)}
+              </h2>
               <p className="aman-runtime-rail__role">
                 {personName ? `${personName}'s Chief of Staff` : 'Your Chief of Staff'}
               </p>
@@ -266,7 +272,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               data-section="rules"
               aria-labelledby="aman-runtime-rail-rules-label"
             >
-              <h3 id="aman-runtime-rail-rules-label" className="aman-runtime-rail__section-label">
+              <h3 id="aman-runtime-rail-rules-label" className="aui-section-heading aman-runtime-rail__section-label">
                 Your rules
               </h3>
               <ul className="aman-runtime-rail__rules">
@@ -290,7 +296,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               data-section="recent-actions"
               aria-labelledby="aman-runtime-rail-recent-actions-label"
             >
-              <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
+              <h3
+                id="aman-runtime-rail-recent-actions-label"
+                className="aui-section-heading aman-runtime-rail__section-label"
+              >
                 Recent actions
               </h3>
               {auditFeed}
@@ -303,7 +312,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               data-section="persona"
               aria-labelledby="aman-runtime-rail-persona-label"
             >
-              <h3 id="aman-runtime-rail-persona-label" className="aman-runtime-rail__section-label">
+              <h3 id="aman-runtime-rail-persona-label" className="aui-section-heading aman-runtime-rail__section-label">
                 Answering
               </h3>
               <div className="aman-runtime-rail__section-value" title={trimmedPersonaName}>
@@ -314,7 +323,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
 
           {/* Everything an ordinary user would not act on sits behind one closed disclosure. */}
           <details className="aman-runtime-rail__details">
-            <summary className="aman-runtime-rail__details-summary">Details</summary>
+            <summary className="aui-section-heading aman-runtime-rail__details-summary">Details</summary>
             <dl className="aman-runtime-rail__details-list">
               <dt>Model</dt>
               <dd className="aman-runtime-rail__model" title={modelName}>

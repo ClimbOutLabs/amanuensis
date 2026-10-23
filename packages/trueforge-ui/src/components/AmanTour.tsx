@@ -8,9 +8,6 @@ import { assistantDisplayName } from '../utils/assistantName.js';
 import { TourIllustration } from './tourIllustrations.js';
 import { HELP_AREAS, firstFrameCardPrompts, type TourCapabilities, type TourPrompt } from './tourPrompts.js';
 
-/** The one line a first-run person sees under the greeting: what the assistant does. */
-export const TOUR_SUBLINE = 'It keeps track of your day and checks with you before it acts.';
-
 /** Morning, afternoon or evening, by the local hour. */
 export function greetingFor(now: Date): string {
   const hour = now.getHours();
@@ -29,7 +26,7 @@ const CHIP_CLASS =
   'cursor-pointer rounded-full border border-border bg-card-bg px-2.5 py-1.5 text-sm text-text-primary hover:border-gold-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring aria-checked:border-gold-ink aria-checked:bg-gold-ink aria-checked:text-card-bg';
 
 const TICKET_BUTTON_CLASS =
-  'flex h-full w-full cursor-pointer flex-col gap-1.5 rounded-[inherit] border-0 bg-transparent p-3 text-left text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
+  'flex h-full w-full cursor-pointer items-center gap-2 rounded-[inherit] border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-60';
 
 /**
  * The Tour's "What would help you most?" pick is one area at a time. A new pick replaces the
@@ -112,17 +109,17 @@ export function AmanTour({
   return (
     <div data-testid="aman-tour" className="flex w-full flex-col gap-4">
       <section aria-labelledby="aman-tour-help-heading" className="flex flex-col gap-2">
-        <h2 id="aman-tour-help-heading" className="aui-tour-label m-0">
+        <h2 id="aman-tour-help-heading" className="aui-section-heading m-0">
           What would help you most?
         </h2>
         <HelpAreaPills labelId="aman-tour-help-heading" helpAreas={helpAreas} onChange={onHelpAreasChange} />
       </section>
 
       <section aria-labelledby="aman-tour-can-heading" className="flex flex-col gap-2">
-        <h2 id="aman-tour-can-heading" className="aui-tour-title m-0">
-          What {assistant} can do
+        <h2 id="aman-tour-can-heading" className="aui-section-heading m-0">
+          Some things {assistant} can do
         </h2>
-        <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-4">
+        <ul className="grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4">
           {cards.map(item => (
             <CapabilityTicket key={item.key} item={item} disabled={disabled} onSend={onSend} />
           ))}
@@ -205,8 +202,10 @@ function CapabilityTicket({
   return (
     <li className="aui-ticket aui-ticket--punch flex flex-col aui-settle">
       <TicketButton prompt={item.prompt} disabled={disabled} onSend={onSend}>
-        {item.illustration === undefined ? null : <TourIllustration name={item.illustration} />}
-        <span className="text-sm font-medium">{item.label}</span>
+        {item.illustration === undefined ? null : (
+          <TourIllustration name={item.illustration} className="size-6 shrink-0" />
+        )}
+        <span>{item.label}</span>
       </TicketButton>
     </li>
   );

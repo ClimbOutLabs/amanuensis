@@ -64,10 +64,11 @@ describe('firstFrameCardPrompts', () => {
     ]);
   });
 
-  it('never offers the morning brief as one of the four, since it has its own ticket', () => {
-    for (const helpAreas of HELP_AREA_IDS.map(id => [id])) {
-      expect(keysFor({ helpAreas, capabilities: ALL })).not.toContain(MORNING_BRIEF.key);
+  it('offers the morning brief only through the Productivity pill', () => {
+    for (const id of HELP_AREA_IDS.filter(area => area !== 'productivity')) {
+      expect(keysFor({ helpAreas: [id], capabilities: ALL })).not.toContain(MORNING_BRIEF.key);
     }
+    expect(keysFor({ helpAreas: ['productivity'], capabilities: ALL })).toContain(MORNING_BRIEF.key);
   });
 });
 

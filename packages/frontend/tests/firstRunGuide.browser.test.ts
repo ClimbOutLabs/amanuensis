@@ -77,6 +77,31 @@ async function checkTourSummary(page: Page, state: keyof typeof SUMMARY_EXPECTAT
   assert.equal(await page.getByTestId('aman-first-run-guide').count(), 0);
 }
 
+/**
+ * Three type levels only: the greeting, one heading size and one body size. Only text a person can see
+ * counts, so a closed disclosure adds no size.
+ */
+async function assertThreeTypeLevels(page: Page, roots: readonly string[], where: string) {
+  const sizes = await page.evaluate(
+    selectors => {
+      const found = new Set<string>();
+      for (const root of Array.from(document.querySelectorAll(selectors.join(',')))) {
+        for (const element of Array.from(root.querySelectorAll('*'))) {
+          const hasText = Array.from(element.childNodes).some(
+            node => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+          );
+          if (hasText && element.getBoundingClientRect().width > 0) {
+            found.add(getComputedStyle(element).fontSize);
+          }
+        }
+      }
+      return Array.from(found).sort();
+    },
+    [...roots],
+  );
+  assert.ok(sizes.length <= 3, `${where} renders ${sizes.length} font sizes: ${sizes.join(', ')}`);
+}
+
 test('first-run screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
   const server = await createServer({
@@ -183,7 +208,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.ok(nameBox.y < assistantBox.y, 'the owner name field comes before the assistant name field');
         await shoot('panel');
 
-        // The real shell: the greeting and the status line read on the first screen, above the composer and the tour.
+        // The real shell: the greeting reads on the first screen, with the composer and the tour under it.
         await open('shell');
         await page.getByTestId('aman-tour').waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         // Let the settle and lay animations finish so the picture shows the resting frame.
@@ -191,13 +216,15 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           document.getAnimations().every(animation => animation.playState !== 'running'),
         );
         await shoot('shell');
-        const statusBox = await page
-          .getByText(/^Your brief is ready/)
-          .first()
-          .boundingBox();
+        const greetingBox = await page.getByRole('heading', { name: TOUR_HEADING }).boundingBox();
         assert.ok(
-          statusBox != null && statusBox.y + statusBox.height <= viewport.height,
-          `the status line is not on the first screen at ${viewport.name} ${theme}`,
+          greetingBox != null && greetingBox.y + greetingBox.height <= viewport.height,
+          `the greeting is not on the first screen at ${viewport.name} ${theme}`,
+        );
+        await assertThreeTypeLevels(
+          page,
+          ['.aui-thread-welcome-root', '[data-testid="aman-tour"]'],
+          `${viewport.name} ${theme}`,
         );
         // Every grid fills its rows: at desktop width each row is complete, on the phone the cards stack.
         const rowsOf = (selector: string) =>
@@ -207,7 +234,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           );
         const chipTops = await rowsOf('[role="radiogroup"] button');
         if (viewport.name === 'desktop') {
-          assert.equal(new Set(chipTops).size, 1, 'the five chips share one row at desktop width');
+          assert.ok(new Set(chipTops).size <= 2, 'the six chips fit in at most two rows at desktop width');
         }
         const cardLefts = await page.evaluate(() =>
           Array.from(document.querySelectorAll('[data-testid="aman-tour"] section ul > li')).map(el =>
@@ -217,13 +244,35 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.equal(cardLefts.length, 4, 'four capability tickets');
         assert.equal(
           new Set(cardLefts).size,
-          viewport.name === 'desktop' ? 4 : 1,
-          'the capability cards fill four columns on desktop and one on the phone',
+          viewport.name === 'desktop' ? 4 : 2,
+          'the capability cards fill four columns on desktop and two on the phone',
         );
+
         assert.ok(
           await page.getByRole('button', { name: /Keep pages in Spaces/ }).isVisible(),
           'Keep pages in Spaces is on the first frame',
         );
+        // The right panel on its own: the picture's frame, its fade, and the panel's type sizes.
+        await open('rail');
+        await page.locator('.aman-runtime-rail__frame').waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+        await page.waitForFunction(() =>
+          document.getAnimations().every(animation => animation.playState !== 'running'),
+        );
+        await shoot('rail');
+        await assertThreeTypeLevels(page, ['.aman-runtime-rail'], `panel ${viewport.name} ${theme}`);
+        // The panel's fade is a gradient inside the picture's frame, and it ends exactly at the frame's edge.
+        if (viewport.name === 'desktop') {
+          const edges = await page.evaluate(() => {
+            const frame = document.querySelector('.aman-runtime-rail__frame')?.getBoundingClientRect();
+            const fade = document.querySelector('.aman-runtime-rail__frame-fade')?.getBoundingClientRect();
+            return frame != null && fade != null ? { frame, fade } : null;
+          });
+          assert.ok(edges != null, 'the panel frame and its fade are on the desktop rail');
+          assert.ok(Math.abs(edges.frame.height - 160) < 1.5, `the frame is 10rem tall, not ${edges.frame.height}px`);
+          assert.ok(Math.abs(edges.fade.bottom - edges.frame.bottom) < 1.5, 'the fade ends at the frame bottom edge');
+          assert.ok(Math.abs(edges.fade.left - edges.frame.left) < 1.5, 'the fade starts at the frame left edge');
+          assert.ok(Math.abs(edges.fade.right - edges.frame.right) < 1.5, 'the fade ends at the frame right edge');
+        }
       }
       await context.close();
     }

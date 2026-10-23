@@ -4,34 +4,26 @@ import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personaliza
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import { TOUR_SUBLINE } from '@/components/AmanTour.js';
 import { AmanWelcome, AmanWelcomeFooter, amanWelcomeHeading } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { TOUR_HIDDEN_STORAGE_KEY } from '@/utils/tourDisplayPreference.js';
 
-const { composer, server, waiting } = vi.hoisted(() => {
+const { composer, server } = vi.hoisted(() => {
   const server: {
     grantedFeatures: string[];
     sandboxEnabled: boolean;
     hasCatalog: boolean;
-    scheduleCount: number;
   } = {
     grantedFeatures: [],
     sandboxEnabled: false,
     hasCatalog: true,
-    scheduleCount: 0,
   };
-  const waiting: { count: number; firstId: string | null } = { count: 0, firstId: null };
-  return { composer: { setText: vi.fn(), send: vi.fn() }, server, waiting };
+  return { composer: { setText: vi.fn(), send: vi.fn() }, server };
 });
 
 vi.mock('@assistant-ui/react', async importOriginal => ({
   ...(await importOriginal<typeof import('@assistant-ui/react')>()),
   useAui: () => ({ composer: () => composer }),
-}));
-
-vi.mock('@/components/AmanTourWaiting.js', () => ({
-  useTourWaiting: () => ({ count: waiting.count, firstId: waiting.firstId }),
 }));
 
 vi.mock('@/server/ServerContext.js', async importOriginal => ({
@@ -48,9 +40,6 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
           }),
         }
       : null,
-  useOptionalScheduleServer: () => ({
-    listSchedules: async () => ({ data: Array.from({ length: server.scheduleCount }, () => ({})) }),
-  }),
   useServerCapabilities: () => ({ sandbox: { enabled: server.sandboxEnabled } }),
 }));
 
@@ -102,9 +91,6 @@ beforeEach(() => {
   server.grantedFeatures = [];
   server.sandboxEnabled = false;
   server.hasCatalog = true;
-  server.scheduleCount = 0;
-  waiting.count = 0;
-  waiting.firstId = null;
 });
 
 afterEach(() => {
@@ -123,19 +109,14 @@ describe('the home greeting', () => {
     expect(container.textContent).not.toMatch(/chief of staff/i);
   });
 
-  it('keeps one short line about the assistant for a first-run person, whose tour is not hidden yet', async () => {
-    renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
+  it('shows no description sentence and no status line, first run or not', async () => {
+    const { container } = renderHome({ assistantName: 'Maya', setup: LIVE_SETUP });
 
-    expect(await screen.findByText(TOUR_SUBLINE)).toBeInTheDocument();
-    expect(screen.getByTestId('aman-tour')).toBeInTheDocument();
-  });
-
-  it('drops that line once the owner has hidden the tour', async () => {
-    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
-    renderHome({ setup: LIVE_SETUP });
-
-    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
-    expect(screen.queryByText(TOUR_SUBLINE)).not.toBeInTheDocument();
+    await screen.findByTestId('aman-tour');
+    expect(container.textContent).not.toMatch(/keeps track of your day/);
+    expect(container.textContent).not.toMatch(
+      /Your brief is ready|Nothing needs you|Quietly watching|run on a schedule/,
+    );
   });
 
   it('keeps a heading the runtime passes in, such as an active agent name, on the plain screen', async () => {
@@ -144,47 +125,15 @@ describe('the home greeting', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Your brief is ready/)).not.toBeInTheDocument();
   });
 });
 
-describe('the status line', () => {
-  it('reads nothing needs the person and nothing is scheduled when both counts are zero', async () => {
-    renderHome({ setup: LIVE_SETUP });
+describe('the Productivity pill', () => {
+  it('holds the brief first, and sends it through the composer', async () => {
+    renderHome({ helpAreas: ['productivity'], setup: LIVE_SETUP });
 
-    expect(await screen.findByText(/^Your brief is ready/)).toBeInTheDocument();
-    expect(screen.getByText(/^Nothing needs you/)).toBeInTheDocument();
-    expect(screen.getByText('Nothing runs on a schedule yet')).toBeInTheDocument();
-  });
-
-  it('counts the approvals that wait on the person', async () => {
-    waiting.count = 2;
-    waiting.firstId = 'approval-1';
-    renderHome({ setup: LIVE_SETUP });
-
-    expect(await screen.findByText(/^2 things need you/)).toBeInTheDocument();
-    expect(screen.queryByText(/^Nothing needs you/)).not.toBeInTheDocument();
-  });
-
-  it('counts the schedules the person has set up', async () => {
-    server.scheduleCount = 2;
-    renderHome({ setup: LIVE_SETUP });
-
-    expect(await screen.findByText('2 things run on a schedule')).toBeInTheDocument();
-  });
-
-  it('shows the status line once, with no cards repeating it', async () => {
-    const { container } = renderHome({ setup: LIVE_SETUP });
-    await screen.findByText(/^Your brief is ready/);
-
-    expect(container.textContent?.match(/Nothing needs you/g)).toHaveLength(1);
-    expect(screen.queryByRole('heading', { name: 'Quietly watching' })).not.toBeInTheDocument();
-  });
-
-  it('sends the brief through the composer and then sends it', async () => {
-    renderHome({ setup: LIVE_SETUP });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Open the brief' }));
+    const starters = await screen.findByRole('list', { name: 'Starter suggestions' });
+    fireEvent.click(within(starters).getByRole('button', { name: 'Open the brief' }));
 
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
     expect(composer.send).toHaveBeenCalledTimes(1);
@@ -193,10 +142,12 @@ describe('the status line', () => {
 
   it('turns its links off and says why when no model is set', async () => {
     renderHome({
+      helpAreas: ['productivity'],
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('button', { name: 'Open the brief' })).toBeDisabled();
+    const starters = await screen.findByRole('list', { name: 'Starter suggestions' });
+    expect(within(starters).getByRole('button', { name: 'Open the brief' })).toBeDisabled();
     expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
   });
 });
@@ -221,7 +172,7 @@ describe('the starters and the tour below the composer', () => {
 
     const tour = await screen.findByTestId('aman-tour');
     expect(within(tour).getByRole('radiogroup', { name: 'What would help you most?' })).toBeInTheDocument();
-    expect(within(tour).getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
+    expect(within(tour).getByRole('heading', { name: 'Some things Maya can do' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
   });
 
@@ -298,7 +249,7 @@ describe('the assistant name on the home', () => {
     const { container } = renderHome({ assistantName: 'Maya', userName: 'Priya', setup: LIVE_SETUP });
 
     await screen.findByTestId('aman-tour');
-    expect(container.textContent).toContain('Ask what Maya has noticed');
+    expect(container.textContent).toContain('Some things Maya can do');
     expect(container.textContent).not.toMatch(/Aman/);
   });
 });

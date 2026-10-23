@@ -1,6 +1,7 @@
 import {
   AmanFirstRunGuide,
   AmanPandaSourceProvider,
+  AmanRuntimeRail,
   AmanSetupProvider,
   AmanTour,
   AmanWelcome,
@@ -32,7 +33,8 @@ export type FixtureState =
   | 'hidden'
   | 'tour-focus'
   | 'tour-none'
-  | 'shell';
+  | 'shell'
+  | 'rail';
 export const FIXTURE_STATES: readonly FixtureState[] = [
   'fresh',
   'half',
@@ -45,6 +47,7 @@ export const FIXTURE_STATES: readonly FixtureState[] = [
   'tour-focus',
   'tour-none',
   'shell',
+  'rail',
 ];
 const TOUR_HIDDEN_STORAGE_KEY = 'aman.hide_tour';
 
@@ -92,6 +95,7 @@ function setupFor(state: FixtureState): AmanSetupState {
     case 'tour-focus':
     case 'tour-none':
     case 'shell':
+    case 'rail':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
   }
 }
@@ -125,6 +129,16 @@ function Screen({ state }: { state: FixtureState }) {
             overrides={{ WelcomeScreen: AmanWelcome }}
           />
         </AmanPandaSourceProvider>
+      </div>
+    );
+  }
+  if (state === 'rail') {
+    // The right panel alone, with the picture the host passes; the name and caption come from the profile.
+    return (
+      <div className="flex min-h-screen justify-center py-8">
+        <div className="w-72">
+          <AmanRuntimeRail avatarSrc="/aman-avatar.png" status="ready" modelName="local/llama" version="0.4.2" />
+        </div>
       </div>
     );
   }

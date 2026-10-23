@@ -378,7 +378,7 @@
 
 /* Expanded, no control in the rail is icon-only: the chevron carries a word beside it. */
 .aman-runtime-rail__button-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -396,33 +396,48 @@
   display: flex;
 }
 
-/* The picture sits in a plain frame: the panel's border and background, no tint or shadow. The
-   picture is drawn as it is (no crop, filter or blend), and the frame sets its height. */
+/* The picture sits in a plain frame: the panel's border, corner radius and background, with no tint
+   or shadow. The picture is drawn as it is (no crop, filter or blend). */
 .aman-runtime-rail__avatar-card {
   display: grid;
   gap: 0.5rem;
   width: 100%;
 }
 
-.aman-runtime-rail__avatar {
-  display: block;
-  justify-self: center;
-  width: auto;
-  max-width: 100%;
+.aman-runtime-rail__frame {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
   height: 10rem;
   border: 0.0625rem solid var(--border);
   border-radius: 0.5rem;
   background-color: var(--sidebar-bg);
 }
 
-.aman-runtime-rail__avatar-fallback {
-  width: 2.625rem;
-  height: 2.625rem;
+.aman-runtime-rail__avatar {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+/* A fade into the frame's own background over its lower part. It is absolute inside the frame, so
+   it ends exactly at the frame's edge and never reaches the caption below. */
+.aman-runtime-rail__frame-fade {
+  position: absolute;
+  inset: auto 0 0;
+  height: 40%;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--sidebar-bg));
+}
+
+.aman-runtime-rail__avatar-fallback {
   display: grid;
   place-items: center;
+  width: 100%;
+  height: 100%;
   color: var(--text-primary);
-  font-size: 1.25rem;
+  font-size: var(--text-xl);
   font-weight: 700;
 }
 
@@ -431,7 +446,7 @@
   align-items: center;
   gap: 0.55rem;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 /* Status colours come from the theme's semantic tokens so both palettes and both modes
@@ -470,7 +485,7 @@
   border-radius: 999px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
@@ -486,16 +501,13 @@
 
 .aman-runtime-rail__identity h2 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.5rem;
 }
 
 .aman-runtime-rail__role {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: var(--text-sm);
+  line-height: 1.4;
 }
 
 .aman-runtime-rail__rules {
@@ -504,7 +516,7 @@
   margin: 0;
   padding: 0;
   color: var(--text-primary);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   list-style: none;
 }
 
@@ -519,18 +531,14 @@
 
 .aman-runtime-rail__section-label {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--text-primary);
 }
 
 .aman-runtime-rail__section-value {
   overflow: hidden;
   margin: 0;
   color: var(--text-primary);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -538,7 +546,7 @@
 .aman-runtime-rail__link {
   justify-self: start;
   color: var(--gold-ink);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-decoration: underline;
   text-underline-offset: 0.125rem;
 }
@@ -558,11 +566,7 @@
 }
 
 .aman-runtime-rail__details-summary {
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--text-primary);
   cursor: pointer;
 }
 
@@ -571,7 +575,7 @@
   margin: 0.5rem 0 0;
   gap: 0.15rem;
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .aman-runtime-rail__details-list dt {
@@ -590,7 +594,7 @@
   overflow: hidden;
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.6875rem;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2070,23 +2074,14 @@
   letter-spacing: -0.01em;
 }
 
-/* Tour card titles: the display face at the theme's text-xl, so a title takes a line or two. */
-.aui-tour-title {
+/* Every heading on the home and in the right panel: the display face, one size, sentence case. */
+.aui-section-heading {
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: 400;
   line-height: 1.2;
   letter-spacing: -0.01em;
-}
-
-/* Every label on the Tour: the UI sans in secondary text. Monospace stays for code and data. */
-.aui-tour-label {
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: 0.01em;
-  color: var(--text-secondary);
+  text-transform: none;
 }
 
 @media (max-width: 40rem) {

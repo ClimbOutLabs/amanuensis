@@ -1,21 +1,19 @@
 'use client';
 
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
-import { useEffect, useState } from 'react';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
-import { useOptionalScheduleServer, useServerCapabilities } from '../server/ServerContext.js';
+import { useServerCapabilities } from '../server/ServerContext.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
 import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
-import { AmanHomeStatus, AmanStarters } from './AmanHome.js';
+import { AmanStarters } from './AmanHome.js';
 import { AmanPandaRoundTicket, useOptionalAmanPandaSrc } from './AmanPanda.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
-import { AmanTour, TOUR_SUBLINE, greetingLine } from './AmanTour.js';
-import { useTourWaiting } from './AmanTourWaiting.js';
+import { AmanTour, greetingLine } from './AmanTour.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
 import type { TourCapabilities } from './tourPrompts.js';
@@ -41,31 +39,6 @@ function useTourCapabilities(): TourCapabilities {
     // Tour runs. It stays a capability so that a future off switch hides its card without a change here.
     maps: true,
   };
-}
-
-/**
- * How many scheduled runs the person has set up, read from the first page of the schedules list.
- * A failed read keeps the last count, so the stub never blanks out because the schedules server is slow.
- */
-function useScheduleCount(): number {
-  const schedules = useOptionalScheduleServer();
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (schedules === null) return;
-    let cancelled = false;
-    schedules
-      .listSchedules()
-      .then(page => {
-        if (!cancelled) setCount(page.data.length);
-      })
-      .catch(() => {
-        /* Keep the last count; the status line reads fine without it. */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [schedules]);
-  return count;
 }
 
 /**
@@ -113,16 +86,13 @@ function AmanSetupBlock() {
 }
 
 /**
- * The home's top, above the composer: the greeting, then for a first-run person one line about the
- * assistant, the status line, and the setup. An active agent's heading gets the plain greeting only.
+ * The home's top, above the composer: the greeting, then the setup or the name line. An active
+ * agent's heading gets the plain greeting only.
  */
 export function AmanWelcome(props: WelcomeScreenProps) {
   const personalization = useOptionalPersonalization();
   const setup = useOptionalAmanSetup();
   const { hidden } = useTourHidden();
-  const sendPrompt = useSendPrompt();
-  const waiting = useTourWaiting();
-  const scheduleCount = useScheduleCount();
   const pandaSrc = useOptionalAmanPandaSrc();
   const currentUser = useOptionalCurrentUser();
   const personName = personDisplayName({
@@ -131,7 +101,6 @@ export function AmanWelcome(props: WelcomeScreenProps) {
   });
   const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
   const assistant = assistantDisplayName(profile.assistant_name);
-  const canSend = setup === null || setup.modelName !== null;
   const ordinaryChat = props.heading === undefined;
   const showTour = ordinaryChat && !hidden;
 
@@ -149,16 +118,6 @@ export function AmanWelcome(props: WelcomeScreenProps) {
       <WelcomeScreen {...props} heading={props.heading ?? greeting} icon={ordinaryChat ? phonePanda : props.icon} />
       {hasTopBlock ? (
         <div className="mb-6 flex w-full flex-col items-center gap-3 px-4">
-          {showTour ? <p className="m-0 text-center text-sm text-text-secondary">{TOUR_SUBLINE}</p> : null}
-          {ordinaryChat ? (
-            <AmanHomeStatus
-              assistantName={assistant}
-              waitingCount={waiting.count}
-              scheduleCount={scheduleCount}
-              canSend={canSend}
-              onSend={sendPrompt}
-            />
-          ) : null}
           {showTour ? <TourSetupLine /> : <AmanSetupBlock />}
         </div>
       ) : null}

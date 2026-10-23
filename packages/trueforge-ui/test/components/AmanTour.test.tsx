@@ -34,7 +34,7 @@ describe('AmanTour panel', () => {
     const { container } = renderTour();
 
     expect(screen.getByRole('radiogroup', { name: 'What would help you most?' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'What Maya can do' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Some things Maya can do' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hide the tour' })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/Quietly watching|Nothing needs you|Your brief is ready|chief of staff/);
     expect(screen.queryByRole('button', { name: /Open the brief/ })).not.toBeInTheDocument();
@@ -44,7 +44,7 @@ describe('AmanTour panel', () => {
     renderTour();
 
     const cards = within(
-      screen.getByRole('heading', { name: 'What Maya can do' }).parentElement as HTMLElement,
+      screen.getByRole('heading', { name: 'Some things Maya can do' }).parentElement as HTMLElement,
     ).getAllByRole('listitem');
     expect(cards).toHaveLength(4);
     expect(
@@ -92,7 +92,7 @@ describe('AmanTour panel', () => {
   it('sends the exact prompt of a card through the composer', () => {
     const { props } = renderTour({ capabilities: ALL });
     const cards = within(
-      screen.getByRole('heading', { name: 'What Maya can do' }).parentElement as HTMLElement,
+      screen.getByRole('heading', { name: 'Some things Maya can do' }).parentElement as HTMLElement,
     ).getAllByRole('button');
 
     fireEvent.click(cards[0] as HTMLElement);
@@ -118,14 +118,14 @@ describe('AmanTour panel', () => {
   it('uses the chosen name on the capability heading and never says Aman', () => {
     const { container } = renderTour({ assistantName: 'Maya' });
 
-    expect(container.textContent).toContain('What Maya can do');
+    expect(container.textContent).toContain('Some things Maya can do');
     expect(container.textContent).not.toMatch(/Aman/);
   });
 
   it('falls back to Aman only when the person has not chosen a name', () => {
     renderTour({ assistantName: null });
 
-    expect(screen.getByRole('heading', { name: 'What Aman can do' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Some things Aman can do' })).toBeInTheDocument();
   });
 });
 
