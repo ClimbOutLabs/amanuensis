@@ -31,6 +31,7 @@ import type {
   ChatCompletionContentPart,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
+  ChatCompletionSystemMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
@@ -47,7 +48,9 @@ import {
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
-import { BROKEN_TOOL_MARKUP_MESSAGE, ToolMarkupGuard, type ToolMarkupOutcome } from './toolMarkup';
+import { RepeatedUnitGuard } from './repeatedUnitGuard';
+import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
+import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -173,24 +176,6 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
   return client(model.id);
-}
-
-/**
- * The text that ends a reply whose markup could not be rebuilt: the garbled-reply line, set off
- * from whatever answer text came before it. Nothing else of the broken markup is shown.
- */
-function garbledTail({
-  markupOutcome,
-  accumulatedText,
-}: {
-  markupOutcome: ToolMarkupOutcome;
-  accumulatedText: string;
-}): string {
-  if (markupOutcome.status !== 'broken') {
-    return '';
-  }
-  const separator = accumulatedText === '' || accumulatedText.endsWith('\n') ? '' : '\n\n';
-  return `${separator}${BROKEN_TOOL_MARKUP_MESSAGE}`;
 }
 
 /**
@@ -860,9 +845,11 @@ export interface ConvertedMessages {
 }
 
 /**
- * System messages are extracted into `instructions`, since SDK v7 no longer accepts
- * `{ role: 'system' }` in the messages array. The toolCallId → toolName lookup is built first
- * because tool result messages carry only the id.
+ * The first message, when it is a system message, is the static instruction and becomes `instructions`.
+ * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
+ * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
+ * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
+ * toolName lookup is built first because tool result messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -887,16 +874,37 @@ export function convertMessages({
     }
   }
 
+  const lastUserIndex = findLastUserIndex(messages);
   const systemParts: string[] = [];
-  const result: ModelMessage[] = [];
-  for (const msg of messages) {
-    if (msg.role === 'system') {
-      const content = typeof msg.content === 'string' ? msg.content : msg.content.map(p => p.text).join('');
+  // With no user message there is nothing to carry per-reply context, so it stays in instructions.
+  const turnContextParts: string[] = [];
+  for (const [index, msg] of messages.entries()) {
+    if (msg.role !== 'system') {
+      continue;
+    }
+    const content = systemContentText(msg.content);
+    if (index === 0 || lastUserIndex === -1) {
       systemParts.push(content);
+    } else {
+      turnContextParts.push(content);
+    }
+  }
+
+  const result: ModelMessage[] = [];
+  for (const [index, msg] of messages.entries()) {
+    if (msg.role === 'system') {
       continue;
     }
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: toUserContent(msg.content) });
+      const userContent = toUserContent(msg.content);
+      if (index !== lastUserIndex || turnContextParts.length === 0) {
+        result.push({ role: 'user', content: userContent });
+        continue;
+      }
+      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
+      const ownParts: UserContent =
+        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
+      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -922,6 +930,23 @@ export function convertMessages({
     // 'developer' / 'function' roles — not used in the harness pipeline; skip.
   }
   return { instructions: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, messages: result };
+}
+
+function systemContentText(content: ChatCompletionSystemMessageParam['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return content.map(p => p.text).join('');
+}
+
+/** Index of the latest user message, or -1 when there is none. */
+function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */
@@ -1258,13 +1283,15 @@ export class ModelStreamFault extends Error {
   }
 }
 
-/** Raised when one provider stream stops making textual progress. A kind of ModelStreamFault: the model is still responding, just unusably, and the same compact-and-retry recovery applies. */
+/**
+ * Raised when streamed reasoning stops making progress. A kind of ModelStreamFault: the model is still
+ * responding, just unusably, and the same compact-and-retry recovery applies. Answer text does not
+ * raise it; a repeating answer is cut and noted instead (see REPEAT_STOP_NOTE).
+ */
 export class ModelOutputRepetitionError extends ModelStreamFault {
-  constructor(channel: 'reasoning' | 'answer') {
+  constructor() {
     super(
-      channel === 'reasoning'
-        ? "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once."
-        : "The model's answer started repeating itself, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
+      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
     );
     this.name = 'ModelOutputRepetitionError';
   }
@@ -1406,9 +1433,7 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
  * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
- * so downstream error handling is unchanged; the underlying request is expected to observe that
- * abort (via a combined `AbortSignal`) and end the source stream, which unblocks the `for await`
- * below with a rejection.
+ * so downstream error handling is unchanged, and rejects the pending read at once.
  */
 export async function* enforceStreamDeadlines<T>({
   stream,
@@ -1438,12 +1463,33 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.chunkMs);
   };
 
+  // A provider stream does not always end when its request is aborted, so an expired deadline
+  // rejects the pending read itself; the source is asked to close but never awaited.
+  const iterator = stream[Symbol.asyncIterator]();
+  const expired = new Promise<never>((_, reject) => {
+    const onExpired = () => {
+      const reason: unknown = deadlineController.signal.reason;
+      const expiredError = new Error(describeStreamError(reason), { cause: reason });
+      expiredError.name = 'TimeoutError';
+      reject(expiredError);
+    };
+    if (deadlineController.signal.aborted) {
+      onExpired();
+    } else {
+      deadlineController.signal.addEventListener('abort', onExpired, { once: true });
+    }
+  });
+  // Observed here so an expiry nobody is reading never surfaces as an unhandled rejection.
+  expired.catch(() => undefined);
+
   armFirstChunkTimer();
   try {
-    // The underlying stream is expected to end (reject) shortly after `deadlineController` aborts,
-    // since callers combine it into the signal driving the request — a fired timer is not handled
-    // here so that rejection, not a silent early return, is what ends this generator.
-    for await (const part of stream) {
+    for (;;) {
+      const result = await Promise.race([iterator.next(), expired]);
+      if (result.done === true) {
+        return;
+      }
+      const part = result.value;
       if (hasSubstance(part)) {
         clearTimeout(timer);
         armChunkTimer();
@@ -1452,6 +1498,9 @@ export async function* enforceStreamDeadlines<T>({
     }
   } finally {
     clearTimeout(timer);
+    void Promise.resolve()
+      .then(() => iterator.return?.())
+      .catch(() => undefined);
   }
 }
 
@@ -1476,11 +1525,13 @@ export async function* mapStreamToChunks({
   const toolCallStates = new Map<string, ToolCallState>();
   let nextToolIndex = 0;
   let accumulatedText = '';
-  // Leaked tool-call markup in the answer text is held back and never streamed; at the end of the
-  // reply it is either rebuilt into real tool calls or replaced by the garbled-reply line.
+  // Leaked tool-call markup in the answer text is held back and never streamed or run; the caller is
+  // told it did not run.
   const markupGuard = new ToolMarkupGuard();
-  const textRepetition = new StreamingRepetitionGuard();
+  // A reply that repeats one sentence or line three times is stopped before the last copy.
+  const answerUnits = new RepeatedUnitGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
+  let repetitionStopped = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1518,31 +1569,35 @@ export async function* mapStreamToChunks({
   // from a stream that never finished at all.
   let sawFinishStep = false;
 
-  for await (const part of stream) {
+  streamLoop: for await (const part of stream) {
     switch (part.type) {
       case 'text-delta': {
         const released = markupGuard.push(part.text);
         if (released === '') {
           break;
         }
-        if (textRepetition.push(released)) {
-          throw new ModelOutputRepetitionError('answer');
+        const answer = answerUnits.push(released);
+        if (answer.text !== '') {
+          // Answer text is real output: the reasoning guard must not mistake
+          // long methodical work for a stuck loop while the turn is producing.
+          reasoningRepetition.markProgress();
+          accumulatedText += answer.text;
+          yield {
+            ...makeBase(),
+            choices: [
+              {
+                index: 0,
+                delta: { content: answer.text, role: 'assistant' },
+                finish_reason: null,
+                logprobs: null,
+              },
+            ],
+          };
         }
-        // Answer text is real output: the reasoning guard must not mistake
-        // long methodical work for a stuck loop while the turn is producing.
-        reasoningRepetition.markProgress();
-        accumulatedText += released;
-        yield {
-          ...makeBase(),
-          choices: [
-            {
-              index: 0,
-              delta: { content: released, role: 'assistant' },
-              finish_reason: null,
-              logprobs: null,
-            },
-          ],
-        };
+        if (answer.stopped) {
+          repetitionStopped = true;
+          break streamLoop;
+        }
         break;
       }
 
@@ -1555,7 +1610,7 @@ export async function* mapStreamToChunks({
         // A delta with no preceding `reasoning-start` would otherwise drop the block and its
         // signature, breaking replay while the text still streams out.
         if (reasoningRepetition.push(part.text)) {
-          throw new ModelOutputRepetitionError('reasoning');
+          throw new ModelOutputRepetitionError();
         }
         currentThinkingBlock ??= openThinkingBlock(part.providerMetadata);
         currentThinkingBlock.thinking += part.text;
@@ -1739,16 +1794,29 @@ export async function* mapStreamToChunks({
   // connection mid-response, rather than terminating it cleanly, can end an async iterable this
   // way with no explicit error at all. Treated the same as the explicit-error cases above: a
   // model/provider stream fault, not a host fault.
-  if (!sawFinishStep && accumulatedText === '' && toolCallStates.size === 0 && !markupGuard.inMarkup) {
+  if (
+    !repetitionStopped &&
+    !sawFinishStep &&
+    accumulatedText === '' &&
+    toolCallStates.size === 0 &&
+    !markupGuard.inMarkup
+  ) {
     throw new ModelStreamFault('The model stream ended without any text, tool call, or finish signal.');
   }
 
-  // Settle the markup guard: a clean reply releases its held tail so the final text matches what
-  // was streamed; recovered markup joins the reply's tool calls; broken markup is never run or
-  // shown, and the garbled line stands in for it, so nothing in it is saved as calls either.
+  // Settle the markup guard. A clean reply releases its held tail, which passes the repetition guard
+  // like the rest of the answer; a reply that carried markup releases nothing of it.
   const markupOutcome = markupGuard.finish();
-  const tail =
-    markupOutcome.status === 'clean' ? markupGuard.heldText : garbledTail({ markupOutcome, accumulatedText });
+  let tail = '';
+  if (!repetitionStopped) {
+    const flushed = answerUnits.push(markupOutcome === 'clean' ? markupGuard.heldText : '');
+    const rest = flushed.stopped ? { text: '', stopped: false } : answerUnits.finish();
+    repetitionStopped = flushed.stopped || rest.stopped;
+    tail = flushed.text + rest.text;
+  }
+  if (repetitionStopped) {
+    tail += noticeAfter({ text: accumulatedText + tail, notice: REPEAT_STOP_NOTE });
+  }
   if (tail !== '') {
     accumulatedText += tail;
     yield {
@@ -1774,15 +1842,6 @@ export async function* mapStreamToChunks({
         ? { provider_specific_fields: { thought_signature: tc.thoughtSignature } }
         : {}),
     }));
-  if (markupOutcome.status === 'recovered') {
-    markupOutcome.calls.forEach((call, position) => {
-      toolCalls.push({
-        id: `markup-recovered-${String(position)}`,
-        type: 'function' as const,
-        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-      });
-    });
-  }
 
   const output: RawAssistantMessage = {
     role: 'assistant',
@@ -1795,7 +1854,8 @@ export async function* mapStreamToChunks({
     usage: finalUsage,
     output,
     finish_reason: finalFinishReason,
-    ...(markupOutcome.status === 'recovered' ? { tool_markup: markupOutcome.status } : {}),
+    ...(markupOutcome === 'leaked' ? { tool_markup: markupOutcome } : {}),
+    ...(repetitionStopped ? { repetition_stopped: true } : {}),
   };
 }
 

@@ -7,6 +7,12 @@ import { newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
 import { SEARCH_CHAT_GRANT_KEY } from '../core/mcp/approvalGrant';
 import {
+  createToolCallMemoState,
+  createTurnToolCallLedger,
+  mergeTurnToolCallLedgers,
+  type TurnToolCallLedger,
+} from '../core/mcp/executeToolCalls';
+import {
   isSerializedImplementationPlanGrant,
   serializeImplementationPlanGrant,
   type ImplementationPlanGrant,
@@ -63,13 +69,14 @@ import { CancellationReason } from './schemas/turn';
 import type {
   ISessionStore,
   NewThreadInit,
+  SessionTitleSeed,
   ThreadTaskStateInit,
   ThreadToolCallMemoInit,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
 } from './store/ISessionStore';
 import { ApprovalRequestEndedError, TurnNotFoundError } from './store/SessionStoreErrors';
-import { TurnHandle } from './TurnHandle';
+import { cancelStreamingTurn, TurnHandle } from './TurnHandle';
 
 /** How many recent ancestors SessionHandle persists on each turn. Store-local. */
 const MAX_TURN_ANCESTORS = 20;
@@ -413,7 +420,7 @@ export class SessionHandle<
      * unit IF the session has none; never overwrites. The caller derives the
      * value (e.g. from the first user message) — the library does not.
      */
-    update_session_title_if_not_exist?: string | undefined;
+    update_session_title_if_not_exist?: SessionTitleSeed | null | undefined;
     /** Called only after a registered command's durable start record commits. */
     on_command_execution_started?: ((execution: RegisteredCommandExecution) => void) | undefined;
     /** Durable owner written on registered-command leases (replica id in distributed mode). */
@@ -553,6 +560,21 @@ export class SessionHandle<
       const sendBatch = toSendBatch(input.input);
       const isRequestContinuation = sendBatch.length > 0 && !sendBatch.some(isInputUserMessage);
 
+      // One ledger for the whole turn, shared by every thread built below. A continuation rebuilds it from
+      // the snapshots of the paused turn, so approval pauses do not reset the write cap or repeat counts.
+      const turnToolCallLedger =
+        isRequestContinuation && previous !== undefined
+          ? mergeTurnToolCallLedgers(
+              // The root goes first: its last call is the one that counts as consecutive.
+              [...threadIdsForCurrentTurn(previous)]
+                .sort((left, right) => Number(right === MAIN_THREAD_ID) - Number(left === MAIN_THREAD_ID))
+                .flatMap(threadId => {
+                  const snapshot = previous.snapshot.threads[threadId];
+                  return snapshot === undefined ? [] : [createToolCallMemoState(snapshot.tool_call_memo).turn];
+                }),
+            )
+          : createTurnToolCallLedger();
+
       const agentThreads = this.buildThreads({
         previous,
         resolver: input.resolver,
@@ -563,6 +585,7 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         isRequestContinuation,
+        turnToolCallLedger,
         sentinelServices,
         stopAfterToolResponse: input.stop_after_tool_response === true,
       });
@@ -920,6 +943,13 @@ export class SessionHandle<
     reason: CancellationReason;
     handoff?: AbnormalHandoff | undefined;
   }): Promise<TurnRecord<TTurnCustom>> {
+    // A stream running here writes the steps it already ran before its terminal state, so the
+    // fence below cannot drop them. Its own terminal write then wins; the freeze is a no-op.
+    await cancelStreamingTurn({
+      session_id: this.session.session_id,
+      turn_id: input.turn_id,
+      reason: input.reason,
+    });
     const state: CancelledTurnState = {
       status: 'cancelled',
       reason: input.reason,
@@ -1038,6 +1068,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
   }): Map<string, AgentThread> {
@@ -1061,6 +1092,7 @@ export class SessionHandle<
           chatApprovalGrants: input.chatApprovalGrants,
           loadImplementationPlanGrants: input.loadImplementationPlanGrants,
           isRequestContinuation: input.isRequestContinuation,
+          turnToolCallLedger: input.turnToolCallLedger,
           sentinelServices: input.sentinelServices,
           stopAfterToolResponse: input.stopAfterToolResponse,
         }),
@@ -1080,6 +1112,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
   }): AgentThread {
@@ -1105,6 +1138,7 @@ export class SessionHandle<
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
       sandbox,
+      serverSandboxAvailable: input.resolver.serverSandboxAvailable ?? false,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
@@ -1116,6 +1150,7 @@ export class SessionHandle<
       capabilities,
       capabilityState: input.previousThreadSnapshot?.capability_state ?? undefined,
       toolCallMemo: input.previousThreadSnapshot?.tool_call_memo,
+      turnToolCallLedger: input.turnToolCallLedger,
       taskState: input.previousThreadSnapshot?.task_state,
       chatApprovalGrants: input.chatApprovalGrants,
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
@@ -1126,6 +1161,7 @@ export class SessionHandle<
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
@@ -1213,6 +1249,7 @@ export class SessionHandle<
         agentInfo: params.request,
         capabilities,
         toolCallMemo: undefined,
+        turnToolCallLedger: params.turnToolCallLedger,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
@@ -1223,6 +1260,7 @@ export class SessionHandle<
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });

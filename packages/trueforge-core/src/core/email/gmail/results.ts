@@ -51,6 +51,10 @@ export interface ResultContext {
 const ATTACHMENTS_OFF_NOTE =
   'Attachments cannot be opened in this chat because the sandbox is off. Tell the user that plainly; do not guess what they contain.';
 
+/** Linked images are offered to the person by the chat itself; a copy in the answer would only clutter it. */
+export const LINKED_IMAGES_NOTE =
+  'The chat offers these images to the user itself. Do not put them or their links in your answer unless the user asks for an image.';
+
 /** The reason attachments cannot be read, only where a result names some and the chat cannot open them. */
 function attachmentsNote({ context, listed }: { context: ResultContext; listed: boolean }) {
   return listed && !context.attachmentsOpenable ? { attachments_note: ATTACHMENTS_OFF_NOTE } : {};
@@ -324,7 +328,9 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
   budget.spend(neutralizeDeep(note));
   // Listed so the chat can offer to show them; nothing is fetched unless the person says so.
   const linkedImages = linkedImagesOf({ message: input.message, max: CHAT_IMAGE_MAX_PER_EMAIL });
+  const imagesNote = linkedImages.length > 0 ? { linked_images_note: LINKED_IMAGES_NOTE } : {};
   budget.spend(linkedImages);
+  budget.spend(imagesNote);
   const read = readBody({ message: input.message, maxChars: bodyChars(budget.left) });
   const bounded = fitText({ text: read.body, left: budget.left });
   return {
@@ -333,6 +339,7 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
     ...(listed.omitted > 0 ? { attachments_omitted: listed.omitted } : {}),
     ...note,
     ...(linkedImages.length > 0 ? { linked_images: linkedImages } : {}),
+    ...imagesNote,
     body: bounded.text,
     body_truncated: bounded.truncated || read.cut,
   };

@@ -14,6 +14,9 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
     listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings,
@@ -145,7 +148,7 @@ describe('SentinelSettings', () => {
       );
       expect(
         await screen.findByText(
-          "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.",
+          "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode.",
         ),
       ).toBeInTheDocument();
     },

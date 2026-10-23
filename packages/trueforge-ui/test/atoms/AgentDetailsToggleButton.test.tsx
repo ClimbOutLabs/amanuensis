@@ -92,17 +92,31 @@ describe('AgentDetailsToggleButton', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('renders as "Hide agent details" and pressed when the stored preference is expanded', async () => {
+  it('keeps its label and is pressed, with a filled look, when the stored preference is expanded', async () => {
     renderToggle({ agentDetails: 'expanded' });
     await act(async () => {
       await Promise.resolve();
     });
 
-    const toggle = screen.getByRole('button', { name: 'Hide agent details' });
+    const toggle = screen.getByRole('button', { name: 'Show agent details' });
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(toggle).toHaveAttribute('title', 'Agent details are on');
+    expect(toggle).toHaveClass('bg-secondary-button-hover');
   });
 
-  it('toggles the label/aria-pressed and writes the new preference through the session', async () => {
+  it('has no fill while off, so only the on state looks pressed', async () => {
+    renderToggle({ agentDetails: 'collapsed' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const toggle = screen.getByRole('button', { name: 'Show agent details' });
+    expect(toggle).toHaveAttribute('title', 'Agent details are off');
+    expect(toggle).toHaveClass('bg-transparent');
+    expect(toggle).not.toHaveClass('bg-secondary-button-hover');
+  });
+
+  it('toggles aria-pressed and writes the new preference through the session', async () => {
     const { server } = renderToggle({ agentDetails: 'collapsed' });
     await act(async () => {
       await Promise.resolve();
@@ -114,7 +128,7 @@ describe('AgentDetailsToggleButton', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole('button', { name: 'Hide agent details' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Show agent details' })).toHaveAttribute('aria-pressed', 'true');
     expect(server.updateSession).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'sess-1',

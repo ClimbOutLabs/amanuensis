@@ -345,9 +345,18 @@ describe('submitRetainWithVerification', () => {
     getOperation.mockResolvedValue({ ok: false, code: 'timeout', reason: 'timeout' });
     retryOperation.mockRejectedValue(new Error('network down'));
 
-    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBeUndefined();
+    // Nothing was stored, so the caller must not claim a save.
+    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBe(false);
     // Initial submission plus the one deterministic resubmission for an unreadable status.
     expect(retain).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves true once the provider holds the exchange', async () => {
+    const { client, retain, getOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'completed' });
+
+    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBe(true);
   });
 
   it('is a no-op when there is nothing to retain', async () => {
@@ -355,7 +364,7 @@ describe('submitRetainWithVerification', () => {
 
     await expect(
       submitRetainWithVerification({ ...submitParams(client), userText: '', assistantText: '' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(retain).not.toHaveBeenCalled();
     expect(getOperation).not.toHaveBeenCalled();
   });

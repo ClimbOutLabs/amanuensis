@@ -38,6 +38,7 @@ import type { Database } from '../../../src/db/sqlite/types';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
+import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
@@ -1813,7 +1814,7 @@ describe('runDataImport at scale', () => {
           makeCreateTurnInput({
             sessionId,
             turnId,
-            update_session_title_if_not_exist: `Bulk chat ${String(index)}`,
+            update_session_title_if_not_exist: { title: `Bulk chat ${String(index)}`, source: 'first_message' },
             new_context_appends: [
               {
                 thread_id: 'main',
@@ -2539,6 +2540,45 @@ describe('runDataImport checks persona and personalization text like the app doe
   });
 });
 
+describe('runDataImport points chats at the current Iris', () => {
+  it("moves a chat that was with the archived guide to this owner's Iris", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-archived-guide');
+    try {
+      let sessionId = '';
+      const older = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        const first = recordAt(sessions[0], 'first chat');
+        sessionId = String(recordAt(first['session'], 'session')['session_id']);
+        first['persona_activations'] = [
+          {
+            id: 'act-archived-guide',
+            turn_id: null,
+            persona_id: legacyAmanGuidePersonaId('alice'),
+            persona_name: 'Aman guide',
+            model_name: null,
+            source: 'explicit',
+          },
+        ];
+        setLegacySessions(entries, sessions);
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+      const activations = await target.stores.personaStore.listSessionPersonaActivations({
+        tenant_id: TENANT,
+        session_id: sessionId,
+        limit: 50,
+      });
+      expect(activations.find(activation => activation.id === 'act-archived-guide')).toMatchObject({
+        persona_id: amanGuidePersonaId('bob'),
+        persona_name: 'Iris',
+      });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 /** Rewrites the first personas as an older version wrote them: each name, then its aliases. */
 async function withOlderPersonaNames(
   archive: Buffer,
@@ -2988,7 +3028,9 @@ async function seedLongChat(
       makeCreateTurnInput({
         sessionId,
         turnId,
-        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
+        ...(previousTurnId === undefined
+          ? { update_session_title_if_not_exist: { title: 'Long chat', source: 'first_message' } }
+          : { previousTurnId }),
         new_context_appends: [
           {
             thread_id: MAIN_THREAD_ID,

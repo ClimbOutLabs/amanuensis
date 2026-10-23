@@ -80,13 +80,19 @@ function readSchema(value: unknown): ToolParameterSchema | undefined {
   const items = readSchema(value['items']);
   const enumValues = Array.isArray(value['enum']) ? value['enum'] : undefined;
   const anyOf = Array.isArray(value['anyOf'])
-    ? value['anyOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['anyOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const oneOf = Array.isArray(value['oneOf'])
-    ? value['oneOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['oneOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const allOf = Array.isArray(value['allOf'])
-    ? value['allOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['allOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const additional = value['additionalProperties'];
   const additionalProperties =
@@ -271,7 +277,11 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
   return { value, problems: [] };
 }
 
-function checkObject(input: { schema: ToolParameterSchema; value: Record<string, unknown>; path: string }): CheckOutcome {
+function checkObject(input: {
+  schema: ToolParameterSchema;
+  value: Record<string, unknown>;
+  path: string;
+}): CheckOutcome {
   const { value, path } = input;
   const schema = flattenAllOf(input.schema);
   const properties = schema.properties ?? {};
@@ -329,12 +339,42 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
  * problems that could not be repaired. A call with problems must not be sent; the problems are
  * the model's instructions for its one retry.
  */
-export function checkToolArguments(input: {
-  schema: ToolParameterSchema;
+export function checkToolArguments(input: { schema: ToolParameterSchema; args: Record<string, unknown> }): {
   args: Record<string, unknown>;
-}): { args: Record<string, unknown>; problems: ArgumentProblem[] } {
+  problems: ArgumentProblem[];
+} {
   const outcome = checkObject({ schema: input.schema, value: input.args, path: '' });
   return { args: isRecord(outcome.value) ? outcome.value : input.args, problems: outcome.problems };
+}
+
+/**
+ * Drops the top-level arguments a tool's schema does not name, by the same rule the full check uses:
+ * only a schema that names its properties and allows no extras drops anything, so a tool without a
+ * schema, or one that takes free-form input, keeps every argument. Nothing else is changed.
+ */
+export function dropUnnamedArguments(input: { schema: ToolParameterSchema; args: Record<string, unknown> }): {
+  args: Record<string, unknown>;
+  dropped: string[];
+} {
+  const schema = flattenAllOf(input.schema);
+  const properties = schema.properties ?? {};
+  if (
+    Object.keys(properties).length === 0 ||
+    schema.additionalProperties === true ||
+    isRecord(schema.additionalProperties)
+  ) {
+    return { args: input.args, dropped: [] };
+  }
+  const kept: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(input.args)) {
+    if (Object.hasOwn(properties, key)) {
+      kept[key] = value;
+    } else {
+      dropped.push(key);
+    }
+  }
+  return { args: dropped.length === 0 ? input.args : kept, dropped };
 }
 
 /** The plain message the model gets when its call was not sent: what is wrong and what it should be. */

@@ -48,6 +48,7 @@ async function canChatAllow(
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
@@ -85,5 +86,23 @@ describe('the approval event says whether chat scope is offered', () => {
     expect(await canChatAllow('mcp_search_unreturned_url', { search_provider_call: true, effect: undefined })).toBe(
       false,
     );
+  });
+
+  it('withholds the chat choice from a search held because searches are set to ask', async () => {
+    expect(await canChatAllow('mcp_search_setting_ask', { search_provider_call: true, effect: undefined })).toBe(false);
+  });
+
+  it('withholds the chat choice from a search held because it carries a key', async () => {
+    expect(await canChatAllow('mcp_search_guard', { search_provider_call: true, effect: undefined })).toBe(false);
+  });
+
+  it('withholds the chat choice from a search held after the chat opened a key file', async () => {
+    expect(
+      await canChatAllow('mcp_search_after_private_read', {
+        search_provider_call: true,
+        effect: undefined,
+        secret_path_read: true,
+      }),
+    ).toBe(false);
   });
 });

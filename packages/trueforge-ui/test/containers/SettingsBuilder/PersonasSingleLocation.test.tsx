@@ -66,12 +66,12 @@ describe('Personas render in exactly one place in Settings', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument());
 
     // No separate "Personas" tab in the section nav.
-    expect(screen.queryByRole('button', { name: 'Personas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Personas' })).not.toBeInTheDocument();
 
     // Personas live on the Roles and Personas page. The section is lazy-loaded, and a
     // cold vitest transform of its model-selector import graph can take >5s,
     // so give the chunk load a generous budget instead of the default 5s.
-    fireEvent.click(screen.getByRole('button', { name: 'Roles and Personas' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Roles and Personas' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Roles and Personas' })).toBeInTheDocument(), {
       timeout: 20000,
     });

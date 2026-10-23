@@ -40,6 +40,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
@@ -102,6 +103,7 @@ export interface SessionTable {
    *      (COALESCE) targets it directly
    */
   title: string | null;
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   /**
@@ -938,6 +940,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  brief_item_completion: BriefItemCompletionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

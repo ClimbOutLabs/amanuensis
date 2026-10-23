@@ -690,6 +690,42 @@
         ],
         "type": "object"
       },
+      "BriefItemCompletion": {
+        "description": "The item as marked done.",
+        "properties": {
+          "completed_at": {
+            "description": "When the item was marked done, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "completed_at"
+        ],
+        "type": "object"
+      },
       "BugReportBundle": {
         "properties": {
           "build": {
@@ -2245,6 +2281,10 @@
         "type": "object"
       },
       "DeleteAgentResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteBriefItemDoneResponse": {
         "properties": {},
         "type": "object"
       },
@@ -4529,6 +4569,21 @@
         ],
         "type": "object"
       },
+      "ListBriefItemCompletionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Completed brief items, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/BriefItemCompletion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5477,6 +5532,53 @@
           "server_id",
           "server_name",
           "name"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneRequest": {
+        "properties": {
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat the brief was shown in.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BriefItemCompletion"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -6693,13 +6795,13 @@
         "description": "Optional per-provider override of the server-wide stream progress deadlines.",
         "properties": {
           "chunk_ms": {
-            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.",
+            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
           },
           "first_chunk_ms": {
-            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.",
+            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
@@ -7721,6 +7823,34 @@
           "name",
           "url",
           "description"
+        ],
+        "type": "object"
+      },
+      "ReplyResultsByKind": {
+        "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
+        "properties": {
+          "error": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refused": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "refused",
+          "unavailable",
+          "error"
         ],
         "type": "object"
       },
@@ -11577,6 +11707,51 @@
       "TurnMetrics": {
         "description": "Optional billable aggregate for the whole turn.",
         "properties": {
+          "claim_mismatch": {
+            "description": "True when the last tool call in this reply did not succeed.",
+            "type": "boolean"
+          },
+          "guard_fired": {
+            "description": "Reason code of the first guard that blocked a tool call, or null when none did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_call_input_tokens": {
+            "description": "Input tokens of the last model call in this turn: the context size the model last saw.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "results_by_kind": {
+            "$ref": "#/components/schemas/ReplyResultsByKind"
+          },
+          "steps": {
+            "description": "Model steps in this reply, including sub-agent steps.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sub_agent_steps": {
+            "description": "Model steps run by sub-agents in this reply.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time_to_first_token_ms": {
+            "description": "Milliseconds from the first model request to its first output, or null when there was none.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool_calls_by_tool": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Tool calls in this reply, counted per tool name.",
+            "type": "object"
+          },
           "total_cache_read_tokens": {
             "description": "Total cache-read tokens across model calls in this turn.",
             "minimum": 0,
@@ -11609,6 +11784,11 @@
           },
           "total_tokens": {
             "description": "Total tokens (input + output) across model calls in this turn.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wall_time_ms": {
+            "description": "Milliseconds from turn start to finish.",
             "minimum": 0,
             "type": "integer"
           }
@@ -22668,6 +22848,189 @@
           "auditLog"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/brief-items/completions": {
+      "get": {
+        "description": "Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.",
+        "parameters": [
+          {
+            "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBriefItemCompletionsResponse"
+                }
+              }
+            },
+            "description": "Completed brief items."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List morning brief items marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "description": "Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkBriefItemDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item as marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          }
+        },
+        "summary": "Mark a morning brief item done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "markDone"
+      }
+    },
+    "/api/v1/user/brief-items/completions/{item_key}": {
+      "delete": {
+        "description": "Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.",
+        "parameters": [
+          {
+            "description": "Client key of the brief item.",
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "description": "Client key of the brief item.",
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item is no longer marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid item key."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Undo a morning brief item marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "undo"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

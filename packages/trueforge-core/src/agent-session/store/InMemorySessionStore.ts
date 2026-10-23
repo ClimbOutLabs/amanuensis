@@ -62,6 +62,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetGeneratedSessionTitleInput,
   SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
@@ -290,6 +291,7 @@ export class InMemorySessionStore<
       created_by_subject: input.created_by_subject,
       agent: deepCopy(input.agent),
       title: null,
+      title_source: null,
       folder_id: null,
       repository_id: null,
       workspace_cwd: null,
@@ -333,6 +335,16 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
+  }
+
+  async setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id || stored.record.title_source !== 'first_message') {
+      return false;
+    }
+    stored.record.title = input.title;
+    stored.record.title_source = 'auto';
+    return true;
   }
 
   async setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
@@ -605,6 +617,7 @@ export class InMemorySessionStore<
     }
     if (input.title !== undefined) {
       stored.record.title = input.title;
+      stored.record.title_source = 'person';
     }
     if (input.metadata !== undefined) {
       stored.record.metadata = deepCopy(input.metadata);
@@ -854,7 +867,8 @@ export class InMemorySessionStore<
     stored.record.last_activity_timestamp_ms = Date.now();
     stored.record.updated_at = new Date();
     if (input.update_session_title_if_not_exist !== null && stored.record.title === null) {
-      stored.record.title = input.update_session_title_if_not_exist;
+      stored.record.title = input.update_session_title_if_not_exist.title;
+      stored.record.title_source = input.update_session_title_if_not_exist.source;
     }
   }
 

@@ -4,7 +4,6 @@ import {
   type CreatedBySubject,
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
-import { isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { ulid } from 'ulid';
 import type { IAgentStore } from '../../db/agentStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
@@ -15,7 +14,6 @@ import type { ISpaceStore } from '../../db/spaceStore';
 import type { WithTransaction } from '../../db/transaction';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
-import { dayInZone } from './calendar';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
 import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME } from './world';
@@ -489,22 +487,18 @@ async function seedSchedule<TTransaction>({
 }
 
 /**
- * The Tasks space. One last written on the seed day is left as it is, because the assistant keeps it current
- * (a ticked task); one from an earlier day is rewritten unless it already says the same.
+ * The Tasks space is rewritten unless it already holds this seed day's content, so a re-seed on the same real
+ * day with another --today never leaves the old dates behind. A task the assistant ticked is rewritten too.
  */
 async function seedSpaces<TTransaction>({
   stores,
   scope,
   world,
-  now,
 }: {
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
   world: DemoWorld;
-  now: Date;
 }): Promise<SeedReport['spaces']> {
-  // Compared on the clock that wrote updated_at, so a rehearsal with --today keeps same-day edits.
-  const runDay = isoDay(dayInZone({ now, timeZone: world.timeZone }));
   const report = { created: 0, updated: 0, unchanged: 0 };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
   for (const space of world.spaces) {
@@ -519,10 +513,7 @@ async function seedSpaces<TTransaction>({
         expected_aggregate_revision: aggregate.revision,
       });
       report.created += 1;
-    } else if (
-      isoDay(dayInZone({ now: new Date(existing.updated_at), timeZone: world.timeZone })) === runDay ||
-      isSameSpaceContent({ stored: existing, wanted: content })
-    ) {
+    } else if (isSameSpaceContent({ stored: existing, wanted: content })) {
       report.unchanged += 1;
     } else {
       await stores.spaceStore.updateSpace({
@@ -572,7 +563,7 @@ export async function seedDemoWorld<TTransaction>({
   const agent = await seedAgent({ stores, scope, world });
   await removeEarlierSeeds({ stores, scope });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
-  const spaces = await seedSpaces({ stores, scope, world, now });
+  const spaces = await seedSpaces({ stores, scope, world });
   return {
     personas,
     profile,

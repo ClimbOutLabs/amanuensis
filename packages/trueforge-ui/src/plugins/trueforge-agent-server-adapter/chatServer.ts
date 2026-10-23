@@ -31,6 +31,7 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
+import { LiveConnectionLostError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
@@ -402,13 +403,13 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
- * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * Taps Sentinel approval events off a raw stream or history item before the vendor
+ * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
  * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
-function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
 }
 
@@ -567,9 +568,9 @@ async function* fallbackToTurnFinalState(input: {
  * still running server-side never surfaces as a failed turn. Resumes from
  * `cursor` (exclusive), bounded by `TURN_STREAM_RECONNECT_MAX_ATTEMPTS` with
  * capped exponential backoff. Gives up only when the caller cancels
- * (`abortSignal`), the server reports the turn is gone, or retries are
- * exhausted — rethrowing the triggering error unchanged for the caller to
- * normalize.
+ * (`abortSignal`) or the server reports the turn is gone, rethrowing that
+ * error unchanged. Exhausted retries throw `LiveConnectionLostError` so the
+ * chat resyncs from the server rather than marking the turn failed.
  */
 async function* subscribeWithReconnect(
   client: TrueForge,
@@ -602,8 +603,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        const error = new Error('Turn stream ended without turn.done and retries exhausted');
-        throw error;
+        throw new LiveConnectionLostError();
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -629,7 +629,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        throw error;
+        throw new LiveConnectionLostError({ cause: error });
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -834,6 +834,9 @@ export function createHarnessChatServer(
         ...(limit === undefined ? {} : { limit }),
       });
       const data = page.data.flatMap(item => {
+        // A chat that learns of a waiting call from history (opened mid-turn, or caught up after the
+        // live stream dropped) gets its card here; the chat's one saved-card read may predate the ask.
+        tapSentinelStreamEvent(item.event);
         const converted = toUiEventItem(item);
         return converted === undefined ? [] : [converted];
       });

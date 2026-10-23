@@ -62,7 +62,8 @@ mcp_servers:
     name: tavily
     logo: https://assets.production.truefoundry.com/tavily.svg
     url: https://mcp.tavily.com/mcp
-    description: Search the web, extract page content, and crawl sites.
+    description: Search the web, extract page content, and crawl sites. Needs your Tavily API key.
+    search_provider: true
     search_tools:
       - tavily_search
       - tavily_extract

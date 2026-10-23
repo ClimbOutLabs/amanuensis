@@ -12,6 +12,7 @@ import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
@@ -209,7 +210,9 @@ export async function findInstanceData<TTransaction>(
   if (folders.some(folder => !ignoredFolders.has(folder.folder_id))) {
     found.push('folders');
   }
-  if ((await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: subjectId })).length > 0) {
+  // The guide is installed for every person, so it alone does not make an instance non-empty.
+  const personas = await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: subjectId });
+  if (personas.some(persona => !isAmanGuidePersona(persona))) {
     found.push('personas');
   }
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });

@@ -11,29 +11,12 @@ import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBu
 import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
 import { TENANT_ID } from '../../../../src/tenancy';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { fakeHelperLlm, fakeHelperLlmThrowing } from '../../../fixtures/fakeHelperLlm';
 import { startModelEndpointStub } from '../../../fixtures/modelEndpointStub';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 function makeLogger() {
   return winston.createLogger({ silent: true });
-}
-
-/**
- * A complete ILLM double for summarization tests: the summarizer only ever calls
- * `createNonStream`, and streaming refuses loudly so an unexpected call fails the test.
- */
-function fakeSummarizer(content: string | { type: 'text'; text: string }[]): ILLM {
-  const result: Awaited<ReturnType<ILLM['createNonStream']>> = {
-    output: { role: 'assistant', content },
-    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-    finish_reason: 'stop',
-  };
-  return {
-    create(): ReturnType<ILLM['create']> {
-      throw new Error('streaming is not used by memory summarization');
-    },
-    createNonStream: async () => result,
-  };
 }
 
 function fakeModelProviderStore(): IModelProviderStore {
@@ -84,7 +67,7 @@ describe('summarizeTurnContent', () => {
   it('returns a summarized result on success', async () => {
     const result = await summarizeTurnContent({
       ...base,
-      resolveLlm: async () => fakeSummarizer('- User has a synthetic test robot named Bleep-Bloop.'),
+      resolveLlm: async () => fakeHelperLlm('- User has a synthetic test robot named Bleep-Bloop.'),
     });
     expect(result).toEqual({
       status: 'summarized',
@@ -122,23 +105,43 @@ describe('summarizeTurnContent', () => {
         throw new Error('provider down');
       },
     });
-    expect(result).toEqual({ status: 'failed', reason: 'provider down' });
+    expect(result).toEqual({ status: 'failed', reason: 'provider down', fallback: 'model_unresolved' });
   });
 
   it('returns failed when the model returns an empty summary', async () => {
     const result = await summarizeTurnContent({
       ...base,
-      resolveLlm: async () => fakeSummarizer('   '),
+      resolveLlm: async () => fakeHelperLlm('   '),
     });
-    expect(result).toEqual({ status: 'failed', reason: 'empty-summary' });
+    expect(result).toEqual({ status: 'failed', reason: 'empty-summary', fallback: 'summary_empty' });
+  });
+
+  it('returns failed with model_timeout when the summarizer call times out', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      resolveLlm: async () => fakeHelperLlmThrowing(new Error('The request timed out after 30000 ms')),
+    });
+    expect(result).toEqual({
+      status: 'failed',
+      reason: 'The request timed out after 30000 ms',
+      fallback: 'model_timeout',
+    });
+  });
+
+  it('returns failed with model_failed when the summarizer call errors', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      resolveLlm: async () => fakeHelperLlmThrowing(new Error('upstream 500')),
+    });
+    expect(result).toEqual({ status: 'failed', reason: 'upstream 500', fallback: 'model_failed' });
   });
 
   it('returns failed for an overlong summary instead of truncating', async () => {
     const result = await summarizeTurnContent({
       ...base,
-      resolveLlm: async () => fakeSummarizer('x'.repeat(5000)),
+      resolveLlm: async () => fakeHelperLlm('x'.repeat(5000)),
     });
-    expect(result).toEqual({ status: 'failed', reason: 'summary-too-long' });
+    expect(result).toEqual({ status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' });
   });
 
   it('returns skipped/input-too-long instead of truncating an overlong turn', async () => {
@@ -153,7 +156,7 @@ describe('summarizeTurnContent', () => {
   });
 
   it('caps the generation with max_tokens so output cost is bounded', async () => {
-    const llm = fakeSummarizer('- User has a synthetic test robot named Bleep-Bloop.');
+    const llm = fakeHelperLlm('- User has a synthetic test robot named Bleep-Bloop.');
     const createNonStream = jest.spyOn(llm, 'createNonStream');
     const result = await summarizeTurnContent({
       ...base,
@@ -168,7 +171,7 @@ describe('summarizeTurnContent', () => {
     const result = await summarizeTurnContent({
       ...base,
       resolveLlm: async () =>
-        fakeSummarizer([
+        fakeHelperLlm([
           { type: 'text', text: 'Fact: ' },
           { type: 'text', text: 'Bleep-Bloop' },
         ]),

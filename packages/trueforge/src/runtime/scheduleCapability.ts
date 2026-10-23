@@ -17,6 +17,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/ToolSet';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import {
   CREATE_SCHEDULE_TOOL_NAME,
@@ -275,6 +276,7 @@ function errorResult(message: string) {
 export class ScheduleToolSet extends LocalToolMCP {
   readonly name = SCHEDULE_SERVER_ID;
   readonly displayName = 'Schedules';
+  protected override readonly bundle: ToolBundleName = 'schedules';
   readonly #options: ScheduleToolSetOptions;
   readonly #tools: ToolDefinition[];
 
@@ -285,7 +287,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. It runs as the assistant in this chat. Never say something is scheduled unless this succeeded. If how often or when is unclear, ask first. Times use the user's time zone. For a morning brief, set morning_brief, not task. The user approves a card before anything is saved.",
+          "The only way to make a recurring task; it runs as the assistant here. It cannot make a one-time reminder: say so instead of making a repeating one. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -340,6 +342,10 @@ export class ScheduleToolSet extends LocalToolMCP {
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
     const call = withoutRetiredAgent(params);
     const info = await super.toolCallInfo(call, resolveUnderlyingTool);
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false) {
+      return info;
+    }
     const prepared = isScheduleWriteToolName(call.name) ? await this.#prepareWrite(call) : undefined;
     if (prepared !== undefined && !prepared.ok) {
       // Not a permission wall: the model can fix the call or ask the user. A policy block would count toward
@@ -678,7 +684,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
 const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
 const SCHEDULE_INSTRUCTION =
-  'Schedules can only be made with create_schedule. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
+  'Schedules can only be made with create_schedule, and only repeating ones: a one-time reminder or check-in later cannot be set. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
 
 function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);
@@ -686,5 +692,9 @@ function buildScheduleInstruction(builder: InstructionBuilder): void {
 
 /** Attaches the schedule tools, and the rule that they are the only way to schedule, to one chat turn's root thread. */
 export function scheduleCapability(options: ScheduleToolSetOptions): AgentCapability {
-  return { systemToolSets: [new ScheduleToolSet(options)], instructionBuilders: [buildScheduleInstruction] };
+  return {
+    systemToolSets: [new ScheduleToolSet(options)],
+    instructionBuilders: [buildScheduleInstruction],
+    bundle: 'schedules',
+  };
 }

@@ -283,36 +283,83 @@ describe('toStreamError', () => {
 // ─────────── mapStreamToChunks ───────────
 
 describe('mapStreamToChunks', () => {
-  it.each([['reasoning', 'reasoning-delta'] as const, ['answer', 'text-delta'] as const])(
-    'stops sustained repetition in the %s stream',
-    async (channel, type) => {
-      const repeated = `${'the same uncertain identification keeps circling without reaching a useful conclusion '.repeat(45)}.`;
-      // Two parts: ~810 words of pure repetition with zero output progress,
-      // past the progress window, so the guard must trip.
-      const parts: TextStreamPart<ToolSet>[] =
-        type === 'reasoning-delta'
-          ? [
-              { type: 'reasoning-delta', id: 'r1', text: repeated },
-              { type: 'reasoning-delta', id: 'r1', text: repeated },
-            ]
-          : [
-              { type: 'text-delta', id: 't1', text: repeated },
-              { type: 'text-delta', id: 't1', text: repeated },
-            ];
+  it('stops sustained repetition in the reasoning stream', async () => {
+    const repeated = `${'the same uncertain identification keeps circling without reaching a useful conclusion '.repeat(45)}.`;
+    // Two parts: ~810 words of pure repetition with zero output progress,
+    // past the progress window, so the guard must trip.
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'reasoning-delta', id: 'r1', text: repeated },
+      { type: 'reasoning-delta', id: 'r1', text: repeated },
+    ];
 
-      await expect(
-        drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-      ).rejects.toEqual(new ModelOutputRepetitionError(channel));
-    },
-  );
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError(),
+    );
+  });
 
-  it('tells the user what to do next when it stops a repetitive turn', () => {
-    expect(new ModelOutputRepetitionError('reasoning').message).toBe(
-      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
+  it('stops a reply that repeats one sentence three times, keeps the first two, and says so', async () => {
+    const sentence = 'Let me know if you need anything else. ';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: sentence.repeat(5) },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(`${sentence.repeat(2).trimEnd()}\n\nStopped: the reply was repeating itself.`);
+  });
+
+  it('stops a closing-line loop before its third copy, so two copies and the stop line remain', async () => {
+    const closing = 'All set for the calendar work tomorrow, see you then.\n';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: 'Here is the summary of the calendar work.\n' },
+      ...Array.from({ length: 6 }, () => ({ type: 'text-delta' as const, id: 't1', text: closing })),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(
+      `Here is the summary of the calendar work.\n${closing.repeat(2)}\nStopped: the reply was repeating itself.`,
     );
-    expect(new ModelOutputRepetitionError('answer').message).toBe(
-      "The model's answer started repeating itself, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-    );
+  });
+
+  it('leaves a normal long answer with a few repeated words untouched', async () => {
+    const answer = [
+      'Your week is busy. Monday has the dentist at 9, and Tuesday is free until lunch.',
+      'Let me know if you need anything else.',
+      'Wednesday has two meetings, and the review is moved to Thursday morning.',
+      'Let me know if you need anything else.',
+      'Thursday also has the planning session, which runs long.',
+      '',
+    ].join('\n');
+    const parts: TextStreamPart<ToolSet>[] = [{ type: 'text-delta', id: 't1', text: answer }, makeFinishStep('stop')];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBeUndefined();
+    expect(final.output.content).toBe(answer);
+  });
+
+  it('leaves two identical short lines in a row untouched', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: 'Done.\nDone.\n' },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBeUndefined();
+    expect(final.output.content).toBe('Done.\nDone.\n');
+  });
+
+  it('stops a third identical line of six or more words and says so', async () => {
+    const line = 'Please check the build output again.\n';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: line.repeat(3) },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(`${line.repeat(2)}\nStopped: the reply was repeating itself.`);
   });
 
   it('does not stop repetitive reasoning while the turn keeps issuing tool calls', async () => {
@@ -362,7 +409,7 @@ describe('mapStreamToChunks', () => {
     ];
 
     await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
-      new ModelOutputRepetitionError('reasoning'),
+      new ModelOutputRepetitionError(),
     );
   });
 
@@ -409,7 +456,7 @@ describe('mapStreamToChunks', () => {
     ];
 
     await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
-      new ModelOutputRepetitionError('reasoning'),
+      new ModelOutputRepetitionError(),
     );
   });
 
@@ -1034,6 +1081,28 @@ describe('enforceStreamDeadlines', () => {
     expect(deadlineController.signal.aborted).toBe(false);
   });
 
+  it('ends the read itself when the provider stream ignores the abort', async () => {
+    async function* stream() {
+      yield { type: 'start' } as TextStreamPart<ToolSet>;
+      // A provider that accepted the request and never ends its stream, abort or not.
+      await new Promise(() => undefined);
+    }
+    const deadlineController = new AbortController();
+    const outcome = collect(
+      enforceStreamDeadlines({
+        stream: stream(),
+        timeout: { firstChunkMs: 90_000, chunkMs: 60_000 },
+        hasSubstance: chunkHasSubstance,
+        deadlineController,
+      }),
+    ).then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
+    await jest.advanceTimersByTimeAsync(90_000);
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
   it('aborts with a first-chunk TimeoutError when no substantive part arrives in time', async () => {
     async function* stream() {
       yield { type: 'start' } as TextStreamPart<ToolSet>;
@@ -1050,13 +1119,18 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(60);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/first chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
   });
 
   it('aborts with a chunk TimeoutError once a substantive part has cleared the first-chunk deadline', async () => {
@@ -1075,13 +1149,18 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(30);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/^chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
   });
 });
 
@@ -1092,7 +1171,7 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     return chunks.map(chunk => chunk.choices[0]?.delta.content ?? '').join('');
   }
 
-  it('never streams DSML markup or the claim after it, and rebuilds the call', async () => {
+  it('holds the DSML call out of the reply, shows only the text before it, and returns no call', async () => {
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-start', id: 't1' },
       { type: 'text-delta', id: 't1', text: 'Let me add that for you. ' },
@@ -1120,18 +1199,32 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     expect(shown).toBe('Let me add that for you. ');
     expect(shown).not.toContain('DSML');
     expect(shown).not.toContain('added the appointment');
-    expect(final.tool_markup).toBe('recovered');
+    expect(final.tool_markup).toBe('leaked');
     expect(final.output.content).toBe('Let me add that for you. ');
-    expect(final.output.tool_calls).toHaveLength(1);
-    const call = final.output.tool_calls?.[0];
-    expect(call?.function.name).toBe('create_event');
-    expect(JSON.parse(call?.function.arguments ?? '{}')).toEqual({
-      title: 'Dentist',
-      start: { date_time: '2026-10-27T14:30:00', time_zone: 'America/New_York' },
-    });
+    expect(final.output.tool_calls).toBeUndefined();
   });
 
-  it('shows the garbled line in place of an invented function_results block and streams none of it', async () => {
+  it('holds back the lone DSML parameter line from the owner report, the exact text the model wrote', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Setting the reminder now.\n' },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="start" string="true">2026-10-23T09:10</｜DSML｜parameter>',
+      },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Setting the reminder now.\n');
+    expect(final.tool_markup).toBe('leaked');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
+  it('holds back an invented function_results block and shows the text before it, nothing after', async () => {
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-start', id: 't1' },
       { type: 'text-delta', id: 't1', text: 'Adding it now. ' },
@@ -1143,11 +1236,10 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     const { chunks, final } = await drainStream(
       mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
     );
-    const garbled = "The model's reply came back garbled. Try again, or pick another model in the model picker.";
-    expect(chunkText(chunks)).toBe(`Adding it now. \n\n${garbled}`);
-    expect(final.tool_markup).toBeUndefined();
+    expect(chunkText(chunks)).toBe('Adding it now. ');
+    expect(final.tool_markup).toBe('leaked');
     expect(final.output.tool_calls).toBeUndefined();
-    expect(final.output.content).toBe(`Adding it now. \n\n${garbled}`);
+    expect(final.output.content).toBe('Adding it now. ');
   });
 
   it('streams a reply whose text merely ends near an opener in full', async () => {

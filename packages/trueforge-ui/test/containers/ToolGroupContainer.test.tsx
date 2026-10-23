@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
@@ -53,23 +53,25 @@ function renderMultiToolMessage(
 }
 
 describe('AgentSteps grouping', () => {
-  it('groups consecutive tool calls under the agent internals disclosure', async () => {
+  it('groups consecutive tool calls under the agent internals disclosure when the switch is on', async () => {
+    renderMultiToolMessage(
+      [
+        { type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {}, result: 'a' },
+        { type: 'tool-call', toolCallId: '2', toolName: 'second_tool', args: {}, result: 'b' },
+      ],
+      { expanded: true },
+    );
+    expect(await screen.findByRole('region', { name: '2 steps · 2 tools' })).toBeInTheDocument();
+  });
+
+  it('shows no step row and no tool rows while the switch is off', () => {
     renderMultiToolMessage([
       { type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {}, result: 'a' },
       { type: 'tool-call', toolCallId: '2', toolName: 'second_tool', args: {}, result: 'b' },
     ]);
-    // With the chat-level switch off, the turn collapses into the faint one-line summary.
-    expect(screen.getByRole('region', { name: '2 steps · 2 tools' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /steps?/ })).not.toBeInTheDocument();
     expect(screen.getByText('first_tool')).not.toBeVisible();
-  });
-
-  it('renders both nested tool calls once expanded (defaultOpen)', () => {
-    renderMultiToolMessage([
-      { type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {} },
-      { type: 'tool-call', toolCallId: '2', toolName: 'second_tool', args: {} },
-    ]);
-    expect(screen.getByText('first_tool')).toBeInTheDocument();
-    expect(screen.getByText('second_tool')).toBeInTheDocument();
+    expect(screen.getByText('second_tool')).not.toBeVisible();
   });
 
   it('reveals the grouped tool calls when the chat-level switch is on', async () => {
@@ -80,13 +82,15 @@ describe('AgentSteps grouping', () => {
       ],
       { expanded: true },
     );
-    expect(await screen.findByText('first_tool')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('first_tool')).toBeVisible());
     expect(screen.getByText('second_tool')).toBeVisible();
   });
 
-  it('uses singular label for exactly one tool call in the group', () => {
-    renderMultiToolMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {} }]);
-    expect(screen.getByRole('region', { name: '1 step · 1 tool' })).toBeInTheDocument();
+  it('uses singular label for exactly one tool call in the group', async () => {
+    renderMultiToolMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {} }], {
+      expanded: true,
+    });
+    expect(await screen.findByRole('region', { name: '1 step · 1 tool' })).toBeInTheDocument();
   });
 
   it('renders text written before a tool call as ordinary answer text outside the internals', async () => {

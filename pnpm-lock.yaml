@@ -15,7 +15,7 @@ overrides:
   google-auth-library: ^10.9.0
 
 patchedDependencies:
-  '@truefoundry/assistant-ui-runtime@0.1.37': 6663a61ddb3cc9bec995d3030238c48b889c56c118f64e1bab3a8f050732fd33
+  '@truefoundry/assistant-ui-runtime@0.1.37': a9a4b1363b6f94791152c44b8043f92c8cd512e5042303d39f5678f599a8cc14
 
 importers:
 
@@ -344,7 +344,7 @@ importers:
         version: 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=6663a61ddb3cc9bec995d3030238c48b889c56c118f64e1bab3a8f050732fd33)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=a9a4b1363b6f94791152c44b8043f92c8cd512e5042303d39f5678f599a8cc14)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -702,6 +702,9 @@ importers:
       '@fontsource/inter-tight':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource/newsreader':
+        specifier: 5.3.0
+        version: 5.3.0
       '@openuidev/react-headless':
         specifier: ^0.9.13
         version: 0.9.13(ai@7.0.99(zod@4.6.4))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
@@ -713,7 +716,7 @@ importers:
         version: 0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.4))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.4))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.4))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.4)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=6663a61ddb3cc9bec995d3030238c48b889c56c118f64e1bab3a8f050732fd33)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=a9a4b1363b6f94791152c44b8043f92c8cd512e5042303d39f5678f599a8cc14)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -802,6 +805,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@types/hast':
+        specifier: ^3.0.5
+        version: 3.0.5
       '@types/leaflet':
         specifier: ^1.9.22
         version: 1.9.22
@@ -2126,6 +2132,9 @@ packages:
 
   '@fontsource/inter-tight@5.3.0':
     resolution: {integrity: sha512-uRwIrjKSUcCKIFeO2qm3yECA9phwge6Y1qQZvUmwqFgiIVWUELwwuq7pFlmlpPtO33ZtFQVOXQGNuvna1JPs6A==}
+
+  '@fontsource/newsreader@5.3.0':
+    resolution: {integrity: sha512-AFR6ZKY89GNL+9qBI2P2+66NhD5bhOj/v6fsLnFYLM4E0JnMB1yKb+Ro8cA64i1hwAWoBfTq5CHJGWH1toLDkw==}
 
   '@george43g/robustness@0.14.1':
     resolution: {integrity: sha512-zIppHhuvNYIX/jPeUW88nyRTtOlgI9pAJIDAnEehtGIpPTjO+FT0y/Wc36hZDtcSMyg6OuQzGqnAPIcEDpmBSg==}
@@ -10672,6 +10681,8 @@ snapshots:
 
   '@fontsource/inter-tight@5.3.0': {}
 
+  '@fontsource/newsreader@5.3.0': {}
+
   '@george43g/robustness@0.14.1': {}
 
   '@george43g/tui-kit@0.5.1(@george43g/robustness@0.14.1)(@types/react@19.3.0)(ink@7.1.1(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)':
@@ -12991,7 +13002,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=6663a61ddb3cc9bec995d3030238c48b889c56c118f64e1bab3a8f050732fd33)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
+  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=a9a4b1363b6f94791152c44b8043f92c8cd512e5042303d39f5678f599a8cc14)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
     dependencies:
       '@assistant-ui/core': 0.2.22(@assistant-ui/store@0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0))(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@assistant-ui/store': 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
@@ -13212,10 +13223,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/eslint-plugin@8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.10.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@8.68.0(@typescript-eslint/parser@8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.68.0(eslint@10.10.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/scope-manager': 8.68.0
       '@typescript-eslint/type-utils': 8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/utils': 8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
@@ -18374,7 +18385,7 @@ snapshots:
 
   typescript-eslint@8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.10.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.68.0(@typescript-eslint/parser@8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/parser': 8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/typescript-estree': 8.68.0(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/utils': 8.68.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)

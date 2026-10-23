@@ -39,6 +39,8 @@
     --font-display:
       'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-receipt: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Display titles only. Newsreader is bundled in fonts.css. */
+    --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
     /* Each palette colour is a hex line, then the same colour in oklch(); engines that read oklch() take the second. */
     --sidebar-bg: #efe7d8;
     --sidebar-bg: oklch(0.93 0.022 83.3);
@@ -100,9 +102,14 @@
     --gold-soft: oklch(0.955 0.048 93);
     --gold-line: #c9a95a;
     --gold-line: oklch(0.747 0.105 87.7);
+    /* The panda's frame, sampled from aman-avatar.png: parchment and wood in light. */
+    --panda-glow-from: #e5c7a1;
+    --panda-glow-from: oklch(0.846 0.061 73.2);
+    --panda-glow-to: #d5a272;
+    --panda-glow-to: oklch(0.75 0.088 64.6);
     --focus-ring: #7d5f15;
     --focus-ring: oklch(0.503 0.095 84.8);
-    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.16 0 0 0 0 0.15 0 0 0 0.16 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.16 0 0 0 0 0.15 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
     /* Brand accent: the theme's brass. Shares the focus-ring token so a host
      * that restyles the accent moves the mark's flourish with it. */
     --brand-accent: var(--focus-ring);
@@ -183,9 +190,14 @@
     --gold-soft: oklch(0.328 0.044 91.4);
     --gold-line: #8a6a2a;
     --gold-line: oklch(0.544 0.091 81.9);
+    /* The panda's frame, sampled from aman-avatar.png: the wall's glow and its deep brown in dark. */
+    --panda-glow-from: #824b25;
+    --panda-glow-from: oklch(0.469 0.091 53);
+    --panda-glow-to: #4f2710;
+    --panda-glow-to: oklch(0.324 0.069 48.5);
     --focus-ring: #e9b949;
     --focus-ring: oklch(0.809 0.138 85.2);
-    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.12 0 0 0 0 0.15 0 0 0 0.12 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.12 0 0 0 0 0.15 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
     --overlay: rgb(0 0 0 / 0.65);
     --shadow-color: #000000;
     --scrollbar-thumb: #6e6350;
@@ -400,13 +412,15 @@
 }
 
 /* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
-   all four edges lets the rail background show through instead of a hard cut. The gradients
-   are alpha ramps, not rendered colour, so light and dark blend without naming either. */
+   all four edges lets the frame's glow show through instead of a hard cut. In light, multiply
+   takes the picture's light areas into the glow, so its white backing disappears. The gradients
+   are alpha ramps, not rendered colour, so the rule names no colour of its own. */
 .aman-runtime-rail__avatar {
   width: 100%;
   max-width: 15rem;
   height: auto;
   object-fit: contain;
+  mix-blend-mode: multiply;
   -webkit-mask-image:
     linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
     linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
@@ -415,6 +429,14 @@
     linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
   -webkit-mask-composite: source-in;
   mask-composite: intersect;
+}
+
+/* Dark: multiply would darken the panda's blacks and whites, so the picture is drawn as it is
+   and only its edges fade into the glow through a radial mask. */
+.aui-theme-root.dark .aman-runtime-rail__avatar {
+  mix-blend-mode: normal;
+  -webkit-mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
+  mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
 }
 
 .aman-runtime-rail__avatar-fallback {
@@ -492,19 +514,6 @@
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.75rem;
-}
-
-/* Needs you: the rail's one gold card while an approval waits. Its line is the reader's own words. */
-.aman-runtime-rail__needs-you {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.75rem;
-}
-
-.aman-runtime-rail__needs-body {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 0.85rem;
 }
 
 .aman-runtime-rail__rules {
@@ -645,6 +654,7 @@
  * Tailwind v4 `@theme inline` registrations.
  * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
+  --font-serif: var(--font-serif);
   --color-sidebar-bg: var(--sidebar-bg);
   --color-topbar-bg: var(--topbar-bg);
   --color-primary-bg: var(--primary-bg);
@@ -1534,6 +1544,61 @@
   --paper-top: oklch(0.26 0.032 85.2);
 }
 
+/* The morning brief's one card: the ticket face with hairlines inside, no punch, stub or texture. */
+.aui-brief-card {
+  background-color: var(--card-bg);
+  background-image: none;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.0625rem 0.125rem rgb(70 50 20 / 0.1);
+  color: var(--text-primary);
+}
+
+.aui-theme-root.dark .aui-brief-card {
+  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
+}
+
+/* A quiet text action in the accent ink. Resets native button chrome so it looks the same with or without preflight. */
+.aui-brief-action {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--gold-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Where a brief item came from: a small quiet label, not part of the sentence. */
+.aui-brief-source {
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0 0.3125rem;
+  font-size: var(--text-xs);
+  line-height: 1.125rem;
+  color: var(--text-secondary);
+}
+
+.aui-brief-action:hover,
+.aui-brief-action:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.aui-brief-action:focus-visible {
+  outline: 0.125rem solid var(--gold-ink);
+  outline-offset: 0.125rem;
+  border-radius: 0.125rem;
+}
+
 /* Ticket: a card with a punch hole and a dashed tear line. */
 .aui-ticket {
   position: relative;
@@ -1638,15 +1703,6 @@
     0 0 / 100% 100% no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
     0 0 / 100% 100% no-repeat;
-}
-
-/* Chapter: a label column beside its rows, split from the chapter above by a dashed line. */
-.aui-chapter {
-  display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr);
-  column-gap: 1rem;
-  padding-block: 0.7rem;
-  border-top: 0.125rem dashed var(--border);
 }
 
 /* Row grid shared by chapter lines, receipt rows and rail rows: mark · when · text · action. */
@@ -1765,13 +1821,17 @@
   justify-self: start;
 }
 
-/* The panda's frame: a ticket with a gold-line edge and no fill, so the rail's one gold card stays Needs you. */
+/* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
+   instead of a white card. The hairline stays gold. */
 .aui-panda {
   display: grid;
   justify-items: center;
   gap: 0.5rem;
   padding: 0.4rem;
   border-color: var(--gold-line);
+  background-color: var(--panda-glow-to);
+  background-image: radial-gradient(ellipse at 50% 40%, var(--panda-glow-from), var(--panda-glow-to) 75%), var(--grain);
+  isolation: isolate;
 }
 
 .aui-panda__caption {
@@ -1781,22 +1841,14 @@
   padding: 0 0.25rem 0.25rem;
 }
 
+/* The caption sits on the glow, not the card, so it takes the primary text colour: the glow's
+   worst point is too light for the secondary one in light mode. */
 .aui-panda__role {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: var(--font-receipt);
   font-size: 0.68rem;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
-.aui-brief-display {
-  font-family: var(--font-display);
-}
-
-.aui-brief-mono {
-  font-family: var(--font-receipt);
 }
 
 /* An action in a row is a button; it keeps the look of the link it replaces. */
@@ -1810,11 +1862,6 @@
 
 /* Phone: the chapter label stacks above its rows and the when column narrows. */
 @media (max-width: 40rem) {
-  .aui-chapter {
-    grid-template-columns: 1fr;
-    row-gap: 0.3rem;
-  }
-
   .aui-row {
     grid-template-columns: 1.25rem 3rem minmax(0, 1fr) max-content;
   }
@@ -2085,4 +2132,46 @@
   font-family: var(--font-display);
   font-style: italic;
   color: var(--text-primary);
+}
+
+/* First frame: the day ticket's display title. */
+.aui-day-title {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.aui-ticket__title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+/* Tour card titles: the display face at the theme's text-xl, so a title takes a line or two. */
+.aui-tour-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* Every label on the Tour: the UI sans in secondary text. Monospace stays for code and data. */
+.aui-tour-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 40rem) {
+  .aui-day-title {
+    font-size: 1.9rem;
+  }
 }

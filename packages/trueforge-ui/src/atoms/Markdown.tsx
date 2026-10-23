@@ -16,6 +16,7 @@ import { isChatImageSrc, useChatImageScope, useInsideChatTurn } from '../chatIma
 import { useSlot, useThemeMode } from '../theme/SlotsProvider.js';
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { type CitationSource } from '../utils/citationMarkers.js';
+import { rehypeHighlightText } from '../utils/rehypeHighlightText.js';
 import { remarkCitationMarkers } from '../utils/remarkCitationMarkers.js';
 import { remarkNormalizeProseTypography } from '../utils/remarkNormalizeProseTypography.js';
 import { transformMarkdownSource } from '../utils/transformMarkdownSource.js';
@@ -51,6 +52,8 @@ export type MarkdownProps = {
    * only pictures a stored space contains. Any other remote picture stays a plain link.
    */
   spacePictures?: boolean;
+  /** Marks each case-insensitive match of this text in the rendered output. */
+  highlight?: string;
   className?: string;
 };
 
@@ -537,11 +540,9 @@ const MARKDOWN_SANITIZE_SCHEMA: SanitizeSchema = {
 //
 // Hosts must include KaTeX's own stylesheet (`katex/dist/katex.min.css`) for this output to lay
 // out and size correctly; this package does not bundle it (see packages/frontend's Vite entry).
-const REHYPE_PLUGINS: PluggableList = [
-  rehypeRaw,
-  [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA],
-  [rehypeKatex, { output: 'html' }],
-];
+const REHYPE_SANITIZE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]];
+const REHYPE_MATH_PLUGINS: PluggableList = [[rehypeKatex, { output: 'html' }]];
+const REHYPE_PLUGINS: PluggableList = [...REHYPE_SANITIZE_PLUGINS, ...REHYPE_MATH_PLUGINS];
 
 export function Markdown({
   content,
@@ -552,6 +553,7 @@ export function Markdown({
   readOnly,
   citationSources,
   spacePictures,
+  highlight,
   className,
 }: MarkdownProps) {
   const mode = useThemeMode();
@@ -606,6 +608,13 @@ export function Markdown({
 
   // Create remark plugins dynamically based on citation sources availability
   const remarkPlugins = useMemo(() => createRemarkPlugins(citationSources), [citationSources]);
+  const rehypePlugins = useMemo<PluggableList>(
+    () =>
+      highlight === undefined || highlight === ''
+        ? REHYPE_PLUGINS
+        : [...REHYPE_SANITIZE_PLUGINS, [rehypeHighlightText, { query: highlight }], ...REHYPE_MATH_PLUGINS],
+    [highlight],
+  );
 
   return (
     <div
@@ -613,7 +622,7 @@ export function Markdown({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={rehypePlugins}
         components={components}
         urlTransform={markdownUrlTransform}
       >

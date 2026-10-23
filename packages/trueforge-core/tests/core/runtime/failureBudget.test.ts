@@ -26,6 +26,10 @@ import { EXITED_NOTE } from '../../../src/core/sandbox/execResultSemantics';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
+// Guard tests run longer replies than the production step budget, and so would stop at it before the
+// guard under test can fire. The budget itself is covered by replyStepBudget.test.ts at production values.
+const RAISED_REPLY_STEP_BUDGET = { main: 1000, sub: 1000 };
+
 /**
  * A toolset with two tools: `write`, which always succeeds, and `run`, which fails the way the
  * caller decides: by returning an error result (it ran and failed) or by throwing before
@@ -135,11 +139,13 @@ async function runThreadInstance(
     threadId: 'main',
     title: 'Main',
     toolCallMemo,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     definition: {
+      stepBudget: RAISED_REPLY_STEP_BUDGET,
       modelClient,
       modelId: undefined,
       configuredModels: undefined,
@@ -318,11 +324,13 @@ describe('failed-batch nudge', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
@@ -405,11 +413,13 @@ describe('failed-batch nudge', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
@@ -532,25 +542,31 @@ describe('repeat budget', () => {
     // marks every other variant of the same tool as already warned. Exact sequence from the
     // finding: run({a:1}) twice, then run({a:2}) four times. The a:2 variant must get its own
     // nudge at its own second occurrence, and the turn must still stop at a:2's fourth occurrence.
+    // Every repeat is separated by another call, since an identical call straight after the one
+    // before it is refused and ends the turn at once (the repeat stop). Sequence: a:1 twice, a:2
+    // twice, filler variants between, then a:2 four times in all. The a:1 and a:2 variants are
+    // counted per variant, so the filler variants do not add to either.
     // A succeeding tool, not a failing one: consecutive_failed_batches has its own, lower stop
     // threshold (FAILED_BATCH_STOP_AT), and six straight failures would trip that budget first,
     // masking the repeat-budget behavior this test exists to check.
     const toolSet = makeSucceedingRunToolSet();
+    const variantSequence = [1, 2, 1, 2, 3, 2, 4, 2, 3, 2];
     const requests: LLMCreateParamsStreaming[] = [];
     let round = 0;
     const create = jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
       round += 1;
-      const args = round <= 2 ? { a: 1 } : { a: 2 };
-      return toolCallStream({ id: `run-${String(round)}`, name: 'run', args });
+      const variant = variantSequence[round - 1];
+      if (variant === undefined) return finalAnswerStream();
+      return toolCallStream({ id: `run-${String(round)}`, name: 'run', args: { a: variant } });
     });
 
     const events = await runThread(toolSet, create);
 
-    // Seven provider calls: the a:2 variant's fourth occurrence triggers the
-    // guard, the recovery pass runs a fifth identical call, and the guard
-    // fires again to end the turn.
-    expect(create).toHaveBeenCalledTimes(7);
+    // Ten provider calls: the a:2 variant's fourth occurrence (call 8) fires the guard and gets
+    // the recovery note; the next call (a:3) is followed by a fifth a:2 occurrence, which fires
+    // the guard again and ends the turn.
+    expect(create).toHaveBeenCalledTimes(10);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
@@ -571,10 +587,10 @@ describe('repeat budget', () => {
     const variant2Ref = `[ref:${markerFor({ a: 2 })}]`;
     expect(variant1Ref).not.toBe(variant2Ref);
 
-    // a:1's nudge is decided alongside its own second occurrence (round 2) and so first appears
-    // in the request sent for round 3 (index 2), never before.
-    expect(JSON.stringify(requests[1]?.messages)).not.toContain(variant1Ref);
-    expect(JSON.stringify(requests[2]?.messages)).toContain(variant1Ref);
+    // a:1's nudge is decided alongside its own second occurrence (round 3) and so first appears
+    // in the request sent for round 4 (index 3), never before.
+    expect(JSON.stringify(requests[2]?.messages)).not.toContain(variant1Ref);
+    expect(JSON.stringify(requests[3]?.messages)).toContain(variant1Ref);
 
     // a:2's nudge is decided alongside its own second occurrence (round 4) and so first appears
     // in the request sent for round 5 (index 4), never before, and never conflated with a:1's.
@@ -652,17 +668,26 @@ describe('repeat budget', () => {
       command: 'cd /opt/tf/workspace && python3 qwen_search.py',
     };
 
-    // "Turn 3": the same call three times, which stays under the four-call stop threshold.
+    // "Turn 3": the same call three times, with other calls between so no repeat is consecutive.
+    // That stays under the four-call stop threshold.
+    const earlierSteps = [
+      { id: 'run-earlier-1', name: 'run', args: repeatedArgs },
+      { id: 'lookup-earlier-1', name: 'lookup', args: { q: 'first' } },
+      { id: 'run-earlier-2', name: 'run', args: repeatedArgs },
+      { id: 'lookup-earlier-2', name: 'lookup', args: { q: 'second' } },
+      { id: 'run-earlier-3', name: 'run', args: repeatedArgs },
+    ];
     let earlierRound = 0;
     const earlierCreate = jest.fn(() => {
+      const step = earlierSteps[earlierRound];
       earlierRound += 1;
-      if (earlierRound > 3) return finalAnswerStream();
-      return toolCallStream({ id: `run-earlier-${String(earlierRound)}`, name: 'run', args: repeatedArgs });
+      if (step === undefined) return finalAnswerStream();
+      return toolCallStream(step);
     });
     const { events: earlierEvents, thread: earlierThread } = await runThreadInstance(toolSet, earlierCreate);
     expect(earlierEvents).not.toContainEqual(expect.objectContaining({ status: 'error' }));
     const hydratedToolCallMemo = earlierThread.toSnapshot().tool_call_memo;
-    expect(hydratedToolCallMemo?.call_signatures).toEqual([expect.objectContaining({ count: 3 })]);
+    expect(hydratedToolCallMemo?.call_signatures).toContainEqual(expect.objectContaining({ count: 3 }));
 
     // "Turn 9": a fresh AgentThread instance hydrated from that durable memo makes the
     // same call exactly once. Before the fix this summed to 4 against the hydrated count
@@ -673,7 +698,37 @@ describe('repeat budget', () => {
       if (laterRound > 1) return finalAnswerStream();
       return toolCallStream({ id: 'run-later-1', name: 'run', args: repeatedArgs });
     });
-    const { events: laterEvents } = await runThreadInstance(toolSet, laterCreate, hydratedToolCallMemo);
+    // A new user message starts the turn: the hydrated memo's turn ledger is reset in send(), as it
+    // is for a real new turn, so the earlier occurrences no longer count.
+    const laterThread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: hydratedToolCallMemo,
+      turnToolCallLedger: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelClient: { create: laterCreate, createNonStream: jest.fn() },
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [toolSet],
+      },
+      context: [{ role: 'user', content: 'What is the latest Qwen model?' }],
+    });
+    const laterEvents: unknown[] = [];
+    for await (const event of laterThread.send(
+      [{ type: EventType.USER_MESSAGE, content: 'Check the latest Qwen model again.' }],
+      new AbortController().signal,
+    )) {
+      laterEvents.push(event);
+    }
+    for await (const event of laterThread.execute({ signal: new AbortController().signal })) {
+      laterEvents.push(event);
+    }
 
     expect(laterEvents).not.toContainEqual(expect.objectContaining({ status: 'error' }));
     expect(laterEvents.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
@@ -691,34 +746,57 @@ describe('repeat budget', () => {
       command: 'cd /opt/tf/workspace && python3 qwen_search.py',
     };
 
-    // Before the pause: the same call twice, which stays under the four-call stop threshold
-    // (and reaches the nudge point).
+    // Before the pause: the same call twice, with another call between them, which stays under the
+    // four-call stop threshold and reaches the nudge point. The turn ends on a different call.
+    const beforeSteps = [
+      { id: 'run-before-1', name: 'run', args: repeatedArgs },
+      { id: 'lookup-before-1', name: 'lookup', args: { q: 'before' } },
+      { id: 'run-before-2', name: 'run', args: repeatedArgs },
+      { id: 'lookup-before-2', name: 'lookup', args: { q: 'before again' } },
+    ];
     let beforeRound = 0;
     const beforeCreate = jest.fn(() => {
+      const step = beforeSteps[beforeRound];
       beforeRound += 1;
-      if (beforeRound > 2) return finalAnswerStream();
-      return toolCallStream({ id: `run-before-${String(beforeRound)}`, name: 'run', args: repeatedArgs });
+      if (step === undefined) return finalAnswerStream();
+      return toolCallStream(step);
     });
     const { events: beforeEvents, thread: beforeThread } = await runThreadInstance(toolSet, beforeCreate);
     expect(beforeEvents).not.toContainEqual(expect.objectContaining({ status: 'error' }));
     const pausedToolCallMemo = beforeThread.toSnapshot().tool_call_memo;
-    expect(pausedToolCallMemo?.call_signatures).toEqual([expect.objectContaining({ count: 2 })]);
+    expect(pausedToolCallMemo?.call_signatures).toContainEqual(expect.objectContaining({ count: 2 }));
 
-    // After the pause: a fresh AgentThread instance hydrated from that same request's
-    // durable memo, marked as a continuation, makes the same call again until it stops —
-    // a third time (no nudge; already sent before the pause) and a fourth time (stop).
+    // After the pause: a fresh AgentThread instance hydrated from that same request's durable memo,
+    // marked as a continuation. The run call comes back: a third time (no nudge; already sent before
+    // the pause), then, after another call, a fourth time (first fire: recovery note), then after
+    // another call, a fifth time (second fire: the turn ends).
+    const afterSteps = [
+      { id: 'run-after-1', name: 'run', args: repeatedArgs },
+      { id: 'lookup-after-1', name: 'lookup', args: { q: 'after' } },
+      { id: 'run-after-2', name: 'run', args: repeatedArgs },
+      { id: 'lookup-after-2', name: 'lookup', args: { q: 'after again' } },
+      { id: 'run-after-3', name: 'run', args: repeatedArgs },
+    ];
     let afterRound = 0;
     const afterCreate = jest.fn(() => {
+      const step = afterSteps[afterRound];
       afterRound += 1;
-      return toolCallStream({ id: `run-after-${String(afterRound)}`, name: 'run', args: repeatedArgs });
+      if (step === undefined) return finalAnswerStream();
+      return toolCallStream(step);
     });
     const { events: afterEvents } = await runThreadInstance(toolSet, afterCreate, pausedToolCallMemo, true);
 
-    // Three calls after the pause: the identical-call counts combine across the
-    // pause (2 before + 3 after). The guard triggers recovery on the fourth
-    // occurrence, and the turn ends safely without looping forever.
-    expect(afterCreate).toHaveBeenCalledTimes(3);
-    expect(afterEvents.at(-1)).toMatchObject({ type: 'internal.agent.done' });
+    // The identical-call counts combine across the pause (2 before + 3 after). The fourth
+    // occurrence is the first fire, and the fifth, the second fire, ends the turn with loop_detected.
+    expect(afterCreate).toHaveBeenCalledTimes(5);
+    expect(afterEvents).toContainEqual(
+      expect.objectContaining({
+        type: InternalEventType.AGENT_DONE,
+        status: 'error',
+        error: expect.stringContaining('the same run call four times in this request'),
+        handoff_cause: 'loop_detected',
+      }),
+    );
   });
 
   it("keeps a connector's own intent argument in the signature", async () => {
@@ -791,10 +869,16 @@ describe('repeat budget', () => {
     const root = new AgentThread({
       threadId: 'main',
       title: 'Main',
-      definition: { modelId: undefined, configuredModels: undefined, modelClient: rootModel },
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelId: undefined,
+        configuredModels: undefined,
+        modelClient: rootModel,
+      },
       context: [{ role: 'user', content: 'Delegate this.' }],
       capabilities,
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -807,6 +891,7 @@ describe('repeat budget', () => {
           threadId: input.threadId,
           title: input.request.name,
           definition: {
+            stepBudget: RAISED_REPLY_STEP_BUDGET,
             modelId: undefined,
             configuredModels: undefined,
             modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
@@ -814,6 +899,7 @@ describe('repeat budget', () => {
           parent: input.parent,
           agentInfo: input.request,
           toolCallMemo: undefined,
+          turnToolCallLedger: undefined,
           taskState: undefined,
           isRequestContinuation: undefined,
           tracing: NOOP_AGENT_TRACING,
@@ -832,10 +918,9 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(3);
-    // With loop recovery, the fourth identical spawn triggers a recovery note
-    // rather than an immediate error. The turn still ends safely (with an error)
-    // without running forever.
+    // An identical launch is refused once the first has run, so one child starts and the
+    // repeats cannot relaunch it. The turn still ends safely (with an error) without running forever.
+    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'error' });
   });
 
@@ -857,7 +942,11 @@ describe('repeat budget', () => {
       if (round === 1) {
         return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
       }
+      // Round 2 is a different run call, so the identical one in round 3 is not consecutive.
       if (round === 2) {
+        return toolCallStream({ id: 'run-between', name: 'run', args: { command: 'ls' } });
+      }
+      if (round === 3) {
         const questionTool = request.tools?.find(
           tool => tool.type === 'function' && tool.function.name.endsWith(ASK_USER_QUESTION_TOOL_NAME),
         );
@@ -884,12 +973,13 @@ describe('repeat budget', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition,
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [askUserQuestion()],
     });
 
@@ -921,6 +1011,7 @@ describe('repeat budget', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: thread.toSnapshot().tool_call_memo,
+      turnToolCallLedger: undefined,
       taskState: thread.toSnapshot().task_state,
       isRequestContinuation: true,
       tracing: NOOP_AGENT_TRACING,
@@ -933,19 +1024,23 @@ describe('repeat budget', () => {
       // Consume the resumed execution to the end.
     }
 
-    expect(requests).toHaveLength(3);
-    const finalMessages = requests[2]?.messages ?? [];
+    expect(requests).toHaveLength(4);
+    const finalMessages = requests[3]?.messages ?? [];
     const assistantBatchIndex = finalMessages.findIndex(
       message => message.role === 'assistant' && 'tool_calls' in message && message.tool_calls?.length === 2,
     );
     expect(assistantBatchIndex).toBeGreaterThanOrEqual(0);
     const messagesAfterBatch = finalMessages.slice(assistantBatchIndex + 1);
-    // Both tool results, then the nudge — never a user message ahead of a tool result from the
-    // same batch, and the request message sequence stays assistant, tool, tool, user.
+    // Both tool results come first, never a user message ahead of them. The per-reply block sits
+    // just before the latest user message, which here is the nudge.
     expect(messagesAfterBatch[0]).toMatchObject({ role: 'tool' });
     expect(messagesAfterBatch[1]).toMatchObject({ role: 'tool' });
-    expect(messagesAfterBatch[2]).toMatchObject({ role: 'user' });
-    expect(JSON.stringify(messagesAfterBatch[2])).toContain(nudgeText);
+    expect(messagesAfterBatch[2]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('<reply-context>'),
+    });
+    expect(messagesAfterBatch[3]).toMatchObject({ role: 'user' });
+    expect(JSON.stringify(messagesAfterBatch[3])).toContain(nudgeText);
   });
 
   it('defers the nudge until a sub-agent launched from the same batch finishes', async () => {
@@ -968,7 +1063,11 @@ describe('repeat budget', () => {
         if (round === 1) {
           return toolCallStream({ id: 'run-1', name: 'run', args: runArgs });
         }
+        // Round 2 is a different run call, so the identical one in the batch below is not consecutive.
         if (round === 2) {
+          return toolCallStream({ id: 'run-between', name: 'run', args: { command: 'ls' } });
+        }
+        if (round === 3) {
           const spawnTool = request.tools?.find(
             tool => tool.type === 'function' && tool.function.name.includes('create_sub_agent'),
           );
@@ -997,18 +1096,20 @@ describe('repeat budget', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient: rootModel,
         modelId: undefined,
         configuredModels: undefined,
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities,
     });
     const agentThreads = new Map<string, AgentThread>([['main', root]]);
@@ -1018,6 +1119,7 @@ describe('repeat budget', () => {
           threadId: input.threadId,
           title: input.request.name,
           definition: {
+            stepBudget: RAISED_REPLY_STEP_BUDGET,
             modelId: undefined,
             configuredModels: undefined,
             modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
@@ -1025,6 +1127,7 @@ describe('repeat budget', () => {
           parent: input.parent,
           agentInfo: input.request,
           toolCallMemo: undefined,
+          turnToolCallLedger: undefined,
           taskState: undefined,
           isRequestContinuation: undefined,
           tracing: NOOP_AGENT_TRACING,
@@ -1074,33 +1177,51 @@ describe('repeat budget', () => {
     const toolSet = makeSucceedingRunToolSet();
     const runArgs = { command: 'cd /opt/tf/workspace && python3 qwen_search.py' };
     const nudgeText = 'You already made this exact run call in this request';
+    // The repeated call is separated by a different run call each time, so no repeat is consecutive.
+    // Calls 1, 3, 5, 7 and 9 are the repeated call (its occurrences 1 to 5).
+    const runSequence = [
+      runArgs,
+      { command: 'ls one' },
+      runArgs,
+      { command: 'ls two' },
+      runArgs,
+      { command: 'ls three' },
+      runArgs,
+      { command: 'ls four' },
+      runArgs,
+    ];
     const requests: LLMCreateParamsStreaming[] = [];
     let round = 0;
     const create = jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
       round += 1;
-      return toolCallStream({ id: `run-${String(round)}`, name: 'run', args: runArgs });
+      const args = runSequence[round - 1];
+      if (args === undefined) return finalAnswerStream();
+      return toolCallStream({ id: `run-${String(round)}`, name: 'run', args });
     });
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
-    // Compacts away on the preLLM pass before the third `run` call's request is built — right
-    // after the second call's nudge landed in context, and before the third call can see it.
-    const compaction = new CompactAwayOnNthCall(3);
+    // Compacts away on the preLLM pass before the fifth model call's request is built: the
+    // repeated call's second occurrence (call 3) has already landed its nudge in context, and the
+    // fifth model call is the one that would have seen it, as the third occurrence.
+    const compaction = new CompactAwayOnNthCall(5);
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [{ preLLMProcessors: [compaction] }],
     });
 
@@ -1109,9 +1230,10 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    // Five provider calls: four identical calls trigger the guard, the recovery
-    // pass runs a fifth identical call, and the guard fires again to end the turn.
-    expect(create).toHaveBeenCalledTimes(5);
+    // Nine provider calls: the fourth occurrence of the repeated call (call 7) is the first fire,
+    // which gives the recovery note; the fifth occurrence (call 9) is the second fire, which ends
+    // the turn with loop_detected.
+    expect(create).toHaveBeenCalledTimes(9);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
@@ -1121,13 +1243,15 @@ describe('repeat budget', () => {
       }),
     );
 
-    // Compaction wiped the nudge (and everything else) before the third call's request was
-    // built, so that request must not carry it.
-    expect(JSON.stringify(requests[2]?.messages)).not.toContain(nudgeText);
-    // The third occurrence still gets a nudge in the request that follows it: the durable guard
-    // found no nudge for `run` left in context (compaction erased it), so it is re-sent rather
-    // than staying suppressed by a one-shot latch on the count.
+    // The nudge for the second occurrence is in context before compaction runs.
     expect(JSON.stringify(requests[3]?.messages)).toContain(nudgeText);
+    // Compaction wiped the nudge (and everything else) before the fifth call's request was built,
+    // so that request must not carry it.
+    expect(JSON.stringify(requests[4]?.messages)).not.toContain(nudgeText);
+    // The third occurrence (call 5) still gets a nudge in the request that follows it: the durable
+    // guard found no nudge for `run` left in context (compaction erased it), so it is re-sent rather
+    // than staying suppressed by a one-shot latch on the count.
+    expect(JSON.stringify(requests[5]?.messages)).toContain(nudgeText);
   });
 
   it('does not stop a streak of grep with no matches (exit 1 treated as ok)', async () => {
@@ -1337,24 +1461,36 @@ describe('repeat budget', () => {
     expect(toolSet.callTool).toHaveBeenCalledTimes(5);
     expect(differentEvents.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
 
-    // Then, the same exited command called four times in a row: the identical-call guard stops
-    // the turn on the fourth occurrence, never reaching a fifth call, even though every one of
-    // those results is "exited" and never sets isError.
+    // Then, the same exited command called over and over, with a different exited command between
+    // each occurrence so no repeat is consecutive: the identical-call guard stops the turn on the
+    // fourth occurrence (first fire: recovery note), and the fifth occurrence (second fire) ends it,
+    // even though every one of those results is "exited" and never sets isError.
     jest.mocked(toolSet.callTool).mockClear();
+    const sameCommand = { command: 'cat file.txt | grep pattern' };
+    const identicalSequence = [
+      sameCommand,
+      { command: 'cat other_1.txt | grep pattern' },
+      sameCommand,
+      { command: 'cat other_2.txt | grep pattern' },
+      sameCommand,
+      { command: 'cat other_3.txt | grep pattern' },
+      sameCommand,
+      { command: 'cat other_4.txt | grep pattern' },
+      sameCommand,
+    ];
     let identicalRound = 0;
     const identicalCommandCreate = jest.fn(() => {
+      const args = identicalSequence[identicalRound];
       identicalRound += 1;
-      if (identicalRound > 5) return finalAnswerStream();
-      return toolCallStream({
-        id: `exec-identical-${String(identicalRound)}`,
-        name: 'exec',
-        args: { command: 'cat file.txt | grep pattern' },
-      });
+      if (args === undefined) return finalAnswerStream();
+      return toolCallStream({ id: `exec-identical-${String(identicalRound)}`, name: 'exec', args });
     });
     const identicalEvents = await runThread(toolSet, identicalCommandCreate);
 
-    // Five calls: four identical trigger the guard, the recovery pass runs a
-    // fifth identical call, and the guard fires again to end the turn.
+    // The same command runs once, the four different commands each run once, and the repeats of
+    // the same command are refused in the same reply. The repeat budget ends the turn with a
+    // loop_detected stop on the fifth occurrence.
+    expect(identicalCommandCreate).toHaveBeenCalledTimes(9);
     expect(toolSet.callTool).toHaveBeenCalledTimes(5);
     expect(identicalEvents).toContainEqual(
       expect.objectContaining({
@@ -1410,11 +1546,13 @@ describe('pre-edit discovery hard cap', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,

@@ -19,9 +19,9 @@ import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../Tool
  * not the function name a particular provider happened to invoke — is what
  * this processor matches on.
  */
-export const WEB_SEARCH_RENDER_MAX_RESULTS = 10;
-const WEB_SEARCH_EXCERPTS_PER_RESULT = 2;
-const WEB_SEARCH_EXCERPT_MAX_CHARS = 300;
+export const WEB_SEARCH_RENDER_MAX_RESULTS = 5;
+const WEB_SEARCH_EXCERPTS_PER_RESULT = 1;
+const WEB_SEARCH_EXCERPT_MAX_CHARS = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -84,7 +84,6 @@ function collectExcerpts(item: Record<string, unknown>): string[] {
 interface RenderableResult {
   title: string;
   url: string;
-  publishDate: string | undefined;
   excerpts: string[];
 }
 
@@ -122,7 +121,6 @@ function parseResultItems(results: unknown[]): RenderableResult[] {
     items.push({
       title: stringField(raw, 'title') ?? url,
       url,
-      publishDate: stringField(raw, 'publish_date'),
       excerpts: collectExcerpts(raw),
     });
   }
@@ -170,9 +168,6 @@ export function renderWebSearchResultsMarkdown(content: string): string | undefi
   const shown = items.slice(0, WEB_SEARCH_RENDER_MAX_RESULTS);
   const entries = shown.map((item, index) => {
     const lines = [`${String(index + 1)}. ${item.title}`, `   ${item.url}`];
-    if (item.publishDate !== undefined) {
-      lines.push(`   ${item.publishDate}`);
-    }
     for (const excerpt of item.excerpts.slice(0, WEB_SEARCH_EXCERPTS_PER_RESULT)) {
       lines.push(`   ${truncateAtWordBoundary(excerpt, WEB_SEARCH_EXCERPT_MAX_CHARS)}`);
     }

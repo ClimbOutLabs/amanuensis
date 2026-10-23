@@ -466,6 +466,21 @@ export function parseTokenFactoryMode(options: {
   throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
 }
 
+/** The web search provider an instance designates at startup. */
+export type SearchProviderChoice = 'parallel' | 'tavily';
+
+/** Parses `SEARCH_PROVIDER`. Unset/blank → `parallel`, the keyless default. */
+export function parseSearchProviderChoice(options: { envKey: string; raw: string | undefined }): SearchProviderChoice {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'parallel';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'parallel' || value === 'tavily') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of parallel, tavily; got ${JSON.stringify(options.raw)}`);
+}
+
 /** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
 function blankToUndefined(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
@@ -998,6 +1013,13 @@ export interface SharedServerConfiguration {
   LOG_LEVEL: string;
   /** Log one line per HTTP request (except `/healthz`). Env: `ACCESS_LOGS`. Default true. */
   ACCESS_LOGS: boolean;
+  /**
+   * Token eval instance: Gmail and Calendar answer from the eval fixtures, and only approvals for the
+   * fixture-backed tools and maps and search are allowed through. Env: `AMAN_EVAL_MODE`. Default false.
+   */
+  AMAN_EVAL_MODE: boolean;
+  /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */
+  EVAL_FIXTURE_DIR: string;
   /** Node environment. Env: `NODE_ENV`. */
   NODE_ENV: string | undefined;
   /**
@@ -1112,13 +1134,26 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
+   * Bound in milliseconds on waiting for a model call's first output, on every
+   * step. A provider that accepts the request and then says nothing would
+   * otherwise hold the turn open. Also the default first-chunk deadline for a
+   * provider whose `stream_timeout` does not set one.
+   * Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default 90000 (90 seconds).
    */
   MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks once it has
+   * started answering. Also the default per-chunk deadline for a provider
+   * whose `stream_timeout` does not set one.
+   * Env: `MODEL_STREAM_IDLE_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  MODEL_STREAM_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -1291,6 +1326,12 @@ export interface SharedServerConfiguration {
    */
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
   /**
+   * Max milliseconds a turn's drain waits for its follow-up work (memory, turn summary, profile
+   * learning, artifacts) after the answer. Past it the work keeps running unwatched.
+   * Env: `TURN_FOLLOW_UP_TIMEOUT_MS`. Default 120000.
+   */
+  TURN_FOLLOW_UP_TIMEOUT_MS: number;
+  /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
    * Default 1380 (23 minutes): must stay above run_code's dispatch deadline
@@ -1366,7 +1407,7 @@ export interface SharedServerConfiguration {
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
-   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
+   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
   /**
@@ -1608,6 +1649,17 @@ export interface SharedServerConfiguration {
    * Env: `NEBIUS_API_KEY`. Unset by default.
    */
   NEBIUS_API_KEY: string | undefined;
+  /**
+   * The web search provider this instance designates at startup. `parallel` (the default) keeps
+   * the keyless Parallel connector; `tavily` designates the Tavily connector with `TAVILY_API_KEY`.
+   * Env: `SEARCH_PROVIDER`. Default `parallel`.
+   */
+  SEARCH_PROVIDER: SearchProviderChoice;
+  /**
+   * Tavily API key, written to the Tavily connector at startup when `SEARCH_PROVIDER` is `tavily`.
+   * Never logged. Env: `TAVILY_API_KEY`. Unset by default.
+   */
+  TAVILY_API_KEY: string | undefined;
   /**
    * Token Factory model id used for fallback and forced routing.
    * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
@@ -1899,6 +1951,8 @@ const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
+  AMAN_EVAL_MODE: parseBoolean({ envKey: 'AMAN_EVAL_MODE', raw: getEnv('AMAN_EVAL_MODE'), defaultValue: false }),
+  EVAL_FIXTURE_DIR: path.join(PACKAGE_ROOT, 'evals', 'fixtures'),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
   BUG_REPORT_HANDOFF_URL: parseHandoffUrl(getEnv('BUG_REPORT_HANDOFF_URL')),
@@ -1958,7 +2012,18 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
     // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
+    defaultValue: 90_000,
+  }),
+  MODEL_STREAM_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -2083,6 +2148,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
     defaultValue: 30_000,
   }),
+  TURN_FOLLOW_UP_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_FOLLOW_UP_TIMEOUT_MS',
+    raw: getEnv('TURN_FOLLOW_UP_TIMEOUT_MS'),
+    defaultValue: 120_000,
+  }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({
     envKey: 'TURN_STREAM_TTL_SECONDS',
@@ -2122,7 +2192,7 @@ const shared: SharedServerConfiguration = {
   MEMORY_RECALL_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_MAX_TOKENS',
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
-    defaultValue: 2048,
+    defaultValue: 600,
   }),
   MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
@@ -2303,6 +2373,8 @@ const shared: SharedServerConfiguration = {
     defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),
+  TAVILY_API_KEY: blankToUndefined(getEnv('TAVILY_API_KEY')),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
   TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(

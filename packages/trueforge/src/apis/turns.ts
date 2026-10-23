@@ -2,7 +2,14 @@
  * DB-backed turns API (mounted at /api/v1/sessions).
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  ISessionStore,
+  Sessions,
+  SessionTitleSeed,
+  TerminalTurnState,
+  Turn,
+  TurnStreamingEvent,
+} from '@truefoundry/trueforge-core/agent-session';
 import {
   ApprovalRequestEndedError,
   CancellationReason,
@@ -55,10 +62,13 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { gateEvalApprovals } from '../eval/approvalGate';
+import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
@@ -83,8 +93,13 @@ import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
+import {
+  submitRetainWithVerification,
+  type RetainOutcomeLog,
+  type SummarizeTurnContext,
+} from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { resolveSummarizationModelFqn } from '../runtime/memory/memorySummarize';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import {
@@ -123,6 +138,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
+import { applyAutoSessionTitle, truncateSessionTitle, type AutoSessionTitleTarget } from '../runtime/sessionTitle';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -133,7 +149,9 @@ import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/t
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
+import { TENANT_ID } from '../tenancy';
 import { canReadAgentBoundResource } from './agentAccess';
+import { readServerSandboxAvailable } from './capabilities';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -241,6 +259,8 @@ export interface TurnsRouterDeps {
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
   turnDrains: TurnDrainRegistry;
+  /** Offline mode gates the chat title call. */
+  sentinelSettingsStore: ISentinelSettingsStore;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
@@ -287,6 +307,7 @@ export type BeginTurnExecutionDeps = Pick<
   | 'globalSettingsStore'
   | 'mcpCatalog'
   | 'tokenFactoryBudget'
+  | 'sentinelSettingsStore'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -335,6 +356,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
+  /** The turn's input holds a new message from the person, not only approvals or tool responses. */
+  startsAnswer: boolean;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -343,6 +366,8 @@ function createTurnResolver(deps: {
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
+  /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
+  serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
@@ -387,6 +412,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
+    startsAnswer,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -394,6 +420,7 @@ function createTurnResolver(deps: {
     switchNotice,
     internalSourceState,
     boundRepository,
+    serverSandboxAvailable,
     repositoryStore,
     sessionStore,
     memoryClient,
@@ -533,6 +560,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
@@ -709,6 +737,7 @@ function createTurnResolver(deps: {
       },
       logger,
       boundRepository,
+      serverSandboxAvailable,
       clientTimezone,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
@@ -716,7 +745,9 @@ function createTurnResolver(deps: {
       // run_code's own provisioning-sized deadline, derived from the sandbox
       // bounds — the 21-minute bound is scoped to sandbox/run_code alone.
       runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
+      searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+      modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -803,33 +834,11 @@ function createTurnResolver(deps: {
       schedules,
       personas,
       logger,
+      startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
   );
-}
-
-const MAX_SESSION_TITLE_LENGTH = 50;
-
-/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
-const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
-/**
- * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
- * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
- * ZWJ sequences, which read as one unit but span several) are dropped whole.
- */
-function truncateSessionTitle(title: string): string {
-  let truncated = '';
-  let length = 0;
-  for (const { segment } of titleSegmenter.segment(title)) {
-    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
-      break;
-    }
-    truncated += segment;
-    length += segment.length;
-  }
-  return truncated;
 }
 
 /**
@@ -862,6 +871,77 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
+}
+
+/** A chat's first-message title, or null when the message has no usable text. */
+export function firstMessageTitleSeed(input: TurnInputItem[] | undefined): SessionTitleSeed | null {
+  const title = deriveSessionTitle(input);
+  return title === undefined ? null : { title, source: 'first_message' };
+}
+
+/**
+ * The chat-title target for a turn: present only for a chat's first interactive turn with a
+ * text message, when the chat is online and a helper model resolves. Scheduled turns never get a
+ * generated title; their fixed title is seeded at create time instead.
+ */
+async function resolveAutoSessionTitleTarget(params: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  input: TurnInputItem[] | undefined;
+  unattended: boolean | undefined;
+  subjectId: string;
+  personaModelName: string | undefined;
+  modelProviderStore: IModelProviderStore;
+  agentStore: IAgentStore;
+  sentinelSettingsStore: ISentinelSettingsStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
+  logger: Logger;
+}): Promise<AutoSessionTitleTarget | undefined> {
+  const { session, input, unattended, subjectId, logger } = params;
+  if (unattended === true || session.record.source !== null || session.record.last_turn_id !== null) {
+    return undefined;
+  }
+  const userText = extractUserMessageText(input ?? []);
+  if (userText.trim() === '') {
+    return undefined;
+  }
+  // A failed lookup only costs the chat its generated title; the turn itself must still run.
+  let modelFqn: string | undefined;
+  try {
+    const sentinel = await params.sentinelSettingsStore.get({ tenant_id: TENANT_ID, created_by: subjectId });
+    if (sentinel.offline_mode) {
+      logger.info('Chat title not generated: offline mode is on', { sessionId: session.session_id });
+      return undefined;
+    }
+    modelFqn = await resolveSummarizationModelFqn({
+      tenantId: session.tenant_id,
+      personaModelName: params.personaModelName,
+      sessionAgent: session.record.agent,
+      agentStore: params.agentStore,
+      helperFqn: turnHelperModelFqn(),
+    });
+  } catch (error) {
+    logger.info('Chat title not generated: the helper model did not resolve', {
+      sessionId: session.session_id,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+  if (modelFqn === undefined || modelFqn.trim() === '') {
+    return undefined;
+  }
+  return {
+    store: params.sessionStore,
+    tenantId: session.tenant_id,
+    sessionId: session.session_id,
+    userText,
+    modelFqn,
+    modelProviderStore: params.modelProviderStore,
+    tokenFactoryBudget: params.tokenFactoryBudget,
+    modelUsage: params.modelUsage,
+    logger,
+  };
 }
 
 /** True when any user message in a create-turn input carries an attached file. */
@@ -1004,10 +1084,54 @@ async function resolveAndSubmitArtifactPersistence(params: {
   }
 }
 
+/** Outcome logging for an interactive turn: its retain persona, and the store to read the chat's persona after it. */
+export interface TurnOutcomeLog extends RetainOutcomeLog {
+  personaStore: Pick<IPersonaStore, 'getSessionPersona'>;
+  tenantId: string;
+}
+
 /**
- * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
- * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
- * of dropping them when a SIGTERM lands in the drain window.
+ * Logs when the turn's memory went to the vault of the persona it started with but the chat
+ * ended under another (a `use_persona` switch during the turn).
+ */
+async function logTurnPersonaSwitch(params: {
+  outcomeLog: TurnOutcomeLog;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { outcomeLog, sessionId, turnId, logger } = params;
+  let activePersonaName: string;
+  try {
+    const active = await outcomeLog.personaStore.getSessionPersona({
+      tenant_id: outcomeLog.tenantId,
+      session_id: sessionId,
+    });
+    activePersonaName = active?.persona_name ?? 'shared';
+  } catch (error) {
+    logger.warn('Could not read the chat persona after a turn; persona switch not checked', {
+      sessionId,
+      turnId,
+      ...extractErrorLogFields(error),
+    });
+    return;
+  }
+  if (activePersonaName === outcomeLog.personaName) {
+    return;
+  }
+  logger.info('Turn memory saved under the persona the turn started with', {
+    sessionId,
+    turnId,
+    personaName: outcomeLog.personaName,
+    activePersonaName,
+    reason: 'persona_switched',
+  });
+}
+
+/**
+ * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait, up to the
+ * follow-up time limit, for the TURN_DONE submissions (artifact persistence, memory retain,
+ * profile learning) instead of dropping them when a SIGTERM lands in the drain window.
  */
 export interface DrainTurnEventsInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
@@ -1032,10 +1156,14 @@ export interface DrainTurnEventsInput {
          * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
          */
         summarize?: SummarizeTurnContext | undefined;
+        /** Present only for interactive turns; scheduled turns log nothing at info. */
+        outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
   modelUsage?: ModelUsageDrainMember | undefined;
+  /** Present only for a chat's first interactive turn; the drain names the chat after its reply. */
+  auto_title?: AutoSessionTitleTarget | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
@@ -1055,25 +1183,31 @@ export interface DrainTurnEventsInput {
 }
 
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
-  const drain = runTurnEventDrain(input);
+  // Registered before the stream runs so the chat's next turn, which freezes this one first,
+  // always finds it. Settles once this turn's files are saved, or when the drain of a turn that
+  // did not finish ends.
+  const artifactCapture = Promise.withResolvers<undefined>();
+  input.turnDrains.trackArtifactCapture({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    capture: artifactCapture.promise,
+  });
+  const drain = runTurnEventDrain({
+    input,
+    markArtifactsCaptured: () => {
+      artifactCapture.resolve(undefined);
+    },
+  });
   input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
   return drain;
 }
 
-async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
-  const {
-    trackedStream,
-    turnEventStream,
-    sessionId,
-    turnId,
-    executionDeadline,
-    logger,
-    onEvent,
-    memory,
-    artifacts,
-    profileLearning,
-    modelUsage,
-  } = input;
+async function runTurnEventDrain(params: {
+  input: DrainTurnEventsInput;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, markArtifactsCaptured } = params;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, logger, onEvent, memory } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1081,6 +1215,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // turn that attached one starts out tainted. A turn with neither is the user's own voice:
   // `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -1092,55 +1227,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
-        // First, so the answer's usage is visible before the slower follow-up work below.
-        const flushUsage = async () => {
-          if (modelUsage !== undefined) {
-            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
-          }
-        };
-        await flushUsage();
-        if (memory !== undefined) {
-          // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
-          // it, and the verification pass inside retries a failed retain once.
-          await submitRetainWithVerification({
-            client: memory.client,
-            sessionId,
-            turnId,
-            userText: memory.userText,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            completedAt: event.state.completed_at,
-            sessionTitle: memory.sessionTitle,
-            origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
-            logger,
-            summarize: memory.summarize,
-          });
-        }
-        if (profileLearning !== undefined) {
-          // The assistant's reply is deliberately not passed here: it is not a source of facts
-          // about the user, so the learning pass only ever sees the user's own turn text.
-          // Awaited so the tracked drain covers the pass; the pass writes its audit event to
-          // the turnEventStream (how an open tab sees it without reloading the turn).
-          await submitProfileLearning({
-            ...profileLearning,
-            sessionId,
-            turnId,
-            completedAt: event.state.completed_at,
-            turnEventStream,
-            logger,
-          });
-        }
-        // The summarization and profile learning calls above record after the first flush.
-        await flushUsage();
-        if (artifacts !== undefined) {
-          await resolveAndSubmitArtifactPersistence({
-            ...artifacts,
-            sessionId,
-            turnId,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            logger,
-          });
-        }
+        // Not awaited here: the stream must finish now, so the chat's next turn waits only on
+        // the artifact step. The drain awaits the rest below, up to its time limit.
+        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
       }
+    }
+    if (followUp !== undefined) {
+      await waitForTurnFollowUp({ followUp, sessionId, turnId, logger });
     }
   } catch (error) {
     if (error instanceof SessionStoreNotFoundError) {
@@ -1157,8 +1250,157 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
     }
   } finally {
+    if (followUp === undefined) {
+      markArtifactsCaptured();
+    }
     executionDeadline.dispose();
   }
+}
+
+/**
+ * The work a finished turn does after its answer: artifacts, usage, title, memory, profile learning.
+ * Never throws; a failure is logged.
+ */
+async function runTurnFollowUp(params: {
+  input: DrainTurnEventsInput;
+  state: Extract<TerminalTurnState, { status: 'done' }>;
+  ingestedToolOutput: boolean;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, auto_title } =
+    input;
+  try {
+    // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
+    // on this step, so its tools cannot change a file before this turn has saved it.
+    try {
+      if (artifacts !== undefined) {
+        await resolveAndSubmitArtifactPersistence({
+          ...artifacts,
+          sessionId,
+          turnId,
+          assistantText: formatAssistantMessageText(state.output?.content),
+          logger,
+        });
+      }
+    } finally {
+      markArtifactsCaptured();
+    }
+    // Before the model calls below, so the answer's usage is visible before that slower work.
+    const flushUsage = async () => {
+      if (modelUsage !== undefined) {
+        await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+      }
+    };
+    await flushUsage();
+    if (auto_title !== undefined) {
+      // Never blocks the reply: the reply is already complete on the stream.
+      await applyAutoSessionTitle({
+        ...auto_title,
+        assistantText: formatAssistantMessageText(state.output?.content),
+      });
+    }
+    if (memory !== undefined) {
+      // Awaited so the verification pass inside can retry a failed retain once.
+      const stored = await submitRetainWithVerification({
+        client: memory.client,
+        sessionId,
+        turnId,
+        userText: memory.userText,
+        assistantText: formatAssistantMessageText(state.output?.content),
+        completedAt: state.completed_at,
+        sessionTitle: memory.sessionTitle,
+        origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        logger,
+        summarize: memory.summarize,
+        outcomeLog: memory.outcomeLog,
+      });
+      // Only a stored turn can have gone to the persona it started with; a skipped or failed
+      // retain is already explained by its own reason line.
+      if (stored && memory.outcomeLog !== undefined) {
+        await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+      }
+    }
+    if (profileLearning !== undefined) {
+      // The assistant's reply is deliberately not passed here: it is not a source of facts
+      // about the user, so the learning pass only ever sees the user's own turn text.
+      // The pass writes its audit event to the turnEventStream (how an open tab sees it
+      // without reloading the turn).
+      await submitProfileLearning({
+        ...profileLearning,
+        sessionId,
+        turnId,
+        completedAt: state.completed_at,
+        turnEventStream,
+        logger,
+      });
+    }
+    // The title, summarization and profile learning calls above record after the first flush.
+    await flushUsage();
+  } catch (error) {
+    logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+}
+
+/** Waits for a turn's follow-up work up to its time limit; past it the work keeps running unwatched. */
+async function waitForTurnFollowUp(params: {
+  followUp: Promise<void>;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { followUp, sessionId, turnId, logger } = params;
+  const timeoutMs = configuration.TURN_FOLLOW_UP_TIMEOUT_MS;
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    followUp.then(() => false),
+    new Promise<boolean>(resolve => {
+      // Unref'd so a pending follow-up never keeps the process alive on its own.
+      timeout = setTimeout(() => {
+        resolve(true);
+      }, timeoutMs);
+      timeout.unref();
+    }),
+  ]).finally(() => {
+    clearTimeout(timeout);
+  });
+  if (timedOut) {
+    logger.warn('Turn follow-up work ran past its time limit; it keeps running in the background', {
+      sessionId,
+      turnId,
+      timeoutMs,
+    });
+  }
+}
+
+/** Longest a turn waits for the previous turn of its chat to save its sandbox files. */
+const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
+
+/**
+ * Starts a created turn's clock. Every path that runs a turn calls this after createTurn froze the
+ * previous turn and before any tool runs: it first waits, up to a short limit, for the chat's
+ * previous turn to save its sandbox files, since this turn reuses that sandbox. The wait never
+ * covers that turn's model calls, and it does not count against this turn's deadline.
+ */
+export async function armTurnExecution(params: {
+  turnDrains: TurnDrainRegistry;
+  sessionId: string;
+  executionDeadline: TurnExecutionDeadline;
+  logger: Logger;
+}): Promise<void> {
+  const { turnDrains, sessionId, executionDeadline, logger } = params;
+  const stillRunning = await turnDrains.waitForArtifactCapture({
+    sessionId,
+    timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+  });
+  if (stillRunning !== undefined) {
+    logger.warn('The previous turn was still saving its files, so this turn started without waiting longer', {
+      sessionId,
+      previousTurnId: stillRunning.turnId,
+      timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+    });
+  }
+  executionDeadline.arm();
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1172,6 +1414,7 @@ export interface TurnEventDrainInput {
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
+  auto_title?: AutoSessionTitleTarget | undefined;
 }
 
 /**
@@ -1186,6 +1429,8 @@ export async function beginTurnExecution(params: {
   deps: BeginTurnExecutionDeps;
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
+  /** A scheduled chat's fixed title; interactive chats use their first message. */
+  title_seed?: SessionTitleSeed | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
   const sessionId = session.session_id;
@@ -1265,7 +1510,13 @@ export async function beginTurnExecution(params: {
     userRef,
     session,
     turnId,
+    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
+    serverSandboxAvailable: await readServerSandboxAvailable({
+      store: deps.sandboxProviderStore,
+      tenant_id: session.tenant_id,
+      logger: deps.logger,
+    }),
     personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
     personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -1283,9 +1534,9 @@ export async function beginTurnExecution(params: {
     modelUsage,
   });
 
-  // First turn only: derive the title from the first user message. The store
+  // First turn only: a scheduled chat's fixed title, else the first message. The store
   // never overwrites an existing title.
-  const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+  const titleSeed = session.record.last_turn_id === null ? (params.title_seed ?? firstMessageTitleSeed(input)) : null;
 
   const turn = await session.createTurn({
     turn_id: turnId,
@@ -1294,7 +1545,7 @@ export async function beginTurnExecution(params: {
     signal: abortController.signal,
     resolver,
     custom: { library_near_miss: internalSources.libraryNearMiss },
-    update_session_title_if_not_exist: title,
+    update_session_title_if_not_exist: titleSeed,
     on_command_execution_started: execution => {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
     },
@@ -1302,7 +1553,7 @@ export async function beginTurnExecution(params: {
     unattended: params.unattended,
   });
 
-  executionDeadline.arm();
+  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
 
   const trackedStream = deps.activeTurns.track({
     sessionId,
@@ -1313,6 +1564,20 @@ export async function beginTurnExecution(params: {
 
   // Held for the whole turn; the stream's sequence counter dies with it.
   const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenant_id, sessionId, turn.id));
+  const autoTitle = await resolveAutoSessionTitleTarget({
+    session,
+    input,
+    unattended: params.unattended,
+    subjectId: userRef,
+    personaModelName: deps.personaContext?.model_name,
+    modelProviderStore: deps.modelProviderStore,
+    agentStore: deps.agentStore,
+    sentinelSettingsStore: deps.sentinelSettingsStore,
+    sessionStore: deps.sessionStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
+    logger: deps.logger,
+  });
 
   return {
     turn,
@@ -1325,6 +1590,7 @@ export async function beginTurnExecution(params: {
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      auto_title: autoTitle,
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1350,6 +1616,7 @@ export async function startTurnInProcess(params: {
   userRef: string;
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
+  title_seed?: SessionTitleSeed | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -1757,7 +2024,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
   const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
-    const body = c.req.valid('json');
+    const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
 
     const session = await deps.sessions.get({
@@ -1776,6 +2043,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
+
+    // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
+    const body = configuration.AMAN_EVAL_MODE
+      ? {
+          ...submitted,
+          input: await gateEvalApprovals({
+            session,
+            previous_turn_id: submitted.previous_turn_id,
+            input: submitted.input,
+          }),
+        }
+      : submitted;
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
@@ -2082,6 +2361,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
+      startsAnswer: body.input?.some(isAgentInputUserMessage) ?? false,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
@@ -2089,6 +2369,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchNotice: persona?.switchNotice,
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
+      serverSandboxAvailable: await readServerSandboxAvailable({
+        store: sandboxProviderStore,
+        tenant_id: requestContext.tenant_id,
+        logger: deps.logger,
+      }),
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,
@@ -2143,7 +2428,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
     // First turn only: derive the title from the first user message. The store
     // never overwrites an existing title.
-    const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
+    const titleSeed = session.record.last_turn_id === null ? firstMessageTitleSeed(body.input) : null;
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
@@ -2161,7 +2446,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         signal: abortController.signal,
         resolver,
         custom: turnCustom,
-        update_session_title_if_not_exist: title,
+        update_session_title_if_not_exist: titleSeed,
         on_command_execution_started: execution => {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
@@ -2399,7 +2684,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
     }
 
-    executionDeadline.arm();
+    await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, executionDeadline, logger: deps.logger });
 
     const trackedStream = deps.activeTurns.track({
       sessionId,
@@ -2410,6 +2695,20 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
     // Held for the whole turn; the stream's sequence counter dies with it.
     const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turn.id));
+    const autoTitle = await resolveAutoSessionTitleTarget({
+      session,
+      input: body.input,
+      unattended: undefined,
+      subjectId: requestContext.subject.id,
+      personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+      modelProviderStore,
+      agentStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
+      sessionStore: deps.sessionStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      logger: deps.logger,
+    });
     const drainInput = {
       trackedStream,
       turnEventStream,
@@ -2419,6 +2718,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      auto_title: autoTitle,
       memory:
         memoryClient === undefined
           ? undefined
@@ -2429,6 +2729,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,
+              outcomeLog: {
+                personaName: vaultScope?.personaName ?? 'shared',
+                personaStore: deps.personaStore,
+                tenantId: requestContext.tenant_id,
+              },
             },
       profileLearning,
       artifacts: {

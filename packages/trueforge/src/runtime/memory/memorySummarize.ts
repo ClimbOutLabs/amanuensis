@@ -13,14 +13,14 @@
  * stampede the model.
  */
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import { VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import type { ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { flattenLlmContent, resolveHelperLlm } from '../helperLlm';
 import { routeHelperModel } from '../helperModelRouting';
-import { modelIdentity, type TurnModelUsage } from '../modelUsage';
-import { getModelDetails } from '../sessionResources';
-import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
+import type { TurnModelUsage } from '../modelUsage';
+import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 
 /** Bounded model call; summaries are short and must not delay the drain. */
 const SUMMARIZE_TIMEOUT_MS = 30_000;
@@ -52,7 +52,19 @@ const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
 export type SummarizeTurnResult =
   | { status: 'summarized'; summary: string }
   | { status: 'skipped'; reason: 'empty-exchange' | 'no-model-configured' | 'input-too-long' }
-  | { status: 'failed'; reason: string };
+  | { status: 'failed'; reason: string; fallback: SummaryFallbackReason };
+
+/**
+ * Why a turn was stored as its full text instead of a summary. Logged at info so an owner can
+ * see the effective state; the values are the log's reason codes.
+ */
+export type SummaryFallbackReason =
+  'model_unresolved' | 'model_failed' | 'model_timeout' | 'input_too_long' | 'summary_empty' | 'summary_too_long';
+
+/** A summarization call that ran out of its time budget, as surfaced by the LLM client. */
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'TimeoutError' || /timed? ?out/i.test(error.message));
+}
 
 /** Max concurrent summarization LLM calls across all turns/sessions. Bounds the
  * cost and latency spike when many turn drains overlap; each drain needs at most
@@ -121,16 +133,6 @@ export function buildSummarizationMessages(params: {
   ];
 }
 
-function flattenLlmContent(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (content === null) {
-    return '';
-  }
-  return content.map(part => (part.type === 'text' ? (part.text ?? '') : '')).join('');
-}
-
 /**
  * Summarizes one turn's exchange via the LLM.
  *
@@ -175,30 +177,27 @@ export async function summarizeTurnContent(params: {
   // The slot is acquired before the LLM client is built so queueing never eats the
   // 30s call budget.
   return withSummarizeSlot(async () => {
+    const resolveLlm =
+      params.resolveLlm ??
+      ((name: string): Promise<ILLM> =>
+        resolveHelperLlm({
+          tenantId,
+          modelProviderStore,
+          modelFqn: name,
+          tokenFactoryBudget: params.tokenFactoryBudget,
+          modelUsage: params.modelUsage,
+          logger,
+          timeoutMs: SUMMARIZE_TIMEOUT_MS,
+        }));
+    let llm: ILLM;
     try {
-      const resolveLlm =
-        params.resolveLlm ??
-        (async (name: string): Promise<ILLM> => {
-          const { providerConfig, streamTimeout } = await getModelDetails({
-            tenant_id: tenantId,
-            name,
-            store: modelProviderStore,
-          });
-          return meterHelperLlm({
-            llm: new VercelAILLM({
-              providerConfig,
-              logger,
-              signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
-              streamTimeout,
-            }),
-            identity: modelIdentity({ name, providerConfig }),
-            role: 'summarization',
-            budget: params.tokenFactoryBudget,
-            usage: params.modelUsage,
-            logger,
-          });
-        });
-      const llm = await resolveLlm(summarizationModelFqn);
+      llm = await resolveLlm(summarizationModelFqn);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.debug('Memory summarization model did not resolve; falling back to verbatim transcript', { reason });
+      return { status: 'failed', reason, fallback: 'model_unresolved' };
+    }
+    try {
       // Cap the generation so the model cannot burn tokens for the full 30s
       // budget on output the 2000-char validation would discard anyway.
       const result = await llm.createNonStream({
@@ -207,16 +206,16 @@ export async function summarizeTurnContent(params: {
       });
       const summary = flattenLlmContent(result.output.content ?? null).trim();
       if (summary === '') {
-        return { status: 'failed', reason: 'empty-summary' };
+        return { status: 'failed', reason: 'empty-summary', fallback: 'summary_empty' };
       }
       if (summary.length > SUMMARIZE_MAX_CHARACTERS) {
-        return { status: 'failed', reason: 'summary-too-long' };
+        return { status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' };
       }
       return { status: 'summarized', summary };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.debug('Memory summarization failed; falling back to verbatim transcript', { reason });
-      return { status: 'failed', reason };
+      return { status: 'failed', reason, fallback: isTimeoutError(error) ? 'model_timeout' : 'model_failed' };
     }
   });
 }

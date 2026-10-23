@@ -24,7 +24,6 @@ import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
-import { useToasterOptional } from './ToasterContainer.js';
 
 /**
  * Simplified relative to the reference: renders threads in a single flat list
@@ -261,7 +260,6 @@ function ThreadListItemsByRecency({
   const threadItems = useAuiState(s => s.threads.threadItems);
   const chatFolders = useOptionalChatFolders();
   const server = useOptionalServer();
-  const toaster = useToasterOptional();
   const shell = useOptionalShellMode();
   const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
 
@@ -341,14 +339,13 @@ function ThreadListItemsByRecency({
 
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
 
+  // Failures reach the delete dialog, which says so and keeps the chat.
   const deleteFolderSession = async (sessionId: string) => {
-    if (server?.deleteSession === undefined) return;
-    try {
-      await server.deleteSession({ sessionId });
-      chatFolders.removeFolderSession({ sessionId });
-    } catch (error) {
-      toaster?.showError(error, { title: 'Could not delete this chat' });
+    if (server?.deleteSession === undefined) {
+      throw new Error('Deleting chats is not available here.');
     }
+    await server.deleteSession({ sessionId });
+    chatFolders.removeFolderSession({ sessionId });
   };
 
   // Chats with no folder that the recent list has not loaded render from the

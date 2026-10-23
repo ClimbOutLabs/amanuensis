@@ -32,6 +32,7 @@ const EXPECTED_LLM_INPUT = [
     stream: true,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
   },
@@ -65,6 +66,7 @@ describe('orchestration: mocked LLM and no tools', () => {
       capabilities: undefined,
       capabilityState: undefined,
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
