@@ -77,6 +77,7 @@ import {
   allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
+  awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
   offersChatApproval,
@@ -679,6 +680,7 @@ function deriveAgentThreadState(input: {
   context: ContextMessage[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
 }): AgentThreadState {
   const openToolCallIds = getOpenToolCallIds(input.context);
   if (openToolCallIds.size === 0) {
@@ -693,7 +695,9 @@ function deriveAgentThreadState(input: {
     implementationPlanGrants: input.implementationPlanGrants,
   });
   const hasPendingApproval = assistant?.tool_calls?.some(
-    tc => openToolCallIds.has(tc.id) && tc.tool_info.is_approval_required === true && !decisions.has(tc.id),
+    tc =>
+      openToolCallIds.has(tc.id) &&
+      awaitsApproval({ call: tc, decisions, deniedApprovalIdentities: input.deniedApprovalIdentities }),
   );
   const hasPendingClientSideTool = assistant?.tool_calls?.some(
     tc => openToolCallIds.has(tc.id) && tc.tool_info.is_client_side === true,
@@ -827,9 +831,13 @@ function lastAssistantInContext(context: ContextMessage[]): InternalEnrichedAssi
 // regular tool calls (which the closer repairs), while still blocking on approval/client-side/
 // sub-agent calls that genuinely need resolution. Takes the already-computed open set; copies it
 // since it mutates (deletes) the closable ids.
-function getUnclosableOpenToolCallIds(context: ContextMessage[], openToolCallIds: Set<string>): Set<string> {
-  const blockingOpenToolCallIds = new Set(openToolCallIds);
-  for (const id of getClosableOpenToolCalls(context).keys()) {
+function getUnclosableOpenToolCallIds(input: {
+  context: ContextMessage[];
+  openToolCallIds: Set<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): Set<string> {
+  const blockingOpenToolCallIds = new Set(input.openToolCallIds);
+  for (const id of getClosableOpenToolCalls(input.context, input.deniedApprovalIdentities).keys()) {
     blockingOpenToolCallIds.delete(id);
   }
   return blockingOpenToolCallIds;
@@ -997,6 +1005,7 @@ function getPendingApprovalToolCalls(input: {
   context: ContextMessage[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
 }): InternalEnrichedToolCall[] {
   const openToolCallIds = getOpenToolCallIds(input.context);
   const assistant = lastAssistantInContext(input.context);
@@ -1007,7 +1016,9 @@ function getPendingApprovalToolCalls(input: {
     implementationPlanGrants: input.implementationPlanGrants,
   });
   return (assistant?.tool_calls ?? []).filter(
-    tc => openToolCallIds.has(tc.id) && tc.tool_info.is_approval_required === true && !decisions.has(tc.id),
+    tc =>
+      openToolCallIds.has(tc.id) &&
+      awaitsApproval({ call: tc, decisions, deniedApprovalIdentities: input.deniedApprovalIdentities }),
   );
 }
 
@@ -1052,6 +1063,7 @@ function validateInputMessageTypesGivenContext(input: {
   messages: AgentThreadRuntimeSendInput[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
   /** Whether a standing tool grant can be recorded: only with a Sentinel context. */
   toolGrantsAvailable: boolean;
 }): void {
@@ -1059,12 +1071,17 @@ function validateInputMessageTypesGivenContext(input: {
   const openToolCallIds = getOpenToolCallIds(input.context);
   // Subset that blocks a fresh user message: excludes calls OpenToolCallCloser will auto-close
   // during preSend, so a dangling regular tool call doesn't reject a user message it will repair.
-  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds(input.context, openToolCallIds);
+  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds({
+    context: input.context,
+    openToolCallIds,
+    deniedApprovalIdentities: input.deniedApprovalIdentities,
+  });
   const pendingApprovalCalls = new Map(
     getPendingApprovalToolCalls({
       context: input.context,
       chatApprovalGrants: input.chatApprovalGrants,
       implementationPlanGrants: input.implementationPlanGrants,
+      deniedApprovalIdentities: input.deniedApprovalIdentities,
     }).map(tc => [tc.id, tc] as const),
   );
   const pendingApprovalIds = new Set(pendingApprovalCalls.keys());
@@ -1719,7 +1736,10 @@ export class AgentThread {
     );
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
-    this.preSendContextProcessors = [new OpenToolCallCloser(), ...capabilityPreSend];
+    this.preSendContextProcessors = [
+      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      ...capabilityPreSend,
+    ];
 
     assertUniqueStateKeys(capabilities);
     const claimed = claimCapabilityState(capabilities, input.capabilityState, this.logger);
@@ -1921,6 +1941,7 @@ export class AgentThread {
         messages,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
         toolGrantsAvailable: this.sentinel !== undefined,
       });
       if (messages.some(isInputUserMessage)) {
@@ -1967,6 +1988,7 @@ export class AgentThread {
             context: this.context,
             chatApprovalGrants: this.chatApprovalGrants,
             implementationPlanGrants: this.implementationPlanGrants,
+            deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
@@ -2346,6 +2368,7 @@ export class AgentThread {
       context: this.context,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
     });
     if (this.currentState) {
       assertValidTransition(this.currentState, next);
@@ -2502,6 +2525,7 @@ export class AgentThread {
         context: this.context,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
       }).length > 0 || getPendingClientSideToolCalls(this.context).length > 0
     );
   }
@@ -2519,6 +2543,7 @@ export class AgentThread {
       messages,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
       toolGrantsAvailable: this.sentinel !== undefined,
     });
   }
@@ -3636,7 +3661,11 @@ export class AgentThread {
       assistantMessage = {
         ...assistantMessage,
         tool_calls: assistantMessage.tool_calls.map(call => {
-          if (removedTools.includes(call.tool_info.original_tool_name)) {
+          // A repeat of a "no" keeps its card identity, so the run refuses it as that same "no" and ends the turn.
+          if (
+            removedTools.includes(call.tool_info.original_tool_name) &&
+            !this.toolCallMemo.deniedApprovalIdentities.has(approvalGrantKey(call.tool_info))
+          ) {
             return {
               ...call,
               tool_info: {
@@ -4065,8 +4094,9 @@ export class AgentThread {
     const nextToolCallMemo = cloneToolCallMemoState(toolCallMemo);
     for (const call of openCalls) {
       const decision = decisions.get(call.id);
-      // A card that expired unanswered was never turned down, so asking again is not a repeat of a "no".
-      if (decision?.status === 'deny' && !isExpiredApproval(decision)) {
+      // A card that expired unanswered was never turned down, and a "Change it" answer asks for a revised
+      // call, so neither makes a later call a repeat of a "no".
+      if (decision?.status === 'deny' && !isExpiredApproval(decision) && !isChangeRequestReason(decision.reason)) {
         nextToolCallMemo.deniedApprovalIdentities.add(approvalGrantKey(call.tool_info));
       }
     }
@@ -4242,7 +4272,7 @@ export class AgentThread {
         toolCallIds: orphanedCalls.map(call => call.id),
         toolNames: orphanedCalls.map(call => call.function.name),
       });
-      const closeouts = getClosableOpenToolCallOutcomes(this.context);
+      const closeouts = getClosableOpenToolCallOutcomes(this.context, this.toolCallMemo.deniedApprovalIdentities);
       const completedAt = new Date().toISOString();
       for (const call of orphanedCalls) {
         // The canonical closer refuses to classify a batch containing a
@@ -4616,18 +4646,21 @@ export class AgentThread {
       if (wasRemoved) {
         removedCallsThisBatch += 1;
       }
+      const decision = decisions.get(call.id);
       const kind = toolResultKind({
         disposition: result.disposition,
         failure: result.failure,
         unavailable: !toolMapping.has(call.function.name),
         removed: wasRemoved,
-        expired: isExpiredApproval(decisions.get(call.id)),
+        expired: isExpiredApproval(decision),
       });
+      // A "Change it" answer asks for a revised call, so it neither removes the tool nor ends the reply.
+      const changeRequested = decision?.status === 'deny' && isChangeRequestReason(decision.reason);
       // A call to a removed tool was rejected unrun, so it says nothing about the reply's last action.
-      if (!wasRemoved) {
+      if (!wasRemoved && !changeRequested) {
         lastKindThisBatch = kind;
       }
-      if (!wasRemoved && (kind === 'declined' || kind === 'unavailable')) {
+      if (!wasRemoved && !changeRequested && (kind === 'declined' || kind === 'unavailable')) {
         if (!removalNotices.some(notice => notice.toolName === toolName)) {
           removalNotices.push({ toolName, reason: kind });
         }
@@ -4978,6 +5011,7 @@ export class AgentThread {
       context: this.context,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
     });
     if (pendingApprovalToolCalls.length > 0) {
       const event: ToolApprovalRequiredEvent = {

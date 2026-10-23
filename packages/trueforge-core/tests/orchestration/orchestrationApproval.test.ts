@@ -1,5 +1,6 @@
 /** Pause on write_note approval, then resume after allow or deny. */
 import { createToolResponseV2, EventType } from '../../src/core/events/schema';
+import { deniedToolCallText } from '../../src/core/mcp/ToolSet';
 import { changeRequestReason } from '../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
@@ -22,7 +23,7 @@ import {
 const ROOT_ID = 'thread_root';
 const DENY_REASON = 'not allowed in this test';
 /** ToolSet deny → isError path surfaces the structured error payload for context. */
-const DENY_RAW_CONTENT = JSON.stringify({ error: `User denied tool call: ${DENY_REASON}` });
+const DENY_RAW_CONTENT = deniedToolCallText(DENY_REASON);
 const INSTRUCTION = 'You are running in a test setup.';
 
 // Every host-produced terminal tool result now carries the canonical wrapped shape
