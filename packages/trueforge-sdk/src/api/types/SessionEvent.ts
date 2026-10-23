@@ -19,6 +19,7 @@ export type SessionEvent =
     | TrueForge.ToolApprovalRequiredEvent
     | TrueForge.ToolResponseRequiredEvent
     | TrueForge.ContextCompactionEvent
+    | TrueForge.ContextCompactionStartedEvent
     | TrueForge.MemoryRecallPersistedEvent
     | TrueForge.ProfileLearnedPersistedEvent
     | TrueForge.SkillUsedPersistedEvent
