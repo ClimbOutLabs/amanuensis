@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { connectorUnavailableLine } from '../../../src/core/connectors/connectorAvailability';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import { DeferredTool, LIST_TOOLS_NAME } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -20,7 +21,7 @@ async function listToolsText(deferredTool: DeferredTool, mcpServer: string): Pro
 }
 
 describe('DeferredTool scripted model session', () => {
-  it('settles each call of the reported session: two unknown servers, then a real one', async () => {
+  it('settles each call of the reported session: two built-in bundle names, then a real server', async () => {
     const server = makeMockIMCPServer({
       name: 'parallel-web',
       preload: false,
@@ -37,11 +38,16 @@ describe('DeferredTool scripted model session', () => {
       await listToolsText(deferredTool, 'parallel-web'),
     ];
 
-    const unknownServer = (name: string) =>
+    const bundleName = (name: string, bundle: string) =>
       JSON.stringify({
-        error: `No server named '${name}'. Servers: parallel-web. No connector by that name is set up; the person can set one up in Settings, Connectors. Do not try other names; tell the person this. Built-in tools are called directly by name, never through call_tool; when one is not in your tool list, call load_bundle with its bundle first.`,
+        error: `'${name}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through call_tool; when one is not in your tool list, call load_bundle with the name '${bundle}' first.`,
       });
-    expect(results).toEqual([unknownServer('gmail'), unknownServer('sub_agents'), 'parallel-web:\n  search, fetch']);
+    expect(results).toEqual([
+      bundleName('gmail', 'google'),
+      bundleName('sub_agents', 'sub_agents'),
+      'parallel-web:\n  search, fetch',
+    ]);
+    expect(results[1]).not.toContain('Do not try other names');
   });
 
   it('returns an error, not a pending call, when a connector fails to list its tools', async () => {
@@ -92,7 +98,7 @@ describe('DeferredTool when the connector the model wants is not in the chat', (
     makeMockIMCPServer({ name: 'parallel-web', preload: false }),
   ];
 
-  it('says the Email connector is not set up and where to set it up, and the model stops after one call', async () => {
+  it('says the Email connector is not set up and where to set it up, and the model stops at the first name that is not a built-in bundle', async () => {
     const deferredTool = new DeferredTool(chatServers(), {
       tracing: NOOP_AGENT_TRACING,
       logger: silentLogger,
@@ -101,8 +107,9 @@ describe('DeferredTool when the connector the model wants is not in the chat', (
 
     const { tried, answer } = await guessingTurn(deferredTool);
 
-    expect(tried).toEqual(['email']);
-    expect(answer).toContain('No connector by that name is set up; the person can set one up in Settings, Connectors.');
+    // 'email' and 'gmail' name the built-in Google bundle, so those answers point to load_bundle instead.
+    expect(tried).toEqual(['email', 'gmail', 'inbox']);
+    expect(answer).toContain(connectorUnavailableLine({ connector: 'inbox', availability: 'not-set-up' }));
   });
 
   it('says the Email connector is turned off for this chat and where to turn it on', async () => {
@@ -116,7 +123,7 @@ describe('DeferredTool when the connector the model wants is not in the chat', (
 
     expect(tried).toEqual(['email']);
     expect(answer).toBe(
-      'The Email connector is set up but turned off for this chat. The person can turn it on in Add-ons, Connectors. Do not try other names; tell the person this.',
+      'The Email connector is set up but turned off for this chat. To turn it on, the person opens Add-ons in the composer, goes to Connectors, and turns on Email. Do not try other names; tell the person this.',
     );
   });
 
@@ -150,5 +157,29 @@ describe('DeferredTool when the connector the model wants is not in the chat', (
     expect(answer).toBe(
       'The Email connector is set up but is not answering yet. Try again in a minute. Do not try other names; tell the person this if it keeps failing.',
     );
+  });
+});
+
+describe('DeferredTool when the list of set-up connectors could not be read', () => {
+  const deferredTool = () =>
+    new DeferredTool([makeMockIMCPServer({ name: 'parallel-web', preload: false })], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      setUpConnectorNames: undefined,
+    });
+
+  it('does not say a connector is not set up', async () => {
+    for (const name of ['gmail', 'jira']) {
+      const { error } = ErrorSchema.parse(JSON.parse(await listToolsText(deferredTool(), name)));
+
+      expect(error).not.toContain('not set up');
+      expect(error).not.toContain('No connector named');
+    }
+  });
+
+  it('gives the same line the GitHub hint uses for a connector that is not on', async () => {
+    const { error } = ErrorSchema.parse(JSON.parse(await listToolsText(deferredTool(), 'jira')));
+
+    expect(error).toContain(connectorUnavailableLine({ connector: 'jira', availability: 'unknown' }));
   });
 });

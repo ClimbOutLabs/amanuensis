@@ -11,8 +11,10 @@ import {
   toolResultResponse,
   type ToolSource,
 } from '../../mcp/IMCPServer';
+import { isRecord } from '../../util/records';
 import { accountNamesOfResult, emailsOfResult } from './mailToolResults';
 import {
+  isMailReadToolName,
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_ACCOUNT_LIST_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
@@ -31,19 +33,22 @@ const MAX_CACHED_CHATS = 1000;
 const ACCOUNTS_UNREADABLE =
   'The list of Email accounts could not be read, so nothing was done. Try again in a minute, and tell the person if it keeps failing.';
 const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in for you.';
-const RECENT_WINDOW_NOTE = `With no since or before date, this looks at the last ${String(RECENT_WINDOW_DAYS)} days, then the last ${String(WIDER_WINDOW_DAYS)} if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
 
 function isMailConnectorTool(name: string): boolean {
   return MAIL_CONNECTOR_TOOL_NAMES.some(tool => tool === name);
 }
 
-/** Has no date bound, so the sidecar would scan the whole mailbox. */
-function hasNoDateBound(args: Record<string, unknown>): boolean {
-  return args['since'] === undefined && args['before'] === undefined;
+/** A null date means no date, so it is left out rather than sent on. */
+function withoutNullDates(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).filter(([key, value]) => !((key === 'since' || key === 'before') && value === null)),
+  );
+}
+
+/** Whether the account name was left out. A null name counts as left out. */
+function isAccountLeftOut(requested: unknown): requested is undefined | null {
+  return requested === undefined || requested === null;
 }
 
 /**
@@ -80,20 +85,35 @@ function refusal(text: string): CallToolResponse {
   return toolResultResponse({ text: JSON.stringify({ error: text }), isError: true });
 }
 
-/** Keeps each chat's Email account names, read once. A failed read is not kept, so the next call reads again. */
+/**
+ * Keeps each chat's Email account names per connector address. A fresh read replaces what is kept, and a
+ * failed read is not kept, so the next call reads again.
+ */
 export class MailAccountDirectory {
   readonly #byChat = new Map<string, Promise<readonly string[]>>();
 
-  accounts({ chat_id, read }: { chat_id: string; read: () => Promise<readonly string[]> }): Promise<readonly string[]> {
-    const cached = this.#byChat.get(chat_id);
-    if (cached !== undefined) {
+  accounts({
+    chat_id,
+    connector_url,
+    fresh,
+    read,
+  }: {
+    chat_id: string;
+    connector_url: string;
+    fresh: boolean;
+    read: () => Promise<readonly string[]>;
+  }): Promise<readonly string[]> {
+    const key = JSON.stringify([chat_id, connector_url]);
+    const cached = this.#byChat.get(key);
+    if (cached !== undefined && !fresh) {
       return cached;
     }
     const made = read();
-    this.#byChat.set(chat_id, made);
+    this.#byChat.delete(key);
+    this.#byChat.set(key, made);
     made.catch(() => {
-      if (this.#byChat.get(chat_id) === made) {
-        this.#byChat.delete(chat_id);
+      if (this.#byChat.get(key) === made) {
+        this.#byChat.delete(key);
       }
     });
     const [oldest] = this.#byChat.keys();
@@ -123,7 +143,7 @@ export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>)
  */
 export class MailConnectorSource implements ToolSource {
   readonly #inner: ToolSource;
-  readonly #accounts: () => Promise<readonly string[]>;
+  readonly #accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
   readonly #now: () => Date;
 
   constructor({
@@ -132,7 +152,8 @@ export class MailConnectorSource implements ToolSource {
     now,
   }: {
     inner: ToolSource;
-    accounts: () => Promise<readonly string[]>;
+    /** The account names; `fresh` reads them again instead of using a kept list. */
+    accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
     now: () => Date;
   }) {
     this.#inner = inner;
@@ -177,56 +198,79 @@ export class MailConnectorSource implements ToolSource {
       return this.#inner.callTool(params, approvalDecision, context);
     }
     const given = params.arguments ?? {};
-    const account = await this.#accountFor(given[MAIL_ACCOUNT_ARGUMENT]);
+    const account = await this.#accountFor({
+      requested: given[MAIL_ACCOUNT_ARGUMENT],
+      reads_only: isMailReadToolName(params.name),
+    });
     if ('refused' in account) {
       return refusal(account.refused);
     }
-    const args: Record<string, unknown> = { ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name };
+    const args = withoutNullDates({ ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name });
     const send = (sent: Record<string, unknown>) =>
       this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
-    if (params.name !== MAIL_LIST_TOOL_NAME || !hasNoDateBound(args)) {
+    if (params.name !== MAIL_LIST_TOOL_NAME || args['since'] !== undefined) {
       return send(args);
     }
+    const before = args['before'];
+    const parsedBefore = typeof before === 'string' ? Date.parse(before) : Number.NaN;
+    const upTo = Number.isNaN(parsedBefore) ? this.#now().getTime() : parsedBefore;
+    const daysBefore = (days: number) => new Date(upTo - days * DAY_MS).toISOString();
     const wanted = typeof args['page_size'] === 'number' ? args['page_size'] : SIDECAR_DEFAULT_PAGE_SIZE;
     const recent = { order: 'desc', ...args };
-    const first = await send({ ...recent, since: this.#daysAgo(RECENT_WINDOW_DAYS) });
+    const first = await send({ ...recent, since: daysBefore(RECENT_WINDOW_DAYS) });
     if (!isCallToolResponseResult(first) || first.result.isError === true) {
       return first;
     }
     if (emailsOfResult(first.result).length >= wanted) {
       return first;
     }
-    return send({ ...recent, since: this.#daysAgo(WIDER_WINDOW_DAYS) });
+    return send({ ...recent, since: daysBefore(WIDER_WINDOW_DAYS) });
   }
 
-  #daysAgo(days: number): string {
-    return new Date(this.#now().getTime() - days * DAY_MS).toISOString();
-  }
-
-  /** The account the call goes to. With one account it is always that one; with several the name must match. */
-  async #accountFor(requested: unknown): Promise<{ name: string } | { refused: string }> {
-    let names: readonly string[];
+  async #readAccounts(fresh: boolean): Promise<readonly string[] | undefined> {
     try {
-      names = await this.#accounts();
+      return await this.#accounts({ fresh });
     } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The account the call goes to. A name left out is filled in when there is one account. A name not on the
+   * list is refused, except that a read with one account goes to that account. Anything but a read uses a
+   * fresh list, and a kept list is read again before a name is refused.
+   */
+  async #accountFor({
+    requested,
+    reads_only,
+  }: {
+    requested: unknown;
+    reads_only: boolean;
+  }): Promise<{ name: string } | { refused: string }> {
+    let names = await this.#readAccounts(!reads_only);
+    if (names !== undefined && reads_only && !isAccountLeftOut(requested) && !names.some(name => name === requested)) {
+      names = await this.#readAccounts(true);
+    }
+    const [only, ...others] = names ?? [];
+    if (names === undefined || only === undefined) {
       return { refused: ACCOUNTS_UNREADABLE };
-    }
-    const [only, ...others] = names;
-    if (only === undefined) {
-      return { refused: ACCOUNTS_UNREADABLE };
-    }
-    if (typeof requested === 'string' && names.includes(requested)) {
-      return { name: requested };
-    }
-    if (others.length === 0) {
-      return { name: only };
     }
     const listed = names.map(name => `'${name}'`).join(', ');
+    if (isAccountLeftOut(requested)) {
+      return others.length === 0
+        ? { name: only }
+        : { refused: `Say which Email account to use. The accounts are ${listed}.` };
+    }
+    const match = names.find(name => name === requested);
+    if (match !== undefined) {
+      return { name: match };
+    }
+    if (reads_only && others.length === 0) {
+      return { name: only };
+    }
+    const named = typeof requested === 'string' ? `named '${requested}'` : 'by that name';
     return {
-      refused:
-        typeof requested === 'string'
-          ? `There is no Email account named '${requested}'. The accounts are ${listed}; use one of these names.`
-          : `Say which Email account to use. The accounts are ${listed}.`,
+      refused: `There is no Email account ${named}. The accounts are ${listed}; use one of these names, or leave the name out when there is one account.`,
     };
   }
 }

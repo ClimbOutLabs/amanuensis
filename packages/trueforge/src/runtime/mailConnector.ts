@@ -7,7 +7,7 @@ import type { IMcpServerStore } from '../db/mcpServerStore';
 import { ensureAllowedRecipientsFile } from './mailAllowedRecipients';
 import { runFirstFillInBackground } from './mailFirstFill';
 
-/** Each chat's Email account names, read once per chat in this process and shared by its turns. */
+/** Each chat's Email account names, kept per connector address in this process and shared by its turns. */
 export const mailAccountDirectory = new MailAccountDirectory();
 
 /** Plain words: this is the description a person reads on the Connectors page. */

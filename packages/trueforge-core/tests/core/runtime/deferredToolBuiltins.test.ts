@@ -190,7 +190,7 @@ describe('call_tool naming a built-in tool', () => {
 describe('call_tool naming something that does not exist', () => {
   it('keeps list_tools for an unknown server at Tier 1 and runs nothing', async () => {
     const deferred = makeDeferred();
-    const params = { name: 'list_tools', arguments: { mcp_server: 'gmail' } };
+    const params = { name: 'list_tools', arguments: { mcp_server: 'not-a-server' } };
 
     const info = await deferred.toolCallInfo(params);
     const stamped = await stamp({
@@ -204,7 +204,7 @@ describe('call_tool naming something that does not exist', () => {
     expect(stamped.tier3_card).toBeNull();
     const response = await deferred.callTool(params);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
-    expect(JSON.stringify(response)).toContain("No server named 'gmail'.");
+    expect(JSON.stringify(response)).toContain("No server named 'not-a-server'.");
   });
 
   it('fails closed without a card when the named server exists nowhere', async () => {

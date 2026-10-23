@@ -2,6 +2,7 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import dedent from 'dedent';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { type ConnectorAvailability, connectorUnavailableLine } from '../connectors/connectorAvailability';
 import { isMailConnectorGuess, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
@@ -22,6 +23,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
+import { findBundle, TOOL_BUNDLE_NAMES } from './toolBundleCatalog';
 import { LOAD_BUNDLE_TOOL_NAME } from './ToolBundles';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
@@ -53,6 +55,8 @@ const ALIASABLE_META_TOOL_NAMES: ReadonlySet<string> = new Set([
 
 /** Cap on how many names a rejection lists, so a server with hundreds of tools stays readable. */
 const MAX_LISTED_NAMES = 20;
+
+const STOP_GUESSING = 'Do not try other names; tell the person this.';
 
 /** Renders a name list for a rejection hint, bounded to {@link MAX_LISTED_NAMES}. */
 function boundedNameList(names: readonly string[]): string {
@@ -125,7 +129,8 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
-  private readonly setUpConnectorNames: readonly string[];
+  /** Undefined when the list could not be read, so nothing is claimed about what is set up. */
+  private readonly setUpConnectorNames: readonly string[] | undefined;
 
   constructor(
     servers: readonly IToolSet[],
@@ -138,7 +143,7 @@ export class DeferredTool extends LocalToolMCP {
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
-    this.setUpConnectorNames = options.setUpConnectorNames ?? [];
+    this.setUpConnectorNames = options.setUpConnectorNames;
     this.serverMap = new Map(servers.map(s => [s.name, s]));
     this.tools = this.buildTools();
   }
@@ -279,7 +284,7 @@ export class DeferredTool extends LocalToolMCP {
    */
   private meantConnector(mcpServer: string): string | undefined {
     const lowered = mcpServer.toLowerCase();
-    const known = [...new Set([...this.setUpConnectorNames, ...this.serverMap.keys()])];
+    const known = [...new Set([...(this.setUpConnectorNames ?? []), ...this.serverMap.keys()])];
     const sameName = known.find(name => name.toLowerCase() === lowered);
     if (sameName !== undefined) {
       return sameName;
@@ -288,20 +293,24 @@ export class DeferredTool extends LocalToolMCP {
   }
 
   /**
-   * One plain line the model can pass on: whether the connector is not set up, set up but turned off for this
-   * chat, or named differently here. Each one ends the search, so the model stops guessing other names.
+   * One plain line the model can pass on: the connector's name here, that it is turned off or not set up,
+   * or, for a built-in bundle's name, how to load that bundle. A connector line ends the search.
    */
   private serverNotFoundText(mcpServer: string): string {
     const meant = this.meantConnector(mcpServer);
-    if (meant !== undefined && this.serverMap.has(meant)) {
-      return `No server named '${mcpServer}'. The connector is named '${meant}'; use that exact name.`;
-    }
     if (meant !== undefined) {
-      return `The ${meant} connector is set up but turned off for this chat. The person can turn it on in Add-ons, Connectors. Do not try other names; tell the person this.`;
+      const availability: ConnectorAvailability = this.serverMap.has(meant) ? 'in-chat' : 'turned-off';
+      const line = connectorUnavailableLine({ connector: meant, availability });
+      return availability === 'in-chat' ? `No server named '${mcpServer}'. ${line}` : `${line} ${STOP_GUESSING}`;
+    }
+    const bundle = findBundle({ name: mcpServer, offered: TOOL_BUNDLE_NAMES });
+    if ('found' in bundle) {
+      return `'${mcpServer}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with the name '${bundle.found}' first.`;
     }
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. No connector by that name is set up; the person can set one up in Settings, Connectors. Do not try other names; tell the person this. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with its bundle first.`;
+    const availability: ConnectorAvailability = this.setUpConnectorNames === undefined ? 'unknown' : 'not-set-up';
+    return `No server named '${mcpServer}'. Servers: ${serverList}. ${connectorUnavailableLine({ connector: mcpServer, availability })} ${STOP_GUESSING}`;
   }
 
   /** A connector this chat has that did not answer when its tools were listed. The detail is for the model only. */

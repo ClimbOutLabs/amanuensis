@@ -239,7 +239,7 @@ export class TurnResourceResolver<
        */
       setUpConnectorNames?: (() => Promise<readonly string[]>) | undefined;
       /**
-       * Keeps the Email account names per chat across turns. Omit to read them once per turn instead.
+       * Keeps the Email account names per chat across turns. Omit to keep them for one turn only.
        */
       mailAccounts?: MailAccountDirectory | undefined;
     },
@@ -480,8 +480,13 @@ export class TurnResourceResolver<
             }
             return new MailConnectorSource({
               inner: remote,
-              accounts: () =>
-                this.#mailAccounts.accounts({ chat_id: session_id, read: () => readMailAccountNames(remote) }),
+              accounts: ({ fresh }) =>
+                this.#mailAccounts.accounts({
+                  chat_id: session_id,
+                  connector_url: url,
+                  fresh,
+                  read: () => readMailAccountNames(remote),
+                }),
               now: () => new Date(),
             });
           },
