@@ -1410,8 +1410,8 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // so the threshold check never undercounts while the checklist's contents are unknown.
     const promptTokens = boundOrSandboxCoding || checklistConfigured ? PROMPT_TOKENS : CONVERSATION_PROMPT_TOKENS;
     // execution.forceCompaction bypasses the threshold entirely (see AgentThreadExecutionContext):
-    // the host is asking for compaction now, regardless of size, because it is about to retry a
-    // model call after a ModelStreamFault and wants a shorter context under it.
+    // the host is asking for compaction now, regardless of size, because the request would not
+    // fit the model or the provider said the last one did not.
     const overThreshold =
       execution.forceCompaction === true || contextTokens + promptTokens >= this.compactionThresholdTokens;
     // Debug while under threshold keeps routine turns quiet; info marks a compaction decision.
