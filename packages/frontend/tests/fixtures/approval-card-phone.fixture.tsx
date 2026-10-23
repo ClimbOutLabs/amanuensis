@@ -1,4 +1,4 @@
-import { PermissionApprovalCard, SlotsProvider, ToolApprovalBar } from '@truefoundry/trueforge-ui';
+import { PermissionApprovalCard, SlotsProvider } from '@truefoundry/trueforge-ui';
 import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
 
@@ -39,14 +39,31 @@ createRoot(rootElement).render(
         />
       </section>
       <section data-testid="plain-card">
-        <ToolApprovalBar
-          toolName="web_search (parallel)"
-          approveOptions={[
-            { id: 'allow-once', label: 'Approve', variant: 'primary' },
-            { id: 'allow-chat', label: 'Approve for this chat', variant: 'secondary' },
-          ]}
-          denyOptions={[{ id: 'deny', label: 'Deny', variant: 'secondary', requiresReason: true }]}
-          onSelect={noop}
+        {/* The generic ticket a waiting call shows before its server card arrives. Invented data only. */}
+        <PermissionApprovalCard
+          approvalId="approval-plain"
+          card={{
+            plain_what: 'Allow "draft email" on email-mcp?',
+            plain_why: null,
+            cannot_be_undone: null,
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: null,
+            outbound_text: 'to: robin@example.test\nsubject: Picnic plans\nbody: Bring the blue blanket.',
+            destination_host: null,
+            outbound_truncated: false,
+            email: null,
+            calendar_event: null,
+            schedule: null,
+            persona: null,
+          }}
+          othersWaiting={0}
+          onApprove={noop}
+          onApproveForChat={noop}
+          onDeny={noop}
+          outboundOpen
         />
       </section>
     </main>

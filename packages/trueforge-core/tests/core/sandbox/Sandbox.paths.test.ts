@@ -27,6 +27,7 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
+import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
@@ -3910,9 +3911,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response)).toBe(true);
     if (isCallToolResponseResult(response)) {
       expect(response.result.isError).toBe(true);
-      expect(response.result.content).toEqual([
-        { type: 'text', text: JSON.stringify({ error: 'User denied tool call: not approved' }) },
-      ]);
+      expect(response.result.content).toEqual([{ type: 'text', text: deniedToolCallText('not approved') }]);
     }
   });
 
@@ -4353,7 +4352,7 @@ describe('Sandbox skills without a network', () => {
       expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
       expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
       const builder = new InstructionBuilder('prompt');
-      sandbox.buildInstruction(builder);
+      sandbox.buildSkillsInstruction(builder);
       const prompt = builder.build();
       expect(prompt).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
       expect(prompt).not.toContain('alpha: unavailable');

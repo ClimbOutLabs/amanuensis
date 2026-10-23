@@ -59,7 +59,6 @@ function sessionRecord(overrides: Partial<Pick<SessionRecord, 'repository_id' | 
     created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
     agent: { type: 'reference', id: 'agent-1', name: 'test-agent' },
     title: null,
-    title_source: null,
     folder_id: null,
     repository_id: null,
     workspace_cwd: null,
@@ -131,7 +130,7 @@ describe('cancelSessionTurn', () => {
     redisRequestMock.mockReset();
   });
 
-  it('aborts a turn running in this process without freezing', async () => {
+  it('aborts a turn running in this process, then freezes it in case the abort is ignored', async () => {
     const activeTurns = new ActiveTurnRegistry();
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     const abortController = trackRun(activeTurns, turnId);
@@ -143,7 +142,10 @@ describe('cancelSessionTurn', () => {
 
     expect(abortController.signal.aborted).toBe(true);
     expect(abortController.signal.reason).toBe(CancellationReason.ClientCancelled);
-    expect(session.freezeTurn).not.toHaveBeenCalled();
+    // The run never ends on its own here, as when a step ignores the abort.
+    expect(session.freezeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ turn_id: turnId, reason: CancellationReason.ClientCancelled }),
+    );
   });
 
   it('freezes when this executor owns the turn id but the run is gone', async () => {

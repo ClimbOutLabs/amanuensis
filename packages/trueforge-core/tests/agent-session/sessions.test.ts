@@ -152,7 +152,7 @@ describe('Sessions / SessionHandle / TurnHandle (storage + createTurn)', () => {
       previous_turn_id: 'none',
       signal: new AbortController().signal,
       resolver: makeTestResolver(),
-      update_session_title_if_not_exist: { title: 'From first message', source: 'first_message' },
+      update_session_title_if_not_exist: 'From first message',
     });
     expect(turn.state.status).toBe('running');
     expect(turn.input).toHaveLength(1);
@@ -343,6 +343,9 @@ describe('Sessions / SessionHandle / TurnHandle (storage + createTurn)', () => {
       custom: { n: 1 },
     });
     expect(t1.custom).toEqual({ n: 1 });
+    for await (const event of t1.stream()) {
+      void event;
+    }
 
     const t2 = await session.createTurn({
       turn_id: mintTestTurnId(),

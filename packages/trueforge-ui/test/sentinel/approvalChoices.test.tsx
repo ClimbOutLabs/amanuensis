@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
+import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { offersChangeIt } from '@/sentinel/approvalChoices.js';
@@ -140,6 +141,11 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, email: mail })).toBe(true);
     expect(offersChangeIt({ ...card, calendar_event: event })).toBe(true);
     expect(offersChangeIt({ ...card, schedule })).toBe(true);
+  });
+
+  it('offers Change it for a held web search, so its words can be edited before it is sent', () => {
+    const plain_what = searchHoldCardText({ summary: 'Example Person clinic hours', say: HOLD_SAY.private_detail });
+    expect(offersChangeIt({ ...card, plain_what })).toBe(true);
   });
 
   it('offers Change it for a new specialist', () => {

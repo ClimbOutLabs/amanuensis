@@ -1,12 +1,11 @@
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
-import { MAX_WRITE_CALLS_PER_TURN, type TurnStepKind } from '../mcp/executeToolCalls';
+import { isReadOnlyCall, MAX_WRITE_CALLS_PER_TURN, type TurnStepKind } from '../mcp/executeToolCalls';
 import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
 } from '../sandbox/Sandbox';
-import { isSafeToRepeat } from './OpenToolCallCloser';
 
 /** Sent to the model when its reply carried a tool call as text, so that call did not run. */
 export const TOOL_MARKUP_RETRY_MESSAGE =
@@ -21,6 +20,15 @@ export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the ma
 
 /** Ends the turn, shown to the person, when the write cap stopped a call. */
 export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
+
+/** Ends the turn, shown to the person, when the model kept sending tool calls that were blocked before they ran. */
+export function blockedCallsStopMessage(assistantName: string): string {
+  return `${assistantName} kept sending a request in a form the tool cannot take, so this reply stopped. Ask again in other words.`;
+}
+
+/** The same stop for a helper, read by the model that started it. */
+export const BLOCKED_CALLS_PARENT_MESSAGE =
+  'The helper kept sending a request in a form the tool cannot take, so it stopped. Do not send it the same task again. Try another way, or tell the person what could not be done.';
 
 /** The kinds of done-work a reply can claim, each backed by a different kind of step. */
 export type UnbackedClaimKind = 'clone' | 'run' | 'read' | 'workspace' | 'change';
@@ -49,7 +57,7 @@ export function stepKindsOf(info: InternalToolCallInfo): TurnStepKind[] {
   if (GIT_TOOL_NAME.test(name)) {
     kinds.push('git');
   }
-  if (isSafeToRepeat(info) && !CLOCK_AND_HOST_HELPERS.has(name) && READ_TOOL_NAME.test(name)) {
+  if (isReadOnlyCall(info) && !CLOCK_AND_HOST_HELPERS.has(name) && READ_TOOL_NAME.test(name)) {
     kinds.push('read');
   }
   return kinds;

@@ -31,6 +31,7 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
+import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
 import { LiveConnectionLostError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
@@ -403,14 +404,36 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
- * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * Taps Sentinel approval events off a raw stream or history item before the vendor
+ * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
  * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
-function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
+}
+
+/**
+ * Taps the compaction start and end off a raw stream item, before the vendor conversion narrows
+ * them away. The chat stops being "compacting" when compaction ends, the reply starts, or the
+ * turn ends, so a cancelled compaction that never sends its end still clears.
+ */
+function tapContextCompactionStreamEvent(sessionId: string, data: TrueForgeApi.TurnStreamingEvent): void {
+  switch (data.type) {
+    case 'agent.context.compaction_started':
+      publishContextCompaction({ sessionId, active: true });
+      return;
+    case 'agent.context.compaction':
+    case 'model.message.delta':
+    case 'model.message':
+    case 'turn.created':
+    case 'turn.done':
+      publishContextCompaction({ sessionId, active: false });
+      return;
+    default:
+      return;
+  }
 }
 
 /**
@@ -499,6 +522,7 @@ async function* subscribeTurnOnce(
     if (item.data.type === 'document.ingestion') {
       publishDocumentIngestionEvent(turnId, item.data);
     }
+    tapContextCompactionStreamEvent(sessionId, item.data);
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
@@ -763,6 +787,7 @@ export function createHarnessChatServer(
           if (item.data.type === 'document.ingestion' && turnId !== undefined) {
             publishDocumentIngestionEvent(turnId, item.data);
           }
+          tapContextCompactionStreamEvent(sessionId, item.data);
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
@@ -834,6 +859,9 @@ export function createHarnessChatServer(
         ...(limit === undefined ? {} : { limit }),
       });
       const data = page.data.flatMap(item => {
+        // A chat that learns of a waiting call from history (opened mid-turn, or caught up after the
+        // live stream dropped) gets its card here; the chat's one saved-card read may predate the ask.
+        tapSentinelStreamEvent(item.event);
         const converted = toUiEventItem(item);
         return converted === undefined ? [] : [converted];
       });

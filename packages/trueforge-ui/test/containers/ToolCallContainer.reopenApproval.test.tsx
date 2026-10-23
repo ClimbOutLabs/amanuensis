@@ -197,12 +197,12 @@ describe('a reopened chat with one held search', () => {
         expect(live.includes('Allow searches in this chat')).toBe(search.can_chat_allow);
         expect(live).not.toContain('Approve for this chat');
         expect(live).not.toContain('Always allow this tool');
-        expect(live.slice(0, 2)).toEqual(['Allow it', 'Not now']);
+        expect(live.slice(0, 3)).toEqual(['Allow it', 'Change it', 'Not now']);
       });
     });
   }
 
-  it('falls back to the plain card when the saved cards cannot be read', async () => {
+  it('falls back to the generic ticket, never the old radio card, when the saved cards cannot be read', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderChat(
       HELD_SEARCHES[0] ?? { name: '', say: '', can_chat_allow: false, can_always_allow: false },
@@ -210,7 +210,9 @@ describe('a reopened chat with one held search', () => {
         throw new Error('offline');
       }),
     );
-    await waitFor(() => expect(screen.getByRole('radiogroup')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
     expect(document.querySelector('[data-role="approval-loading"]')).toBeNull();
     consoleError.mockRestore();
   });

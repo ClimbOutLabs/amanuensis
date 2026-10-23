@@ -62,7 +62,6 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
-  SetGeneratedSessionTitleInput,
   SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
@@ -291,7 +290,6 @@ export class InMemorySessionStore<
       created_by_subject: input.created_by_subject,
       agent: deepCopy(input.agent),
       title: null,
-      title_source: null,
       folder_id: null,
       repository_id: null,
       workspace_cwd: null,
@@ -335,16 +333,6 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
-  }
-
-  async setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean> {
-    const stored = this.sessions.get(sessionKey(input.session_id));
-    if (stored?.record.tenant_id !== input.tenant_id || stored.record.title_source !== 'first_message') {
-      return false;
-    }
-    stored.record.title = input.title;
-    stored.record.title_source = 'auto';
-    return true;
   }
 
   async setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
@@ -617,7 +605,6 @@ export class InMemorySessionStore<
     }
     if (input.title !== undefined) {
       stored.record.title = input.title;
-      stored.record.title_source = 'person';
     }
     if (input.metadata !== undefined) {
       stored.record.metadata = deepCopy(input.metadata);
@@ -732,6 +719,12 @@ export class InMemorySessionStore<
       ) {
         continue;
       }
+      if (input.folder_id !== undefined && stored.record.folder_id !== input.folder_id) {
+        continue;
+      }
+      if (input.no_folder && stored.record.folder_id !== null) {
+        continue;
+      }
       if (createdByOrAgentIds !== undefined) {
         const creatorMatches =
           stored.record.created_by_subject.subject_id === createdByOrAgentIds.created_by_subject_id;
@@ -811,6 +804,14 @@ export class InMemorySessionStore<
     if (input.require_previous_turn_is_tip && previousTurnId !== stored.record.last_turn_id) {
       throw new StaleApprovalContinuationError(previousTurnId, stored.record.last_turn_id);
     }
+    // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+    const tipTurnId = stored.record.last_turn_id;
+    if (tipTurnId !== null) {
+      const tip = this.turns.get(turnKey({ session_id: input.turn.session_id, turn_id: tipTurnId }));
+      if (tip?.state.status === 'running') {
+        throw new PreviousTurnRunningError(tipTurnId);
+      }
+    }
     let previousSnapshot: TurnSnapshot | undefined;
     if (previousTurnId !== null) {
       const prevKey = turnKey({ session_id: input.turn.session_id, turn_id: previousTurnId });
@@ -861,8 +862,7 @@ export class InMemorySessionStore<
     stored.record.last_activity_timestamp_ms = Date.now();
     stored.record.updated_at = new Date();
     if (input.update_session_title_if_not_exist !== null && stored.record.title === null) {
-      stored.record.title = input.update_session_title_if_not_exist.title;
-      stored.record.title_source = input.update_session_title_if_not_exist.source;
+      stored.record.title = input.update_session_title_if_not_exist;
     }
   }
 

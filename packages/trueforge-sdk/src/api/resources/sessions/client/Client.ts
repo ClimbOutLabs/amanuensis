@@ -39,13 +39,15 @@ export class SessionsClient {
      *     await client.sessions.list()
      */
     public async list(request: TrueForge.ListSessionsRequest = {}, requestOptions?: SessionsClient.RequestOptions): Promise<core.Page<TrueForge.Session, TrueForge.ListSessionsResponse>> {
-        const list = core.HttpResponsePromise.interceptFunction(async (request: TrueForge.ListSessionsRequest): Promise<core.WithRawResponse<TrueForge.ListSessionsResponse>> => { const { limit = 25, order, pageToken, startTimestamp, endTimestamp, agentId, createdByMe, metadata, sourceType, sourceId } = request; const _queryParams: Record<string, unknown> = {
+        const list = core.HttpResponsePromise.interceptFunction(async (request: TrueForge.ListSessionsRequest): Promise<core.WithRawResponse<TrueForge.ListSessionsResponse>> => { const { limit = 25, order, pageToken, startTimestamp, endTimestamp, agentId, folderId, noFolder, createdByMe, metadata, sourceType, sourceId } = request; const _queryParams: Record<string, unknown> = {
             limit,
             order: order != null ? serializers.ListSessionsOrder.jsonOrThrow(order, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true }) : undefined,
             page_token: pageToken,
             start_timestamp: startTimestamp != null ? startTimestamp?.toISOString() : undefined,
             end_timestamp: endTimestamp != null ? endTimestamp?.toISOString() : undefined,
             agent_id: agentId,
+            folder_id: folderId,
+            no_folder: noFolder,
             created_by_me: createdByMe,
             metadata,
             source_type: sourceType != null ? serializers.SessionSourceType.jsonOrThrow(sourceType, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true }) : undefined,

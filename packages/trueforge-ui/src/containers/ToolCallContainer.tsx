@@ -26,12 +26,14 @@ import { Button } from '../atoms/primitives/Button.js';
 import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
+import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
+import { standInApprovalCard } from '../sentinel/standInCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
 import {
@@ -55,19 +57,18 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
-  parseToolNotDoneReason,
   parseToolOutputScreen,
-  parseToolResultDisposition,
   resolveSubAgentMeta,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
+  toolCallDisposition,
+  toolCallNotDoneReason,
   toStatus,
 } from '../utils/toolCallParsing.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedApprovalBridge.js';
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
-import { ToolApprovalContainer } from './ToolApprovalContainer.js';
 import { ToolCallContentBlockContainer } from './ToolCallContentBlockContainer.js';
 import { useEndedApprovalDismiss } from './useEndedApprovalDismiss.js';
 
@@ -141,6 +142,8 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
   const isMobile = useIsMobile();
+  // Who may answer is the session's rule; a sub-agent's card is answered through the runtime like any other.
+  const canManageSession = useActiveSessionCanManage();
   // The approval ticket takes the one highlight only where the rail is hidden; mail never takes it.
   const highlightedApprovalId = useHighlightedCard({
     firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
@@ -208,20 +211,19 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     return respond({ optionId, reason });
   };
 
-  // An approval whose server-built plain-language card arrived on the
-  // `tool.approval_required` event replaces the generic approval card. The branch keys
-  // on the explicit numeric `tier` the server sent; without it the generic card
-  // renders as before. Approve/Deny reuse the same option plumbing, so grants and
-  // confirmations behave identically.
+  const options = buildApprovalOptions(part.approval?.options);
+  // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
+  // and taking the first allow option would silently approve every later equivalent call.
+  const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
+  const denyOption = options.find(option => !option.isAllow);
+  const onDeny = () => onSelectOption(denyOption?.id ?? '__deny');
+
+  // The server's plain-language card from the `tool.approval_required` event picks the card. Approve/Deny
+  // reuse the same option plumbing, so grants and confirmations behave identically.
   const approvalInfo = sentinel?.approvalFor(part.toolCallId);
   if (approvalInfo?.tier === 2 || approvalInfo?.tier === 3) {
-    const options = buildApprovalOptions(part.approval?.options);
-    // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
-    // and taking the first allow option would silently approve every later equivalent call.
-    const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
     // The server decides who may get chat scope; a declared option never overrides a refusal.
     const allowChatId = approvalInfo.chatAllowOffered === false ? undefined : allowChatOptionId(part.approval?.options);
-    const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
     // gets its own allow and redeems its own single-use token. A Tier 3 call is never listed
@@ -266,10 +268,10 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
           approvalId={approvalInfo.toolCallId}
           card={approvalInfo.card}
           onApprove={() => onSelectOption(allowOnceId)}
-          onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+          onDeny={onDeny}
           onChangeRequest={onChangeRequest}
           onSaveDraft={saveDraftOption === undefined ? undefined : () => onSelectOption(SAVE_DRAFT_OPTION_ID)}
-          disabled={isNestedReadonly}
+          disabled={!canManageSession}
         />
       );
     }
@@ -282,11 +284,11 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
-        onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        onDeny={onDeny}
         onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
-        disabled={isNestedReadonly}
+        disabled={!canManageSession}
       />
     );
   }
@@ -301,13 +303,29 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
 
+  // No server card on this screen yet (it can arrive later, or not at all in a host without Sentinel):
+  // the same ticket, built from what the call names, with the choices the call declared.
+  const allowChatId = allowChatOptionId(part.approval?.options);
+  // Approvals are listed by the server's tool call id, the same id a server card carries.
+  const serverCallId = toolInvocationRawId(part.toolCallId);
+  // A call that declared no choices gets the default single-use allow, sent by the same id as before.
+  const standInAllowId =
+    options.find(option => option.id === allowOnceId || option.id === 'allow-once')?.id ?? allowOnceId;
   return (
-    <ToolApprovalContainer
-      toolName={part.toolName}
-      argsText={part.argsText}
-      hostObservedTargetSummary={artifactText(part.artifact, 'hostObservedTargetSummary')}
-      options={buildApprovalOptions(part.approval?.options)}
-      onSelectOption={onSelectOption}
+    <PermissionApprovalCard
+      approvalId={serverCallId}
+      card={standInApprovalCard({
+        toolName: part.toolName,
+        argsText: part.argsText,
+        hostTarget: artifactText(part.artifact, 'hostObservedTargetSummary'),
+      })}
+      highlighted={highlightedApprovalId === serverCallId}
+      othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== serverCallId).length}
+      onApprove={() => onSelectOption(standInAllowId)}
+      onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
+      onDeny={onDeny}
+      disabled={!canManageSession}
+      outboundOpen
     />
   );
 }
@@ -507,7 +525,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
     ) : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
-  const disposition = parseToolResultDisposition(part.result);
+  const disposition = toolCallDisposition(part);
   const outputScreen = parseToolOutputScreen(part.result);
   const outputWasWithheld = outputScreen?.action === 'withheld';
   const status = outputWasWithheld
@@ -516,7 +534,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       ? toStatus(part.status?.type)
       : disposition.tone;
   const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
-  const notDoneReason = outputWasWithheld ? undefined : parseToolNotDoneReason(part.result);
+  const notDoneReason = outputWasWithheld ? undefined : toolCallNotDoneReason(part);
   const outcomeText = outputWasWithheld
     ? outputScreen.label
     : notDoneReason !== undefined
@@ -587,6 +605,8 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       : typeof part.result === 'string'
         ? part.result
         : JSON.stringify(part.result, null, 2);
+  // A waiting call's card shows its details in plain fields, so the raw arguments stay out of view until it is answered.
+  const noRequest = { value: '', isJson: false };
 
   if (isSandbox) {
     const { command, intent, summary, argsJson } = parseSandboxArgs(part.argsText, part.toolName);
@@ -603,7 +623,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         command={command}
         summary={summary}
         exitCode={exitCode}
-        argsJson={argsJson}
+        argsJson={showApproval ? undefined : argsJson}
         resultText={resultText}
         resultJson={resultJson}
         notices={notices}
@@ -629,7 +649,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
     if (part.toolName === 'list_tools' && mcpServer) {
       const slots = RequestResponseSlots({
-        request: argsDisplay,
+        request: showApproval ? noRequest : argsDisplay,
         response: resultDisplay,
       });
       return (
@@ -645,8 +665,8 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
           showResponseLine={status !== 'running' && !!resultDisplay.data}
           mcpServerName={mcpServer}
           {...slots}
-          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
-          approvalId={showApproval ? part.approval?.id : undefined}
+          approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
+          approvalId={showApproval ? approval?.id : undefined}
         />
       );
     }
@@ -654,7 +674,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
     const inputDisplay =
       heldSearchRequest ?? (input !== undefined ? getJsonDisplayValue(JSON.stringify(input, null, 2)) : argsDisplay);
     const slots = RequestResponseSlots({
-      request: inputDisplay,
+      request: showApproval ? noRequest : inputDisplay,
       response: resultDisplay,
     });
 
@@ -681,7 +701,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const argsDisplay = getJsonDisplayValue(part.argsText);
   const resultDisplay = getToolResultContent(part.result);
   const slots = RequestResponseSlots({
-    request: heldSearchRequest ?? argsDisplay,
+    request: showApproval ? noRequest : (heldSearchRequest ?? argsDisplay),
     response: resultDisplay,
   });
 
