@@ -100,8 +100,15 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
       if (menuRef.current?.contains(target)) return;
       setOpen(false);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [open]);
 
   const content = (

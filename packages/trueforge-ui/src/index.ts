@@ -218,7 +218,6 @@ export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
 export { AmanSetupTicket } from './components/AmanFirstRunGuide.js';
 export type { FirstRunTarget, SetupItem } from './components/AmanFirstRunGuide.js';
-export { AmanPandaSourceProvider } from './components/AmanPanda.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';

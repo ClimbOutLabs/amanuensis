@@ -391,11 +391,16 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
         setOpenAndFlush(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenAndFlush(false);
+    };
     document.addEventListener('mousedown', handler);
     document.addEventListener('focusin', handler);
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('focusin', handler);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, setOpenAndFlush]);
 

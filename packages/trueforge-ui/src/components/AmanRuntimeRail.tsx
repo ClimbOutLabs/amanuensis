@@ -1,11 +1,13 @@
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
+import { WORKING_ON_IT_LABEL } from '../atoms/ComposerShell.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { useContextCompactionActive } from '../hooks/useContextCompactionActive.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { WAITING_FOR_YOU_LABEL } from '../sentinel/types.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
@@ -95,17 +97,17 @@ function statusLineLabel({
   compacting: boolean;
 }): string {
   if (status !== 'ready') return STATUS_LABELS[status];
-  if (waitingOnPerson) return 'Waiting for you';
+  if (waitingOnPerson) return WAITING_FOR_YOU_LABEL;
   if (compacting && activity === 'thinking') return 'Tidying up the conversation';
   switch (activity) {
     case 'idle':
       return 'Ready';
     case 'thinking':
-      return 'Working on it';
+      return WORKING_ON_IT_LABEL;
     case 'writing':
       return 'Writing the answer';
     case 'waiting':
-      return 'Waiting for you';
+      return WAITING_FOR_YOU_LABEL;
     case 'error':
       return 'Something went wrong. Send your message again.';
   }

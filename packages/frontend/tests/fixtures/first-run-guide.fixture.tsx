@@ -1,5 +1,4 @@
 import {
-  AmanPandaSourceProvider,
   AmanSetupProvider,
   AmanWelcome,
   PersonalizationProvider,
@@ -83,13 +82,11 @@ function Screen({ state }: { state: FixtureState }) {
   if (state === 'shell') {
     return (
       <div className="overflow-hidden" style={{ height: '100vh' }}>
-        <AmanPandaSourceProvider src="/aman-avatar.png">
-          <TrueForgeUI
-            server={{ type: 'trueforge', baseUrl: 'http://127.0.0.1/', fetch: shellFetch }}
-            layout="sidebar"
-            overrides={{ WelcomeScreen: AmanWelcome }}
-          />
-        </AmanPandaSourceProvider>
+        <TrueForgeUI
+          server={{ type: 'trueforge', baseUrl: 'http://127.0.0.1/', fetch: shellFetch }}
+          layout="sidebar"
+          overrides={{ WelcomeScreen: AmanWelcome }}
+        />
       </div>
     );
   }

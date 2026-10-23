@@ -1,5 +1,4 @@
 import {
-  AmanPandaSourceProvider,
   AmanRuntimeRail,
   AmanSetupProvider,
   AmanWelcome,
@@ -531,19 +530,17 @@ export function App() {
                                 }}
                               >
                                 <ComposerDraftScopeProvider scope={draftScope}>
-                                  <AmanPandaSourceProvider src={AMAN_PANDA_SRC}>
-                                    <AmanShell
-                                      defaultAgentSpec={boot.defaultAgentSpec}
-                                      openSettings={boot.openSettings}
-                                      displayName={session.displayName}
-                                      overrides={overrides}
-                                      modelName={
-                                        setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                      }
-                                      version={boot.build?.version}
-                                      buildRef={boot.build?.ref}
-                                    />
-                                  </AmanPandaSourceProvider>
+                                  <AmanShell
+                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                    openSettings={boot.openSettings}
+                                    displayName={session.displayName}
+                                    overrides={overrides}
+                                    modelName={
+                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                    }
+                                    version={boot.build?.version}
+                                    buildRef={boot.build?.ref}
+                                  />
                                 </ComposerDraftScopeProvider>
                               </AmanSetupProvider>
                             </HelpProvider>

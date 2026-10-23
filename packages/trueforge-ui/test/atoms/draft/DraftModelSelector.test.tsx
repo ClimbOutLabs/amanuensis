@@ -218,6 +218,15 @@ describe('DraftModelSelector', () => {
     expect(document.body.contains(listbox)).toBe(true);
   });
 
+  it('closes the open menu on Escape', async () => {
+    renderSelector();
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('listbox', { name: 'Select model' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Select model' })).not.toBeInTheDocument();
+  });
+
   it('caps the menu height and scrolls the option list instead of growing off screen', async () => {
     renderSelector();
 

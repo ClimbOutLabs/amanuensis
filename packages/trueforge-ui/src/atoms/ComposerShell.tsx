@@ -23,6 +23,9 @@ export type ComposerShellProps = {
   className?: string;
 };
 
+/** The one owner of the words for a reply in progress, shown in the composer and the panel. */
+export const WORKING_ON_IT_LABEL = 'Working on it';
+
 /**
  * The composer card. It holds the attachment chips above the input and one toolbar row below it:
  * the `+` menu, a gold status while a turn runs, then the model, the mic and Send or Stop.
@@ -62,7 +65,7 @@ export function ComposerShell({
           {isRunning ? (
             <span role="status" className="text-text-secondary flex items-center gap-2 text-[0.8125rem]">
               <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
-              Working on it
+              {WORKING_ON_IT_LABEL}
             </span>
           ) : null}
           {connectorStatusLabel && (
