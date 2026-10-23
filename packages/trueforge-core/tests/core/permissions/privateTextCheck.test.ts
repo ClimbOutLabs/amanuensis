@@ -1,5 +1,10 @@
 import type { OutboundStrings } from '../../../src/core/permissions/outboundGuard';
-import { fingerprintLeak, fingerprintsOf, privateTextLeak } from '../../../src/core/permissions/privateTextCheck';
+import {
+  ChatPrivateFingerprintsSchema,
+  fingerprintLeak,
+  fingerprintsOf,
+  privateTextLeak,
+} from '../../../src/core/permissions/privateTextCheck';
 
 function outgoing(...values: string[]): OutboundStrings {
   return { values, scalars: [], keys: [], plumbing: [] };
@@ -553,5 +558,12 @@ describe('fingerprintLeak for the check every search gets', () => {
     expect(leak({ entries: memoryOnly('<user-name>sam rivera</user-name>'), query: 'Sam Rivera linkedin' })).toBe(
       'name',
     );
+  });
+});
+
+describe('a chat record saved before attached files were counted', () => {
+  it('reads as covering no attached files, so a chat whose history shows one asks', () => {
+    const older = { complete: true, has_text: true, secret: false, entries: [] };
+    expect(ChatPrivateFingerprintsSchema.parse(older)).toEqual({ ...older, attached_files: 0 });
   });
 });

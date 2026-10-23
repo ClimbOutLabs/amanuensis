@@ -129,13 +129,16 @@ export type PrivateFingerprint = z.infer<typeof PrivateFingerprintSchema>;
 /**
  * What a chat keeps across its turns for the checks: fingerprints of every private text it read. `complete`
  * is false when some read left no text to fingerprint, so a check could miss a copy and the chat must ask.
- * `secret` is set once the chat read a secret or key file, which no grant lifts.
+ * `secret` is set once the chat read a secret or key file, which no grant lifts. `attached_files` counts the files
+ * the person attached that the record covers, so a turn whose history shows more knows the record misses one. A
+ * record saved before the count existed reads as covering none.
  */
 export const ChatPrivateFingerprintsSchema = z.object({
   complete: z.boolean(),
   has_text: z.boolean(),
   secret: z.boolean(),
   entries: z.array(PrivateFingerprintSchema),
+  attached_files: z.number().int().nonnegative().default(0),
 });
 export type ChatPrivateFingerprints = z.infer<typeof ChatPrivateFingerprintsSchema>;
 
@@ -161,12 +164,13 @@ export function mergeChatPrivateFingerprints(input: {
     has_text: stored.has_text || saved.has_text,
     secret: stored.secret || saved.secret,
     entries: fits ? [...entries.values()] : [],
+    attached_files: Math.max(stored.attached_files, saved.attached_files),
   };
 }
 
 export function emptyChatPrivateFingerprints(): ChatPrivateFingerprints {
   // A chat with no private read yet has nothing it could miss, so it starts complete.
-  return { complete: true, has_text: false, secret: false, entries: [] };
+  return { complete: true, has_text: false, secret: false, entries: [], attached_files: 0 };
 }
 
 function digitsOf(text: string): string {

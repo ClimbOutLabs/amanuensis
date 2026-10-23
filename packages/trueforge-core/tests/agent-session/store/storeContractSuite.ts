@@ -730,6 +730,7 @@ export function runStoreContractSuite<
       has_text: true,
       secret: false,
       entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+      attached_files: 1,
     };
 
     async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
@@ -755,12 +756,13 @@ export function runStoreContractSuite<
       const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
       await store.setPrivateFingerprints({
         session_id: sessionId,
-        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry], attached_files: 2 },
       });
       await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
 
       const merged = await savedFingerprints(store);
-      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      // The count of attached files covered never drops: a turn that saw fewer does not lower it.
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true, attached_files: 2 });
       expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
       expect(merged?.entries).toHaveLength(2);
     });

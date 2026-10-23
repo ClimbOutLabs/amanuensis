@@ -379,19 +379,65 @@ function scannableResultText(result: CallToolResult): string | undefined {
 export function recordPrivateContextText(input: {
   state: WebSearchTurnState;
   text: string;
-  /** False for a text the host puts before the model again each turn, such as the profile or recalled memory. */
-  once_only: boolean;
+  /**
+   * `each_turn` for a text the host puts before the model again every turn (the profile, recalled memory); its
+   * ordinary wording is left out, or it would hold ordinary searches. `attachment` for a file's text, kept whole.
+   */
+  source: 'each_turn' | 'attachment';
 }): void {
   const { state, text } = input;
   if (text.trim() === '') {
     return;
   }
   state.privateContextKept = true;
-  if (input.once_only) {
+  const attachment = input.source === 'attachment';
+  if (attachment) {
     state.onceOnlyContextKept = true;
   }
-  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: false })) {
+  if (
+    !state.fingerprintsLost &&
+    !addPrivateFingerprints({ state: state.chatFingerprints, text, word_runs: attachment })
+  ) {
     state.fingerprintsLost = true;
+  }
+}
+
+/** What Aman could read of a file the person attached, at the moment it arrives. */
+export type AttachedFileContent =
+  | { kind: 'text'; text: string }
+  /** A PDF or scanned image, whose text is kept once it is extracted later in the turn. */
+  | { kind: 'extracted_later' }
+  /** An image the model reads itself, a spreadsheet, or any other file whose text cannot be read here. */
+  | { kind: 'unreadable' };
+
+/**
+ * Counts one file the person attached, before the model sees it, and keeps its text when it can be read. A file
+ * whose text cannot be read leaves the chat unable to check its searches, so each one asks.
+ */
+export function recordAttachedFile(input: { state: WebSearchTurnState; content: AttachedFileContent }): void {
+  const { state, content } = input;
+  state.chatFingerprints.attached_files += 1;
+  state.privateContextKept = true;
+  state.onceOnlyContextKept = true;
+  if (content.kind === 'unreadable') {
+    state.fingerprintsLost = true;
+  } else if (content.kind === 'text') {
+    recordPrivateContextText({ state, text: content.text, source: 'attachment' });
+  }
+}
+
+/** A file counted at upload whose text could not be extracted after all: the chat can no longer check its searches. */
+export function markAttachedFileUnreadable(state: WebSearchTurnState): void {
+  state.fingerprintsLost = true;
+}
+
+/**
+ * Called with how many files the chat's history says the person attached. More than the record covers means a file
+ * from an earlier turn, an imported chat or a lost save left no fingerprints, so the chat's searches ask.
+ */
+export function checkAttachedFilesCovered(input: { state: WebSearchTurnState; attached_in_history: number }): void {
+  if (input.attached_in_history > input.state.chatFingerprints.attached_files) {
+    input.state.fingerprintsLost = true;
   }
 }
 
@@ -475,6 +521,7 @@ export function chatFingerprintsAfterTurn(state: WebSearchTurnState): ChatPrivat
     has_text: state.chatFingerprints.has_text,
     secret: state.chatFingerprints.secret,
     entries: state.chatFingerprints.entries,
+    attached_files: state.chatFingerprints.attached_files,
   };
 }
 

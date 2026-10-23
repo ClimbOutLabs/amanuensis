@@ -7,7 +7,9 @@ import { EventType } from '../../src/agent-session/schemas/events';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { HOLD_SAY } from '../../src/core/permissions/searchHoldText';
 import {
+  checkAttachedFilesCovered,
   markPrivateDataRead,
+  recordAttachedFile,
   recordPrivateContextText,
   recordPrivateReadText,
   recordPrivateToolResult,
@@ -45,9 +47,9 @@ interface Source {
 
 /** Text the host puts before the model each turn (memory, profile), or once (an attached file's text). */
 const context =
-  (text: string, once_only: boolean) =>
+  (text: string, source: 'each_turn' | 'attachment') =>
   (state: WebSearchTurnState): void => {
-    recordPrivateContextText({ state, text, once_only });
+    recordPrivateContextText({ state, text, source });
   };
 const read =
   (tool_name: string, text: string) =>
@@ -58,14 +60,14 @@ const read =
 const SOURCES: Source[] = [
   {
     name: 'memory',
-    record: context(MEMORY, false),
+    record: context(MEMORY, 'each_turn'),
     query: '48 Harrowgate Rd house prices',
     message: 'What is near there?',
     say: HOLD_SAY.private_detail,
   },
   {
     name: 'profile',
-    record: context(PROFILE, false),
+    record: context(PROFILE, 'each_turn'),
     query: 'Teodoro Brambleworth nurse',
     message: 'Find me online',
     say: HOLD_SAY.private_detail,
@@ -93,14 +95,14 @@ const SOURCES: Source[] = [
   },
   {
     name: 'attachment',
-    record: context(ATTACHMENT, true),
+    record: context(ATTACHMENT, 'attachment'),
     query: 'Casimir Pendlebury lease',
     message: 'Check the tenant',
     say: HOLD_SAY.private_detail,
   },
   {
     name: 'a name from the message that memory holds',
-    record: context(MEMORY, false),
+    record: context(MEMORY, 'each_turn'),
     query: 'Ines Quillfeather new job',
     message: 'Look up Inês Quillfeather for me',
     say: HOLD_SAY.private_detail,
@@ -144,8 +146,8 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
     const { run, resolverForTurn, create, callTool, audit } = await setupSearchChat({ reasoning_effort });
     const resolver = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY, once_only: false });
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, once_only: false });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: MEMORY, source: 'each_turn' });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'each_turn' });
       return yield* searchStream({ id: 'call-1', query: 'opening hours of the Lisbon Oceanarium' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -162,7 +164,7 @@ describe.each(EFFORTS)('with reasoning effort %s', reasoning_effort => {
     const { run, resolverForTurn, create, callTool } = await setupSearchChat({ reasoning_effort });
     const resolver = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, once_only: false });
+      recordPrivateContextText({ state: resolver.webSearchTurn, text: PROFILE, source: 'each_turn' });
       return yield* searchStream({ id: 'call-1', query: 'asyncio event loop tutorial python 3.13 advanced news' });
     });
     create.mockImplementationOnce(() => searchStream({ id: 'call-2', query: 'weather in Lisbon' }));
@@ -179,7 +181,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const recalling = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, once_only: false });
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'each_turn' });
       return yield* textStream('Noted.');
     });
     await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Hello' }], resolver: recalling });
@@ -214,7 +216,7 @@ describe('a chat whose earlier turn recalled private details', () => {
     const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
     const losing = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY, once_only: false });
+      recordPrivateContextText({ state: losing.webSearchTurn, text: MEMORY, source: 'each_turn' });
       losing.webSearchTurn.fingerprintsLost = true;
       return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
     });
@@ -253,7 +255,7 @@ describe('a chat with "Allow searches in this chat"', () => {
 
     const recalling = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, once_only: false });
+      recordPrivateContextText({ state: recalling.webSearchTurn, text: MEMORY, source: 'each_turn' });
       return yield* searchStream({ id: 'call-2', query: 'Ines Quillfeather' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -280,7 +282,7 @@ describe('a turn that starts while a profile-only turn is still running', () => 
       release = resolve;
     });
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: first.webSearchTurn, text: PROFILE, once_only: false });
+      recordPrivateContextText({ state: first.webSearchTurn, text: PROFILE, source: 'each_turn' });
       recorded();
       await gate;
       return yield* textStream('Hello.');
@@ -298,7 +300,7 @@ describe('a turn that starts while a profile-only turn is still running', () => 
 
     const second = resolverForTurn();
     create.mockImplementationOnce(async function* () {
-      recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, once_only: false });
+      recordPrivateContextText({ state: second.webSearchTurn, text: PROFILE, source: 'each_turn' });
       return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
     });
     create.mockImplementation(() => textStream('Done.'));
@@ -322,5 +324,94 @@ describe('a turn that starts while a profile-only turn is still running', () => 
     create.mockImplementation(() => textStream('Done.'));
     await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'And another' }] });
     expect(callTool).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a chat with an attached file', () => {
+  const CONTACTS = 'name,email,phone\nJane Example-Smith,jane.smith@example.test,+44 20 7946 0958\n';
+
+  it.each([
+    ['a name', 'Jane Example-Smith'],
+    ['an email address', 'jane.smith@example.test'],
+  ])('holds a search for %s from an attached CSV after a sandbox command printed it', async (_label, query) => {
+    const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
+    const resolver = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      // The upload step keeps the file's text; then the model prints it with an ordinary command.
+      recordAttachedFile({ state: resolver.webSearchTurn, content: { kind: 'text', text: CONTACTS } });
+      recordPrivateToolResult({
+        state: resolver.webSearchTurn,
+        tool_name: 'run_command',
+        result: toolResultResponse({ text: CONTACTS }).result,
+      });
+      return yield* searchStream({ id: 'call-1', query });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+
+    const turn = await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Who is this?' }], resolver });
+
+    const state = (await session.getTurn(turn.id))?.state;
+    expect(state).toMatchObject(HELD);
+    expect(JSON.stringify(state)).toContain(HOLD_SAY.private_detail);
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('asks before every search once a file it cannot read was attached, and keeps asking in later turns', async () => {
+    const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
+    const resolver = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      recordAttachedFile({ state: resolver.webSearchTurn, content: { kind: 'unreadable' } });
+      return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+    const turn = await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Look at this' }], resolver });
+    expect((await session.getTurn(turn.id))?.state).toMatchObject(HELD);
+    expect(JSON.stringify((await session.getTurn(turn.id))?.state)).toContain(HOLD_SAY.private_unchecked);
+
+    create.mockImplementationOnce(() => textStream('Skipped.'));
+    await run({
+      messages: [
+        {
+          type: EventType.USER_TOOL_APPROVAL,
+          thread_id: 'main',
+          tool_call_id: 'call-1',
+          approval: { status: 'deny', reason: 'Not now' },
+        },
+      ],
+    });
+    create.mockImplementationOnce(() => searchStream({ id: 'call-2', query: 'oldest cafe in Lisbon' }));
+    create.mockImplementation(() => textStream('Done.'));
+    const later = await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Something else' }] });
+    expect((await session.getTurn(later.id))?.state).toMatchObject(HELD);
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('asks when the history shows a file the saved record does not cover, as in an older or imported chat', async () => {
+    const { session, run, resolverForTurn, create, callTool } = await setupSearchChat();
+    const resolver = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      checkAttachedFilesCovered({ state: resolver.webSearchTurn, attached_in_history: 1 });
+      return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+
+    const turn = await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }], resolver });
+
+    expect((await session.getTurn(turn.id))?.state).toMatchObject(HELD);
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('runs a public search without asking after a readable file was attached', async () => {
+    const { run, resolverForTurn, create, callTool } = await setupSearchChat();
+    const resolver = resolverForTurn();
+    create.mockImplementationOnce(async function* () {
+      recordAttachedFile({ state: resolver.webSearchTurn, content: { kind: 'text', text: CONTACTS } });
+      return yield* searchStream({ id: 'call-1', query: 'tallest building in Lisbon' });
+    });
+    create.mockImplementation(() => textStream('Done.'));
+
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }], resolver });
+
+    expect(callTool).toHaveBeenCalledTimes(1);
   });
 });

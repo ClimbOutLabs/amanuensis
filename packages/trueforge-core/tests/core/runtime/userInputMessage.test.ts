@@ -368,3 +368,48 @@ describe('UserInputMessage validation', () => {
     });
   });
 });
+
+describe('processAgentUserInput reports what it could read of each attached file', () => {
+  const asData = (mime: string, text: string) => `data:${mime};base64,${Buffer.from(text).toString('base64')}`;
+
+  it('reads text files whole, leaves a PDF to extraction, and calls any other file unreadable', async () => {
+    const localSandbox = makeStubPublicSandbox();
+    jest
+      .spyOn(localSandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
+    const csv = 'name,email\nJane Smith,jane@example.test\n';
+    const msg: AgentInputUserMessage = {
+      type: EventType.USER_MESSAGE,
+      content: [
+        { type: 'file', name: 'contacts.csv', data: asData('text/csv', csv) } satisfies FileContentPart,
+        { type: 'file', name: 'lease.pdf', data: asData('application/pdf', '%PDF-1.4') } satisfies FileContentPart,
+        {
+          type: 'file',
+          name: 'budget.xlsx',
+          data: asData('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'PK'),
+        } satisfies FileContentPart,
+      ],
+    };
+
+    const processed = await processAgentUserInput(msg, localSandbox);
+
+    expect(processed.attachedFiles).toEqual([
+      { kind: 'text', text: csv },
+      { kind: 'extracted_later' },
+      { kind: 'unreadable' },
+    ]);
+  });
+
+  it('calls an image the model reads itself unreadable', async () => {
+    const msg: AgentInputUserMessage = {
+      type: EventType.USER_MESSAGE,
+      content: [{ type: 'file', name: 'card.png', data: asData('image/png', 'png') } satisfies FileContentPart],
+    };
+    expect((await processAgentUserInput(msg, undefined, true)).attachedFiles).toEqual([{ kind: 'unreadable' }]);
+  });
+
+  it('reports no files for a message without any', async () => {
+    const msg: AgentInputUserMessage = { type: EventType.USER_MESSAGE, content: 'hello' };
+    expect((await processAgentUserInput(msg, undefined)).attachedFiles).toEqual([]);
+  });
+});

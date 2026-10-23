@@ -26,7 +26,7 @@ export function personalizationContextCapability(input: {
         processPreLLM: async function* () {
           if (!recorded) {
             recorded = true;
-            recordPrivateContextText({ state: webSearch, text: context.injected_context, once_only: false });
+            recordPrivateContextText({ state: webSearch, text: context.injected_context, source: 'each_turn' });
           }
           yield* [];
         },

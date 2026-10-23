@@ -1,3 +1,4 @@
+import { extname } from 'node:path';
 import type { ChatCompletionContentPart } from 'openai/resources/chat';
 import {
   isSupportedDocumentExtension,
@@ -13,6 +14,7 @@ import {
   type UserContentPart,
 } from '../events/schema';
 import type { LLMUserMessage } from '../llm/LLMTypes';
+import type { AttachedFileContent } from '../permissions/webSearch';
 import { SandboxFileUploadError, type Sandbox, type SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentSendInput } from './AgentThread.types';
 import { assertAttachmentBatch, stageAttachment, validatePublicFilename } from './attachmentStaging';
@@ -111,6 +113,53 @@ const UPLOADED_FILES_HEADING = 'Uploaded files (';
 /** True for the note that lists the files a person attached to their message. */
 export function isUploadedFilesAnnouncement(text: string): boolean {
   return text.startsWith(`${SYSTEM_TAG_START}${UPLOADED_FILES_HEADING}`);
+}
+
+/** How many files the note says the person attached, or 0 when the text is not that note. */
+export function uploadedFilesCount(text: string): number {
+  if (!isUploadedFilesAnnouncement(text)) {
+    return 0;
+  }
+  const count = /^\((\d+)\)/.exec(text.slice(SYSTEM_TAG_START.length + UPLOADED_FILES_HEADING.length - 1));
+  return count === null ? 0 : Number(count[1]);
+}
+
+/** Files read as plain text when attached, so the searches that follow can be checked against what they say. */
+const TEXT_FILE_EXTENSIONS = new Set([
+  '.txt',
+  '.csv',
+  '.tsv',
+  '.md',
+  '.markdown',
+  '.eml',
+  '.ics',
+  '.vcf',
+  '.json',
+  '.xml',
+  '.html',
+  '.htm',
+  '.yaml',
+  '.yml',
+  '.log',
+]);
+
+/** The text of an attached file that is plain UTF-8 text, or undefined for any other file. */
+function attachedPlainText(file: { filename: string; mime: string; bytes: Buffer }): string | undefined {
+  const textType =
+    TEXT_FILE_EXTENSIONS.has(extname(file.filename).toLowerCase()) ||
+    file.mime.startsWith('text/') ||
+    file.mime === 'application/json' ||
+    file.mime === 'application/xml';
+  if (!textType) {
+    return undefined;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(file.bytes);
+  } catch {
+    return undefined;
+  }
+  return text.includes('\u0000') ? undefined : text;
 }
 
 function buildUploadedFilesAnnouncement(
@@ -269,6 +318,8 @@ export interface ProcessAgentUserInputResult {
   message: LLMUserMessage;
   sandboxCreated?: SandboxInfo | undefined;
   stagedDocuments?: readonly StagedDocumentFile[] | undefined;
+  /** What could be read of each attached file, so the turn keeps it for the checks on later searches. */
+  attachedFiles: readonly AttachedFileContent[];
 }
 
 /** Multipart staging failed after any successful siblings were rolled back. */
@@ -296,13 +347,13 @@ export async function processAgentUserInput(
   modelSupportsVision = false,
 ): Promise<ProcessAgentUserInputResult> {
   if (typeof msg.content === 'string') {
-    return { message: { role: 'user', content: msg.content }, sandboxCreated: undefined };
+    return { message: { role: 'user', content: msg.content }, sandboxCreated: undefined, attachedFiles: [] };
   }
 
   const { fileParts, textParts } = partitionContent(msg.content);
 
   if (fileParts.length === 0) {
-    return { message: { role: 'user', content: textParts }, sandboxCreated: undefined };
+    return { message: { role: 'user', content: textParts }, sandboxCreated: undefined, attachedFiles: [] };
   }
   // No need to use signal param; extraction now happens in the turn loop
   assertAttachmentBatch(fileParts.map(part => approximateDecodedBytes(part.data)));
@@ -312,6 +363,7 @@ export async function processAgentUserInput(
   // Vision images are staged for tool use like any other file, but excluded from OCR ingestion below
   // since the model already reads them directly via their image_url part.
   const filesToUploadToSandbox: { filename: string; buffer: Buffer; mime: string; visionImage: boolean }[] = [];
+  const attachedFiles: AttachedFileContent[] = [];
 
   for (const filePart of fileParts) {
     const filename = filePart.name.replace(/^\/+/, '');
@@ -331,6 +383,8 @@ export async function processAgentUserInput(
     if (isImageMime(mime) && modelSupportsVision) {
       // Vision-capable model: send image directly.
       visionImageParts.push({ type: 'image_url', image_url: { url: file_data } });
+      // The model reads the picture itself, so nothing here can check what it shows.
+      attachedFiles.push({ kind: 'unreadable' });
       if (!sandbox) {
         // No sandbox needed; skip staging.
         continue;
@@ -352,11 +406,22 @@ export async function processAgentUserInput(
       );
     }
     const buffer = extractBase64(file_data);
+    const visionImage = isImageMime(mime) && modelSupportsVision;
+    if (!visionImage) {
+      const text = attachedPlainText({ filename, mime, bytes: buffer });
+      attachedFiles.push(
+        text !== undefined
+          ? { kind: 'text', text }
+          : isSupportedDocumentExtension(filename)
+            ? { kind: 'extracted_later' }
+            : { kind: 'unreadable' },
+      );
+    }
     filesToUploadToSandbox.push({
       filename,
       buffer,
       mime,
-      visionImage: isImageMime(mime) && modelSupportsVision,
+      visionImage,
     });
   }
 
@@ -469,5 +534,5 @@ export async function processAgentUserInput(
   modelParts.push(...textParts);
   modelParts.push(...visionImageParts);
 
-  return { message: { role: 'user', content: modelParts }, sandboxCreated, stagedDocuments };
+  return { message: { role: 'user', content: modelParts }, sandboxCreated, stagedDocuments, attachedFiles };
 }

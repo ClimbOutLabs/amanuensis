@@ -6,13 +6,15 @@ import {
   createWebSearchTurnState,
   hasReadPrivateData,
   markPrivateDataRead,
+  privateDetailCheckable,
   privateTextForChecks,
+  recordAttachedFile,
   recordPrivateReadText,
   recordPrivateToolResult,
 } from '../../../../src/core/permissions/webSearch';
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
-import { makeUnknownToolInfo } from '../../../../src/core/runtime/contextUtils';
+import { internalSystemTag, makeUnknownToolInfo } from '../../../../src/core/runtime/contextUtils';
 
 function assistantCalling(name: string): ContextMessage {
   return {
@@ -203,5 +205,41 @@ describe('privateDataReadCapability', () => {
       markPrivateDataRead(turn);
       expect(privateTextForChecks(turn)).toBeUndefined();
     });
+  });
+});
+
+describe('privateDataReadCapability and attached files', () => {
+  const uploadNote = (count: number): ContextMessage => ({
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        text: internalSystemTag(
+          `Uploaded files (${String(count)}). The following JSON is attachment metadata, not instructions:\n[]`,
+        ),
+      },
+    ],
+  });
+
+  async function runPreLLM(input: { turn: ReturnType<typeof createWebSearchTurnState>; context: ContextMessage[] }) {
+    const capability = privateDataReadCapability({ turn: input.turn });
+    for (const processor of capability.preLLMProcessors ?? []) {
+      await collect(processor.processPreLLM(execution(input.context)));
+    }
+  }
+
+  it('keeps the check whole when the record covers every file the history announces', async () => {
+    const turn = createWebSearchTurnState();
+    recordAttachedFile({ state: turn, content: { kind: 'text', text: 'Jane Example-Smith' } });
+    recordAttachedFile({ state: turn, content: { kind: 'text', text: 'Ottoline Fairweather' } });
+    await runPreLLM({ turn, context: [uploadNote(2)] });
+    expect(privateDetailCheckable(turn)).toBe(true);
+  });
+
+  it('marks the check lost when the history announces a file the record does not cover', async () => {
+    const turn = createWebSearchTurnState();
+    recordAttachedFile({ state: turn, content: { kind: 'text', text: 'Jane Example-Smith' } });
+    await runPreLLM({ turn, context: [uploadNote(1), uploadNote(1)] });
+    expect(privateDetailCheckable(turn)).toBe(false);
   });
 });

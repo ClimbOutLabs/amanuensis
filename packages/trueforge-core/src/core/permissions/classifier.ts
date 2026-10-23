@@ -2103,6 +2103,24 @@ async function classifyMapsSilently(input: {
   ) {
     return undefined;
   }
+  // The profile, recalled memory and attached files are checked too: a map may name a place from them, never a
+  // person, a contact or a number. A chat whose kept details miss a text shows the card.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return undefined;
+    }
+    const leak = fingerprintLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended ? privateDetailSkipped() : undefined;
+    }
+  }
   const readMode = hasReadPrivateData(ctx.web_search);
   const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
   if (readMode && texts === undefined) {

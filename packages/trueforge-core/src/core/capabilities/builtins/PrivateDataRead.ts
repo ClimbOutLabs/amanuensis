@@ -2,6 +2,7 @@ import type { RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { isPrivateReadToolName } from '../../permissions/privateReadTools';
 import {
+  checkAttachedFilesCovered,
   hasReadPrivateData,
   markPrivateDataReadFromHistory,
   type WebSearchTurnState,
@@ -9,6 +10,7 @@ import {
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
+import { uploadedFilesCount } from '../../runtime/UserInputMessage';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 
@@ -43,6 +45,22 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
   );
 }
 
+/** How many files the person attached across the conversation, by the notes that announce them. */
+function attachedFilesInContext(context: AgentThreadExecutionContext['context']): number {
+  let count = 0;
+  for (const message of context) {
+    if (!isLLMContextMessage(message) || message.role !== 'user' || typeof message.content === 'string') {
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === 'text') {
+        count += uploadedFilesCount(part.text);
+      }
+    }
+  }
+  return count;
+}
+
 /**
  * The root thread's private-read state: the flag for the chat, saved so the next turn starts with it, and a mark
  * restored from the context when a forked or cut-off thread still holds a private read. Each result's text is recorded
@@ -74,6 +92,11 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
           if (!hasReadPrivateData(input.turn) && contextReadPrivateData(execution.context)) {
             markPrivateDataReadFromHistory(input.turn);
           }
+          // A file attached in a turn whose fingerprints were never saved (an older or imported chat) is not covered.
+          checkAttachedFilesCovered({
+            state: input.turn,
+            attached_in_history: attachedFilesInContext(execution.context),
+          });
           return saveWhenSet();
         },
       },
