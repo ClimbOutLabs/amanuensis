@@ -42,6 +42,8 @@ const HEADER_LINE = /^[ \t]*(?:from|to|cc)[ \t]*:([^\n\r]*)/gim;
 const JSON_HEADER = /"(?:from|to|cc)"[ \t]*:[ \t]*"([^"\n\r]*)"/gi;
 /** The person's own name in their profile, whatever its case. */
 const PROFILE_NAME = /<(?:user-name|address-user-as)>([^<\n\r]*)<\//gi;
+/** The People line of recalled memory: `People: Name: what is known | Other Name: ...`. */
+const PEOPLE_LINE = /^[ \t]*People:[ \t]*([^\n\r]*)/gim;
 /** A calendar attendee's or organizer's display name in JSON. */
 const DISPLAY_NAME = /"displayName"\s*:\s*"([^"]*)"/gi;
 /** One recipient of a header list: quoted text (which may hold a comma) or the text up to the next comma. */
@@ -212,7 +214,10 @@ function namesIn(text: string): string[] {
       );
     }
   }
-  for (const match of [...text.matchAll(DISPLAY_NAME), ...text.matchAll(PROFILE_NAME)]) {
+  const peopleLabels = [...text.matchAll(PEOPLE_LINE)].flatMap(line =>
+    (line[1] ?? '').split(' | ').map(person => [person, person.split(':')[0] ?? '']),
+  );
+  for (const match of [...text.matchAll(DISPLAY_NAME), ...text.matchAll(PROFILE_NAME), ...peopleLabels]) {
     const name = (match[1] ?? '').trim();
     if (wordsOf(name).length >= MIN_NAME_WORDS) {
       names.push(name);

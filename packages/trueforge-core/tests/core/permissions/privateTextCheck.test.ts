@@ -576,3 +576,25 @@ describe('privateTextLeak keeps to what a read chat checked before', () => {
     ).toBeNull();
   });
 });
+
+describe('the People line of recalled memory', () => {
+  it('keeps each person named there as a name, whatever its case', () => {
+    const entries = fingerprintsOf({
+      texts: ['<aman-memory>\nPeople: wilhelmina thrupp: your cousin | Ana Reis: dentist\n</aman-memory>'],
+      word_runs: false,
+      running_details: true,
+    });
+    const leak = (query: string) =>
+      fingerprintLeak({
+        mode: 'search',
+        strings: outgoing(query),
+        earlier: '',
+        entries,
+        has_text: true,
+        encoded_runs: false,
+      });
+    expect(leak('Wilhelmina Thrupp')).toBe('name');
+    expect(leak('ana reis clinic')).toBe('name');
+    expect(leak('your cousin gift ideas')).toBeNull();
+  });
+});
