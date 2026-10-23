@@ -33,13 +33,17 @@ export const railMenuRowClassName = cn(
   'flex h-8 w-full shrink-0 flex-row items-center justify-start gap-2 border-0 bg-transparent px-2.5 text-[0.875rem] font-normal whitespace-nowrap text-text-primary shadow-none hover:bg-ghost-button-hover',
 );
 
+/** The selected rail entry: the soft fill the composer's open menu uses, not a solid block. */
+export const railSelectedClassName =
+  'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
+
 /**
- * Compact sidebar rail control: 4rem × 3.375rem, icon over a 0.75rem secondary label. No box at rest;
+ * Compact sidebar rail control: 4rem × 3.375rem, icon over a 0.75rem label. No box at rest;
  * hover and the selected item use the soft fill tokens, not a heavy primary fill.
  */
 export const sidebarRailButtonClassName = cn(
   sidebarQuietRadiusClassName,
-  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 border border-transparent whitespace-normal px-0.5 text-[0.75rem] font-normal leading-tight text-text-secondary !justify-center shadow-none hover:bg-ghost-button-hover hover:text-text-primary [&_svg]:size-3.5',
+  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 border border-transparent whitespace-normal px-0.5 text-[0.75rem] font-normal leading-tight text-sidebar-text !justify-center shadow-none hover:bg-ghost-button-hover hover:text-text-primary [&_svg]:size-3.5',
 );
 
 /** Shared Button / native `<button>` className helper (SDK utilities are layered). */

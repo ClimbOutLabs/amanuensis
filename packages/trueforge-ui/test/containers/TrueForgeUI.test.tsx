@@ -135,7 +135,7 @@ describe('TrueForgeUI', () => {
     await waitFor(() => {
       switch (layout) {
         case 'sidebar':
-          expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
+          expect(screen.getByRole('button', { name: 'Chats' })).toBeInTheDocument();
           expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
           break;
         case 'drawer':
@@ -272,7 +272,7 @@ describe('TrueForgeUI', () => {
       expect(getMcp).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start new chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
     await waitFor(() => {
       expect(getCapabilities).toHaveBeenCalledTimes(2);
@@ -509,7 +509,7 @@ describe('SidebarLayout', () => {
     expect(rail).toHaveClass('w-20');
     expect(within(drawer).getByAltText('Acme')).toHaveAttribute('src', '/acme.svg');
     expect(within(drawer).queryByText('Acme')).not.toBeInTheDocument();
-    expect(within(drawer).getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Chats' })).toBeInTheDocument();
     openRailMenu();
     expect(screen.getByRole('button', { name: 'Start new agent' })).toBeInTheDocument();
     expect(within(drawer).queryByText('No threads yet')).not.toBeInTheDocument();
@@ -565,7 +565,7 @@ describe('SidebarLayout', () => {
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
   });
 
-  it('shows a permanent labeled rail with New Chat and no expand control', () => {
+  it('shows a permanent labeled rail with Chats, no New entry, and no expand control', () => {
     const { container } = render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/acme.svg' } }}>
         <RuntimeHarness messages={[]}>
@@ -578,13 +578,15 @@ describe('SidebarLayout', () => {
 
     expect(container.querySelector('aside img')).toHaveAttribute('src', '/acme.svg');
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
-    expect(screen.getByText('New')).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    expect(within(nav).getByRole('button', { name: 'Chats' })).toBeInTheDocument();
+    expect(within(nav).queryByText('New')).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('button', { name: /new chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
   });
 
-  it('orders the sidebar rail: New first, and the More menu last', () => {
+  it('orders the sidebar rail: Chats first, and the More menu last', () => {
     render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/acme.svg' } }}>
         <RuntimeHarness messages={[]}>
@@ -599,7 +601,7 @@ describe('SidebarLayout', () => {
     const labels = Array.from(nav.querySelectorAll('button')).map(
       button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '',
     );
-    expect(labels[0]).toBe('Start new chat');
+    expect(labels[0]).toBe('Chats');
     expect(labels[labels.length - 1]).toBe('More');
   });
 
@@ -633,7 +635,7 @@ describe('SidebarLayout', () => {
     const recentChats = screen.getByRole('complementary', { name: 'Recent chats' });
     expect(recentChats).toHaveClass('hidden', 'md:flex');
     expect(recentChats.parentElement?.previousElementSibling?.tagName).toBe('HEADER');
-    expect(screen.getByText('New')).toBeInTheDocument();
+    expect(within(recentChats).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
 
     openRailMenu();
 
@@ -642,14 +644,14 @@ describe('SidebarLayout', () => {
       expect(screen.queryByRole('complementary', { name: 'Recent chats' })).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start new chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Chats' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open named chat' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
   });
 
-  it('highlights New chat when selected, and opens Agent Config and Settings from the More menu', async () => {
+  it('highlights one rail entry for the screen, and opens Agent Config and Settings from the More menu', async () => {
     function NamedAgentButtons() {
       const shell = useShellMode();
       return (
@@ -684,17 +686,19 @@ describe('SidebarLayout', () => {
       </SlotsProvider>,
     );
 
-    const newChat = screen.getByRole('button', { name: 'Start new chat' });
-    expect(newChat).toHaveAttribute('aria-current', 'page');
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const current = () => Array.from(nav.querySelectorAll('[aria-current="page"]')).map(el => el.textContent?.trim());
+    expect(current()).toEqual(['Chats']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open history' }));
-    expect(newChat).toHaveAttribute('aria-current', 'page');
+    expect(current()).toEqual(['Chats']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Try support' }));
-    expect(newChat).not.toHaveAttribute('aria-current');
+    expect(current()).toEqual(['Chats']);
 
     openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
+    await waitFor(() => expect(current()).toEqual(['More']));
     const config = await screen.findByRole('dialog', { name: 'Agent Config' });
     const chatColumn = config.nextElementSibling;
     expect(config).toHaveClass('md:max-w-140', 'md:flex-1', '2xl:max-w-150', 'border-r');
@@ -706,6 +710,7 @@ describe('SidebarLayout', () => {
     openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(current()).toEqual(['More']);
   });
 
   it('chooses an appearance from the More menu and shows settings only when catalog is provided', async () => {

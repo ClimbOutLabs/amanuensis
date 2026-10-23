@@ -688,7 +688,14 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   return (
     <ThreadListShell
       header={
-        isRecentHistory ? null : (
+        isRecentHistory ? (
+          showNewChat ? (
+            <ThreadListNewButton aria-label="New chat" className="w-full" onClick={handleNewChat}>
+              <Icon name="square-pen" />
+              New chat
+            </ThreadListNewButton>
+          ) : null
+        ) : (
           <div className="flex flex-col gap-1">
             {showNewChat ? <ThreadListNewButton onClick={handleNewChat} /> : null}
             <AgentsLibraryButton />

@@ -5,22 +5,30 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
-import { auiButtonClass, sidebarButtonRadiusClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
+import {
+  auiButtonClass,
+  railSelectedClassName,
+  sidebarButtonRadiusClassName,
+  sidebarRailButtonClassName,
+} from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { SEARCH_AGENTS_PAGE_SIZE } from './lib/useSearchAgentsList.js';
 
 export type AgentsLibraryButtonProps = {
   className?: string;
   compact?: boolean;
+  /** Whether this is the current screen. The rail decides this in one place; on its own the button follows its page. */
+  selected?: boolean;
 };
 
-export function AgentsLibraryButton({ className, compact = false }: AgentsLibraryButtonProps) {
+export function AgentsLibraryButton({ className, compact = false, selected }: AgentsLibraryButtonProps) {
   const server = useOptionalServer();
   const shell = useOptionalShellMode();
   const [countLabel, setCountLabel] = useState<string | null>(null);
 
   const enabled = shell?.isLibraryEnabled === true && server != null;
   const libraryOpen = shell?.libraryOpen === true;
+  const highlighted = selected ?? libraryOpen;
   const agentsListEpoch = shell?.agentsListEpoch ?? 0;
 
   useEffect(() => {
@@ -48,15 +56,17 @@ export function AgentsLibraryButton({ className, compact = false }: AgentsLibrar
         type="button"
         aria-label={compact ? 'Agents' : undefined}
         title={compact ? 'Agents' : undefined}
-        aria-current={libraryOpen ? 'page' : undefined}
+        aria-current={highlighted ? 'page' : undefined}
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
             sidebarButtonRadiusClassName,
             'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
             compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
-            libraryOpen &&
-              'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+            highlighted &&
+              (compact
+                ? railSelectedClassName
+                : 'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text'),
           ),
         })}
         onClick={() => shell?.setLibraryOpen(true)}

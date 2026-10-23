@@ -12,11 +12,16 @@ import {
   type Ref,
 } from 'react';
 
-import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
-import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
+import {
+  auiButtonClass,
+  railMenuRowClassName,
+  railSelectedClassName,
+  sidebarRailButtonClassName,
+} from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
+import { useLightDismiss } from '../atoms/lib/useLightDismiss.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
@@ -25,12 +30,14 @@ import { ShellActions } from '../atoms/ShellActions.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
+import { useOpenMostRecentChat } from '../containers/useOpenMostRecentChat.js';
 import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode, type ShellMode } from '../server/ShellModeContext.js';
 import { resolveBrandChrome } from '../theme/brand.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useBrand } from '../theme/ThemeProvider.js';
+import { railEntryFor, type RailEntry } from './railEntry.js';
 
 const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuilder/index.js'));
 const SchedulesPage = lazy(() =>
@@ -41,107 +48,60 @@ const SpacesView = lazy(() => import('../containers/SpacesView.js'));
 const brandLogoClassName = 'h-5 w-5 max-w-40 shrink-0 object-contain';
 const railWidthClassName = 'w-20';
 
-const railActionButtonClassName = cn(sidebarRailButtonClassName, 'text-sidebar-text');
-
-/** The selected rail item: the soft fill the composer's open menu uses, not a solid block. */
-const railSelectedClassName =
-  'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
-
 function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; mode?: ShellMode }): boolean {
   return !overlayOpen && mode?.status === 'active' && !mode.isCreateAgent;
 }
 
 /**
- * Nav buttons only (New Chat through Build Agent). Returned as plain siblings — not wrapped
- * in their own `<nav>` — so the caller can lay them out as siblings of the footer actions
- * in one scrolling flex column instead of two separately-boxed groups that can paint over
- * each other on a short viewport.
- *
- * Order is the everyday-user order: New chat, Chats, Spaces, Schedules, Agents, Build agent.
- * Sessions, Settings and the other footer actions live in `ShellActions`, below these.
+ * Presses on these never count as outside the chat list: the rail's Chats entry toggles it, and the
+ * list's own menus and dialogs open in a layer outside it.
+ */
+const CHAT_LIST_INSIDE_SELECTOR = '[data-chat-list-trigger], [role="menu"], [role="dialog"], [role="alertdialog"]';
+
+/**
+ * Nav buttons only (Chats through Agents). Returned as plain siblings, not wrapped in their own
+ * `<nav>`, so the caller lays them out in one scrolling flex column with the footer actions.
+ * New chat lives at the top of the chat list; Build agent, Sessions and Settings live under More.
  */
 function SidebarNavItems({
-  showHistoryToggle = false,
-  historyCollapsed = false,
-  onToggleHistoryCollapsed,
+  selected,
+  chatListOpen,
+  onChats,
 }: {
-  showHistoryToggle?: boolean;
-  historyCollapsed?: boolean;
-  onToggleHistoryCollapsed?: () => void;
+  selected: RailEntry;
+  chatListOpen: boolean;
+  onChats: () => void;
 }): ReactNode {
-  const aui = useAui();
-  const shell = useOptionalShellMode();
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const SchedulesButton = useSlot('SchedulesButton');
   const SpacesButton = useSlot('SpacesButton');
-  const showNewActions = shell?.isNewChatEnabled !== false;
-  const overlayOpen =
-    shell?.settingsOpen === true ||
-    shell?.libraryOpen === true ||
-    shell?.sessionsOpen === true ||
-    shell?.schedulesOpen === true ||
-    shell?.spacesOpen === true;
-  const mode = shell?.mode;
-  const newChatSelected =
-    !overlayOpen &&
-    mode?.status === 'active' &&
-    !mode.isCreateAgent &&
-    shell?.historyAgentFilter?.intent !== 'try-agent';
-  const historyToggleLabel = historyCollapsed ? 'Show recent chats' : 'Hide recent chats';
-
-  const handleNewChat = () => {
-    shell?.setLibraryOpen(false);
-    shell?.setSessionsOpen(false);
-    if (shell?.isComposerEnabled) {
-      shell.openDraft();
-      return;
-    }
-    shell?.setSettingsOpen(false);
-    shell?.setSchedulesOpen(false);
-    shell?.closeSpaces();
-    void Promise.resolve(aui.threads().switchToNewThread()).catch(() => undefined);
-  };
+  const chatsSelected = selected === 'chats';
 
   return (
     <>
-      {showNewActions ? (
-        <button
-          type="button"
-          aria-label="Start new chat"
-          title="New chat"
-          aria-current={newChatSelected ? 'page' : undefined}
-          className={auiButtonClass({
-            variant: 'ghost',
-            className: cn(railActionButtonClassName, newChatSelected && railSelectedClassName),
-          })}
-          onClick={handleNewChat}
-        >
-          <Icon name="square-pen" size={14} />
-          <span className="text-center">New</span>
-        </button>
-      ) : null}
-      {showHistoryToggle ? (
-        <button
-          type="button"
-          aria-label={historyToggleLabel}
-          aria-pressed={historyCollapsed}
-          title={historyToggleLabel}
-          className={auiButtonClass({ variant: 'ghost', className: railActionButtonClassName })}
-          onClick={event => {
-            // The mobile nav drawer closes on any rail button click via the aside's
-            // onNavigate bubble handler; the history toggle must not dismiss the
-            // drawer — its whole point is to reveal the chats panel inside it.
-            event.stopPropagation();
-            onToggleHistoryCollapsed?.();
-          }}
-        >
-          <Icon name="message-square-text" size={14} />
-          <span className="text-center">Chats</span>
-        </button>
-      ) : null}
-      <SpacesButton compact />
-      <SchedulesButton compact />
-      <AgentsLibraryButton compact />
+      <button
+        type="button"
+        title="Chats"
+        aria-expanded={chatListOpen}
+        aria-current={chatsSelected ? 'page' : undefined}
+        data-chat-list-trigger=""
+        className={auiButtonClass({
+          variant: 'ghost',
+          className: cn(sidebarRailButtonClassName, chatsSelected && railSelectedClassName),
+        })}
+        onClick={event => {
+          // The mobile nav drawer closes on any rail button click via the aside's onNavigate
+          // bubble handler; Chats must not dismiss the drawer, since it reveals the list inside it.
+          event.stopPropagation();
+          onChats();
+        }}
+      >
+        <Icon name="message-square-text" size={14} />
+        <span className="text-center">Chats</span>
+      </button>
+      <SpacesButton compact selected={selected === 'spaces'} />
+      <SchedulesButton compact selected={selected === 'schedules'} />
+      <AgentsLibraryButton compact selected={selected === 'agents'} />
     </>
   );
 }
@@ -151,19 +111,17 @@ function SidebarRail({
   onNavigate,
   className,
   railRef,
-  showHistoryToggle = false,
-  historyCollapsed = false,
-  onToggleHistoryCollapsed,
+  selected,
+  chatListOpen,
+  onChats,
   ...dialogProps
 }: {
   onNavigate?: () => void;
   className?: string;
   railRef?: Ref<HTMLElement>;
-  /** Whether the recent-chats history panel could be showing right now (controls toggle visibility). */
-  showHistoryToggle?: boolean;
-  /** Whether the user has hidden the recent-chats history panel. */
-  historyCollapsed?: boolean;
-  onToggleHistoryCollapsed?: () => void;
+  selected: RailEntry;
+  chatListOpen: boolean;
+  onChats: () => void;
 } & Omit<ComponentPropsWithoutRef<'aside'>, 'children' | 'className'>): ReactNode {
   const brand = useBrand();
   const chrome = resolveBrandChrome(brand);
@@ -192,17 +150,14 @@ function SidebarRail({
       <div className="flex h-14 w-full shrink-0 items-center justify-center text-text-primary">
         <BrandLogo variant={chrome.collapsedVariant} className={brandLogoClassName} />
       </div>
-      {/* One scrolling flex column: nav buttons and footer actions are plain siblings with
-          a consistent gap, so on a short viewport the column scrolls (min-h-0 + overflow-y-auto)
-          instead of the footer actions painting over the nav buttons or vice versa. */}
+      {/* One scrolling flex column: on a short viewport it scrolls (min-h-0 + overflow-y-auto) instead
+          of the footer painting over the nav. The footer sits at the bottom when there is room. */}
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1" aria-label="Sidebar">
-        <SidebarNavItems
-          showHistoryToggle={showHistoryToggle}
-          historyCollapsed={historyCollapsed}
-          onToggleHistoryCollapsed={onToggleHistoryCollapsed}
-        />
-        <UserAvatar labeled className="mt-1" />
-        <RailMoreMenu />
+        <SidebarNavItems selected={selected} chatListOpen={chatListOpen} onChats={onChats} />
+        <div className="mt-auto flex flex-col items-center gap-1 pt-1">
+          <UserAvatar labeled />
+          <RailMoreMenu selected={selected === 'more'} />
+        </div>
       </nav>
     </aside>
   );
@@ -212,7 +167,7 @@ function SidebarRail({
  * The kebab at the bottom of the rail. Everything that is not a rail destination lives here: Build agent,
  * Sessions, Settings, the theme, Bug report and the host's log-out. It closes on an outside click or Escape.
  */
-function RailMoreMenu() {
+function RailMoreMenu({ selected }: { selected: boolean }) {
   const shell = useOptionalShellMode();
   const showNewActions = shell?.isNewChatEnabled !== false;
   const handleNewAgent = () => {
@@ -232,7 +187,11 @@ function RailMoreMenu() {
           type="button"
           aria-label="More"
           title="More"
-          className={auiButtonClass({ variant: 'ghost', className: cn(sidebarRailButtonClassName, 'mt-1') })}
+          aria-current={selected ? 'page' : undefined}
+          className={auiButtonClass({
+            variant: 'ghost',
+            className: cn(sidebarRailButtonClassName, selected && railSelectedClassName),
+          })}
         >
           <Icon name="ellipsis-vertical" size={14} />
           <span className="text-center">More</span>
@@ -278,10 +237,46 @@ export function SidebarLayout({ className }: { className?: string }) {
   const recentHistoryAvailable = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
   const historyCollapsed = shell?.historyCollapsed === true;
   const showRecentHistory = recentHistoryAvailable && !historyCollapsed;
-  const toggleHistoryCollapsed = useCallback(
-    () => shell?.setHistoryCollapsed(!historyCollapsed),
-    [shell, historyCollapsed],
-  );
+  const railEntry = railEntryFor(shell);
+  const openMostRecentChat = useOpenMostRecentChat();
+  const chatListRef = useRef<HTMLElement>(null);
+  // Opened from the rail, the docked chat list behaves like a menu: it closes on a press outside,
+  // Escape, or picking a chat. Left open from an earlier visit, it stays put.
+  const [chatListFromRail, setChatListFromRail] = useState(false);
+  const chatListDismissible = chatListFromRail && showRecentHistory && !isMobile;
+
+  const closeChatList = useCallback(() => {
+    setChatListFromRail(false);
+    shell?.setHistoryCollapsed(true);
+  }, [shell]);
+
+  const handleChats = () => {
+    if (shell === null) return;
+    if (showRecentHistory) {
+      closeChatList();
+      return;
+    }
+    const alreadyOnChats = railEntry === 'chats';
+    shell.setSettingsOpen(false);
+    shell.setLibraryOpen(false);
+    shell.setSessionsOpen(false);
+    shell.setSchedulesOpen(false);
+    shell.closeSpaces();
+    shell.setHistoryCollapsed(false);
+    setChatListFromRail(true);
+    if (!alreadyOnChats) openMostRecentChat();
+  };
+
+  useLightDismiss({
+    open: chatListDismissible,
+    isInside: target =>
+      chatListRef.current?.contains(target) === true || target.closest(CHAT_LIST_INSIDE_SELECTOR) !== null,
+    onDismiss: closeChatList,
+  });
+
+  useEffect(() => {
+    if (!showRecentHistory) setChatListFromRail(false);
+  }, [showRecentHistory]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -312,9 +307,9 @@ export function SidebarLayout({ className }: { className?: string }) {
       <HelpNewChatBridge />
       <SidebarRail
         className="hidden md:flex"
-        showHistoryToggle={recentHistoryAvailable}
-        historyCollapsed={historyCollapsed}
-        onToggleHistoryCollapsed={toggleHistoryCollapsed}
+        selected={railEntry}
+        chatListOpen={showRecentHistory}
+        onChats={handleChats}
       />
 
       {showAgentConfig ? (
@@ -341,16 +336,24 @@ export function SidebarLayout({ className }: { className?: string }) {
           )}
           start={
             !overlayOpen ? (
-              <button
-                ref={menuBtnRef}
-                type="button"
-                aria-label="Navigation"
-                aria-expanded={mobileNavOpen}
-                className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'md:hidden')}
-                onClick={() => setMobileNavOpen(true)}
+              // Sits in a rail-wide strip on the rail's background, so it lines up with the rail it opens.
+              <div
+                className={cn(
+                  railWidthClassName,
+                  '-ml-4 flex shrink-0 items-center justify-center self-stretch border-r border-border bg-sidebar-bg md:hidden',
+                )}
               >
-                <Icon name="bars" />
-              </button>
+                <button
+                  ref={menuBtnRef}
+                  type="button"
+                  aria-label="Navigation"
+                  aria-expanded={mobileNavOpen}
+                  className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
+                  onClick={() => setMobileNavOpen(true)}
+                >
+                  <Icon name="bars" />
+                </button>
+              </div>
             ) : null
           }
           title={!overlayOpen ? <NamedAgentHeaderLabel /> : null}
@@ -368,10 +371,14 @@ export function SidebarLayout({ className }: { className?: string }) {
         <div className="flex min-h-0 min-w-0 flex-1">
           {showRecentHistory ? (
             <aside
+              ref={chatListRef}
               aria-label="Recent chats"
               className="hidden min-h-0 w-64 shrink-0 border-r border-border bg-sidebar-bg md:flex"
             >
-              <ThreadListContainer variant="recent-history" />
+              <ThreadListContainer
+                variant="recent-history"
+                {...(chatListDismissible ? { onThreadOpen: closeChatList } : {})}
+              />
             </aside>
           ) : null}
 
@@ -459,9 +466,9 @@ export function SidebarLayout({ className }: { className?: string }) {
           >
             <SidebarRail
               onNavigate={() => setMobileNavOpen(false)}
-              showHistoryToggle={recentHistoryAvailable}
-              historyCollapsed={historyCollapsed}
-              onToggleHistoryCollapsed={toggleHistoryCollapsed}
+              selected={railEntry}
+              chatListOpen={showRecentHistory}
+              onChats={handleChats}
             />
             {showRecentHistory ? (
               <div
