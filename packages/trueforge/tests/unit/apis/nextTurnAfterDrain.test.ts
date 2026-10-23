@@ -199,8 +199,9 @@ async function chatWithTwoTurns() {
       default_timeout_ms: 60_000,
       finalization_buffer_ms: 1_000,
     });
+    executionDeadline.arm();
     // The step every server path takes after createTurn, before any tool runs.
-    await armTurnExecution({ turnDrains, sessionId: session.session_id, executionDeadline, logger });
+    await armTurnExecution({ turnDrains, sessionId: session.session_id, logger });
     const doneSeen = Promise.withResolvers<void>();
     const drain = drainTurnEvents({
       trackedStream: turn.stream(),
@@ -396,17 +397,11 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     turnDrains.trackArtifactCapture({ sessionId: 'session-next-turn', turnId: 'turn-1', capture: capture.promise });
 
     jest.useFakeTimers();
-    const executionDeadline = new TurnExecutionDeadline({
-      abortController: new AbortController(),
-      default_timeout_ms: 60_000,
-      finalization_buffer_ms: 1_000,
-    });
     try {
       let started = false;
       const waiting = armTurnExecution({
         turnDrains,
         sessionId: 'session-next-turn',
-        executionDeadline,
         logger,
       }).then(() => {
         started = true;
@@ -417,7 +412,6 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
       await waiting;
       expect(started).toBe(true);
     } finally {
-      executionDeadline.dispose();
       jest.useRealTimers();
       capture.resolve();
     }

@@ -343,6 +343,9 @@ describe('Sessions / SessionHandle / TurnHandle (storage + createTurn)', () => {
       custom: { n: 1 },
     });
     expect(t1.custom).toEqual({ n: 1 });
+    for await (const event of t1.stream()) {
+      void event;
+    }
 
     const t2 = await session.createTurn({
       turn_id: mintTestTurnId(),

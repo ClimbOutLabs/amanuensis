@@ -31,7 +31,7 @@ export function mintTestTurnId(): string {
 export function makeAgentSpec(
   overrides: {
     instructions?: string;
-    model?: { name: string };
+    model?: { name: string; params?: Record<string, unknown> };
     auxiliary_models?: {
       compaction?: { name: string; params?: Record<string, unknown> };
       delegation?: { name: string; params?: Record<string, unknown> };

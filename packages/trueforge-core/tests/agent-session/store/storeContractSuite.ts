@@ -734,6 +734,7 @@ export function runStoreContractSuite<
       has_text: true,
       secret: false,
       entries: [{ kind: 'name', length: 2, digest: '0123456789abcdef0123456789abcdef' }],
+      attached_files: 1,
     };
 
     async function savedFingerprints(store: Store): Promise<ChatPrivateFingerprints | null | undefined> {
@@ -759,12 +760,13 @@ export function runStoreContractSuite<
       const otherEntry: PrivateFingerprint = { kind: 'number', length: 7, digest: 'fedcba9876543210fedcba9876543210' };
       await store.setPrivateFingerprints({
         session_id: sessionId,
-        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry] },
+        fingerprints: { complete: false, has_text: false, secret: true, entries: [otherEntry], attached_files: 2 },
       });
       await store.setPrivateFingerprints({ session_id: sessionId, fingerprints });
 
       const merged = await savedFingerprints(store);
-      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true });
+      // The count of attached files covered never drops: a turn that saw fewer does not lower it.
+      expect(merged).toMatchObject({ complete: false, has_text: true, secret: true, attached_files: 2 });
       expect(merged?.entries).toEqual(expect.arrayContaining([...fingerprints.entries, otherEntry]));
       expect(merged?.entries).toHaveLength(2);
     });
@@ -2546,6 +2548,7 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
       );
+      await finishTurn(store, 'turn-2');
       // Fork from turn-1 (not the tip).
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
@@ -2558,12 +2561,56 @@ export function runStoreContractSuite<
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }));
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).last_turn_id).toBe('turn-root-2');
     });
 
-    it('concurrent createTurn forking the same tip: both succeed with isolated context', async () => {
+    it('rejects a new root turn while the tip is still running', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await expect(store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }))).rejects.toMatchObject({
+        name: 'PreviousTurnRunningError',
+        previous_turn_id: 'turn-1',
+      });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-1');
+    });
+
+    it('concurrent first turns on a new chat: only the first commits', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const results = await Promise.allSettled([
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-a' })),
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-b' })),
+      ]);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
+      const turns = await store.listTurns({ session_id: sessionId, limit: 10, page_token: undefined });
+      expect(turns.data).toHaveLength(1);
+    });
+
+    it('rejects a fork while the tip is a different running turn', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+      );
+      await expect(
+        store.createTurn(
+          makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+        ),
+      ).rejects.toMatchObject({ name: 'PreviousTurnRunningError', previous_turn_id: 'turn-2' });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-2');
+    });
+
+    it('concurrent createTurn forking the same tip: only the first commits', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
@@ -2612,20 +2659,24 @@ export function runStoreContractSuite<
           }),
         ),
       ]);
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_id);
+      const winner = mustGet(mustGet(session).last_turn_id);
+      expect(['turn-a', 'turn-b']).toContain(winner);
       const turns = await store.listTurns({
         session_id: sessionId,
         limit: 10,
         page_token: undefined,
       });
-      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', 'turn-a', 'turn-b']);
+      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', winner].sort());
 
-      const turnA = await store.getTurn({ session_id: sessionId, turn_id: 'turn-a' });
-      const turnB = await store.getTurn({ session_id: sessionId, turn_id: 'turn-b' });
-      expect(contextContents(turnA?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'a-only']);
-      expect(contextContents(turnB?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'b-only']);
+      const committed = await store.getTurn({ session_id: sessionId, turn_id: winner });
+      expect(contextContents(committed?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual([
+        'shared',
+        winner === 'turn-a' ? 'a-only' : 'b-only',
+      ]);
     });
 
     it('rejects createTurn when previous turn is still running', async () => {
@@ -4058,10 +4109,23 @@ export function runStoreContractSuite<
     it('recovers only explicitly selected owners with expired leases', async () => {
       const store = createStore();
       await seedSession(store);
+      // A chat runs one turn at a time, so the second running command lives in another chat.
+      const otherSessionId = `${sessionId}-other`;
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const sessionOf = (turnId: string): string => (turnId.endsWith('replica-a') ? sessionId : otherSessionId);
       for (const turnId of ['turn-a.replica-a', 'turn-b.replica-b']) {
-        await store.createTurn(makeCreateTurnInput({ sessionId, turnId }));
+        await store.createTurn(makeCreateTurnInput({ sessionId: sessionOf(turnId), turnId }));
         await store.appendCommandExecutionStarted({
-          session_id: sessionId,
+          session_id: sessionOf(turnId),
           turn_id: turnId,
           ownership: commandOwnership({
             leaseId: `lease-${turnId}`,
@@ -4106,14 +4170,14 @@ export function runStoreContractSuite<
       ).resolves.toMatchObject({ status: 'running', disposition: null });
       await expect(
         store.getCommandExecution({
-          session_id: sessionId,
+          session_id: otherSessionId,
           turn_id: 'turn-b.replica-b',
           thread_id: MAIN_THREAD_ID,
           tool_call_id: 'call-turn-b.replica-b',
         }),
       ).resolves.toMatchObject({ status: 'terminal', disposition: 'outcome_unknown' });
       const recoveredEvents = await store.listTurnEvents({
-        session_id: sessionId,
+        session_id: otherSessionId,
         turn_id: 'turn-b.replica-b',
         limit: 10,
         page_token: undefined,
@@ -4200,6 +4264,8 @@ export function runStoreContractSuite<
         expect(
           events.data.filter(event => event.type === EventType.TOOL_RESPONSE_V2 && event.tool_call_id === toolCallId),
         ).toHaveLength(recovered);
+        // The chat takes its next turn only once this one has ended.
+        await finishTurn(store, turnId);
       }
     });
 
@@ -4489,16 +4555,20 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-sibling', previousTurnId: 't1', firstTurnId: 't1' }),
       );
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-sibling',
+        events: [makeTurnCreatedEvent('t2-sibling')],
+      });
+      await finishTurn(store, 't2-sibling');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-anchor', previousTurnId: 't1', firstTurnId: 't1' }),
       );
-      for (const turnId of ['t2-sibling', 't2-anchor']) {
-        await store.appendToEvents({
-          session_id: sessionId,
-          turn_id: turnId,
-          events: [makeTurnCreatedEvent(turnId)],
-        });
-      }
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-anchor',
+        events: [makeTurnCreatedEvent('t2-anchor')],
+      });
       const { data } = await store.listSessionEvents({
         session_id: sessionId,
         limit: 10,
@@ -4556,6 +4626,7 @@ export function runStoreContractSuite<
         event_id: mustGet(firstPage.data[0]).event.id,
       });
 
+      await finishTurn(store, 't2');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-new-active', previousTurnId: 't1', firstTurnId: 't1' }),
       );
