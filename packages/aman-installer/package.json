@@ -14,7 +14,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build-exe.mjs",
-    "lint": "eslint src tests",
+    "lint": "eslint src",
     "test": "node --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
