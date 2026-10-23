@@ -111,7 +111,7 @@ describe('space capability', () => {
     expect(capability.preLLMProcessors).toBeUndefined();
   });
 
-  it('instructs the model to author every html space unconditionally and never via sandbox file edits', () => {
+  it('instructs the model to author every html space unconditionally', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -127,8 +127,24 @@ describe('space capability', () => {
     expect(rendered).toContain('<style>');
     expect(rendered).toContain('no external stylesheets');
     expect(rendered).toContain('Author every html space');
-    expect(rendered).toContain('Never author a space by editing files in the sandbox');
     expect(rendered).not.toContain('If the web-artifacts-builder skill is available');
+  });
+
+  it('keeps the rule against writing a space through sandbox files in the always-sent create_space description', async () => {
+    const capability = spaceCapability({
+      store: makeStore(),
+      authority: { tenantId: 'default', userRef: 'user-a' },
+      tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const response = await toolSet.listTools();
+    const tools = 'result' in response ? response.result.tools : [];
+    const createSpace = tools.find(tool => tool.name === CREATE_SPACE_TOOL_NAME);
+    expect(createSpace?.description).toContain('never by editing files in the sandbox');
   });
 
   it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {

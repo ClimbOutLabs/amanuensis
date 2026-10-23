@@ -38,13 +38,13 @@ describe('DeferredTool scripted model session', () => {
       await listToolsText(deferredTool, 'parallel-web'),
     ];
 
-    const bundleName = (name: string, bundle: string) =>
+    const bundleName = (name: string) =>
       JSON.stringify({
-        error: `'${name}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through call_tool; when one is not in your tool list, call load_bundle with the name '${bundle}' first.`,
+        error: `'${name}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through call_tool.`,
       });
     expect(results).toEqual([
-      bundleName('gmail', 'google'),
-      bundleName('sub_agents', 'sub_agents'),
+      bundleName('gmail'),
+      bundleName('sub_agents'),
       'parallel-web:\n  search, fetch',
     ]);
     expect(results[1]).not.toContain('Do not try other names');

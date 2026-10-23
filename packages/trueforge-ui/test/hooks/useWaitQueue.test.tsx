@@ -73,6 +73,32 @@ describe('useWaitQueue', () => {
     expect(view.snapshot.microcopy).toBe('Reading…');
   });
 
+  it('never says a search the person said no to was searched', () => {
+    const view = assistantView(
+      [
+        { role: 'user', content: 'hello' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'search-1',
+              toolName: 'web_search',
+              args: { query: 'Dana Example' },
+              approval: { id: 'search-1', approved: false, reason: 'No thanks' },
+              result: { error: 'No thanks' },
+              isError: true,
+            },
+          ],
+        },
+      ],
+      true,
+    );
+
+    expect(view.snapshot.ticks).not.toContain('Searched the web');
+    expect(view.snapshot.ticks).toContain('Not done: you said no');
+  });
+
   it('derives Writing from streaming text', () => {
     const view = assistantView(
       [

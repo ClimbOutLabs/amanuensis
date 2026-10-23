@@ -24,7 +24,6 @@ import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
 import { findBundle, TOOL_BUNDLE_NAMES } from './toolBundleCatalog';
-import { LOAD_BUNDLE_TOOL_NAME } from './ToolBundles';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
 const DEFERRED_TOOLS_INSTRUCTION = 'deferred-tools-instructions';
@@ -305,7 +304,7 @@ export class DeferredTool extends LocalToolMCP {
     }
     const bundle = findBundle({ name: mcpServer, offered: TOOL_BUNDLE_NAMES });
     if ('found' in bundle) {
-      return `'${mcpServer}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}; when one is not in your tool list, call ${LOAD_BUNDLE_TOOL_NAME} with the name '${bundle.found}' first.`;
+      return `'${mcpServer}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.`;
     }
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);

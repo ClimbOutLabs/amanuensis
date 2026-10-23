@@ -16,6 +16,7 @@ export const SessionEventType = {
         ToolApprovalRequired: "tool.approval_required",
         ToolResponseRequired: "tool.response_required",
         AgentContextCompaction: "agent.context.compaction",
+        AgentContextCompactionStarted: "agent.context.compaction_started",
         AmanMemoryRecall: "aman.memory.recall",
         AmanProfileLearned: "aman.profile.learned",
         AmanSkillUsed: "aman.skill.used",

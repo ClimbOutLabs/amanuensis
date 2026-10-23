@@ -1,3 +1,4 @@
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import type { SentinelApprovalCard } from './types.js';
 
 /** The approval choices, in the order every approval surface shows them. */
@@ -48,9 +49,13 @@ export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
  */
 export const ALWAYS_ALLOW_TOOL_OPTION_ID = 'allow-standing';
 
-/** Cards with content a person may want to edit: a mail, a calendar event, a new schedule, or a new specialist. */
+/**
+ * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new specialist, or a
+ * held web search, whose words they may want to change before it is sent.
+ */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {
   return (
+    isSearchHoldCardText(card.plain_what) ||
     card.email !== null ||
     card.calendar_event !== null ||
     (card.schedule !== null && card.schedule.action === 'create') ||

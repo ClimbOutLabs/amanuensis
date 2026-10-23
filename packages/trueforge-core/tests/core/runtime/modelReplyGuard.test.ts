@@ -65,9 +65,13 @@ function call(id: string, name: string, args: Record<string, unknown> | string):
   };
 }
 
-function guard(calls: RawToolCall[], knownEventIds: ReadonlySet<string> = new Set()) {
+function guard(
+  calls: RawToolCall[],
+  knownEventIds: ReadonlySet<string> = new Set(),
+  readOnlyTools: ReadonlySet<string> = new Set(),
+) {
   const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: calls };
-  return guardModelReply({ message, tools: TOOLS, knownEventIds });
+  return guardModelReply({ message, tools: TOOLS, knownEventIds, readOnlyTools });
 }
 
 describe('guardModelReply', () => {
@@ -83,7 +87,21 @@ describe('guardModelReply', () => {
 
   it('flags a call whose arguments cannot be repaired, keyed by its id', () => {
     const outcome = guard([call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '[' })]);
-    expect(outcome.invalidCalls.get('a')).toContain('full_content should be true or false');
+    expect(outcome.invalidCalls.get('a')).toContain(
+      'full_content must be true or false, for example "full_content": true, or leave it out',
+    );
+  });
+
+  it('drops an unusable optional true-or-false value from a read-only tool and lets the call through', () => {
+    const outcome = guard(
+      [call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '> ' })],
+      new Set(),
+      new Set(['web_fetch']),
+    );
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(JSON.parse(outcome.message.tool_calls?.[0]?.function.arguments ?? '{}')).toEqual({
+      urls: ['https://example.com'],
+    });
   });
 
   it('treats arguments streamed as empty text as an empty object when the tool allows one', () => {
@@ -98,7 +116,7 @@ describe('guardModelReply', () => {
   it('sends an empty-arguments call with a required field through the plain argument message instead', () => {
     const outcome = guard([call('a', 'create_event', '')]);
     const message = outcome.invalidCalls.get('a');
-    expect(message).toContain('title should be text');
+    expect(message).toContain('title must be text');
     expect(message).toContain('was not sent');
     expect(message).not.toContain('not complete');
   });

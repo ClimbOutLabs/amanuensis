@@ -157,6 +157,22 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
+ * Whether a call waits for the person's answer. A call that matches a "no" from earlier in this turn
+ * gets no new card: the run refuses it as that same "no", so rewording a search cannot ask again.
+ */
+export function awaitsApproval(input: {
+  call: InternalEnrichedToolCall;
+  decisions: ReadonlyMap<string, ApprovalDecision>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): boolean {
+  return (
+    input.call.tool_info.is_approval_required === true &&
+    !input.decisions.has(input.call.id) &&
+    !input.deniedApprovalIdentities.has(approvalGrantKey(input.call.tool_info))
+  );
+}
+
+/**
  * Durable identity for a chat-scoped approval. The identity is derived by the
  * server from the enriched tool call, never accepted from the browser. The card's
  * destination and recipient are part of it so a grant never follows a call to a different target.

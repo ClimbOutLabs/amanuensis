@@ -189,7 +189,7 @@ describe('toolCallParsing', () => {
     const declined = JSON.stringify({
       schema_version: 'tool.response.v2',
       outcome: { disposition: 'denied' },
-      result: { error: 'User denied tool call: not now' },
+      result: { error: 'The person said no to this. Their reason: not now.' },
     });
     expect(parseToolNotDoneReason(declined)).toBe('you said no');
     expect(parseToolResultDisposition(declined)?.label).toBe('Denied');

@@ -39,7 +39,7 @@ async function* finalAnswerStream(): AsyncGenerator<
   return { output: { role: 'assistant', content: 'done' }, usage: getEmptyUsage(), finish_reason: 'stop' };
 }
 
-async function firstSystemMessage(sandbox: Sandbox | undefined): Promise<string | undefined> {
+async function hostMessages(sandbox: Sandbox | undefined): Promise<string | undefined> {
   const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
@@ -60,15 +60,18 @@ async function firstSystemMessage(sandbox: Sandbox | undefined): Promise<string 
     // Draining is enough; the assertion is on the request sent to the model.
   }
 
+  // The system prompt, where the skills index always goes, and the per-reply block.
   const request = create.mock.calls[0]?.[0];
-  const systemMessage = request?.messages.find(m => m.role === 'system');
-  return typeof systemMessage?.content === 'string' ? systemMessage.content : undefined;
+  const system = request?.messages.flatMap(m =>
+    m.role === 'system' && typeof m.content === 'string' ? [m.content] : [],
+  );
+  return system === undefined || system.length === 0 ? undefined : system.join('\n');
 }
 
 describe('AgentThread skill prompt section', () => {
   it('renders <skills> with precedence guidance when the sandbox mounts skills', async () => {
     const sandbox = makeStubPublicSandbox({ skillMounter: new SkillMounter([GIT_SKILL]) });
-    const system = await firstSystemMessage(sandbox);
+    const system = await hostMessages(sandbox);
 
     expect(system).toContain('<skills>');
     expect(system).toContain('MUST use that skill');
@@ -79,7 +82,7 @@ describe('AgentThread skill prompt section', () => {
   });
 
   it('renders no <skills> section when there is no sandbox', async () => {
-    const system = await firstSystemMessage(undefined);
+    const system = await hostMessages(undefined);
 
     expect(system).toBeDefined();
     expect(system).not.toContain('<skills>');

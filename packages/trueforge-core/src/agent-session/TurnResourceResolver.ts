@@ -54,7 +54,7 @@ export type TurnSandboxFactory = (input: {
   sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
 
-/** The bundle a host-provisioned connector's tools are sent with: search goes with web, the first-party mail and calendar accounts with google. */
+/** The guidance topic a host-provisioned connector's tools are grouped under: search under web, the first-party mail and calendar accounts under google. */
 function connectorBundle(input: {
   name: string;
   firstParty: boolean;

@@ -33,7 +33,7 @@ export interface AgentCapability {
   readonly toolResponseProcessors?: readonly ToolResponseProcessor[] | undefined;
   readonly untrustedTextScreens?: readonly UntrustedTextScreen[] | undefined;
   readonly instructionBuilders?: readonly ((builder: InstructionBuilder) => void)[] | undefined;
-  /** The bundle whose prompt sections `instructionBuilders` write: sent only while it is loaded. Absent: always sent. */
+  /** The guidance topic `instructionBuilders` write into, returned by load_bundle. Absent: sent in the system prompt. */
   readonly bundle?: ToolBundleName | undefined;
   /**
    * Cross-turn durable state. `key` must be unique across capabilities on a

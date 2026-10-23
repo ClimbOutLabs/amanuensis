@@ -33,6 +33,15 @@ export function AgentDetailsPreferenceProvider({ children }: { children: ReactNo
   const visibilityRef = useRef(visibility);
   visibilityRef.current = visibility;
   const loadingRef = useRef<Set<string>>(new Set());
+  const retryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    const timers = retryTimersRef.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   // Reads the latest map off a ref (not the `visibility` closure) so this stays referentially
   // stable across loads instead of forcing every consumer's effect to re-run on each one.
@@ -41,16 +50,33 @@ export function AgentDetailsPreferenceProvider({ children }: { children: ReactNo
       if (server == null) return;
       if (visibilityRef.current.has(sessionId) || loadingRef.current.has(sessionId)) return;
       loadingRef.current.add(sessionId);
-      void server
-        .getSession({ sessionId })
-        .then(session => {
-          const value = sessionAgentDetails(session) ?? 'collapsed';
-          setVisibilityMap(current => new Map(current).set(sessionId, value));
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          loadingRef.current.delete(sessionId);
-        });
+      const load = (attempt: number) => {
+        server
+          .getSession({ sessionId })
+          .then(session => {
+            loadingRef.current.delete(sessionId);
+            const value = sessionAgentDetails(session) ?? 'collapsed';
+            // A choice made while this read was in flight is newer than what the read saw.
+            setVisibilityMap(current => (current.has(sessionId) ? current : new Map(current).set(sessionId, value)));
+          })
+          .catch(() => {
+            // A failed read must not leave the chat on the default for good: details the person
+            // turned on would stay hidden until the page reloads. Retry with a growing pause.
+            const timer = setTimeout(
+              () => {
+                retryTimersRef.current.delete(timer);
+                if (visibilityRef.current.has(sessionId)) {
+                  loadingRef.current.delete(sessionId);
+                  return;
+                }
+                load(attempt + 1);
+              },
+              Math.min(1000 * 2 ** attempt, 30_000),
+            );
+            retryTimersRef.current.add(timer);
+          });
+      };
+      load(0);
     },
     [server],
   );

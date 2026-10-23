@@ -35,6 +35,7 @@ import {
   type AgentParent,
   type ApprovalDecision,
   type ContextCompactionEvent,
+  type ContextCompactionStartedEvent,
   type DocumentIngestionEvent,
   type MCPInitializeEvent,
   type MCPServerInitInfo,
@@ -63,6 +64,7 @@ import {
   type LLMUserMessage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
+  type RawToolCall,
   type RegisteredCommandExecution,
   type ThinkingBlock,
 } from '../llm/LLMTypes';
@@ -77,6 +79,7 @@ import {
   allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
+  awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
   offersChatApproval,
@@ -93,6 +96,8 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  isHostVouchedRead,
+  isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   NO_PROGRESS_NUDGE_AT,
@@ -134,7 +139,13 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
-import { keepSubAgentAnswerText } from '../permissions/webSearch';
+import {
+  keepSubAgentAnswerText,
+  markAttachedFileUnreadable,
+  recordAttachedFile,
+  recordPrivateContextText,
+} from '../permissions/webSearch';
+import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -224,12 +235,13 @@ import {
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
-  isSafeToRepeat,
   OpenToolCallCloser,
   unknownOutcomeCloseout,
   type ClosableToolOutcome,
 } from './OpenToolCallCloser';
 import {
+  BLOCKED_CALLS_PARENT_MESSAGE,
+  blockedCallsStopMessage,
   claimsUnbackedAction,
   REPEATED_ACTION_RESULT,
   TOOL_MARKUP_RETRY_MESSAGE,
@@ -270,12 +282,13 @@ import {
   type TaskState,
 } from './taskState';
 import { TaskStateToolSet } from './TaskStateToolSet';
-import type { ToolBundleName } from './toolBundleCatalog';
+import { TOOL_BUNDLE_NAMES, type ToolBundleName } from './toolBundleCatalog';
 import { ToolBundles } from './ToolBundles';
 import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
   buildIngestionUnavailableNote,
+  documentPlainText,
   isEmptyMessageContent,
   processAgentUserInput,
   type AgentInputUserMessage,
@@ -673,6 +686,7 @@ function deriveAgentThreadState(input: {
   context: ContextMessage[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
 }): AgentThreadState {
   const openToolCallIds = getOpenToolCallIds(input.context);
   if (openToolCallIds.size === 0) {
@@ -687,7 +701,9 @@ function deriveAgentThreadState(input: {
     implementationPlanGrants: input.implementationPlanGrants,
   });
   const hasPendingApproval = assistant?.tool_calls?.some(
-    tc => openToolCallIds.has(tc.id) && tc.tool_info.is_approval_required === true && !decisions.has(tc.id),
+    tc =>
+      openToolCallIds.has(tc.id) &&
+      awaitsApproval({ call: tc, decisions, deniedApprovalIdentities: input.deniedApprovalIdentities }),
   );
   const hasPendingClientSideTool = assistant?.tool_calls?.some(
     tc => openToolCallIds.has(tc.id) && tc.tool_info.is_client_side === true,
@@ -821,9 +837,13 @@ function lastAssistantInContext(context: ContextMessage[]): InternalEnrichedAssi
 // regular tool calls (which the closer repairs), while still blocking on approval/client-side/
 // sub-agent calls that genuinely need resolution. Takes the already-computed open set; copies it
 // since it mutates (deletes) the closable ids.
-function getUnclosableOpenToolCallIds(context: ContextMessage[], openToolCallIds: Set<string>): Set<string> {
-  const blockingOpenToolCallIds = new Set(openToolCallIds);
-  for (const id of getClosableOpenToolCalls(context).keys()) {
+function getUnclosableOpenToolCallIds(input: {
+  context: ContextMessage[];
+  openToolCallIds: Set<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): Set<string> {
+  const blockingOpenToolCallIds = new Set(input.openToolCallIds);
+  for (const id of getClosableOpenToolCalls(input.context, input.deniedApprovalIdentities).keys()) {
     blockingOpenToolCallIds.delete(id);
   }
   return blockingOpenToolCallIds;
@@ -991,6 +1011,7 @@ function getPendingApprovalToolCalls(input: {
   context: ContextMessage[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
 }): InternalEnrichedToolCall[] {
   const openToolCallIds = getOpenToolCallIds(input.context);
   const assistant = lastAssistantInContext(input.context);
@@ -1001,7 +1022,9 @@ function getPendingApprovalToolCalls(input: {
     implementationPlanGrants: input.implementationPlanGrants,
   });
   return (assistant?.tool_calls ?? []).filter(
-    tc => openToolCallIds.has(tc.id) && tc.tool_info.is_approval_required === true && !decisions.has(tc.id),
+    tc =>
+      openToolCallIds.has(tc.id) &&
+      awaitsApproval({ call: tc, decisions, deniedApprovalIdentities: input.deniedApprovalIdentities }),
   );
 }
 
@@ -1046,6 +1069,7 @@ function validateInputMessageTypesGivenContext(input: {
   messages: AgentThreadRuntimeSendInput[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  deniedApprovalIdentities: ReadonlySet<string>;
   /** Whether a standing tool grant can be recorded: only with a Sentinel context. */
   toolGrantsAvailable: boolean;
 }): void {
@@ -1053,12 +1077,17 @@ function validateInputMessageTypesGivenContext(input: {
   const openToolCallIds = getOpenToolCallIds(input.context);
   // Subset that blocks a fresh user message: excludes calls OpenToolCallCloser will auto-close
   // during preSend, so a dangling regular tool call doesn't reject a user message it will repair.
-  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds(input.context, openToolCallIds);
+  const blockingOpenToolCallIds = getUnclosableOpenToolCallIds({
+    context: input.context,
+    openToolCallIds,
+    deniedApprovalIdentities: input.deniedApprovalIdentities,
+  });
   const pendingApprovalCalls = new Map(
     getPendingApprovalToolCalls({
       context: input.context,
       chatApprovalGrants: input.chatApprovalGrants,
       implementationPlanGrants: input.implementationPlanGrants,
+      deniedApprovalIdentities: input.deniedApprovalIdentities,
     }).map(tc => [tc.id, tc] as const),
   );
   const pendingApprovalIds = new Set(pendingApprovalCalls.keys());
@@ -1362,6 +1391,27 @@ export async function classifyUnstampedToolCall(input: {
   return { ...info, ...stampSentinelDecision({ decision }) };
 }
 
+/**
+ * The called tools whose reads the host itself vouches for, looked up by name before their
+ * arguments are trusted. A server's own read-only claim never counts here.
+ */
+function hostVouchedReadToolNames({
+  calls,
+  toolMapping,
+}: {
+  calls: readonly RawToolCall[];
+  toolMapping: Map<string, MappedMCPTool>;
+}): Set<string> {
+  const vouched = new Set<string>();
+  for (const name of new Set(calls.map(call => call.function.name))) {
+    const toolInfo = toolMapping.get(name);
+    if (toolInfo?.toolSet.isHostVouchedReadTool?.(toolInfo.originalToolName) === true) {
+      vouched.add(name);
+    }
+  }
+  return vouched;
+}
+
 async function enrichAssistantMessage({
   assistantMessage,
   toolMapping,
@@ -1522,9 +1572,11 @@ export class AgentThread {
   private postToolCallContextProcessor: PostToolCallAgentContextProcessor[];
 
   private instruction: string | undefined;
-  // Per-reply block (date, person). Fixed for the thread's life: a thread that
-  // crosses UTC midnight keeps the date its reply started with.
+  // Per-reply block (date, person, a bound repository's state). Only the date is
+  // fixed: a thread that crosses UTC midnight keeps the date its reply started with.
+  // The block is rebuilt when a bound repository's branch or head changes.
   private replyContext: string;
+  private readonly replyDate = new Date();
   private toolResponseProcessors: ToolResponseProcessor[];
   private untrustedTextScreens: readonly UntrustedTextScreen[];
   private instructionBuilders: readonly {
@@ -1533,7 +1585,7 @@ export class AgentThread {
   }[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
-  // Built-in tools sent only when a turn needs them. Absent for a read-only definition, which offers no tools.
+  // Built-in tools' guidance, read on demand. Absent for a read-only definition, which offers no tools.
   private readonly toolBundles: ToolBundles | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
@@ -1684,8 +1736,16 @@ export class AgentThread {
       ? undefined
       : new ToolBundles({
           tracing: this.tracing,
-          sectionBundles: new Set((input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle]))),
-          routeSignals: () => ({ repositoryAttached: this.sandbox?.getBoundRepositoryContext() !== undefined }),
+          // The web guidance says how to treat current facts, which matters most when no tool can fetch them.
+          sectionBundles: new Set([
+            'web',
+            ...(input.capabilities ?? []).flatMap(c => (c.bundle === undefined ? [] : [c.bundle])),
+          ]),
+          guidance: bundle => {
+            const builder = new InstructionBuilder('bundle-guidance');
+            this.addBundleGuidance(builder, bundle);
+            return builder.build();
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
@@ -1703,7 +1763,10 @@ export class AgentThread {
     );
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
-    this.preSendContextProcessors = [new OpenToolCallCloser(), ...capabilityPreSend];
+    this.preSendContextProcessors = [
+      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      ...capabilityPreSend,
+    ];
 
     assertUniqueStateKeys(capabilities);
     const claimed = claimCapabilityState(capabilities, input.capabilityState, this.logger);
@@ -1731,16 +1794,16 @@ export class AgentThread {
     }
 
     this.instruction = this.buildInstruction(this.definition.instruction);
-    // Built once per reply, never per step: the static instruction above stays
-    // byte-identical across days and people, so provider prefix caching holds.
+    // Kept out of the static instruction above, so it stays byte-identical across
+    // days and people and provider prefix caching holds.
     this.replyContext = this.buildReplyContext();
   }
 
   /**
    * The per-reply block, sent right after the static instruction. Today's date and the
    * person's name change between replies, so they live here instead of in the static
-   * instruction. Built once when the thread starts, so every step of a reply sends the
-   * same bytes. Sub-agents get the date only.
+   * instruction. The date is fixed when the thread starts; a bound repository's branch and
+   * head are rebuilt here when they change. Sub-agents get the date only.
    */
   private buildReplyContext(): string {
     const builder = new InstructionBuilder('reply-context');
@@ -1751,8 +1814,8 @@ export class AgentThread {
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
     // time of day. The get_current_datetime tool remains for precise time.
-    const dateUtc = new Date().toISOString().slice(0, 10);
-    const local = resolveLocalTime(new Date(), this.definition.clientTimezone);
+    const dateUtc = this.replyDate.toISOString().slice(0, 10);
+    const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
     const localDateClause = local.isFallback
       ? ''
       : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
@@ -1765,7 +1828,33 @@ export class AgentThread {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
       builder.addSection('person', `The person you work for is ${personName}.`, true);
     }
+    // A chat bound to a repository needs its live branch and commands on every reply, not only
+    // when the model reads the sandbox guidance; here it leaves the cached prefix untouched.
+    if (this.toolBundles !== undefined && this.sandbox?.getBoundRepositoryContext() !== undefined) {
+      this.addBundleGuidance(builder.beginSection('repository-context'), 'sandbox');
+    }
     return builder.build();
+  }
+
+  /** A bundle's prompt sections. */
+  private addBundleGuidance(builder: InstructionBuilder, bundle: ToolBundleName): void {
+    if (bundle === 'web') {
+      builder.addSection(
+        'source-discovery',
+        createSourceDiscoveryContract({
+          shellCanFetch: this.sandbox?.hasNetwork() === true,
+        }),
+      );
+      builder.addSection('web-images', WEB_IMAGES_PROMPT);
+    }
+    if (bundle === 'sandbox') {
+      this.sandbox?.buildInstruction(builder);
+    }
+    for (const instruction of this.instructionBuilders) {
+      if (instruction.bundle === bundle) {
+        instruction.build(builder);
+      }
+    }
   }
 
   private buildInstruction(userInstruction?: string): string {
@@ -1804,31 +1893,13 @@ export class AgentThread {
         `You are running as the model "${modelId}". Your training data ends before this model was released, so newer models, tools and events exist that you have never read about. When the question is what is newest or whether something exists, trust search results and the user over your memory.${configuredModelsClause}`,
       );
     }
-    // A bundle's sections go out with its tools. A thread without bundles sends every section.
-    const loaded = (bundle: ToolBundleName | undefined) =>
-      bundle === undefined || this.toolBundles === undefined || this.toolBundles.isLoaded(bundle);
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
-    // The sandbox bundle's guidance and its exec tool go out together, and only when this chat has a sandbox.
-    const sandboxLoaded = this.sandbox !== undefined && loaded('sandbox');
-    if (loaded('web')) {
-      capabilities.addSection(
-        'source-discovery',
-        createSourceDiscoveryContract({ shellCanFetch: sandboxLoaded && this.sandbox?.hasNetwork() === true }),
-      );
-    }
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
-    if (loaded('web')) {
-      capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
-    }
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
-
-    if (this.sandbox && loaded('sandbox')) {
-      this.sandbox.buildInstruction(capabilities);
-    }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
     if (this.sandbox === undefined && !this.parent) {
@@ -1839,12 +1910,20 @@ export class AgentThread {
       }
     }
     this.toolBundles?.buildInstruction(capabilities);
+    this.sandbox?.buildSkillsInstruction(capabilities);
     if (this.deferredTool) {
       this.deferredTool.buildInstruction(capabilities);
     }
     for (const { bundle, build } of this.instructionBuilders) {
-      if (loaded(bundle)) {
+      if (bundle === undefined) {
         build(capabilities);
+      }
+    }
+    // With bundles, a bundle's guidance goes out at the end of the chat when the model reads it, so
+    // this prompt stays byte-identical for the whole chat. A thread without bundles sends it all here.
+    if (this.toolBundles === undefined) {
+      for (const bundle of TOOL_BUNDLE_NAMES) {
+        this.addBundleGuidance(capabilities, bundle);
       }
     }
     if (!this.parent && userInstruction?.trim()) {
@@ -1890,6 +1969,7 @@ export class AgentThread {
         messages,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
         toolGrantsAvailable: this.sentinel !== undefined,
       });
       if (messages.some(isInputUserMessage)) {
@@ -1908,6 +1988,13 @@ export class AgentThread {
           clientSideToolResponses.push(m);
         } else if (isInputUserMessage(m)) {
           const result = await processAgentUserInput(m, this.sandbox, this.definition.modelSupportsVision ?? false);
+          // Kept before the model sees the files, so a search that copies one asks first.
+          const sentinel = this.sentinel;
+          if (sentinel !== undefined) {
+            for (const content of result.attachedFiles) {
+              recordAttachedFile({ state: sentinel.web_search, content });
+            }
+          }
           contextMessages.push(result.message);
           if (result.sandboxCreated) {
             this.pendingSandboxCreatedEvents.push(buildSandboxCreatedEvent(result.sandboxCreated));
@@ -1929,6 +2016,7 @@ export class AgentThread {
             context: this.context,
             chatApprovalGrants: this.chatApprovalGrants,
             implementationPlanGrants: this.implementationPlanGrants,
+            deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
@@ -2308,6 +2396,7 @@ export class AgentThread {
       context: this.context,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
     });
     if (this.currentState) {
       assertValidTransition(this.currentState, next);
@@ -2426,9 +2515,14 @@ export class AgentThread {
   private *recoverFromLoopOrExit(input: {
     recoveryNote: string;
     errorMessage: string;
+    /** What the parent model reads when a helper stops this way; undefined sends it errorMessage. */
+    parentErrorMessage: string | undefined;
   }): Generator<AgentThreadEvent, StepOutcome, unknown> {
     if (this.loopRecoveryAttemptedThisTurn) {
-      yield this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      const done = this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      yield input.parentErrorMessage === undefined || done.send_to_parent === undefined
+        ? done
+        : { ...done, send_to_parent: { ...done.send_to_parent, content: input.parentErrorMessage } };
       return 'exit';
     }
     this.loopRecoveryAttemptedThisTurn = true;
@@ -2464,6 +2558,7 @@ export class AgentThread {
         context: this.context,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
       }).length > 0 || getPendingClientSideToolCalls(this.context).length > 0
     );
   }
@@ -2481,6 +2576,7 @@ export class AgentThread {
       messages,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
       toolGrantsAvailable: this.sentinel !== undefined,
     });
   }
@@ -2710,6 +2806,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,
@@ -2723,6 +2820,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,
@@ -2779,6 +2877,11 @@ export class AgentThread {
           case EventType.AGENT_CONTEXT_COMPACTION:
             // Counts-only record that a compaction attempt ran (see ContextCompaction.ts);
             // carries no context mutation of its own, so just stamp thread_id and forward it.
+            yield { ...response, thread_id: this.threadId };
+            break;
+          case EventType.AGENT_CONTEXT_COMPACTION_STARTED:
+            // Yielded before the summarizer runs and before any overwrite, so a client can say
+            // the conversation is being tidied while the slow call is in flight.
             yield { ...response, thread_id: this.threadId };
             break;
           case InternalEventType.PASSTHROUGH:
@@ -2965,144 +3068,169 @@ export class AgentThread {
       }
     };
 
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      if (file === undefined) {
-        continue;
-      }
-
-      if (signal?.aborted) {
-        // Never reached extraction: no `started` event for these, per the cancellation contract.
-        for (const progress of cancelFrom(files.slice(index))) {
-          yield buildDocumentIngestionEvent(progress, this.threadId);
-          extractedTextParts.push(
-            buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
-          );
+    // A file whose text was not kept, for any reason, leaves the chat unable to check its searches.
+    const keptFiles = new Set<string>();
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        if (file === undefined) {
+          continue;
         }
-        break;
-      }
 
-      yield buildDocumentIngestionEvent(
-        { fileName: file.filename, stagedPath: file.path, phase: 'started' },
-        this.threadId,
-      );
-
-      let terminalDocumentProgress: DocumentFileProgress | undefined;
-      try {
-        const extraction = await extractDocumentsFromSandbox(
-          this.sandbox,
-          [file.path],
-          signal,
-          progress => {
-            if (progress.phase !== 'started') {
-              terminalDocumentProgress = progress;
-            }
-          },
-          budget,
-        );
-        const document = extraction.documents[0];
-        if (terminalDocumentProgress === undefined && document !== undefined) {
-          // Defensive: onFileProgress above should always have fired for the one file requested.
-          terminalDocumentProgress = {
-            phase: document.pages.length > 0 ? 'finished' : 'failed',
-            filename: file.filename,
-            path: file.path,
-            elapsedMs: 0,
-            document,
-          };
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          // The file currently in flight still gets a terminal event; it never leaves `started`
-          // dangling. Remaining, unreached files are cancelled without ever having started.
-          yield buildDocumentIngestionEvent(
-            { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
-            this.threadId,
-          );
-          extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
-          for (const progress of cancelFrom(files.slice(index + 1))) {
+        if (signal?.aborted) {
+          // Never reached extraction: no `started` event for these, per the cancellation contract.
+          for (const progress of cancelFrom(files.slice(index))) {
             yield buildDocumentIngestionEvent(progress, this.threadId);
             extractedTextParts.push(
               buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
             );
           }
-          return;
+          break;
         }
-        const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
-        yield buildDocumentIngestionEvent(
-          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
-          this.threadId,
-        );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-        continue;
-      }
 
-      if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
-        // Should be unreachable (extraction resolved without ever reporting a terminal phase);
-        // still emit a terminal event so `started` is never left dangling.
-        const issue = 'Extraction produced no text';
         yield buildDocumentIngestionEvent(
-          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+          { fileName: file.filename, stagedPath: file.path, phase: 'started' },
           this.threadId,
         );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-        continue;
-      }
 
-      const document = terminalDocumentProgress.document;
-      if (terminalDocumentProgress.phase === 'finished') {
-        yield buildDocumentIngestionEvent(
-          {
-            fileName: file.filename,
-            stagedPath: file.path,
-            phase: 'finished',
-            method:
-              document.extraction_mode === 'text'
-                ? 'native text'
-                : document.extraction_mode === 'ocr'
-                  ? 'OCR'
-                  : 'mixed',
-            pageCount: document.pages.length,
-            elapsedMs: terminalDocumentProgress.elapsedMs,
-          },
-          this.threadId,
-        );
-        extractedTextParts.push(
-          await this.screenIngestedText({
+        let terminalDocumentProgress: DocumentFileProgress | undefined;
+        // What extraction returns, after its page limits: only it says whether pages were left unread.
+        let returnedIssue: string | null | undefined;
+        try {
+          const extraction = await extractDocumentsFromSandbox(
+            this.sandbox,
+            [file.path],
+            signal,
+            progress => {
+              if (progress.phase !== 'started') {
+                terminalDocumentProgress = progress;
+              }
+            },
+            budget,
+          );
+          const document = extraction.documents[0];
+          returnedIssue = document?.issue;
+          if (terminalDocumentProgress === undefined && document !== undefined) {
+            // Defensive: onFileProgress above should always have fired for the one file requested.
+            terminalDocumentProgress = {
+              phase: document.pages.length > 0 ? 'finished' : 'failed',
+              filename: file.filename,
+              path: file.path,
+              elapsedMs: 0,
+              document,
+            };
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            // The file currently in flight still gets a terminal event; it never leaves `started`
+            // dangling. Remaining, unreached files are cancelled without ever having started.
+            yield buildDocumentIngestionEvent(
+              { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
+              this.threadId,
+            );
+            extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
+            for (const progress of cancelFrom(files.slice(index + 1))) {
+              yield buildDocumentIngestionEvent(progress, this.threadId);
+              extractedTextParts.push(
+                buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
+              );
+            }
+            return;
+          }
+          const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
+          yield buildDocumentIngestionEvent(
+            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          continue;
+        }
+
+        if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
+          // Should be unreachable (extraction resolved without ever reporting a terminal phase);
+          // still emit a terminal event so `started` is never left dangling.
+          const issue = 'Extraction produced no text';
+          yield buildDocumentIngestionEvent(
+            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          continue;
+        }
+
+        const document = terminalDocumentProgress.document;
+        if (terminalDocumentProgress.phase === 'finished') {
+          yield buildDocumentIngestionEvent(
+            {
+              fileName: file.filename,
+              stagedPath: file.path,
+              phase: 'finished',
+              method:
+                document.extraction_mode === 'text'
+                  ? 'native text'
+                  : document.extraction_mode === 'ocr'
+                    ? 'OCR'
+                    : 'mixed',
+              pageCount: document.pages.length,
+              elapsedMs: terminalDocumentProgress.elapsedMs,
+            },
+            this.threadId,
+          );
+          const ingested = await this.screenIngestedText({
             part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
             file: { filename: file.filename, path: file.path },
             signal,
-          }),
-        );
-      } else {
-        const issue = document.issue ?? 'Extraction produced no text';
-        yield buildDocumentIngestionEvent(
-          {
-            fileName: file.filename,
-            stagedPath: file.path,
-            phase: 'failed',
-            issue,
-            elapsedMs: terminalDocumentProgress.elapsedMs,
-          },
-          this.threadId,
-        );
-        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+          });
+          // An attached file is the person's own: a later search that carries its details asks first. The whole text
+          // is kept, since the model can read past the part shown here.
+          if (this.sentinel !== undefined) {
+            recordPrivateContextText({
+              state: this.sentinel.web_search,
+              text: documentPlainText(document),
+              source: 'attachment',
+            });
+          }
+          // A file read only in part (a page limit, a page with no text) is not covered: the model can still read
+          // the rest, and nothing here would see it.
+          if (returnedIssue === null) {
+            keptFiles.add(file.path);
+          }
+          extractedTextParts.push(ingested);
+        } else {
+          const issue = document.issue ?? 'Extraction produced no text';
+          yield buildDocumentIngestionEvent(
+            {
+              fileName: file.filename,
+              stagedPath: file.path,
+              phase: 'failed',
+              issue,
+              elapsedMs: terminalDocumentProgress.elapsedMs,
+            },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+        }
       }
-    }
 
-    // Append extracted text parts to context as a synthetic user message so the model sees them
-    // before the LLM call. This message contains the extracted text from the staged documents.
-    if (extractedTextParts.length > 0) {
-      const contextMessage: ContextMessage = {
-        role: 'user',
-        content: extractedTextParts,
-      };
-      yield* this.appendToContext({
-        context: [contextMessage],
-        output: [],
-        currentContextUsage: undefined,
-        usage: undefined,
-      });
+      // Append extracted text parts to context as a synthetic user message so the model sees them
+      // before the LLM call. This message contains the extracted text from the staged documents.
+      if (extractedTextParts.length > 0) {
+        const contextMessage: ContextMessage = {
+          role: 'user',
+          content: extractedTextParts,
+        };
+        yield* this.appendToContext({
+          context: [contextMessage],
+          output: [],
+          currentContextUsage: undefined,
+          usage: undefined,
+        });
+      }
+    } finally {
+      const sentinel = this.sentinel;
+      if (sentinel !== undefined && files.some(file => !keptFiles.has(file.path))) {
+        markAttachedFileUnreadable(sentinel.web_search);
+      }
     }
   }
 
@@ -3118,6 +3246,7 @@ export class AgentThread {
   ): AsyncGenerator<
     | ThreadOverwriteContextEvent
     | ContextCompactionEvent
+    | ContextCompactionStartedEvent
     | AgentThreadAppendContext
     | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
     | InternalCapabilityStateEvent,
@@ -3223,7 +3352,12 @@ export class AgentThread {
     ) {
       // Every model request atomically refreshes Sandbox Git state. Rebuild only
       // when that state changed, keeping ordinary prompt construction deterministic.
-      this.instruction = this.buildInstruction(this.definition.instruction);
+      // With bundles the state rides in the per-reply block, so the system prompt stays put.
+      if (this.toolBundles === undefined) {
+        this.instruction = this.buildInstruction(this.definition.instruction);
+      } else {
+        this.replyContext = this.buildReplyContext();
+      }
     }
     // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
     // request before its safety ceiling is checked. If the raw context is already past
@@ -3321,6 +3455,7 @@ export class AgentThread {
       } satisfies ModelMessageEvent;
 
       let firstDeltaTimestamped = false;
+      let firstTokenMs: number | null = null;
       const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
@@ -3357,7 +3492,8 @@ export class AgentThread {
           if (event) {
             if (!firstDeltaTimestamped) {
               firstDeltaTimestamped = true;
-              this.metrics.time_to_first_token_ms ??= Date.now() - modelRequestStartedAt;
+              firstTokenMs = Date.now() - modelRequestStartedAt;
+              this.metrics.time_to_first_token_ms ??= firstTokenMs;
               yield { ...event, created_at: new Date().toISOString() };
             } else {
               yield event;
@@ -3378,6 +3514,15 @@ export class AgentThread {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         result = attemptResult;
+        // One line per model step, so a slow step shows in the logs without a trace viewer.
+        this.logger.info('Model step finished', {
+          threadId: this.threadId,
+          step: this.metrics.iterations,
+          attempt,
+          firstTokenMs,
+          durationMs: Date.now() - modelRequestStartedAt,
+          toolCount: tools.length,
+        });
         break;
       } catch (error) {
         // Cancellation and every non-stream-fault error keep their existing handling
@@ -3521,9 +3666,10 @@ export class AgentThread {
               tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
             }),
       },
-      // Every tool's schema, not only the ones sent: a tool keeps its name, and stays callable, outside its bundle.
+      // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
+      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
@@ -3557,7 +3703,11 @@ export class AgentThread {
       assistantMessage = {
         ...assistantMessage,
         tool_calls: assistantMessage.tool_calls.map(call => {
-          if (removedTools.includes(call.tool_info.original_tool_name)) {
+          // A repeat of a "no" keeps its card identity, so the run refuses it as that same "no" and ends the turn.
+          if (
+            removedTools.includes(call.tool_info.original_tool_name) &&
+            !this.toolCallMemo.deniedApprovalIdentities.has(approvalGrantKey(call.tool_info))
+          ) {
             return {
               ...call,
               tool_info: {
@@ -3845,9 +3995,10 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A write
-   * (tier 3) past MAX_WRITE_CALLS_PER_TURN is not run either. Both end the turn after their batch
-   * resolves, and the repeat also ends it when the same call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
+   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
+   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
+   * call comes straight after the one before.
    */
   private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
     calls: InternalEnrichedToolCall[];
@@ -3887,8 +4038,14 @@ export class AgentThread {
         repeatStop = repeatStop || consecutive;
         return blocked(call, REPEATED_ACTION_RESULT);
       }
-      // A write held for the owner in an unattended run does not run now, so it does not count.
-      if (call.tool_info.tier === 3 && call.tool_info.held_for_owner === undefined) {
+      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
+      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
+      // held for the owner in an unattended run does not run now.
+      if (
+        call.tool_info.tier === 3 &&
+        !isHostVouchedRead(call.tool_info) &&
+        call.tool_info.held_for_owner === undefined
+      ) {
         if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked(call, WRITE_CAP_BLOCKED_RESULT);
@@ -3986,8 +4143,9 @@ export class AgentThread {
     const nextToolCallMemo = cloneToolCallMemoState(toolCallMemo);
     for (const call of openCalls) {
       const decision = decisions.get(call.id);
-      // A card that expired unanswered was never turned down, so asking again is not a repeat of a "no".
-      if (decision?.status === 'deny' && !isExpiredApproval(decision)) {
+      // A card that expired unanswered was never turned down, and a "Change it" answer asks for a revised
+      // call, so neither makes a later call a repeat of a "no".
+      if (decision?.status === 'deny' && !isExpiredApproval(decision) && !isChangeRequestReason(decision.reason)) {
         nextToolCallMemo.deniedApprovalIdentities.add(approvalGrantKey(call.tool_info));
       }
     }
@@ -4163,7 +4321,7 @@ export class AgentThread {
         toolCallIds: orphanedCalls.map(call => call.id),
         toolNames: orphanedCalls.map(call => call.function.name),
       });
-      const closeouts = getClosableOpenToolCallOutcomes(this.context);
+      const closeouts = getClosableOpenToolCallOutcomes(this.context, this.toolCallMemo.deniedApprovalIdentities);
       const completedAt = new Date().toISOString();
       for (const call of orphanedCalls) {
         // The canonical closer refuses to classify a batch containing a
@@ -4208,8 +4366,8 @@ export class AgentThread {
         disposition: result.disposition,
         reasonCode: result.remediation?.reason_code ?? null,
       });
-      // Calls with no metadata count as writes, as isSafeToRepeat treats them.
-      const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
+      // Calls with no metadata count as writes, as isReadOnlyCall treats them.
+      const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
       if (result.disposition === 'executed_ok' && !result.failure && writes) {
         nextToolCallMemo.turn.successfulWritesThisTurn += 1;
       }
@@ -4537,18 +4695,21 @@ export class AgentThread {
       if (wasRemoved) {
         removedCallsThisBatch += 1;
       }
+      const decision = decisions.get(call.id);
       const kind = toolResultKind({
         disposition: result.disposition,
         failure: result.failure,
         unavailable: !toolMapping.has(call.function.name),
         removed: wasRemoved,
-        expired: isExpiredApproval(decisions.get(call.id)),
+        expired: isExpiredApproval(decision),
       });
+      // A "Change it" answer asks for a revised call, so it neither removes the tool nor ends the reply.
+      const changeRequested = decision?.status === 'deny' && isChangeRequestReason(decision.reason);
       // A call to a removed tool was rejected unrun, so it says nothing about the reply's last action.
-      if (!wasRemoved) {
+      if (!wasRemoved && !changeRequested) {
         lastKindThisBatch = kind;
       }
-      if (!wasRemoved && (kind === 'declined' || kind === 'unavailable')) {
+      if (!wasRemoved && !changeRequested && (kind === 'declined' || kind === 'unavailable')) {
         if (!removalNotices.some(notice => notice.toolName === toolName)) {
           removalNotices.push({ toolName, reason: kind });
         }
@@ -4745,6 +4906,7 @@ export class AgentThread {
           "Your tool calls keep being blocked by this conversation's tool policy: the tools are not allowed here, and retrying them or trying variants cannot succeed. Write your final answer now: tell the user in plain language what you tried to do, what is not permitted in this conversation, what you were able to accomplish, and ask how they would like to proceed. Do not make any more tool calls — just answer.",
         errorMessage:
           'The model made three tool calls blocked by the conversation tool policy in this turn, ignoring the earlier host note about it, so the turn was stopped. Policy-blocked calls cannot succeed by retrying; the model must use allowed tools or explain the limitation to the user.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveEmptyInspectionBatches >= EMPTY_INSPECTION_STOP_AT) {
@@ -4753,14 +4915,15 @@ export class AgentThread {
           'Your inspections keep returning no matches. Write your final answer now based on what you have found so far, stating clearly what was not found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive inspections that returned no matches, ignoring the earlier host note about it, so the turn was stopped. Do not keep rephrasing the same search; use the evidence already collected or change strategy.',
+        parentErrorMessage: undefined,
       });
     }
     if (nextToolCallMemo.consecutiveNoProgressBatches >= NO_PROGRESS_STOP_AT) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote:
           'Your tool calls keep getting blocked before they run. Write your final answer now: explain what you tried, what blocked it, and what you know so far. Do not make any more tool calls — just answer.',
-        errorMessage:
-          'The model made five consecutive tool calls that were blocked before they ran, ignoring the earlier host note about it, so the turn was stopped. Retrying differently-shaped arguments will not help; read the actual blocking error, fix its root cause, or ask the user.',
+        errorMessage: blockedCallsStopMessage(assistantDisplayName(this.definition.identity?.assistantName)),
+        parentErrorMessage: BLOCKED_CALLS_PARENT_MESSAGE,
       });
     }
     if (nextToolCallMemo.consecutiveFailedBatches >= FAILED_BATCH_STOP_AT) {
@@ -4769,6 +4932,7 @@ export class AgentThread {
           'Your tool calls keep failing. Write your final answer now: report what you tried, what failed, and what you have learned so far. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model made five consecutive tool calls that all failed, ignoring the earlier host note about it, so the turn was stopped. Trying another variant will not help; the tool or environment is not working. Report what failed and what is already known.',
+        parentErrorMessage: undefined,
       });
     }
     // Hard cap, one stage past the INSPECTION_WARNING_LIMIT nudge above: that nudge fires once
@@ -4782,6 +4946,7 @@ export class AgentThread {
           'You have made many inspections without making progress. Write your final answer now summarizing what you found. Do not make any more tool calls — just answer.',
         errorMessage:
           'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
+        parentErrorMessage: undefined,
       });
     }
     for (const name of unavailableToolNames) {
@@ -4797,6 +4962,7 @@ export class AgentThread {
         recoveryNote:
           'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
         errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4804,6 +4970,7 @@ export class AgentThread {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
         errorMessage: `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
+        parentErrorMessage: undefined,
       });
     }
 
@@ -4843,6 +5010,7 @@ export class AgentThread {
           repeatedVerification,
           repeatedGithubFileRead,
         }),
+        parentErrorMessage: undefined,
       });
     }
     if (authRequirementInfo.length > 0) {
@@ -4899,6 +5067,7 @@ export class AgentThread {
       context: this.context,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      deniedApprovalIdentities: this.toolCallMemo.deniedApprovalIdentities,
     });
     if (pendingApprovalToolCalls.length > 0) {
       const event: ToolApprovalRequiredEvent = {
@@ -5058,10 +5227,6 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            if (this.toolBundles?.refresh(this.context) === true) {
-              // Routing and loads add bundles, and a bundle's prompt sections go out with its tools.
-              this.instruction = this.buildInstruction(this.definition.instruction);
-            }
             const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
             const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;

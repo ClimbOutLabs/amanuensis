@@ -14,6 +14,15 @@ export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the ma
 /** Ends the turn, shown to the person, when the write cap stopped a call. */
 export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
 
+/** Ends the turn, shown to the person, when the model kept sending tool calls that were blocked before they ran. */
+export function blockedCallsStopMessage(assistantName: string): string {
+  return `${assistantName} kept sending a request in a form the tool cannot take, so this reply stopped. Ask again in other words.`;
+}
+
+/** The same stop for a helper, read by the model that started it. */
+export const BLOCKED_CALLS_PARENT_MESSAGE =
+  'The helper kept sending a request in a form the tool cannot take, so it stopped. Do not send it the same task again. Try another way, or tell the person what could not be done.';
+
 /**
  * Past-tense action claims in first person or as a finished state. Kept short on purpose: a claim
  * only matters when no write call succeeded in the turn, and a false match only adds a note.

@@ -9,11 +9,16 @@ describe('deniedToolCallText', () => {
     );
   });
 
-  it('keeps the error wording for an ordinary denial', () => {
-    expect(deniedToolCallText('not allowed')).toBe(JSON.stringify({ error: 'User denied tool call: not allowed' }));
-    expect(deniedToolCallText(undefined)).toBe(
-      JSON.stringify({ error: 'User denied tool call: no reason provided' }),
-    );
+  it('tells the model firmly not to retry after a no, in the same error shape', () => {
+    const text = deniedToolCallText(undefined);
+    expect(JSON.parse(text)).toEqual({
+      error:
+        'The person said no to this. Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.',
+    });
+    expect(JSON.parse(deniedToolCallText('not now'))).toEqual({
+      error:
+        'The person said no to this. Their reason: not now. Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.',
+    });
   });
 
   it('tells the model a card that expired unanswered was not turned down', () => {
