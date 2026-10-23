@@ -29,7 +29,7 @@ function LimitedChatRows({
       {visible.length < indices.length ? (
         <button
           type="button"
-          className="w-full rounded-[1.25rem] px-2.5 py-1.5 text-left text-sm font-normal text-text-secondary hover:text-text-primary"
+          className="w-full rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1.5 text-left text-sm font-normal text-text-secondary hover:text-text-primary"
           onClick={() => setLimit(current => current + RECENT_CHATS_PAGE_SIZE)}
         >
           Show more
@@ -55,7 +55,7 @@ export function EarlierChats({
       <button
         type="button"
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left text-[0.75rem] font-normal text-text-secondary hover:text-text-primary"
+        className="flex w-full items-center gap-1 border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-[0.75rem] font-normal text-text-secondary hover:text-text-primary"
         onClick={() => setExpanded(value => !value)}
       >
         <Icon name="chevron-down" className={cn('size-3 shrink-0 transition-transform', !expanded && '-rotate-90')} />

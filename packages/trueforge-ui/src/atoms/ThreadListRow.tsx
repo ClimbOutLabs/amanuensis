@@ -52,7 +52,7 @@ export function ThreadListRow({
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
-            '!justify-start h-auto min-h-8 min-w-0 flex-1 overflow-hidden rounded-[1.25rem] px-2.5 py-1.5 text-left font-normal shadow-none',
+            '!justify-start h-auto min-h-8 min-w-0 flex-1 overflow-hidden rounded-[1.25rem] border-0 px-2.5 py-1.5 text-left font-normal shadow-none',
             'bg-transparent hover:bg-transparent hover:text-inherit',
             active ? 'text-dropdown-selected-item-text' : 'text-inherit',
           ),

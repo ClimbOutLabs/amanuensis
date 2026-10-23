@@ -594,7 +594,7 @@ export function ChatFolderSection({
         <button
           type="button"
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
           onClick={() => setExpanded(value => !value)}
         >
           <Icon name="chevron-down" className={cn('size-3 transition-transform', !expanded && '-rotate-90')} />
@@ -609,7 +609,7 @@ export function ChatFolderSection({
             variant: 'ghost',
             size: 'icon',
             className:
-              'size-6 shrink-0 text-text-secondary opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100',
+              'size-6 shrink-0 border-0 text-text-secondary opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100',
           })}
           onClick={() => setManageOpen(true)}
         >
@@ -715,7 +715,8 @@ export function NewFolderButton() {
         className={auiButtonClass({
           variant: 'ghost',
           size: 'icon',
-          className: 'size-6 shrink-0 text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary',
+          className:
+            'size-6 shrink-0 border border-border text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary',
         })}
         onClick={() => setOpen(true)}
       >
