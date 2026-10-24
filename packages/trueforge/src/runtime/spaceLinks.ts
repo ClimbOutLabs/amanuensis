@@ -42,7 +42,12 @@ export function isPlaceholder(host: string): boolean {
  * with the URL parser the browser uses, so a spelling a browser reads as a remote address is
  * checked as one, whatever its scheme separators look like.
  */
-function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+  // Scripts never run on a space page, whatever their source, so a script source is refused
+  // outright rather than checked against the chat's results and then stripped at render.
+  if (tag === 'script') {
+    return 'Scripts never run on a space page. Use plain HTML and CSS instead.';
+  }
   const noun = nounOf(kind);
   let url: URL;
   try {
@@ -73,6 +78,9 @@ function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): 
   // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
   if (!isTrustedLink({ provenance: web_search.provenance, url: candidate })) {
+    if (kind === 'picture') {
+      return "Open the picture's page first, then use the image link from that page.";
+    }
     return `This ${noun}'s link did not come from the person or a search in this chat. Search for the ${noun} first, then use a link from the results.`;
   }
   return undefined;

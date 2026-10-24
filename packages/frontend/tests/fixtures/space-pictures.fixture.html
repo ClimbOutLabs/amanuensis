@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space pictures fixture</title>
+    <!-- The same policy as index.html; the browser test checks the two stay equal. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data:; connect-src 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
+  </head>
+  <body>
+    <iframe id="space-frame" title="Space content" sandbox="allow-same-origin" style="width: 37.5rem; height: 25rem; border: 0"></iframe>
+    <script>
+      // The space frame as SpacesView builds it: its own CSP meta, and the picture routed through
+      // the owner's picture route, exactly as rewriteSpacePictureUrls rewrites a stored body.
+      // The direct link beside it is the control: the inherited shell policy must blank it.
+      const fox = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+      const proxy = '/api/space-pictures?url=' + encodeURIComponent(fox);
+      const frame =
+        '<!doctype html><html><head>' +
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data: \'self\'; font-src data:; media-src data:; form-action \'none\'; base-uri \'none\'">' +
+        '<meta charset="utf-8"></head><body>' +
+        '<img data-testid="proxy-picture" src="' + proxy + '" alt="Red fox">' +
+        '<img data-testid="direct-picture" src="' + fox + '" alt="Red fox direct">' +
+        '</body></html>';
+      document.getElementById('space-frame').srcdoc = frame;
+    </script>
+  </body>
+</html>
