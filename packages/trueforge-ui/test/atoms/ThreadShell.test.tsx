@@ -95,18 +95,17 @@ describe('ThreadComposerAreaShell', () => {
     expect(composer).toHaveTextContent('Populated composer');
   });
 
-  it('sits lower on desktop and fades messages out above the composer, leaving phones unchanged', () => {
+  it('sits lower on desktop and puts no fade over the messages above the composer', () => {
     render(<ThreadComposerAreaShell data-testid="composer">Composer</ThreadComposerAreaShell>);
 
     const composer = screen.getByTestId('composer');
     expect(composer).toHaveClass(
       'pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
       'md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
-      'md:before:absolute',
-      'md:before:bottom-full',
-      'md:before:h-6',
-      'md:before:bg-linear-to-t',
     );
+    // A gradient fade above the composer washed over the bottom of a waiting approval card
+    // while it was scrolled into view, so its buttons looked faded. It must not come back.
+    expect(composer.className).not.toMatch(/md:before:/);
     expect(composer.className).not.toMatch(/md:pb-\[max\(1\.5rem/);
   });
 });

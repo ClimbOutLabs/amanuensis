@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -12,20 +10,12 @@ import { createServer } from 'vite';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { screenshotDir } from './support/screenshotDir.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const ENDED_NOTE = 'This request ended. Ask again if you still need it.';
 const ALLOW = 'Allow it';
 const DENY = 'Not now';
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-ended-card-'));
-}
 
 /**
  * The chat moved on: a newer turn runs and finishes, so the paused turn's request has ended. It is
@@ -111,7 +101,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
+  const outDir = await screenshotDir('aman-ended-card-');
   try {
     await vite.listen();
     const address = vite.httpServer?.address();
