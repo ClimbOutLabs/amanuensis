@@ -215,7 +215,8 @@ function senderOf(value: string): { address: string; name: string | null } | und
   if (address === undefined) {
     return undefined;
   }
-  const before = value.slice(0, value.indexOf('<') < 0 ? 0 : value.indexOf('<'));
+  const angle = value.indexOf('<');
+  const before = angle === -1 ? '' : value.slice(0, angle);
   const name = before.replace(/["']/g, '').trim().slice(0, MAX_SENDER_NAME_CHARS);
   return { address: address.toLowerCase(), name: name === '' ? null : name };
 }

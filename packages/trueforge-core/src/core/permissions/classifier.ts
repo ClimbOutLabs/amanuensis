@@ -2048,13 +2048,11 @@ function steeringChecked(input: {
   const say = steeredDestinationSay({
     assistant: ctx.web_search.assistantName,
     destinations: steered.map(({ value, kind, origin }) => {
-      const name = kind === 'address' ? cardNames.get(value.toLowerCase()) || origin.name : null;
+      // The name the send itself shows wins; an email's sender name fills in when the card has none.
+      const cardName = kind === 'address' ? (cardNames.get(value.toLowerCase()) ?? '') : '';
+      const name = cardName === '' ? (kind === 'address' ? origin.name : null) : cardName;
       const shown = escapeDisplayText(value);
-      return {
-        kind,
-        source: origin.source,
-        who: name === null || name === undefined || name === '' ? shown : `${escapeDisplayText(name)} (${shown})`,
-      };
+      return { kind, source: origin.source, who: name === null ? shown : `${escapeDisplayText(name)} (${shown})` };
     }),
   });
   return {
