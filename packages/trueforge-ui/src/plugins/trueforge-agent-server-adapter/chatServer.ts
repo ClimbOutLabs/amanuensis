@@ -16,7 +16,7 @@ import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atom
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
-import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
+import { applyHeldPersona, awaitPendingPersonaMutation } from '../../personaMutationGate.js';
 import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import { extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
@@ -758,7 +758,8 @@ export function createHarnessChatServer(
       // The pill's persona switch is a separate HTTP request. If the user hit
       // send while that PUT was still in flight, wait for it so the turn is
       // admitted after the new activation lands instead of answering as the
-      // old persona.
+      // old persona. A pick made on a new chat before it existed lands here, before its first turn.
+      await applyHeldPersona(sessionId);
       await awaitPendingPersonaMutation();
       const cursor: TurnStreamCursor = { sequence: undefined };
       const seenTurnDone = { done: false };

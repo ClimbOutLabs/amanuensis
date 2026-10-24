@@ -15,6 +15,7 @@ vi.mock('@/assistant-ui.js', () => ({
 
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
 import { PersonaProvider, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
+import { applyHeldPersona, holdPersonaForNewChat } from '@/personaMutationGate.js';
 import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
 
 const ZARA: SessionPersona = {
@@ -82,6 +83,30 @@ describe('ActivePersonaIndicator', () => {
     useAuiState.mockImplementation((selector: (state: unknown) => unknown) =>
       selector({ threadListItem: { remoteId: 'sess-1' } }),
     );
+  });
+
+  it('shows on a new chat, and a pick there answers its first message', async () => {
+    holdPersonaForNewChat(null);
+    useAuiState.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({ threadListItem: { id: 'new-chat', remoteId: undefined } }),
+    );
+    const setSessionPersona = vi.fn(async () => NOVA);
+    const getSessionPersona = vi.fn(async () => null);
+    renderIndicator({ setSessionPersona, getSessionPersona });
+
+    fireEvent.click(await screen.findByTitle('Choose an agent'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Nova' }));
+    expect(await screen.findByTestId('active-persona')).toHaveTextContent('Nova');
+    // Nothing is sent before the chat exists; the session lookup never ran for a chat without one.
+    expect(setSessionPersona).not.toHaveBeenCalled();
+    expect(getSessionPersona).not.toHaveBeenCalled();
+
+    // The chat's first turn applies the pick to the new session before it is admitted.
+    await applyHeldPersona('sess-new');
+    expect(setSessionPersona).toHaveBeenCalledWith('sess-new', 'p-nova');
+    // Applied once: a later turn does not switch again.
+    await applyHeldPersona('sess-new');
+    expect(setSessionPersona).toHaveBeenCalledTimes(1);
   });
 
   it('names who answers the chat on the control, and each choice with its model in the menu', async () => {

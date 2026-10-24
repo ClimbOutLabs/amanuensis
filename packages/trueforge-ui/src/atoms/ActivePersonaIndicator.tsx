@@ -12,7 +12,12 @@ import {
 } from '../components/PersonaContext.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
-import { registerPersonaMutation } from '../personaMutationGate.js';
+import {
+  dropHeldPersonaUnlessFor,
+  heldPersonaFor,
+  holdPersonaForNewChat,
+  registerPersonaMutation,
+} from '../personaMutationGate.js';
 import { displayModelLabel } from './draft/DraftModelCatalogPanel.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -68,6 +73,7 @@ function ActivePersonaChip({
 } & ActivePersonaIndicatorProps) {
   const assistant = useAssistantDisplayName();
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
+  const threadId = useAuiState(state => state.threadListItem.id);
   const isRunning = useThreadIsRunning();
   const menuId = useId();
   const [active, setActive] = useState<SessionPersona | null>(null);
@@ -75,6 +81,8 @@ function ActivePersonaChip({
   const [statusUnavailable, setStatusUnavailable] = useState(false);
   const [lookupRetry, setLookupRetry] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  // On a new chat there is no session to switch yet: the pick is held and applied to its first turn.
+  const [heldId, setHeldId] = useState<string | null | undefined>(() => heldPersonaFor(threadId));
   const sessionIdRef = useRef(sessionId);
   const lookupGenerationRef = useRef(0);
   const mutationGenerationRef = useRef(0);
@@ -87,6 +95,11 @@ function ActivePersonaChip({
     height: MENU_HEIGHT,
   });
   sessionIdRef.current = sessionId;
+
+  useEffect(() => {
+    dropHeldPersonaUnlessFor(threadId);
+    setHeldId(heldPersonaFor(threadId));
+  }, [threadId]);
 
   useEffect(() => {
     lookupGenerationRef.current += 1;
@@ -166,10 +179,12 @@ function ActivePersonaChip({
 
   const applyPersona = useCallback(
     (personaId: string | null) => {
+      setMenuOpen(false);
       if (sessionId == null) {
+        setHeldId(personaId);
+        holdPersonaForNewChat({ threadId, personaId, apply: id => setSessionPersona(id, personaId) });
         return;
       }
-      setMenuOpen(false);
       if (active?.persona_id === personaId) {
         return;
       }
@@ -201,7 +216,7 @@ function ActivePersonaChip({
       registerPersonaMutation(mutation);
       void mutation;
     },
-    [setSessionPersona, sessionId, active],
+    [setSessionPersona, sessionId, threadId, active],
   );
 
   if (statusUnavailable) {
@@ -227,12 +242,14 @@ function ActivePersonaChip({
     );
   }
 
-  // Shown once the list has loaded with someone to pick, in a chat whose answerer can change.
-  if (loading || personas.length === 0 || sessionId == null) {
+  // Shown once the list has loaded with someone to pick, on a new chat as well as a running one.
+  if (loading || personas.length === 0) {
     return null;
   }
   const triggerDisabled = disabled || busy || isRunning;
-  const answerer = active?.persona_name ?? assistant;
+  // Until the server has answered for this chat, the held pick is who answers.
+  const chosenId = active === null ? (heldId ?? null) : active.persona_id;
+  const answerer = active?.persona_name ?? personas.find(persona => persona.id === chosenId)?.display_name ?? assistant;
   const itemClass = cn(
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary',
     'hover:bg-ghost-button-hover focus-visible:bg-ghost-button-hover focus-visible:outline-none',
@@ -255,7 +272,7 @@ function ActivePersonaChip({
         )}
         onClick={() => setMenuOpen(open => !open)}
       >
-        <span className="truncate" data-testid={active?.persona_id == null ? undefined : 'active-persona'}>
+        <span className="truncate" data-testid={chosenId === null ? undefined : 'active-persona'}>
           {answerer}
         </span>
         <Icon name="chevron-down" className="size-3.5 shrink-0" />
@@ -277,7 +294,7 @@ function ActivePersonaChip({
             onClick={() => applyPersona(null)}
           >
             <span className="min-w-0 flex-1 truncate">{assistant}</span>
-            {active?.persona_id == null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
+            {chosenId === null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
           </button>
           {personas.map(persona => (
             <button
@@ -297,7 +314,7 @@ function ActivePersonaChip({
                   </span>
                 ) : null}
               </span>
-              {active?.persona_id === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
+              {chosenId === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
             </button>
           ))}
         </div>
