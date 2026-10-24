@@ -131,6 +131,7 @@ import {
   getModelDetails,
   isGithubConnectorAttached,
   isWebConnectorAttached,
+  modelRequestGate,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -529,6 +530,12 @@ function createTurnResolver(deps: {
                   build: buildClient,
                 }),
           defaultModelParams: resolved.defaultModelParams,
+          // The per-model request limit, keyed by the configured model whatever provider ends
+          // up serving it: a step on this model waits for a place before it sends.
+          modelRequestGate:
+            resolved.maxConcurrentRequests === undefined
+              ? undefined
+              : { gate: modelRequestGate, key: name, limit: resolved.maxConcurrentRequests },
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
           // prompt names what it really is.

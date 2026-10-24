@@ -110,6 +110,8 @@ interface ResolvedModel {
   /** See AgentDefinition.modelSupportsVision. Every implementation must set this explicitly. */
   modelSupportsVision: boolean;
   modelProperties?: AgentDefinition['modelProperties'];
+  /** See AgentDefinition.modelRequestGate. Absent leaves the model unlimited. */
+  modelRequestGate?: AgentDefinition['modelRequestGate'];
 }
 
 /** The saved Authorization header of a connector, whether its headers are static or resolved at connect. */
@@ -569,6 +571,7 @@ export class TurnResourceResolver<
         // unchanged.
         modelId: resolvedModel.modelId ?? modelName.slice(modelName.indexOf('/') + 1),
         modelSupportsVision: resolvedModel.modelSupportsVision,
+        modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,

@@ -274,7 +274,10 @@ describe('validateAgentSpec', () => {
     setCachedLocalSandboxSupport(undefined);
   });
 
-  async function setup(options?: { reasoningEfforts?: ReasoningEffort[] | undefined }) {
+  async function setup(options?: {
+    reasoningEfforts?: ReasoningEffort[] | undefined;
+    maxConcurrentRequests?: number | undefined;
+  }) {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const modelProviderStore = new SqliteModelProviderStore(db);
@@ -295,6 +298,9 @@ describe('validateAgentSpec', () => {
               context_length: 128000,
               max_output_tokens: 4096,
               ...(options?.reasoningEfforts !== undefined ? { reasoning_efforts: options.reasoningEfforts } : {}),
+              ...(options?.maxConcurrentRequests !== undefined
+                ? { max_concurrent_requests: options.maxConcurrentRequests }
+                : {}),
             },
           },
         ],
@@ -326,6 +332,26 @@ describe('validateAgentSpec', () => {
       defaultModelParams: { max_tokens: 4096 },
       modelProperties: { context_length: 128000, max_output_tokens: 4096 },
     });
+  });
+
+  it('limits a custom provider model to one request at a time unless its settings say otherwise', async () => {
+    const stores = await setup();
+    await expect(
+      getModelDetails({
+        tenant_id: 'default',
+        name: 'test-provider/test-model',
+        store: stores.modelProviderStore,
+      }),
+    ).resolves.toMatchObject({ maxConcurrentRequests: 1 });
+
+    const raised = await setup({ maxConcurrentRequests: 3 });
+    await expect(
+      getModelDetails({
+        tenant_id: 'default',
+        name: 'test-provider/test-model',
+        store: raised.modelProviderStore,
+      }),
+    ).resolves.toMatchObject({ maxConcurrentRequests: 3 });
   });
 
   it('rejects malformed model FQN with 422', async () => {

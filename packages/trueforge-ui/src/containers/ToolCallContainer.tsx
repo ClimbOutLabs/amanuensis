@@ -36,6 +36,7 @@ import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { standInApprovalCard } from '../sentinel/standInCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
+import { REQUEST_ENDED_LINE } from '../utils/staleApproval.js';
 import {
   allowChatOptionId,
   allowOnceOptionId,
@@ -125,7 +126,7 @@ function EndedApprovalNote({ onDismiss, dismissing }: { onDismiss: (() => void) 
       data-role="approval-expired"
       className="text-text-secondary flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
     >
-      <p>This request ended. Ask again if you still need it.</p>
+      <p>{REQUEST_ENDED_LINE}</p>
       {onDismiss !== undefined && (
         <Button.Secondary size="small" onClick={onDismiss} disabled={dismissing}>
           Dismiss
