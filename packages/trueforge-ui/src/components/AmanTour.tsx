@@ -43,15 +43,16 @@ function NameUnderline() {
 const PILL_CLASS =
   'inline-flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border px-3 font-[inherit] text-[0.8125rem] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
 
+/** Compact: icon and title on one line, one line of description, so all four fit with the composer. */
 const CARD_CLASS =
-  'flex cursor-pointer flex-col gap-1 rounded-[0.625rem] border border-border bg-card-bg px-3.5 py-3 text-left font-[inherit] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
+  'flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-[0.625rem] border border-border bg-card-bg px-3 py-2 text-left font-[inherit] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
 
 /** The map pin is not in the icon set; drawn in the same stroke style. */
 function MapPinIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="size-[1.125rem]"
+      className="size-4"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"
@@ -110,7 +111,7 @@ export function AmanTour({
 
   return (
     <>
-      <h1 className="aui-face-serif order-0 m-0 px-4 pt-[clamp(7rem,22vh,14rem)] pb-5 text-center text-[1.75rem] leading-[1.2] font-normal text-text-primary">
+      <h1 className="aui-face-serif order-0 m-0 px-4 pt-[clamp(3rem,12vh,8rem)] pb-4 text-center text-[1.75rem] leading-[1.2] font-normal text-text-primary">
         {hello}
         {firstName === null ? null : (
           <>
@@ -124,7 +125,7 @@ export function AmanTour({
       </h1>
 
       {/* pt-4 keeps the first row clear of the composer above; the cards sit a little further down still. */}
-      <div className="order-1 mx-auto flex w-full max-w-160 flex-col gap-5 px-4 pt-4 pb-6">
+      <div className="order-1 mx-auto flex w-full max-w-160 flex-col gap-4 px-4 pt-4 pb-4">
         {canSend ? null : (
           <p className="m-0 text-center text-[0.8125rem] text-text-secondary">
             Choose a model in Settings before you start a chat.
@@ -168,15 +169,19 @@ export function AmanTour({
             {cards.map(card => (
               <li key={card.key}>
                 <button type="button" className={cn(CARD_CLASS, 'h-full w-full')} onClick={() => onFill(card.prompt)}>
-                  <span className="text-gold-ink">
-                    {card.icon === 'map-pin' ? (
-                      <MapPinIcon />
-                    ) : (
-                      <Icon name={card.icon} size="1.125rem" aria-hidden="true" />
-                    )}
+                  <span className="flex min-w-0 items-center gap-2" data-role="home-card-title">
+                    <span className="flex shrink-0 text-gold-ink">
+                      {card.icon === 'map-pin' ? (
+                        <MapPinIcon />
+                      ) : (
+                        <Icon name={card.icon} size="1rem" aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="truncate text-[0.875rem] font-medium">{card.title}</span>
                   </span>
-                  <span className="aui-face-serif text-[0.9375rem]">{card.title}</span>
-                  <span className="text-[0.8125rem] text-text-secondary">{card.detail(assistant)}</span>
+                  <span className="truncate text-[0.8125rem] text-text-secondary" title={card.detail(assistant)}>
+                    {card.detail(assistant)}
+                  </span>
                 </button>
               </li>
             ))}

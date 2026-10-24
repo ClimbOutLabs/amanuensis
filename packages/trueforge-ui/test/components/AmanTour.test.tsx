@@ -71,7 +71,7 @@ describe('AmanTour home', () => {
     const cardTitles = () =>
       within(screen.getByRole('region', { name: 'Some things Mannie can do' }))
         .getAllByRole('button')
-        .map(card => card.querySelector('.aui-face-serif')?.textContent);
+        .map(card => card.querySelector('[data-role="home-card-title"]')?.textContent);
     expect(cardTitles()).toEqual(GENERAL_CARDS.map(card => card.title));
 
     const family = screen.getByRole('button', { name: 'Family and home' });
