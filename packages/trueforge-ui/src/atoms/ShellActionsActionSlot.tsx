@@ -7,7 +7,12 @@ import type { ReactNode } from 'react';
  * Default is empty; override via `overrides.ShellActionsActionSlot`.
  * Layouts keep {@link ShellActions} mounted while Settings is open so host state is not remounted.
  */
-export function ShellActionsActionSlot(): ReactNode {
+export type ShellActionsActionSlotProps = {
+  /** Draw a labeled row, as in the rail's More menu, instead of an icon button. */
+  row?: boolean;
+};
+
+export function ShellActionsActionSlot(_props: ShellActionsActionSlotProps): ReactNode {
   return null;
 }
 

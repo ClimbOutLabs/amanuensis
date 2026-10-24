@@ -64,9 +64,9 @@ export function ShellActions({
           {labeled ? <span className="text-center">Settings</span> : null}
         </button>
       ) : null}
-      {labeled ? <SessionsBrowserButton compact={!rows} /> : null}
+      {labeled ? <SessionsBrowserButton compact={!rows} row={rows} /> : null}
       <BugReportButton row={labeled && rows} />
-      <ActionSlot />
+      <ActionSlot row={labeled && rows} />
     </div>
   );
 }

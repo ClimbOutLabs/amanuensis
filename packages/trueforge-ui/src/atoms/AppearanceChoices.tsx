@@ -14,12 +14,15 @@ const APPEARANCE_CHOICES: readonly { mode: ThemeMode; label: string }[] = [
   { mode: 'system', label: 'Match my computer' },
 ];
 
-/** The Appearance group: one row per choice, with a check on the current one. The theme keeps the choice. */
+/**
+ * The Appearance item with its three choices indented under it, a check on the current one. The item
+ * reads like every other menu row; the theme keeps the choice.
+ */
 export function AppearanceChoices() {
   const { preference, setTheme } = useTheme();
   return (
     <div role="group" aria-label="Appearance" className="flex flex-col">
-      <p className="m-0 flex items-center gap-2 px-2.5 pt-1.5 pb-0.5 text-[0.75rem] text-text-secondary">
+      <p className={cn(railMenuRowClassName, 'm-0 cursor-default hover:bg-transparent')}>
         <Icon name="palette" size={14} />
         Appearance
       </p>

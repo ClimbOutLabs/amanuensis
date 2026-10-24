@@ -464,6 +464,7 @@ export type {
 // Server port types + factory
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
+export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,
@@ -472,6 +473,7 @@ export {
 } from './atoms/lib/sessionCreateAgent.js';
 export { SelectAgentEmptyState } from './atoms/SelectAgentEmptyState.js';
 export { ShellActionsActionSlot } from './atoms/ShellActionsActionSlot.js';
+export type { ShellActionsActionSlotProps } from './atoms/ShellActionsActionSlot.js';
 export type {
   ConnectorChecks,
   ConnectorConnectionFailureKind,

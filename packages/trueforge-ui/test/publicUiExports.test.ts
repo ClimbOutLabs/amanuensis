@@ -197,6 +197,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'ThreadWorkOnRepoControls',
   'Tier2RelaxationToggle',
   'PermissionApprovalCard',
+  'railMenuRowClassName',
   'EmailApprovalCard',
   'Toast',
   'ToastStack',
