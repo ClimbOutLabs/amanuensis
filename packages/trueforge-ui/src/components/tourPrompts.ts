@@ -1,5 +1,5 @@
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the home only offers examples that will work here. */
 export type TourCapabilities = {
@@ -13,13 +13,21 @@ export type TourCapabilities = {
   maps: boolean;
 };
 
-/** One example card on the home: pressing it puts `prompt` in the composer, and nothing sends until the person does. */
+/**
+ * One example card on the home: pressing it puts `prompt` in the composer, and nothing sends until the
+ * person does. Every prompt is directive enough to get a full answer on the first try, even from a slow
+ * local model: it says what to look at, what to produce and how long, and what to ask before acting.
+ */
 export type TourPrompt = {
   key: string;
   title: string;
   /** One short line under the title, naming the assistant by its display name. */
   detail: (assistant: string) => string;
   prompt: string;
+  /** Words from `prompt` that name what the assistant looks at: a calendar, email, a space, or what the person says. */
+  source: string;
+  /** Words from `prompt` that name what the assistant produces. */
+  output: string;
   icon: string;
   /** Capabilities that unlock the example; it shows when any one of them is present. Absent when it works on any instance. */
   needs?: readonly (keyof TourCapabilities)[];
@@ -33,79 +41,54 @@ export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities:
   return prompts.filter(item => item.needs === undefined || item.needs.some(name => capabilities[name]));
 }
 
+const PLAN_DAY: TourPrompt = {
+  key: 'plan-day',
+  title: 'Plan my day',
+  detail: () => 'The three things that matter, your free time, and what to prepare',
+  prompt:
+    'Look at my calendar for today and my unread email from the last day. Give me a short plan: the three things that matter most, when I have free time, and anything I need to prepare. Keep it under ten lines.',
+  source: 'my calendar for today',
+  output: 'a short plan',
+  icon: 'calendar-clock',
+};
+
 /** The cards shown when no topic pill is chosen. */
 export const GENERAL_CARDS: readonly TourPrompt[] = [
   {
     key: 'reply',
     title: 'Draft a reply',
-    detail: () => 'Reads the thread, writes it, asks before sending',
+    detail: () => 'Reads the thread, writes it in your voice, asks before sending',
     prompt:
-      'Help me draft a reply to my most recent email that needs one. Read the whole thread first, and ask me before you send anything.',
+      'Find my most recent email that needs a reply. Read the whole thread, then draft a short reply in my voice. Show me the draft and ask before sending.',
+    source: 'my most recent email that needs a reply',
+    output: 'a short reply in my voice',
     icon: 'square-pen',
   },
-  {
-    key: 'plan',
-    title: 'Plan your day',
-    detail: () => 'Finds conflicts and travel time on your calendar',
-    prompt: 'Help me plan my day. Check my calendar for conflicts and travel time, then suggest an order for my tasks.',
-    icon: 'calendar-clock',
-  },
+  PLAN_DAY,
   {
     key: 'places',
     title: 'Find places and routes',
-    detail: () => 'A map with the stops, and how long it takes',
-    prompt: 'Help me find places I need to go today. Show the stops on a map, and how long each route takes.',
+    detail: () => 'Three options on a map, with travel time and opening hours',
+    prompt:
+      'Find three good options near me for what I describe next, with how long it takes to get there and opening hours. Show them on a map.',
+    source: 'what I describe next',
+    output: 'three good options',
     icon: 'map-pin',
   },
   {
     key: 'schedule',
     title: 'Run things on a schedule',
-    detail: () => 'A brief every morning, a check every Friday',
+    detail: () => 'A short morning brief on weekdays, set up with you',
     prompt:
-      'Help me set something up to run on a schedule: a brief every morning, and a check every Friday. Ask me what to look at first.',
+      "Set up a short morning brief for weekdays at 7:30: today's calendar, emails that need me, and the weather. Show me the schedule and ask before saving it.",
+    source: "today's calendar",
+    output: 'a short morning brief',
     icon: 'clock',
   },
 ];
 
-const CLEAR_HEAD: TourPrompt = {
-  key: 'clear-head',
-  title: 'Clear my head',
-  detail: assistant => `${assistant} asks what is on your mind and sorts it into today, this week and later`,
-  prompt:
-    "I have too much going on. Ask me what's on my mind, then sort it into today, this week, and later, and keep that list for me.",
-  icon: 'lightbulb',
-};
-
-const BREAK_TASK: TourPrompt = {
-  key: 'break-task',
-  title: 'Break a task into steps',
-  detail: () => 'Small steps of about ten minutes each, kept as a list',
-  prompt:
-    'Help me break a task into steps. Ask me what the task is, then split it into small steps I can each do in about 10 minutes, and keep the list so we can tick them off together.',
-  icon: 'list-check',
-};
-
-const PLAN_DAY: TourPrompt = {
-  key: 'plan-day',
-  title: 'Plan my day',
-  detail: assistant => `${assistant} puts your calendar and to-dos in order, with times`,
-  prompt:
-    "Help me plan my day. Look at my calendar and my to-do list, put things in a sensible order with times, and find a good place for lunch near where I'll be.",
-  icon: 'calendar-clock',
-};
-
-const APPOINTMENT: TourPrompt = {
-  key: 'appointment',
-  title: "Doctor's appointments",
-  detail: () => 'What is coming up, what to bring and what to ask',
-  prompt:
-    "Help me with my doctor's appointments. Find any coming up in my calendar and email, tell me what to bring and what to ask, and remind me of anything I still need to book.",
-  icon: 'calendar',
-  needs: ['calendar', 'email'],
-};
-
-/** The topic pills, in the order the home shows them. Productivity comes first, then the help areas. */
-export const HOME_TOPIC_IDS = ['productivity', ...HELP_AREA_IDS] as const;
+/** The topic pills, in the order the home shows them. */
+export const HOME_TOPIC_IDS = ['productivity', 'family', 'new_country'] as const;
 
 export type HomeTopicId = (typeof HOME_TOPIC_IDS)[number];
 
@@ -123,49 +106,84 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'Your morning brief',
         detail: assistant => `${assistant} gathers your mail, calendar and to-dos into one note each morning`,
         prompt: MORNING_BRIEF_PROMPT,
+        source: 'calendar',
+        output: 'digest',
         icon: 'book-open',
       },
-      CLEAR_HEAD,
-      BREAK_TASK,
       PLAN_DAY,
-    ],
-  },
-  focus: {
-    label: 'Focus and getting started',
-    cards: [
-      CLEAR_HEAD,
       {
-        key: 'get-started',
-        title: 'Help me get started',
-        detail: () => 'One small thing you can finish in 25 minutes',
+        key: 'clear-head',
+        title: 'Clear my head',
+        detail: assistant => `${assistant} asks what is on your mind and sorts it into today, this week and later`,
         prompt:
-          "I can't get started. Pick the one smallest thing I should do right now, small enough to finish in 25 minutes.",
-        icon: 'play',
+          "Ask me what is on my mind, one question at a time, until I say I'm done. Then sort everything I told you into three short lists: today, this week, and later. Keep each item to one line, and ask before saving the lists to a space.",
+        source: 'everything I told you',
+        output: 'three short lists',
+        icon: 'lightbulb',
+      },
+      {
+        key: 'break-task',
+        title: 'Break a task into steps',
+        detail: () => 'Five to eight steps of about ten minutes each',
+        prompt:
+          "Ask me which task I'm stuck on. Then split it into five to eight small steps, each something I can do in about ten minutes, as a numbered list. Ask before saving the list to a space.",
+        source: "which task I'm stuck on",
+        output: 'five to eight small steps',
+        icon: 'list-check',
       },
       {
         key: 'forgot',
         title: 'What did I forget?',
         detail: () => 'Promises, replies and things you owe, from your mail and calendar',
-        prompt: 'Look at my email and calendar for anything I promised, owe, or need to reply to.',
+        prompt:
+          'Look at my email and calendar from the last two weeks for anything I promised, owe, or still need to reply to. Give me a list of up to ten items, each with who it is for and when it was due. Ask before replying to anyone.',
+        source: 'my email and calendar from the last two weeks',
+        output: 'a list of up to ten items',
         icon: 'circle-check',
         needs: ['email', 'calendar'],
       },
       {
-        key: 'calm-day',
-        title: 'Plan a calm day',
-        detail: () => 'A short plan with breaks and only three must-dos',
+        key: 'meeting',
+        title: 'Get ready for a meeting',
+        detail: () => 'Who is in it, what it is about, and three things to say',
         prompt:
-          'Help me plan a calm day. Ask what I have to do, then give me a short plan with breaks and only three must-dos.',
-        icon: 'sun',
+          'Look at my calendar for my next meeting, and at my email about it. Give me a short brief: who is coming, what it is about, and three things I should say. Keep it under ten lines.',
+        source: 'my calendar for my next meeting',
+        output: 'a short brief',
+        icon: 'calendar-clock',
+        needs: ['calendar'],
       },
       {
-        key: 'routine',
-        title: "Build a routine I'll keep",
-        detail: assistant => `A simple morning routine, and ${assistant} reminds you each day`,
-        prompt: 'Help me build a simple morning routine I can actually stick to, then remind me each morning at 8.',
-        icon: 'clock',
+        key: 'subscriptions',
+        title: 'Find forgotten subscriptions',
+        detail: () => 'What you pay for, how much and how often',
+        prompt:
+          'Look through my email from the last year for subscriptions and renewals. Give me a table of what I pay for, how much, and how often, and mark anything I may have forgotten. Ask before cancelling or replying to anything.',
+        source: 'my email from the last year',
+        output: 'a table of what I pay for',
+        icon: 'dollar-sign',
+        needs: ['email'],
       },
-      BREAK_TASK,
+      {
+        key: 'tricky-email',
+        title: 'Write a tricky email',
+        detail: () => 'Polite but firm, after you say what happened',
+        prompt:
+          'Ask me what happened and who the email is for. Then draft a short, polite but firm email in my voice, under 150 words. Show me the draft and ask before sending.',
+        source: 'what happened',
+        output: 'a short, polite but firm email',
+        icon: 'square-pen',
+      },
+      {
+        key: 'get-started',
+        title: 'Help me get started',
+        detail: () => 'One small thing you can finish in 25 minutes',
+        prompt:
+          'Ask me what I am putting off. Then pick the one smallest step I can finish in 25 minutes, and tell me how to begin in three short lines.',
+        source: 'what I am putting off',
+        output: 'the one smallest step',
+        icon: 'play',
+      },
     ],
   },
   family: {
@@ -176,23 +194,71 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'This week for my family',
         detail: () => 'School, appointments, birthdays and bills in one list',
         prompt:
-          "What's coming up for my family this week? School, appointments, birthdays and bills. Put it in one list.",
+          'Look at my calendar and email for the next seven days. Give me one list of what is coming up for my family: school, appointments, birthdays and bills, each with its day. Keep it under fifteen lines.',
+        source: 'my calendar and email for the next seven days',
+        output: 'one list',
         icon: 'calendar',
         needs: ['calendar', 'email'],
       },
       {
         key: 'meals',
         title: "Plan this week's meals",
-        detail: () => 'Meals around what you have, and the shopping list',
-        prompt: "Plan this week's meals around what we already have, and make the shopping list.",
+        detail: () => 'Dinners around what you have, and one shopping list',
+        prompt:
+          'Ask me what is in the fridge and cupboards, and how many people are eating. Then plan dinners for the next seven days and give me one shopping list grouped by aisle. Ask before saving the plan to a space.',
+        source: 'what is in the fridge and cupboards',
+        output: 'one shopping list',
         icon: 'list-check',
+      },
+      {
+        key: 'care-track',
+        title: "Keep track of someone's care",
+        detail: assistant => `Medicines, appointments and questions, kept in one place by ${assistant}`,
+        prompt:
+          'Ask me who I care for, their medicines with times, and their coming appointments. Then put it all in one space with three short sections: medicines, appointments, and questions for the doctor. Ask before creating the space.',
+        source: 'who I care for',
+        output: 'three short sections',
+        icon: 'list-check',
+      },
+      {
+        key: 'appointment',
+        title: "Doctor's appointments",
+        detail: () => 'What is coming up, what to bring and what to ask',
+        prompt:
+          "Look at my calendar and email for doctor's appointments in the next month. For each one, list the date, what to bring, and two or three questions to ask. Ask before booking or changing anything.",
+        source: "my calendar and email for doctor's appointments",
+        output: 'list the date, what to bring',
+        icon: 'calendar',
+        needs: ['calendar', 'email'],
+      },
+      {
+        key: 'medicine',
+        title: 'Make a medicine schedule',
+        detail: assistant => `A daily schedule, and ${assistant} reminds you when each one is due`,
+        prompt:
+          'Ask me the medicines, doses and times for the person I care for. Then give me a simple daily schedule as a table, and ask before setting up reminders for when each one is due.',
+        source: 'the medicines, doses and times',
+        output: 'a simple daily schedule',
+        icon: 'clock',
+      },
+      {
+        key: 'care-visit',
+        title: 'Prepare for a care visit',
+        detail: () => 'What to tell the doctor, and what to ask',
+        prompt:
+          'Ask me who the visit is for and what has changed since the last one. Then write a short note for the doctor, under ten lines, and a list of questions to ask.',
+        source: 'what has changed since the last one',
+        output: 'a short note for the doctor',
+        icon: 'square-pen',
       },
       {
         key: 'chores',
         title: 'Split the chores fairly',
         detail: assistant => `${assistant} asks who lives with you and makes a weekly chart`,
         prompt:
-          'Help me split the household chores fairly. Ask me who lives here and what needs doing, then make a weekly chart.',
+          'Ask me who lives here and which chores need doing. Then make a weekly chart that splits them fairly, as a table with one row per person. Ask before saving it to a space.',
+        source: 'who lives here',
+        output: 'a weekly chart',
         icon: 'broom',
       },
       {
@@ -200,61 +266,20 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'Plan a birthday',
         detail: () => 'A to-do list and a timeline for the day',
         prompt:
-          "Help me plan a birthday party. Ask me who it's for, the budget and the date, then make a to-do list and a timeline.",
+          'Ask me who it is for, the date and the budget. Then give me a to-do list and a timeline for the day, each under ten items. Ask before adding anything to my calendar.',
+        source: 'who it is for, the date and the budget',
+        output: 'a to-do list and a timeline',
         icon: 'calendar-plus',
       },
       {
         key: 'outing',
         title: 'Plan a weekend outing',
-        detail: () => 'Somewhere nearby everyone will enjoy, with the route',
+        detail: () => 'Three places nearby, with travel time and opening hours',
         prompt:
-          'Help me plan a weekend outing for my family. Ask me who is coming and what they like, then suggest a few places nearby with how to get there.',
+          'Ask me who is coming and what they like. Then find three places near me, with how long it takes to get there and opening hours. Show them on a map.',
+        source: 'who is coming and what they like',
+        output: 'three places near me',
         icon: 'map-pin',
-      },
-    ],
-  },
-  caring: {
-    label: 'Caring for someone',
-    cards: [
-      {
-        key: 'care-track',
-        title: "Keep track of someone's care",
-        detail: assistant => `Medicines, appointments and questions, kept in one place by ${assistant}`,
-        prompt:
-          "Help me keep track of someone's care: their medicines, appointments and questions for their doctor. Ask me who it is, then keep it all in one place.",
-        icon: 'list-check',
-      },
-      {
-        key: 'care-visit',
-        title: 'Prepare for a care visit',
-        detail: () => 'What to tell the doctor, and what to ask',
-        prompt:
-          "I have a doctor's visit coming up for someone I care for. Help me write down what to tell the doctor and what to ask.",
-        icon: 'square-pen',
-      },
-      APPOINTMENT,
-      {
-        key: 'medicine',
-        title: 'Make a medicine schedule',
-        detail: assistant => `A daily schedule, and ${assistant} reminds you when each one is due`,
-        prompt:
-          'Make a simple daily medicine schedule for someone I care for. Ask me the medicines and times, and remind me when each one is due.',
-        icon: 'clock',
-      },
-      {
-        key: 'family-update',
-        title: 'Write a family update',
-        detail: () => 'A short, clear note on how they are doing',
-        prompt: 'Help me write a short, clear update for the family about how someone I care for is doing.',
-        icon: 'message-square-text',
-      },
-      {
-        key: 'self-care',
-        title: 'Take care of yourself too',
-        detail: assistant => `${assistant} asks three short questions, then suggests small ideas for today`,
-        prompt:
-          "I'd like to practice self-care today. Before you suggest anything, ask me three short questions, one at a time: how I'm feeling right now, how much time and energy I have today, and what usually helps me feel better. Then give me a few small, doable ideas for today.",
-        icon: 'sun',
       },
     ],
   },
@@ -266,7 +291,9 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'What do I need to sort out?',
         detail: () => 'Visa, bank, health care and housing, as a checklist',
         prompt:
-          "I'm new to this country. What do I need to sort out this month: visa, bank, health care and housing? Ask me where I live now, then make me a checklist.",
+          'Ask me which country and city I live in, and when I arrived. Then give me a checklist for this month covering visa, bank, health care and housing, with one line on how to do each. Keep it under fifteen lines.',
+        source: 'which country and city I live in',
+        output: 'a checklist for this month',
         icon: 'list-check',
       },
       {
@@ -274,14 +301,19 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'Explain a letter',
         detail: assistant => `${assistant} tells you what it says and whether you need to act`,
         prompt:
-          "I got a letter in a language I don't read well. Help me understand it and tell me if I need to do anything.",
+          'I will paste or describe a letter next. Tell me in plain words what it says, whether I need to act, and by when. Keep it under eight lines, and ask before writing a reply.',
+        source: 'a letter',
+        output: 'what it says, whether I need to act, and by when',
         icon: 'file',
       },
       {
         key: 'family-doctor',
         title: 'Find a doctor near me',
-        detail: () => 'A family doctor nearby, and how to register',
-        prompt: 'Help me find a family doctor near where I live, and tell me how to register.',
+        detail: () => 'Family doctors nearby, and how to register',
+        prompt:
+          'Find three family doctors near me that take new patients, with how long it takes to get there and opening hours. Show them on a map, and tell me how to register.',
+        source: 'near me',
+        output: 'three family doctors',
         icon: 'map-pin',
         needs: ['maps'],
       },
@@ -290,78 +322,31 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly T
         title: 'Practice the language',
         detail: () => 'Ten minutes on what you need, like the doctor or the bakery',
         prompt:
-          'Help me practice the local language for ten minutes. Ask me what I need it for, like the doctor or the bakery.',
+          'Ask me which language I am learning and what I need it for, like the doctor or the bakery. Then run a ten-minute practice: one short line from you, one from me, and correct my mistakes gently after each turn.',
+        source: 'what I need it for',
+        output: 'a ten-minute practice',
         icon: 'message-square-text',
       },
       {
         key: 'newcomers',
         title: 'What newcomers get wrong',
         detail: () => 'Everyday things that surprise people who just arrived',
-        prompt: 'What do newcomers here often get wrong in everyday life? Ask me where I live first.',
+        prompt:
+          'Ask me which country and city I live in. Then list the five everyday things newcomers there most often get wrong, each in one or two lines.',
+        source: 'which country and city I live in',
+        output: 'the five everyday things',
         icon: 'lightbulb',
       },
       {
         key: 'neighborhood',
         title: 'Choose a neighborhood',
-        detail: () => 'A few options compared on rent, commute and feel',
+        detail: () => 'Three options compared on rent, commute and feel',
         prompt:
-          'Help me choose a neighborhood to live in. Ask me what matters to me, then compare a few options on rent, commute and feel.',
+          'Ask me the city, my budget, and where I work. Then compare three neighborhoods in a short table: rent, commute time, and what living there is like.',
+        source: 'the city, my budget, and where I work',
+        output: 'a short table',
         icon: 'search',
       },
-    ],
-  },
-  work_money: {
-    label: 'Work and money',
-    cards: [
-      {
-        key: 'subscriptions',
-        title: 'Find forgotten subscriptions',
-        detail: () => 'What you pay for, how much and how often',
-        prompt:
-          "Look through my email for subscriptions and renewals. List what I'm paying for, how much and how often, and flag anything I may have forgotten about.",
-        icon: 'dollar-sign',
-        needs: ['email'],
-      },
-      {
-        key: 'invoices',
-        title: 'Chase unpaid invoices',
-        detail: () => 'Which invoices are unpaid, and who to remind',
-        prompt: 'Which of my invoices are unpaid, and who should I chase? Check my email.',
-        icon: 'dollar-sign',
-        needs: ['email'],
-      },
-      {
-        key: 'budget',
-        title: 'Make a simple budget',
-        detail: assistant => `${assistant} asks what comes in and goes out, then shows it as a chart`,
-        prompt: 'Help me make a simple monthly budget. Ask me what comes in and what goes out, and show it as a chart.',
-        icon: 'chart',
-      },
-      {
-        key: 'meeting',
-        title: 'Get ready for a meeting',
-        detail: () => 'Who is in it, what it is about, and three things to say',
-        prompt: 'Help me get ready for my next meeting: who is in it, what it is about, and three things I should say.',
-        icon: 'calendar-clock',
-        needs: ['calendar'],
-      },
-      {
-        key: 'tricky-email',
-        title: 'Write a tricky email',
-        detail: () => 'Polite but firm, after you say what happened',
-        prompt:
-          'Help me write a polite but firm email about something that is bothering me at work. Ask me what happened first.',
-        icon: 'square-pen',
-      },
-      {
-        key: 'raise',
-        title: 'Prepare to ask for a raise',
-        detail: () => 'Your wins in plain words, and what to say',
-        prompt:
-          'Help me prepare to ask for a raise. Ask me about my role and what I have done this year, then help me write down my wins and what to say.',
-        icon: 'chart',
-      },
-      PLAN_DAY,
     ],
   },
 };
@@ -377,3 +362,8 @@ export function homeCardsFor({
   const cards = topic === null ? GENERAL_CARDS : HOME_TOPICS[topic].cards;
   return visibleTourPrompts(cards, capabilities).slice(0, HOME_CARD_COUNT);
 }
+
+/** The saved help areas that still show as a home pill; the others stay stored but are no longer offered. */
+export const HOME_HELP_AREA_IDS: readonly (HelpAreaId & HomeTopicId)[] = HELP_AREA_IDS.filter(
+  (id): id is HelpAreaId & HomeTopicId => isHomeTopicId(id),
+);

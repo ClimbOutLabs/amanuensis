@@ -2,9 +2,9 @@
 
 import type { FC } from 'react';
 
-import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
-import { HOME_TOPICS } from './tourPrompts.js';
+import { HOME_HELP_AREA_IDS, HOME_TOPICS } from './tourPrompts.js';
 
 /** Adds an area at the end when it is not chosen yet, and removes it when it is; the list keeps the order chosen. */
 export function toggleHelpArea(current: readonly HelpAreaId[], id: HelpAreaId): HelpAreaId[] {
@@ -24,7 +24,7 @@ export const HelpAreaChoices: FC<{
       Pick any, and change them any time. They show as pills on the home.
     </p>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {HELP_AREA_IDS.map(id => (
+      {HOME_HELP_AREA_IDS.map(id => (
         <label
           key={id}
           className="flex items-start gap-2 rounded-lg border border-border/70 bg-secondary-bg px-3 py-2 text-sm text-text-primary"

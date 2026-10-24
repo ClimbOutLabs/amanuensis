@@ -63,7 +63,7 @@ async function screenshotDir(): Promise<string> {
 async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   const expected = EXPECTED[state];
   assert.match(await page.getByRole('heading', { level: 1, name: GREETING }).innerText(), GREETING);
-  assert.equal(await page.getByRole('list', { name: 'What would help you most?' }).getByRole('button').count(), 6);
+  assert.equal(await page.getByRole('list', { name: 'What would help you most?' }).getByRole('button').count(), 3);
   assert.equal(await page.getByRole('button', { name: /^Some things|Draft a reply/ }).count(), 1);
   const ticket = page.getByTestId('aman-setup-ticket');
   if (expected.ticket === null) {
@@ -190,7 +190,7 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         const family = page.getByRole('button', { name: 'Family and home' });
         await family.click();
         assert.equal(await family.getAttribute('aria-pressed'), 'true');
-        await page.getByRole('button', { name: /Plan a birthday/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByRole('button', { name: /Plan this week's meals/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(await page.locator('[data-role="user"]').count(), 0, 'choosing a pill sends nothing');
         await shoot('shell-pill');
         await family.click();

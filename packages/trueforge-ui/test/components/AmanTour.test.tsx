@@ -1,9 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
-import { GENERAL_CARDS, HOME_TOPICS } from '@/components/tourPrompts.js';
+import { GENERAL_CARDS } from '@/components/tourPrompts.js';
 
 const noCapabilities = { email: false, calendar: false, sandbox: false, maps: true };
 const morning = new Date(2026, 9, 23, 9, 0);
@@ -52,13 +51,10 @@ describe('AmanTour home', () => {
     expect(container.querySelectorAll('.aui-name-underline')).toHaveLength(1);
   });
 
-  it('puts Productivity first, then the help areas, and shows the gold dot on Productivity once a brief exists', () => {
+  it('shows three pills, Productivity first, and the gold dot on Productivity once a brief exists', () => {
     const { rerender, props } = renderTour({ hasBrief: false });
     const pills = within(screen.getByRole('list', { name: 'What would help you most?' })).getAllByRole('button');
-    expect(pills.map(pill => pill.textContent)).toEqual([
-      'Productivity',
-      ...HELP_AREA_IDS.map(id => HOME_TOPICS[id].label),
-    ]);
+    expect(pills.map(pill => pill.textContent)).toEqual(['Productivity', 'Family and home', 'New to a country']);
     expect(pills.every(pill => pill.getAttribute('aria-pressed') === 'false')).toBe(true);
     expect(pills[0]?.querySelector('.bg-gold')).toBeNull();
 
@@ -80,11 +76,11 @@ describe('AmanTour home', () => {
     expect(family).toHaveClass('bg-gold-soft');
     expect(cardTitles()).toEqual([
       "Plan this week's meals",
-      'Split the chores fairly',
-      'Plan a birthday',
-      'Plan a weekend outing',
+      "Keep track of someone's care",
+      'Make a medicine schedule',
+      'Prepare for a care visit',
     ]);
-    expect(screen.getByText('Mannie asks who lives with you and makes a weekly chart')).toBeInTheDocument();
+    expect(screen.getByText('Medicines, appointments and questions, kept in one place by Mannie')).toBeInTheDocument();
     expect(props.onFill).not.toHaveBeenCalled();
 
     // Pressing the chosen pill again goes back to the general set.
@@ -95,12 +91,12 @@ describe('AmanTour home', () => {
 
   it('keeps the chosen pill after a reload', () => {
     const first = renderTour();
-    fireEvent.click(screen.getByRole('button', { name: 'Work and money' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New to a country' }));
     first.unmount();
 
     renderTour();
-    expect(screen.getByRole('button', { name: 'Work and money' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /Make a simple budget/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New to a country' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Explain a letter/ })).toBeInTheDocument();
   });
 
   it('gives every topic four cards, each naming the assistant by its display name where it names one', () => {
@@ -119,8 +115,8 @@ describe('AmanTour home', () => {
     const { props } = renderTour();
 
     expect(screen.getByRole('heading', { name: 'Some things Mannie can do' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Plan your day/ }));
-    expect(props.onFill).toHaveBeenLastCalledWith(expect.stringContaining('Help me plan my day'));
+    fireEvent.click(screen.getByRole('button', { name: /Plan my day/ }));
+    expect(props.onFill).toHaveBeenLastCalledWith(expect.stringContaining('Look at my calendar for today'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Productivity' }));
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
