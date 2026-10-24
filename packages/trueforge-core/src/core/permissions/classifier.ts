@@ -107,6 +107,7 @@ import {
   searchHoldCardText,
   searchProviderLabel,
   SECRET_SAY,
+  steeredDestinationSay,
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
@@ -2038,7 +2039,24 @@ function steeringChecked(input: {
   if (ctx.services.unattended) {
     return steeredSkipped(ctx);
   }
-  const say = holdSay(ctx.web_search.assistantName).steered_action;
+  const cardNames = new Map(
+    (mail === null ? [] : [...mail.to, ...mail.cc, ...mail.bcc]).map(mailbox => [
+      mailbox.address.toLowerCase(),
+      mailbox.name,
+    ]),
+  );
+  const say = steeredDestinationSay({
+    assistant: ctx.web_search.assistantName,
+    destinations: steered.map(({ value, kind, origin }) => {
+      const name = kind === 'address' ? cardNames.get(value.toLowerCase()) || origin.name : null;
+      const shown = escapeDisplayText(value);
+      return {
+        kind,
+        source: origin.source,
+        who: name === null || name === undefined || name === '' ? shown : `${escapeDisplayText(name)} (${shown})`,
+      };
+    }),
+  });
   return {
     ...decision,
     reason: CONTENT_STEERED_REASON,

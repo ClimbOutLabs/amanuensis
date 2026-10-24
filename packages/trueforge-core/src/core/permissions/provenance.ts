@@ -13,11 +13,22 @@ interface ProvenanceValues {
   overflowed: boolean;
 }
 
+/** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. */
+export type ReadSource = 'email_sender' | 'email' | 'event' | 'page' | 'file' | 'tool_result' | 'other';
+
+export interface ReadOrigin {
+  source: ReadSource;
+  /** The display name an email's sender gave, or null. */
+  name: string | null;
+}
+
 export interface ChatProvenance {
   /** From the person's messages, profile and memory, and search results. */
   trusted: ProvenanceValues;
   /** Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries. */
   untrusted: ProvenanceValues;
+  /** Where each address (`address:`) and site (`site:`) on the read side was first read, so a card can say so. */
+  read_from: Map<string, ReadOrigin>;
 }
 
 /**
@@ -31,7 +42,7 @@ function emptyValues(): ProvenanceValues {
 }
 
 export function emptyChatProvenance(): ChatProvenance {
-  return { trusted: emptyValues(), untrusted: emptyValues() };
+  return { trusted: emptyValues(), untrusted: emptyValues(), read_from: new Map() };
 }
 
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
@@ -114,25 +125,49 @@ function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts
   return side.overflowed || side[input.kind].has(input.value);
 }
 
-function recordUrl(side: ProvenanceValues, value: string): void {
+/** Records one link; returns its site, or undefined when it is not a link. */
+function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   const key = urlKey(value);
   const host = parsedUrl(value)?.hostname;
   if (key === undefined || host === undefined) {
-    return;
+    return undefined;
   }
   add({ side, kind: 'urls', value: key });
   add({ side, kind: 'hosts', value: hostKey(host) });
+  return hostKey(host);
 }
 
-function recordText(side: ProvenanceValues, text: string): void {
+/** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
+function recordText(side: ProvenanceValues, text: string): string[] {
+  const found: string[] = [];
   for (const url of urlsInText(text)) {
-    recordUrl(side, url);
+    const site = recordUrl(side, url);
+    if (site !== undefined) {
+      found.push(`site:${site}`);
+    }
   }
   for (const match of text.matchAll(BARE_HOST)) {
     add({ side, kind: 'hosts', value: hostKey(match[0]) });
+    found.push(`site:${hostKey(match[0])}`);
   }
   for (const match of text.matchAll(EMAIL)) {
     add({ side, kind: 'addresses', value: match[0].toLowerCase() });
+    found.push(`address:${match[0].toLowerCase()}`);
+  }
+  return found;
+}
+
+/** Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are. */
+function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: ReadOrigin }): void {
+  const known = input.provenance.read_from.get(input.key);
+  if (known === undefined) {
+    if (input.provenance.read_from.size < MAX_VALUES_PER_SET) {
+      input.provenance.read_from.set(input.key, input.origin);
+    }
+    return;
+  }
+  if (known.source !== 'email_sender' && input.origin.source === 'email_sender') {
+    input.provenance.read_from.set(input.key, input.origin);
   }
 }
 
@@ -141,9 +176,72 @@ export function recordPersonText(input: { provenance: ChatProvenance; text: stri
   recordText(input.provenance.trusted, input.text);
 }
 
-/** Text the assistant read: a page, a mail body, a file, a tool's output. It is data, never the person's say. */
-export function recordUntrustedText(input: { provenance: ChatProvenance; text: string }): void {
-  recordText(input.provenance.untrusted, input.text);
+/** Text the assistant read: a page, a mail, a file, a tool's output. It is data, never the person's say. */
+export function recordUntrustedText(input: { provenance: ChatProvenance; text: string; source: ReadSource }): void {
+  for (const key of recordText(input.provenance.untrusted, input.text)) {
+    noteOrigin({ provenance: input.provenance, key, origin: { source: input.source, name: null } });
+  }
+}
+
+/** Header keys that name who sent a message. */
+const SENDER_KEYS = new Set(['from', 'sender']);
+const MAX_MAIL_DEPTH = 8;
+const MAX_SENDER_NAME_CHARS = 80;
+const FROM_LINE = /^[ \t]*from:[ \t]*(.+)$/gim;
+
+function collectSenders(input: { node: unknown; into: string[]; depth: number; isSender: boolean }): void {
+  const { node, into, depth, isSender } = input;
+  if (depth > MAX_MAIL_DEPTH) {
+    return;
+  }
+  if (typeof node === 'string') {
+    if (isSender) {
+      into.push(node);
+    }
+  } else if (Array.isArray(node)) {
+    for (const child of node) {
+      collectSenders({ node: child, into, depth: depth + 1, isSender });
+    }
+  } else if (typeof node === 'object' && node !== null) {
+    for (const [key, child] of Object.entries(node)) {
+      collectSenders({ node: child, into, depth: depth + 1, isSender: SENDER_KEYS.has(key.toLowerCase()) });
+    }
+  }
+}
+
+/** A sender as `Name <address>` or a bare address: the address and the display name it gave. */
+function senderOf(value: string): { address: string; name: string | null } | undefined {
+  const address = [...value.matchAll(EMAIL)][0]?.[0];
+  if (address === undefined) {
+    return undefined;
+  }
+  const before = value.slice(0, value.indexOf('<') < 0 ? 0 : value.indexOf('<'));
+  const name = before.replace(/["']/g, '').trim().slice(0, MAX_SENDER_NAME_CHARS);
+  return { address: address.toLowerCase(), name: name === '' ? null : name };
+}
+
+/**
+ * A read of the person's mail. Every address in it is read content, headers too; who sent each message is noted, so
+ * a card can say "who sent the email" rather than only that an email named them.
+ */
+export function recordEmailText(input: { provenance: ChatProvenance; text: string }): void {
+  recordUntrustedText({ provenance: input.provenance, text: input.text, source: 'email' });
+  const senders = [...input.text.matchAll(FROM_LINE)].map(match => match[1] ?? '');
+  try {
+    collectSenders({ node: JSON.parse(input.text), into: senders, depth: 0, isSender: false });
+  } catch {
+    // Plain text: only its From lines name a sender.
+  }
+  for (const value of senders) {
+    const sender = senderOf(value);
+    if (sender !== undefined) {
+      noteOrigin({
+        provenance: input.provenance,
+        key: `address:${sender.address}`,
+        origin: { source: 'email_sender', name: sender.name },
+      });
+    }
+  }
 }
 
 /** Keys whose contents describe a result or what it links to, never the result's own link. */
@@ -240,6 +338,18 @@ function steeredAddress(input: { provenance: ChatProvenance; address: string; re
   );
 }
 
+/** A recipient or site only read content named, and where the assistant read it. */
+export interface SteeredDestination {
+  value: string;
+  kind: 'address' | 'link';
+  origin: ReadOrigin;
+}
+
+/** Where a steered value was read; a value past the cap was never noted, so it reads as "something". */
+function originOf(input: { provenance: ChatProvenance; key: string }): ReadOrigin {
+  return input.provenance.read_from.get(input.key) ?? { source: 'other', name: null };
+}
+
 /**
  * Recipients and sites of a consequential action that only read content named. `reply_sender` is the From of the
  * one message this action replies to, as the host read it; it is trusted for this reply and nothing else, so a
@@ -250,16 +360,26 @@ export function steeredDestinations(input: {
   addresses: readonly string[];
   values: readonly string[];
   reply_sender: string | null;
-}): string[] {
+}): SteeredDestination[] {
   const { provenance, reply_sender } = input;
-  const steered = input.addresses.filter(address => steeredAddress({ provenance, address, reply_sender }));
+  const steered: SteeredDestination[] = [];
+  const addAddress = (address: string): void => {
+    if (steeredAddress({ provenance, address, reply_sender })) {
+      const key = `address:${address.trim().toLowerCase()}`;
+      steered.push({ value: address.trim(), kind: 'address', origin: originOf({ provenance, key }) });
+    }
+  };
+  input.addresses.forEach(addAddress);
   for (const value of input.values) {
     for (const match of value.matchAll(EMAIL)) {
-      if (steeredAddress({ provenance, address: match[0], reply_sender })) {
-        steered.push(match[0]);
+      addAddress(match[0]);
+    }
+    for (const url of urlsOf(value.replace(EMAIL, ' '))) {
+      const host = parsedUrl(url)?.hostname;
+      if (host !== undefined && steeredUrl({ provenance, url })) {
+        steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${hostKey(host)}` }) });
       }
     }
-    steered.push(...urlsOf(value.replace(EMAIL, ' ')).filter(url => steeredUrl({ provenance, url })));
   }
   return steered;
 }

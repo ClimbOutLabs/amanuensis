@@ -1,13 +1,19 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
+import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
+import { isGmailReadToolName } from '../email/gmail/toolContract';
+import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
-import { isSearchResultTool } from '../search/fetchedPages';
+import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import {
   emptyChatProvenance,
   namesUrl,
+  recordEmailText,
   recordSearchResults,
   recordUntrustedText,
   type ChatProvenance,
+  type ReadSource,
 } from './provenance';
 
 /**
@@ -101,6 +107,17 @@ export function resultTexts(result: CallToolResult): string[] {
   return texts;
 }
 
+/** The kind of content a tool's result is, so a card can say where an address was read. */
+function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
+  if (input.opensPage) {
+    return 'page';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === input.baseName)) {
+    return 'event';
+  }
+  return input.baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+}
+
 /**
  * Records where the links and addresses of one tool result came from, before the model reads it. A search's results
  * are the person's to open; every other text is data, the headers of their own mail and their events' guests too.
@@ -115,11 +132,18 @@ export function recordToolResultProvenance(input: {
   const { provenance } = input.state;
   const separator = input.tool_name.lastIndexOf('__');
   const baseName = separator < 0 ? input.tool_name : input.tool_name.slice(separator + 2);
-  if (isSearchResultTool(baseName) && !namesUrl(input.argument_values)) {
+  const searchTool = isSearchResultTool(baseName);
+  if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
+  const mail = !searchTool && (isGmailReadToolName(baseName) || isMailReadToolName(baseName));
+  const source = readSourceOf({ baseName, opensPage: searchTool || isPageReaderTool(baseName) });
   for (const text of input.texts) {
-    recordUntrustedText({ provenance, text });
+    if (mail) {
+      recordEmailText({ provenance, text });
+    } else {
+      recordUntrustedText({ provenance, text, source });
+    }
   }
 }

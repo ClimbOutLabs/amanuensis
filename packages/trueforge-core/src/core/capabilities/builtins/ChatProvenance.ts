@@ -3,7 +3,7 @@ import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
 import { recordToolResultProvenance, type WebSearchTurnState } from '../../permissions/webSearch';
-import { isHostWrappedText, isLLMContextMessage } from '../../runtime/contextUtils';
+import { isHostWrappedText, isLLMContextMessage, isUntrustedDocumentText } from '../../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentContextProcessorOutput, AgentThreadExecutionContext } from '../AgentContextProcessor';
@@ -60,7 +60,7 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
       if (message.role === 'user') {
         for (const text of userTexts(message.content)) {
           if (isHostWrappedText(text)) {
-            recordUntrustedText({ provenance, text });
+            recordUntrustedText({ provenance, text, source: isUntrustedDocumentText(text) ? 'file' : 'other' });
           } else {
             recordPersonText({ provenance, text });
           }

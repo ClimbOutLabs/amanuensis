@@ -1,6 +1,7 @@
 /** Wording of held web search, page and map cards and their audit rows. Browser-safe: the UI reads it too. */
 import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
+import type { ReadSource } from './provenance.js';
 
 /** Clause for a held key in other tools' outbound reasons; search cards use SECRET_SAY instead. */
 export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
@@ -53,7 +54,6 @@ export function holdSay(assistant: string) {
     search_setting: `Searches are set to ask, so ${assistant} is checking with you first.`,
     search_limit: `${assistant} stopped looking things up, because it already looked up a lot in this reply. Ask again to keep going.`,
     steered: `${assistant} found this link in something it read, and opening it would send more than the link said.`,
-    steered_action: `Something ${assistant} read, not you, named who or where this goes.`,
     secret: SECRET_SAY,
     card_number: 'This sends something that looks like a payment card number.',
     encoded: 'This sends a long block of coded text.',
@@ -63,6 +63,37 @@ export function holdSay(assistant: string) {
     maps_always: `Maps are set to ask, so ${assistant} is checking with you first.`,
     maps_offline: `${assistant} is offline, so maps can't run.`,
   } as const;
+}
+
+/** The place an address or link was read, as a card names it. */
+const READ_PLACE: Record<ReadSource, string> = {
+  email_sender: 'an email',
+  email: 'an email',
+  event: 'a calendar event',
+  page: 'a page',
+  file: 'a file',
+  tool_result: 'a tool result',
+  other: 'something',
+};
+
+/**
+ * Says who a send goes to and where the assistant read that address or link, in plain words and without alarm. `who`
+ * is already escaped for display: `Name (address)`, an address, or a link.
+ */
+export function steeredDestinationSay(input: {
+  assistant: string;
+  destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
+}): string {
+  const { assistant } = input;
+  const sentences = input.destinations.map(({ who, kind, source }) => {
+    if (kind === 'link') {
+      return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
+    }
+    return source === 'email_sender'
+      ? `This goes to ${who}, who sent the email ${assistant} just read.`
+      : `This goes to ${who}, whose address was in ${READ_PLACE[source]} ${assistant} read.`;
+  });
+  return [...new Set(sentences)].join(' ');
 }
 
 /** Which sentence each rule the outbound secret guard can trip on says. */

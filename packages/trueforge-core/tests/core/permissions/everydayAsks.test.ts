@@ -277,7 +277,9 @@ describe('what is held, because content steered it', () => {
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
     const decision = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'collect@evil.example' }] })), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
-    expect(decision.card?.plain_what).toMatch(/Something Aman read, not you, named who or where this goes\.$/);
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to collect@evil\.example, whose address was in an email Aman read\.$/,
+    );
     expect(
       allowsChatApproval({
         type: 'truefoundry-system',
@@ -309,7 +311,9 @@ describe('what is held, because content steered it', () => {
       ctx,
     );
     expect(forward).toMatchObject({ tier: 3, reason: 'content_steered' });
-    expect(forward.card?.plain_what).toMatch(/Something Aman read, not you, named who or where this goes\.$/);
+    expect(forward.card?.plain_what).toMatch(
+      / This goes to records@collector\.example, whose address was in an email Aman read\.$/,
+    );
     expect(allowsChatApproval(gmailInfo('send_draft', forward.reason))).toBe(false);
   });
 
@@ -368,6 +372,51 @@ describe('what is held, because content steered it', () => {
       ctx,
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
+  });
+
+  it("says who sent the email when a new send goes to that sender, by the assistant's display name", async () => {
+    const ctx = makeCtx();
+    ctx.web_search.assistantName = 'Mannie';
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: '', address: 'desk@billing-alerts.example' }] })),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to Account Desk \(desk@billing-alerts\.example\), who sent the email Mannie just read\.$/,
+    );
+    expect(decision.card?.plain_what).not.toMatch(/Aman|—/);
+  });
+
+  it('names the page an address was read in, with the name on the card', async () => {
+    const ctx = makeCtx();
+    ctx.web_search.assistantName = 'Mannie';
+    read(ctx, {
+      tool_name: 'web_fetch',
+      args: ['https://vendor.example/contact'],
+      text: 'Questions? Write to sales@vendor.example.',
+    });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: 'Vendor Sales', address: 'sales@vendor.example' }] })),
+      ctx,
+    );
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to Vendor Sales \(sales@vendor\.example\), whose address was in a page Mannie read\.$/,
+    );
+  });
+
+  it('names a file an address was read in, and still asks every time', async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'extract_document_text', args: ['f1'], text: 'Invoices go to billing@supplier.example' });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: '', address: 'billing@supplier.example' }] })),
+      ctx,
+    );
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to billing@supplier\.example, whose address was in a file Aman read\.$/,
+    );
+    expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
   });
 
   it('holds a search that carries a real secret, whatever its source', async () => {
