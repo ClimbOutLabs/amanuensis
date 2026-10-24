@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
 
 import {
-  APPROVAL_AUTO_DENY_MINUTES,
-  approvalAutoDenyReason,
   createSessionResyncExtensions,
   isPendingApprovalsError,
   publishBlockedSend,
@@ -425,13 +423,5 @@ describe('blocked-send pub/sub', () => {
     unsub2();
     publishBlockedSend();
     assert.deepEqual(seen, [1, 2]);
-  });
-});
-
-describe('approval auto-deny policy', () => {
-  it('is a 30-minute fail-closed window', () => {
-    assert.equal(APPROVAL_AUTO_DENY_MINUTES, 30);
-    assert.match(approvalAutoDenyReason(), /30 minutes/);
-    assert.match(approvalAutoDenyReason(), /denied/i);
   });
 });

@@ -16,21 +16,75 @@ function activeTurnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
 }
 
+/**
+ * A chat turn this process is still setting up. It is not in the store yet, so a Cancel that comes
+ * now cannot find it by id; it is marked here instead, and the turn starts already cancelled.
+ */
+export class TurnAdmission {
+  #cancelReason: CancellationReason | undefined;
+
+  constructor(private readonly onRelease: () => void) {}
+
+  get cancelReason(): CancellationReason | undefined {
+    return this.#cancelReason;
+  }
+
+  cancel(reason: CancellationReason): void {
+    this.#cancelReason ??= reason;
+  }
+
+  /** Ends the admission. Safe to call more than once. */
+  release(): void {
+    this.onRelease();
+  }
+}
+
 export class ActiveTurnRegistry {
   private readonly runs = new Map<string, ActiveTurnRun>();
+  private readonly admissions = new Map<string, Set<TurnAdmission>>();
   private alreadyShutDownAbortReason: CancellationReason | undefined;
+  private readonly startedAt = new Date();
+
+  /** True for a turn created before this process started: no run here can own it. */
+  predates(createdAt: Date): boolean {
+    return createdAt < this.startedAt;
+  }
+
+  /** Registers a chat turn that is being set up, before it has an id in the store. */
+  admit(input: { sessionId: string }): TurnAdmission {
+    const admission: TurnAdmission = new TurnAdmission(() => {
+      const pending = this.admissions.get(input.sessionId);
+      pending?.delete(admission);
+      if (pending?.size === 0) {
+        this.admissions.delete(input.sessionId);
+      }
+    });
+    const pending = this.admissions.get(input.sessionId) ?? new Set<TurnAdmission>();
+    pending.add(admission);
+    this.admissions.set(input.sessionId, pending);
+    return admission;
+  }
+
+  /** Marks every turn of the chat still being set up here, so each one starts already cancelled. */
+  cancelAdmissions(input: { sessionId: string; abortReason: CancellationReason }): void {
+    for (const admission of this.admissions.get(input.sessionId) ?? []) {
+      admission.cancel(input.abortReason);
+    }
+  }
 
   /**
    * Registers the run immediately, then returns a generator that forwards
    * `stream` and removes the run when the stream completes (or the consumer
    * exits early). If shutdown has already begun, aborts the controller with
-   * the shutdown reason so the turn ends as abandoned.
+   * the shutdown reason so the turn ends as abandoned. A turn whose admission
+   * was cancelled is aborted the same way, so it ends before reaching the model.
    */
   track<T>(input: {
     sessionId: string;
     turnId: string;
     abortController: AbortController;
     stream: AsyncIterable<T>;
+    admission?: TurnAdmission | undefined;
   }): AsyncGenerator<T> {
     const key = activeTurnKey(input.sessionId, input.turnId);
     const { promise: waitUntilCompleted, resolve } = Promise.withResolvers<undefined>();
@@ -50,6 +104,12 @@ export class ActiveTurnRegistry {
       if (!input.abortController.signal.aborted) {
         input.abortController.abort(this.alreadyShutDownAbortReason);
       }
+    }
+    // From here on a Cancel finds the run by its id.
+    input.admission?.release();
+    const admissionCancelReason = input.admission?.cancelReason;
+    if (admissionCancelReason !== undefined && !input.abortController.signal.aborted) {
+      input.abortController.abort(admissionCancelReason);
     }
 
     const complete = () => {

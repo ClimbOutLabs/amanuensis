@@ -7,7 +7,7 @@ import {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
-import { GRANT_BARRED_TIER_REASONS } from '../permissions/tier';
+import { GRANT_BARRED_TIER_REASONS, OWN_CALENDAR_CHANGE_REASONS } from '../permissions/tier';
 import { SEARCH_AFTER_PRIVATE_READ_REASON } from '../permissions/webSearch';
 import {
   implementationPlanAllowsScope,
@@ -87,7 +87,15 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (info.implementation_plan_grant !== undefined) {
     return true;
   }
+  if (isOwnCalendarChange(info)) {
+    return true;
+  }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
+}
+
+/** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
+function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
+  return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
 }
 
 /**
@@ -137,13 +145,30 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
+  if (
+    secretPathReadBarsDurableGrant(info) ||
+    tierBarsDurableGrant(info) ||
+    info.implementation_plan_grant !== undefined ||
+    info.search_provider_call === true
+  ) {
+    return false;
+  }
+  return isOwnCalendarChange(info) || (info.type === 'mcp' && info.effect === 'inspect');
+}
+
+/**
+ * Whether a call waits for the person's answer. A call that matches a "no" from earlier in this turn
+ * gets no new card: the run refuses it as that same "no", so rewording a search cannot ask again.
+ */
+export function awaitsApproval(input: {
+  call: InternalEnrichedToolCall;
+  decisions: ReadonlyMap<string, ApprovalDecision>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): boolean {
   return (
-    info.type === 'mcp' &&
-    info.effect === 'inspect' &&
-    !secretPathReadBarsDurableGrant(info) &&
-    !tierBarsDurableGrant(info) &&
-    info.implementation_plan_grant === undefined &&
-    info.search_provider_call !== true
+    input.call.tool_info.is_approval_required === true &&
+    !input.decisions.has(input.call.id) &&
+    !input.deniedApprovalIdentities.has(approvalGrantKey(input.call.tool_info))
   );
 }
 

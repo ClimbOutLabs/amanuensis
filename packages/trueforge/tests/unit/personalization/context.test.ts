@@ -1,4 +1,5 @@
 import { InstructionBuilder, rootAgentIdentity } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import {
   buildPersonalizationContext,
   isPersonalizationUnchanged,
@@ -55,7 +56,7 @@ describe('personalization context', () => {
     const complete: PersonalizationProfile = { ...profile, digest: personalizationDigest(profile) };
     const context = buildPersonalizationContext(complete);
     const builder = InstructionBuilder.createSystemPrompt('root');
-    const capability = personalizationContextCapability(context);
+    const capability = personalizationContextCapability({ context, webSearch: createWebSearchTurnState() });
     capability.instructionBuilders?.[0]?.(builder);
 
     expect(context.profile_revision).toBe(2);
@@ -80,8 +81,32 @@ describe('personalization context', () => {
     const complete: PersonalizationProfile = { ...profile, digest: personalizationDigest(profile) };
     const context = buildPersonalizationContext(complete);
 
-    expect(personalizationCapabilitiesForTurn(context, false)).toHaveLength(1);
-    expect(personalizationCapabilitiesForTurn(context, true)).toEqual([]);
+    const webSearch = createWebSearchTurnState();
+    expect(personalizationCapabilitiesForTurn({ context, isSubAgent: false, webSearch })).toHaveLength(1);
+    expect(personalizationCapabilitiesForTurn({ context, isSubAgent: true, webSearch })).toEqual([]);
+  });
+
+  it("keeps the profile's details for the search check before each model call", async () => {
+    const named: PersonalizationProfile = { ...profile, user_name: 'Sam Rivera' };
+    const context = buildPersonalizationContext({ ...named, digest: personalizationDigest(named) });
+    const webSearch = createWebSearchTurnState();
+    const capability = personalizationContextCapability({ context, webSearch });
+    expect(webSearch.chatFingerprints.has_text).toBe(false);
+
+    for (const processor of capability.preLLMProcessors ?? []) {
+      for await (const output of processor.processPreLLM({
+        threadId: 'main',
+        context: [],
+        currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
+      })) {
+        void output;
+      }
+    }
+
+    expect(webSearch.chatFingerprints.has_text).toBe(true);
+    expect(webSearch.privateContextKept).toBe(true);
+    // The profile is put before the model again each turn, so a later turn never distrusts the record over it.
+    expect(webSearch.onceOnlyContextKept).toBe(false);
   });
 
   it('renders the learned profile last, with its provenance preamble', () => {
@@ -183,12 +208,10 @@ describe('root identity from the profile', () => {
     expect(rootIdentityNames(undefined)).toEqual({ assistantName: undefined, personName: undefined });
   });
 
-  it('renders the identity with both names, with only the assistant name, and with neither', () => {
+  it('renders the static identity from the assistant name only, never the person name', () => {
     const both = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata', address_as: 'Maya' }));
-    expect(both.startsWith("You are Nata, Maya's chief of staff.")).toBe(true);
-
-    const assistantOnly = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata' }));
-    expect(assistantOnly.startsWith('You are Nata, chief of staff to the person you work for.')).toBe(true);
+    expect(both.startsWith('You are Nata, chief of staff to the person you work for.')).toBe(true);
+    expect(both).not.toContain('Maya');
 
     const neither = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: null }));
     expect(neither.startsWith('You are Aman, chief of staff to the person you work for.')).toBe(true);

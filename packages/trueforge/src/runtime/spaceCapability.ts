@@ -39,6 +39,7 @@ import {
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import configuration from '../config';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
@@ -48,6 +49,7 @@ import {
   type SpaceMutationResult,
   type SpaceRecord,
 } from '../db/spaceStore';
+import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
@@ -229,7 +231,7 @@ Build a large space in steps, not in one call. First create a short skeleton: a 
 
 Pass body as an array of lines, one element per line: each table row is its own element, and a blank line is an empty string. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
-If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment the host renders, not a bundled app. Author every html space on those classes, as one self-contained document with inline CSS. Never author a space by editing files in the sandbox (apply_patch, replace_text, write_file, or exec): use create_space and update_space only. The host's sanitiser decides what actually renders.
+If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment the host renders, not a bundled app. Author every html space on those classes, as one self-contained document with inline CSS. The host's sanitiser decides what actually renders.
 
 Pictures: use only picture links that a search or page result in this chat returned, never one you made up; search for a picture first if you need one. The host refuses any other link.
 
@@ -713,7 +715,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and update_space, never by editing files in the sandbox. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.create(input)),
     }),
@@ -1357,6 +1359,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** The request carries a new message from the person, not an approval resuming the same answer. */
+  startsAnswer: boolean;
 }
 
 /**
@@ -1423,6 +1427,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           logger: this.#space.logger,
           pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
           timezone: this.clientTimezone,
+          starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
@@ -1457,13 +1462,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
   async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
-    if (connections === undefined) {
+    const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
+    if (connections === undefined && evalFixtures === undefined) {
       return undefined;
     }
     try {
       return await googleCapability({
         fetchImpl: undefined,
         connections,
+        evalSources: evalFixtures,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,

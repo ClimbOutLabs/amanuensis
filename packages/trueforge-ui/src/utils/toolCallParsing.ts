@@ -1,4 +1,6 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import { APPROVAL_EXPIRED_REASON_CODE } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
 import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
@@ -7,18 +9,10 @@ import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
 import type { MapCardData, MapPin, MapPlace, MapRefusedPlace } from '../components/MapCard.js';
-import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 
 export type ApprovalOptionView = {
   id: string;
-  label: string;
   isAllow: boolean;
-  hint?: string;
-  grants?: readonly string[];
-  confirm?: {
-    title?: string;
-    description?: string;
-  };
 };
 
 export type ToolDispositionView = {
@@ -52,11 +46,8 @@ export const SANDBOX_TOOL_NAMES = new Set([
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 
-const APPROVAL_OPTION_CHOICES: Record<string, { label: string; hint: string }> = {
-  'allow-once': APPROVAL_CHOICES.approve,
-  'allow-always': APPROVAL_CHOICES.approveForChat,
-  'reject-once': APPROVAL_CHOICES.deny,
-};
+/** The option kinds an approval card can answer with. */
+const APPROVAL_OPTION_KINDS: ReadonlySet<string> = new Set(['allow-once', 'allow-always', 'reject-once']);
 
 const isAllowKind = (kind: string) => kind === 'allow-once' || kind === 'allow-always';
 
@@ -107,11 +98,87 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
  */
 export function parseToolRefusalNotice(content: unknown): string | undefined {
   const outcome = parseToolResultEnvelope(content)?.outcome;
-  if (!isUnknownRecord(outcome) || outcome.disposition !== 'policy_blocked' || !isUnknownRecord(outcome.remediation)) {
+  if (!isUnknownRecord(outcome) || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  // A call refused before it started (the reply guard, the search budget) carries the same plain line as a policy block.
+  const refusedBeforeStart =
+    outcome.disposition === 'never_ran' && outcome.remediation.reason_code === 'tool_pre_dispatch_failed';
+  if (outcome.disposition !== 'policy_blocked' && !refusedBeforeStart) {
     return undefined;
   }
   const { suggested_action: action, message } = outcome.remediation;
   return action === 'contact_user' && typeof message === 'string' ? message : undefined;
+}
+
+/** True for a call whose request for the person's OK expired unanswered: not their "no". */
+function isExpiredApprovalResult(content: unknown): boolean {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  return (
+    isUnknownRecord(outcome) &&
+    outcome.disposition === 'denied' &&
+    isUnknownRecord(outcome.remediation) &&
+    outcome.remediation.reason_code === APPROVAL_EXPIRED_REASON_CODE
+  );
+}
+
+const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
+
+const DECLINED_REASON = 'you said no';
+
+/**
+ * The short plain reason a call did not run (refused, denied, or never started), or undefined when it ran.
+ * Refused calls must never read as finished, so every step label is built from this.
+ */
+export function parseToolNotDoneReason(content: unknown): string | undefined {
+  const disposition = parseToolResultDisposition(content);
+  switch (disposition?.disposition) {
+    case 'denied':
+      return isExpiredApprovalResult(content) ? 'nobody answered in time' : DECLINED_REASON;
+    case 'policy_blocked':
+      return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
+    case 'never_ran':
+      return parseToolRefusalNotice(content) ?? 'it never started';
+    default:
+      return undefined;
+  }
+}
+
+/** A call's result and its card answer. A "no" on the card fills the result locally with no envelope. */
+type ToolCallOutcomeSource = { result?: unknown; approval?: { approved?: boolean | undefined } | undefined };
+
+/** How a denied call shows, whether the result says so or the person said no on the card. */
+function deniedView({
+  expired,
+  remediation,
+}: {
+  expired: boolean;
+  remediation: string | undefined;
+}): ToolDispositionView {
+  return {
+    disposition: 'denied',
+    label: expired ? 'Expired' : 'Denied',
+    tone: 'muted',
+    ...(remediation ? { remediation } : {}),
+  };
+}
+
+/** The disposition a call shows, counting a "no" on its card before the server's result arrives. */
+export function toolCallDisposition(part: ToolCallOutcomeSource): ToolDispositionView | undefined {
+  return (
+    parseToolResultDisposition(part.result) ??
+    (part.approval?.approved === false ? deniedView({ expired: false, remediation: undefined }) : undefined)
+  );
+}
+
+/** The plain reason a call did not run, counting a "no" on its card, or undefined when it ran. */
+export function toolCallNotDoneReason(part: ToolCallOutcomeSource): string | undefined {
+  return parseToolNotDoneReason(part.result) ?? (part.approval?.approved === false ? DECLINED_REASON : undefined);
+}
+
+/** Step wording for a call that did not run: email sends say "Not sent", everything else "Not done". */
+export function notDoneText({ toolName, reason }: { toolName: string; reason: string }): string {
+  return `${EMAIL_SEND_TOOL_NAMES.has(toolName) ? 'Not sent' : 'Not done'}: ${reason}`;
 }
 
 export function parseToolResultDisposition(content: unknown): ToolDispositionView | undefined {
@@ -124,12 +191,7 @@ export function parseToolResultDisposition(content: unknown): ToolDispositionVie
       : undefined;
   switch (outcome.disposition) {
     case 'denied':
-      return {
-        disposition: outcome.disposition,
-        label: 'Denied',
-        tone: 'muted',
-        ...(remediation ? { remediation } : {}),
-      };
+      return deniedView({ expired: isExpiredApprovalResult(content), remediation });
     case 'policy_blocked':
       return {
         disposition: outcome.disposition,
@@ -380,7 +442,7 @@ export function allowChatOptionId(options: readonly AuiToolApprovalOption[] | un
 }
 
 export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] | undefined): ApprovalOptionView[] {
-  const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_CHOICES, o.kind));
+  const declared = options?.filter(o => APPROVAL_OPTION_KINDS.has(o.kind));
   if (declared && declared.length > 0) {
     const allow = declared
       .filter(o => isAllowKind(o.kind))
@@ -388,20 +450,16 @@ export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] |
     const reject = declared.filter(o => !isAllowKind(o.kind));
     const mapped: ApprovalOptionView[] = [...allow, ...reject].map(o => ({
       id: o.id,
-      label: APPROVAL_OPTION_CHOICES[o.kind]?.label ?? o.id,
-      hint: APPROVAL_OPTION_CHOICES[o.kind]?.hint,
       isAllow: isAllowKind(o.kind),
-      grants: o.grants,
-      confirm: o.confirm != null ? (typeof o.confirm === 'object' ? o.confirm : {}) : undefined,
     }));
     if (reject.length === 0) {
-      mapped.push({ id: '__deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} });
+      mapped.push({ id: '__deny', isAllow: false });
     }
     return mapped;
   }
   return [
-    { id: 'allow-once', ...APPROVAL_CHOICES.approve, isAllow: true },
-    { id: 'deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} },
+    { id: 'allow-once', isAllow: true },
+    { id: 'deny', isAllow: false },
   ];
 }
 
@@ -516,12 +574,25 @@ export function parseMcpToolArgs(argsText: string | undefined): {
   }
 }
 
+/**
+ * The one place tool output is decoded for display. A host may store a plain text result as a JSON
+ * string literal, so its line breaks read as `\n` and its quotes as `\"`; those become real text here.
+ */
 export function getJsonDisplayValue(content: string | undefined): {
   value: string;
   isJson: boolean;
 } {
   if (!content?.trim()) return { value: '', isJson: false };
   const trimmed = content.trim();
+  if (trimmed[0] === '"') {
+    try {
+      const decoded: unknown = JSON.parse(trimmed);
+      if (typeof decoded === 'string')
+        return { value: escapeDisplayText(decoded, { keepNewlines: true }), isJson: false };
+    } catch {
+      /* not a JSON string literal: show it as stored */
+    }
+  }
   if (trimmed[0] !== '{' && trimmed[0] !== '[') {
     return { value: content, isJson: false };
   }

@@ -1,4 +1,5 @@
 /** Wording of held web search and map cards and their audit rows. Browser-safe: the UI reads it too. */
+import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
 
 /** Clause for a held key in other tools' outbound reasons; search cards use HOLD_SAY.secret instead. */
@@ -8,6 +9,21 @@ export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
 export const SEARCH_SERVER_FALLBACK = 'the search provider';
 
 const SEARCH_WHAT_PREFIX = 'Search the web through ';
+
+/** Brand names of the known search providers, by the host their connector or API answers on. */
+const PROVIDER_LABEL_BY_HOST = new Map<string, string>([
+  [TAVILY_CONNECTOR_HOST, 'Tavily'],
+  [TAVILY_API_HOST, 'Tavily'],
+  ['search.parallel.ai', 'Parallel'],
+]);
+
+/**
+ * The brand a person sees for the web search provider, by the host its connector answers on. Undefined
+ * for any other provider: callers then say "the search provider", never the connector's id or host.
+ */
+export function searchProviderLabel({ host }: { host: string | undefined }): string | undefined {
+  return host === undefined ? undefined : PROVIDER_LABEL_BY_HOST.get(host.toLowerCase());
+}
 
 /** The held web search card names the search in plain words, never the connector's id. */
 const WEB_SEARCH_NAME = 'Web search';
@@ -27,6 +43,8 @@ export const HOLD_SAY = {
   search_setting: 'Searches are set to ask, so Aman is checking with you first.',
   private_read: 'This chat has read your private data, so Aman is checking before searching.',
   private_secret: 'This chat opened a file with passwords or keys, so Aman asks before every search.',
+  private_detail: 'This search has details from your private data, so Aman is checking with you first.',
+  private_unchecked: "Aman can't check this search for your private details, so it is asking first.",
   search_limit: 'Aman has already searched a lot in this reply.',
   unseen_link: "This opens a link that didn't come from your search results.",
   site_limit: 'Aman has already opened a lot of pages on this site in this reply.',

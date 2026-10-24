@@ -8,8 +8,8 @@
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
  * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
- * a tool that takes one (default `inert`). A tool the request does not send is reached the way a
- * model would: it loads the tool's bundle with `load_bundle` first.
+ * a tool that takes one (default `inert`). The model never loads anything first: a tool the
+ * request does not send is never called, so a test that needs it fails.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
@@ -39,6 +39,22 @@ export const SEARCH_DIRECTIVE_PREFIX = 'search:';
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
 /**
+ * Searches the web for `WEB_SEARCH_QUERY`; once the search has answered, the model accepts the next
+ * request, sends only an empty role heartbeat, and then never says anything.
+ */
+export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
+/** Searches the web like `STALL_AFTER_TOOL_DIRECTIVE`, then starts its answer and goes silent mid-sentence. */
+export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
+export const STALLED_ANSWER_START = 'Here is what I found so far';
+/** Starts the answer with `STALLED_ANSWER_START` right away, with no tool first, then never says more. */
+export const STALL_AT_ONCE_DIRECTIVE = 'stall_at_once';
+/**
+ * Calls the write tool; once it has answered (a denial counts), the model thinks out loud a little at a
+ * time and never finishes, the shape of a self-hosted model that thinks for minutes per step.
+ */
+export const THINK_AFTER_WRITE_DIRECTIVE = 'think_after_write';
+const THINKING_CHUNK_INTERVAL_MS = 50;
+/**
  * A question carrying this marker makes the knowledge relevance judge keep no
  * passage, so a library lookup for it is a near-miss.
  */
@@ -50,6 +66,8 @@ export interface ScriptedModelServer {
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /** Thinking streams still open: a cancelled turn must hang up every one of them. */
+  openThinkingStreams: () => number;
   close: () => Promise<void>;
 }
 
@@ -118,6 +136,26 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
+/** A text part that is one whole host-written block, such as `<aman-memory>…</aman-memory>`. */
+const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
+
+/**
+ * What the person wrote in a user message. The host puts per-reply context (the reply block,
+ * recalled memory) into the same message as labelled blocks; like a real model, the script
+ * reads directives only from the person's own words, never from recalled chat titles.
+ */
+function personText(content: unknown): string {
+  const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
+  const own: string[] = [];
+  for (const part of parts) {
+    const text = typeof part === 'string' ? part : isRecord(part) ? part['text'] : undefined;
+    if (typeof text === 'string' && !HOST_BLOCK.test(text)) {
+      own.push(text);
+    }
+  }
+  return own.join(' ');
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -127,39 +165,6 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
     }
   }
   return undefined;
-}
-
-/**
- * The bundle a model would load for a tool it cannot see, read from the tool's name as a model reads
- * the bundle index. A connector's other tools ride with the search connector, so `inert` is web.
- */
-const BUNDLE_FOR_TOOL: [match: string, bundle: string][] = [
-  ['tavily', 'web'],
-  ['web_search', 'web'],
-  ['inert', 'web'],
-  ['render_', 'maps'],
-  ['list_inbox', 'google'],
-  ['usage_summary', 'extras'],
-  ['exec', 'sandbox'],
-];
-
-/** A `load_bundle` result, which answers the load, not the scripted step. */
-function isBundleLoadResult(message: ChatMessage): boolean {
-  return (
-    message.role === 'tool' &&
-    /\b[a-z_]+ is (already )?loaded\. Its (tools|guidance)/.test(messageText(message.content))
-  );
-}
-
-/** The bundle to load before calling `match`, when the tool is not sent and its bundle is not loaded yet. */
-function bundleToLoad({ match, request }: { match: string; request: ChatCompletionRequest }): string | undefined {
-  if (resolveToolName({ directive: 'load_bundle', tools: request.tools }) === undefined) {
-    return undefined;
-  }
-  const bundle = BUNDLE_FOR_TOOL.find(([part]) => match.includes(part))?.[1];
-  const system = messageText(request.messages.find(message => message.role === 'system')?.content);
-  const offered = new RegExp(`^- ${bundle ?? ''}: .*$`, 'm').exec(system)?.[0];
-  return bundle === undefined || offered === undefined || offered.endsWith('(loaded)') ? undefined : bundle;
 }
 
 /** The text of the last tool result in the conversation, if a tool has answered. */
@@ -173,9 +178,6 @@ function lastToolResultText(messages: ChatMessage[]): string | undefined {
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
   for (const message of messages) {
-    if (isBundleLoadResult(message)) {
-      continue;
-    }
     if (message.role === 'tool') {
       directive = undefined;
       continue;
@@ -183,7 +185,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text);
     directive = match?.[1];
   }
@@ -244,7 +246,7 @@ function textArgument(messages: ChatMessage[]): string {
   for (const message of messages) {
     if (message.role === 'user') {
       text =
-        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(personText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
     }
   }
   return text;
@@ -257,7 +259,7 @@ function callToolServer(messages: ChatMessage[]): string {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     if (new RegExp(`${RUN_DIRECTIVE_PREFIX}[A-Za-z0-9_-]+`).test(text)) {
       server = new RegExp(`${SERVER_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text)?.[1] ?? DEFAULT_CALL_TOOL_SERVER;
     }
@@ -270,7 +272,7 @@ function searchDirectiveText(messages: ChatMessage[]): string {
   let text = '';
   for (const message of messages) {
     if (message.role === 'user') {
-      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(messageText(message.content))?.[1]?.trim() ?? '';
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(personText(message.content))?.[1]?.trim() ?? '';
     }
   }
   return text;
@@ -298,14 +300,14 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
   let toolResults = 0;
   for (const message of messages) {
     if (message.role === 'user') {
-      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(messageText(message.content));
+      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(personText(message.content));
       if (match?.[1] !== undefined) {
         directive = match[1];
         toolResults = 0;
       }
       continue;
     }
-    if (directive !== undefined && message.role === 'tool' && !isBundleLoadResult(message)) {
+    if (directive !== undefined && message.role === 'tool') {
       toolResults += 1;
     }
   }
@@ -388,6 +390,9 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
 
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
+  // Stalled streams stay open until the caller hangs up or the fixture closes.
+  const stalled = new Set<ServerResponse>();
+  const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -427,6 +432,13 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
       ];
       requestedTool = steps[progress.toolResults];
+    } else if (
+      (progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE) &&
+      progress.toolResults === 0
+    ) {
+      requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
+      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
@@ -450,16 +462,6 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
           argumentsJson: JSON.stringify({ text }),
         });
       }
-    } else if (toolName === undefined && requestedTool !== undefined) {
-      const bundle = bundleToLoad({ match: requestedTool.match, request: parsed });
-      if (bundle !== undefined) {
-        callCounter += 1;
-        toolCalls.push({
-          name: 'load_bundle',
-          callId: `call_${String(callCounter)}`,
-          argumentsJson: JSON.stringify({ name: bundle }),
-        });
-      }
     } else if (toolName !== undefined) {
       callCounter += 1;
       toolCalls.push({
@@ -480,7 +482,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
     const quoteToolResult = parsed.messages.some(message =>
-      messageText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+      personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
     );
     const replyText = rejectingJudge
       ? '{"helpful":[]}'
@@ -497,6 +499,39 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
+    const stalls =
+      progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE;
+    const stallsAtOnce = progress.directive === STALL_AT_ONCE_DIRECTIVE;
+    if (toolCalls.length === 0 && ((stalls && progress.toolResults > 0) || stallsAtOnce)) {
+      const opening =
+        progress.directive === STALL_AFTER_TOOL_DIRECTIVE
+          ? chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null })
+          : chunkEnvelope({
+              index: 0,
+              delta: { role: 'assistant', content: STALLED_ANSWER_START },
+              finish_reason: null,
+            });
+      res.write(`data: ${JSON.stringify(opening)}\n\n`);
+      stalled.add(res);
+      res.on('close', () => stalled.delete(res));
+      return;
+    }
+    if (toolCalls.length === 0 && progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults > 0) {
+      thinking.add(res);
+      const timer = setInterval(() => {
+        const chunk = chunkEnvelope({
+          index: 0,
+          delta: { role: 'assistant', reasoning_content: 'Still weighing it. ' },
+          finish_reason: null,
+        });
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }, THINKING_CHUNK_INTERVAL_MS);
+      res.on('close', () => {
+        clearInterval(timer);
+        thinking.delete(res);
+      });
+      return;
+    }
     const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -529,8 +564,12 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        for (const res of [...stalled, ...thinking]) {
+          res.destroy();
+        }
         httpServer.closeAllConnections();
         httpServer.close(error => {
           if (error) {

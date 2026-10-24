@@ -75,7 +75,7 @@ import type {
   TurnRecordWithoutSnapshot,
 } from './store/ISessionStore';
 import { ApprovalRequestEndedError, TurnNotFoundError } from './store/SessionStoreErrors';
-import { TurnHandle } from './TurnHandle';
+import { cancelStreamingTurn, TurnHandle } from './TurnHandle';
 
 /** How many recent ancestors SessionHandle persists on each turn. Store-local. */
 const MAX_TURN_ANCESTORS = 20;
@@ -403,7 +403,7 @@ export class SessionHandle<
    *
    * `previous_turn_id`: omitted/`'auto'` → session tip; `'none'` → new root
    * (no parent, even on a non-empty session); string → fork from that turn
-   * (must exist). Concurrent `'auto'` forks both succeed.
+   * (must exist). While the chat's latest turn runs, any new turn is refused.
    */
   async createTurn(input: {
     turn_id: string;
@@ -437,9 +437,7 @@ export class SessionHandle<
       throw new ApprovalRequestEndedError();
     }
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
-    // Read, do not freeze: cancelling here would make a submission that then fails
-    // validation kill a running turn on its way out. The freeze happens below, once
-    // nothing is left that can reject.
+    // Read, never frozen: a new submission does not end a running turn.
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
@@ -650,16 +648,8 @@ export class SessionHandle<
         },
       };
 
-      // Last point of no return. Everything that could reject this submission has run,
-      // so cancelling the predecessor is now a consequence of a turn that is definitely
-      // being created. store.createTurn's PreviousTurnRunningError backstops a race here.
-      if (previousTurnId !== null) {
-        await this.freezeTurn({
-          turn_id: previousTurnId,
-          reason: CancellationReason.CancelledForNextTurn,
-        });
-      }
-
+      // A new message never ends a running reply; only Cancel does. The store refuses this
+      // turn with PreviousTurnRunningError while the chat's latest turn still runs.
       await this.store.createTurn({
         turn: turnInit,
         sandbox_info: sandbox?.getCurrentSandboxInfo() ?? previous?.snapshot.sandbox_info ?? null,
@@ -942,6 +932,13 @@ export class SessionHandle<
     reason: CancellationReason;
     handoff?: AbnormalHandoff | undefined;
   }): Promise<TurnRecord<TTurnCustom>> {
+    // A stream running here writes the steps it already ran before its terminal state, so the
+    // fence below cannot drop them. Its own terminal write then wins; the freeze is a no-op.
+    await cancelStreamingTurn({
+      session_id: this.session.session_id,
+      turn_id: input.turn_id,
+      reason: input.reason,
+    });
     const state: CancelledTurnState = {
       status: 'cancelled',
       reason: input.reason,
@@ -1130,6 +1127,7 @@ export class SessionHandle<
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
       sandbox,
+      serverSandboxAvailable: input.resolver.serverSandboxAvailable ?? false,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
@@ -1152,6 +1150,7 @@ export class SessionHandle<
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
@@ -1250,6 +1249,7 @@ export class SessionHandle<
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });

@@ -1,7 +1,7 @@
 /**
  * Prints what the model receives on each chat turn for the standard personal-instance setups:
  * the system prompt sections and the tool definitions, with a rough token count for each. Each
- * setup is measured for a few typical messages, since the message decides which tool bundles go out.
+ * setup is measured for a few typical messages; every tool goes out whatever the message says.
  *
  * Usage (from the repo root): pnpm prompt:report
  */
@@ -17,6 +17,8 @@ import {
 const SETUPS: { name: PersonalInstanceName; title: string }[] = [
   { name: 'personal', title: 'Personal instance: web search, maps, spaces, schedules, memory (no Google)' },
   { name: 'personal-with-google', title: 'Personal instance with Gmail and Google Calendar connected' },
+  { name: 'personal-no-sandbox', title: 'Personal instance with the sandbox turned off (no exec tool)' },
+  { name: 'personal-no-server-sandbox', title: 'Personal instance on a server with no sandbox (no exec tool)' },
 ];
 
 const NAME_WIDTH = 60;

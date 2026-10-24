@@ -6,8 +6,9 @@
  * calls fail inside the provider or the tool with raw validation text, or worse, run half-formed.
  * This check repairs what is safe to repair (boolean text to a real boolean, an argument the
  * schema does not name is dropped, an explicit null for an optional argument is dropped) and
- * reports the rest as plain problems the model can act on. It never sees, and never repeats, a
- * provider's own validation wording.
+ * reports the rest as plain problems the model can act on. For a read-only tool, an optional
+ * true-or-false argument whose value cannot be repaired is dropped too, so the call runs. It
+ * never sees, and never repeats, a provider's own validation wording.
  */
 import type { RawToolCall } from '../llm/LLMTypes';
 import { isRecord } from '../util/records';
@@ -25,10 +26,15 @@ export interface ToolParameterSchema {
   additionalProperties?: boolean | ToolParameterSchema | undefined;
 }
 
-/** One argument that could not be repaired: where it is, and what it should be, in plain words. */
+/**
+ * One argument that could not be repaired: where it is, and what it must be, in plain words.
+ * `example` is a value of the right form, shown to the model; `optional` means it may be left out.
+ */
 export interface ArgumentProblem {
   path: string;
   expected: string;
+  example: string | undefined;
+  optional: boolean;
 }
 
 /**
@@ -80,13 +86,19 @@ function readSchema(value: unknown): ToolParameterSchema | undefined {
   const items = readSchema(value['items']);
   const enumValues = Array.isArray(value['enum']) ? value['enum'] : undefined;
   const anyOf = Array.isArray(value['anyOf'])
-    ? value['anyOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['anyOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const oneOf = Array.isArray(value['oneOf'])
-    ? value['oneOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['oneOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const allOf = Array.isArray(value['allOf'])
-    ? value['allOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    ? value['allOf']
+        .map(entry => readSchema(entry))
+        .filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
   const additional = value['additionalProperties'];
   const additionalProperties =
@@ -168,6 +180,27 @@ interface CheckOutcome {
   problems: ArgumentProblem[];
 }
 
+interface CheckInput {
+  schema: ToolParameterSchema;
+  value: unknown;
+  path: string;
+  /** True only for a read-only tool: an optional true-or-false field that cannot be repaired is dropped. */
+  dropUnusableBooleans: boolean;
+}
+
+function problemAt(input: { path: string; schema: ToolParameterSchema }): ArgumentProblem {
+  return { path: input.path, expected: describeSchema(input.schema), example: undefined, optional: false };
+}
+
+/** A schema that takes only true or false (or null): the one shape whose bad value can be safely left out. */
+function isBooleanOnly(schema: ToolParameterSchema): boolean {
+  if (schema.anyOf !== undefined || schema.oneOf !== undefined || schema.enum !== undefined) {
+    return false;
+  }
+  const types = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type];
+  return types.includes('boolean') && types.every(type => type === 'boolean' || type === 'null');
+}
+
 function joinPath(input: { base: string; key: string }): string {
   return input.base === '' ? input.key : `${input.base}.${input.key}`;
 }
@@ -207,8 +240,8 @@ function flattenAllOf(schema: ToolParameterSchema): ToolParameterSchema {
  * dropped and an explicit null for an optional field is dropped. A value that still does not fit
  * comes back unchanged with a problem naming the field and what it should be.
  */
-function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: string }): CheckOutcome {
-  const { schema, value, path } = input;
+function checkValue(input: CheckInput): CheckOutcome {
+  const { schema, value, path, dropUnusableBooleans } = input;
 
   const union = schema.anyOf ?? schema.oneOf;
   if (union !== undefined && union.length > 0) {
@@ -216,7 +249,7 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
     // preferred over a value that already fits another member unchanged.
     let repaired: CheckOutcome | undefined;
     for (const member of union) {
-      const outcome = checkValue({ schema: member, value, path });
+      const outcome = checkValue({ schema: member, value, path, dropUnusableBooleans });
       if (outcome.problems.length > 0) {
         continue;
       }
@@ -225,25 +258,25 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
       }
       repaired ??= outcome;
     }
-    return repaired ?? { value, problems: [{ path, expected: describeSchema(schema) }] };
+    return repaired ?? { value, problems: [problemAt({ path, schema })] };
   }
 
   if (schema.enum !== undefined) {
     const hit = schema.enum.some(entry => JSON.stringify(entry) === JSON.stringify(value));
-    return hit ? { value, problems: [] } : { value, problems: [{ path, expected: describeSchema(schema) }] };
+    return hit ? { value, problems: [] } : { value, problems: [problemAt({ path, schema })] };
   }
 
   const types = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type];
   if (types.length === 0) {
     // No shape declared: only nested structure can still be checked.
     if (isRecord(value) && schema.properties !== undefined) {
-      return checkObject({ schema, value, path });
+      return checkObject({ schema, value, path, dropUnusableBooleans });
     }
     return { value, problems: [] };
   }
   if (types.length > 1) {
     const asUnion: ToolParameterSchema = { anyOf: types.map(type => ({ type })) };
-    return checkValue({ schema: asUnion, value, path });
+    return checkValue({ schema: asUnion, value, path, dropUnusableBooleans });
   }
   const type = types[0] ?? '';
 
@@ -254,15 +287,23 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
         return { value: text === 'true', problems: [] };
       }
     }
-    return { value, problems: [{ path, expected: describeSchema(schema) }] };
+    return {
+      value,
+      problems: [{ ...problemAt({ path, schema }), example: type === 'boolean' ? 'true' : undefined }],
+    };
   }
   if (type === 'object' && isRecord(value)) {
-    return checkObject({ schema, value, path });
+    return checkObject({ schema, value, path, dropUnusableBooleans });
   }
   if (type === 'array' && Array.isArray(value) && schema.items !== undefined) {
     const problems: ArgumentProblem[] = [];
     const items = value.map((entry, index) => {
-      const outcome = checkValue({ schema: schema.items ?? {}, value: entry, path: `${path}[${String(index)}]` });
+      const outcome = checkValue({
+        schema: schema.items ?? {},
+        value: entry,
+        path: `${path}[${String(index)}]`,
+        dropUnusableBooleans,
+      });
       problems.push(...outcome.problems);
       return outcome.value;
     });
@@ -271,8 +312,8 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
   return { value, problems: [] };
 }
 
-function checkObject(input: { schema: ToolParameterSchema; value: Record<string, unknown>; path: string }): CheckOutcome {
-  const { value, path } = input;
+function checkObject(input: CheckInput & { value: Record<string, unknown> }): CheckOutcome {
+  const { value, path, dropUnusableBooleans } = input;
   const schema = flattenAllOf(input.schema);
   const properties = schema.properties ?? {};
   const propertyNames = Object.keys(properties);
@@ -296,6 +337,7 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
           schema: schema.additionalProperties,
           value: entry,
           path: joinPath({ base: path, key }),
+          dropUnusableBooleans,
         });
         problems.push(...outcome.problems);
         if (outcome.problems.length === 0) {
@@ -309,8 +351,16 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
       // An explicit null for an optional argument means "not given": drop it, do not send it.
       continue;
     }
-    const outcome = checkValue({ schema: propertySchema, value: entry, path: joinPath({ base: path, key }) });
-    problems.push(...outcome.problems);
+    const keyPath = joinPath({ base: path, key });
+    const outcome = checkValue({ schema: propertySchema, value: entry, path: keyPath, dropUnusableBooleans });
+    const optional = !required.has(key);
+    if (outcome.problems.length > 0 && optional && dropUnusableBooleans && isBooleanOnly(propertySchema)) {
+      // A read-only tool runs the same with the field left out, so an unusable value reads as "not given".
+      continue;
+    }
+    problems.push(
+      ...outcome.problems.map(problem => (problem.path === keyPath ? { ...problem, optional } : problem)),
+    );
     cleaned[key] = outcome.value;
   }
   for (const name of required) {
@@ -318,6 +368,8 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
       problems.push({
         path: joinPath({ base: path, key: name }),
         expected: `${describeSchema(properties[name] ?? {})} (this one is required)`,
+        example: undefined,
+        optional: false,
       });
     }
   }
@@ -327,19 +379,72 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
 /**
  * Checks a whole call's arguments. Returns the arguments to send (repaired and pruned) and the
  * problems that could not be repaired. A call with problems must not be sent; the problems are
- * the model's instructions for its one retry.
+ * the model's instructions for its one retry. `readOnly` must be true only for a read the host itself
+ * vouches for, never on a server's own claim: then an optional true-or-false argument that cannot be
+ * repaired is dropped.
  */
 export function checkToolArguments(input: {
   schema: ToolParameterSchema;
   args: Record<string, unknown>;
-}): { args: Record<string, unknown>; problems: ArgumentProblem[] } {
-  const outcome = checkObject({ schema: input.schema, value: input.args, path: '' });
+  readOnly: boolean;
+}): {
+  args: Record<string, unknown>;
+  problems: ArgumentProblem[];
+} {
+  const outcome = checkObject({
+    schema: input.schema,
+    value: input.args,
+    path: '',
+    dropUnusableBooleans: input.readOnly,
+  });
   return { args: isRecord(outcome.value) ? outcome.value : input.args, problems: outcome.problems };
 }
 
-/** The plain message the model gets when its call was not sent: what is wrong and what it should be. */
+/**
+ * Drops the top-level arguments a tool's schema does not name, by the same rule the full check uses:
+ * only a schema that names its properties and allows no extras drops anything, so a tool without a
+ * schema, or one that takes free-form input, keeps every argument. Nothing else is changed.
+ */
+export function dropUnnamedArguments(input: { schema: ToolParameterSchema; args: Record<string, unknown> }): {
+  args: Record<string, unknown>;
+  dropped: string[];
+} {
+  const schema = flattenAllOf(input.schema);
+  const properties = schema.properties ?? {};
+  if (
+    Object.keys(properties).length === 0 ||
+    schema.additionalProperties === true ||
+    isRecord(schema.additionalProperties)
+  ) {
+    return { args: input.args, dropped: [] };
+  }
+  const kept: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(input.args)) {
+    if (Object.hasOwn(properties, key)) {
+      kept[key] = value;
+    } else {
+      dropped.push(key);
+    }
+  }
+  return { args: dropped.length === 0 ? input.args : kept, dropped };
+}
+
+function describeProblem(problem: ArgumentProblem): string {
+  // A list item's path ends in [n], so it has no field name to show in the example.
+  const field = problem.path.split('.').at(-1) ?? problem.path;
+  const example =
+    problem.example === undefined
+      ? ''
+      : field.endsWith(']')
+        ? `, for example ${problem.example}`
+        : `, for example "${field}": ${problem.example}`;
+  return `${problem.path} must be ${problem.expected}${example}${problem.optional ? ', or leave it out' : ''}`;
+}
+
+/** The plain message the model gets when its call was not sent: what is wrong and what it must be. */
 export function toolArgumentProblemMessage(input: { toolName: string; problems: ArgumentProblem[] }): string {
-  const parts = input.problems.map(problem => `${problem.path} should be ${problem.expected}`);
+  const parts = input.problems.map(describeProblem);
   return (
     `The ${input.toolName} call was not sent because some of its arguments were wrong, so nothing was done with it. ` +
     `Fix these and try once more: ${parts.join('; ')}.`

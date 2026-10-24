@@ -77,7 +77,7 @@ function toolResponse(input: { id: string; tool_call_id: string; result: unknown
 }
 
 const EMAIL_HTML =
-  '<p>Sale!</p><img src="https://example.com/pixel.gif"><img src="https://example.org/banner.png"><img src="cid:logo">';
+  '<p>Sale!</p><img src="https://example.com/photo.gif"><img src="https://example.org/banner.png"><img src="cid:logo">';
 
 function setup(options: {
   events?: PersistedTurnEvent[];
@@ -228,9 +228,9 @@ describe('email images', () => {
       request: { source: { kind: 'email', tool_call_id: 'mail-1' }, approved: true },
     });
     expect(result).toMatchObject({ status: 'done', images: [{ status: 'shown' }, { status: 'shown' }] });
-    expect(env.fetched).toEqual(['https://example.com/pixel.gif', 'https://example.org/banner.png']);
+    expect(env.fetched).toEqual(['https://example.com/photo.gif', 'https://example.org/banner.png']);
     expect(env.audits.map(row => [row.outcome, row.tool_name, row.description])).toEqual([
-      ['approved', 'show_image', 'Downloaded an image: https://example.com/pixel.gif'],
+      ['approved', 'show_image', 'Downloaded an image: https://example.com/photo.gif'],
       ['approved', 'show_image', 'Downloaded an image: https://example.org/banner.png'],
     ]);
     expect([...env.store.images.values()].every(image => image.origin === 'remote_approved')).toBe(true);
@@ -265,6 +265,25 @@ describe('email images', () => {
     });
     await expect(env.service.listTurnImages(ref)).resolves.toMatchObject({
       emails: [{ tool_call_id: 'mail-2', count: 1 }],
+    });
+  });
+
+  it('never offers a tracking pixel an older stored result still lists', async () => {
+    const env = setup({
+      events: [
+        modelMessage({ id: 'e1', content: '', calls: [{ id: 'mail-3', name: 'read_email' }] }),
+        toolResponse({
+          id: 'e2',
+          tool_call_id: 'mail-3',
+          result: {
+            id: 'm3',
+            linked_images: ['https://news.list-manage.com/track/open.php?u=abc', 'https://example.com/art.png'],
+          },
+        }),
+      ],
+    });
+    await expect(env.service.listTurnImages(ref)).resolves.toMatchObject({
+      emails: [{ tool_call_id: 'mail-3', count: 1 }],
     });
   });
 
@@ -352,6 +371,35 @@ describe('reply images', () => {
       env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: tracked }, approved: true } }),
     ).resolves.toMatchObject({ status: 'done', images: [{ status: 'shown' }] });
     expect(env.audits).toMatchObject([{ outcome: 'approved', tier: 3 }]);
+  });
+
+  it('shows nothing inline for an email picture the reply copied, and never asks or fetches it', async () => {
+    const env = setup({
+      events: [
+        modelMessage({ id: 'e1', content: '', calls: [{ id: 'mail-1', name: 'read_email' }] }),
+        toolResponse({ id: 'e2', tool_call_id: 'mail-1', result: { messageId: 'm1', bodyHtml: EMAIL_HTML } }),
+        modelMessage({ id: 'e3', content: 'Your sale email: ![banner](https://example.org/banner.png)' }),
+      ],
+    });
+    await expect(env.service.showTurnImages(asking('https://example.org/banner.png'))).resolves.toEqual({
+      status: 'done',
+      images: [],
+    });
+    await expect(
+      env.service.showTurnImages({
+        ...ref,
+        request: { source: { kind: 'reply', url: 'https://example.org/banner.png' }, approved: true },
+      }),
+    ).resolves.toEqual({ status: 'done', images: [] });
+    expect(env.fetched).toEqual([]);
+    expect(env.audits).toEqual([]);
+  });
+
+  it('never offers a tracking pixel the reply links', async () => {
+    const pixel = 'https://u1.ct.sendgrid.net/wf/open?upn=xyz';
+    const env = setup({ events: [modelMessage({ id: 'e1', content: `![](${pixel})` })] });
+    await expect(env.service.showTurnImages(asking(pixel))).resolves.toEqual({ status: 'done', images: [] });
+    expect(env.fetched).toEqual([]);
   });
 
   it('rejects a link the turn never showed as an image', async () => {

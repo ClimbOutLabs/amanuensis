@@ -2,6 +2,7 @@ import type { RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { isPrivateReadToolName } from '../../permissions/privateReadTools';
 import {
+  checkAttachedFilesCovered,
   hasReadPrivateData,
   markPrivateDataReadFromHistory,
   type WebSearchTurnState,
@@ -9,6 +10,7 @@ import {
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
+import { uploadedFilesCount } from '../../runtime/UserInputMessage';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 
@@ -44,6 +46,31 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
 }
 
 /**
+ * How many files the person attached across the conversation. Each message counts the larger of the files its note
+ * announces and the pictures it carries: a picture sent straight to the model, with no sandbox, has no note, and a
+ * picture that was also staged appears in both, so it is counted once.
+ */
+function attachedFilesInContext(context: AgentThreadExecutionContext['context']): number {
+  let count = 0;
+  for (const message of context) {
+    if (!isLLMContextMessage(message) || message.role !== 'user' || typeof message.content === 'string') {
+      continue;
+    }
+    let announced = 0;
+    let pictures = 0;
+    for (const part of message.content) {
+      if (part.type === 'text') {
+        announced += uploadedFilesCount(part.text);
+      } else if (part.type === 'image_url') {
+        pictures += 1;
+      }
+    }
+    count += Math.max(announced, pictures);
+  }
+  return count;
+}
+
+/**
  * The root thread's private-read state: the flag for the chat, saved so the next turn starts with it, and a mark
  * restored from the context when a forked or cut-off thread still holds a private read. Each result's text is recorded
  * by the dispatch loop before the model sees it, on every thread, so this capability only ever runs on the root thread.
@@ -74,6 +101,11 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
           if (!hasReadPrivateData(input.turn) && contextReadPrivateData(execution.context)) {
             markPrivateDataReadFromHistory(input.turn);
           }
+          // A file attached in a turn whose fingerprints were never saved (an older or imported chat) is not covered.
+          checkAttachedFilesCovered({
+            state: input.turn,
+            attached_in_history: attachedFilesInContext(execution.context),
+          });
           return saveWhenSet();
         },
       },

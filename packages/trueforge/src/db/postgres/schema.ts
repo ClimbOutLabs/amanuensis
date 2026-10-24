@@ -60,6 +60,7 @@ export const TABLES_TO_MOVE = [
   'sentinel_audit',
   'sentinel_user_settings',
   'approval_token',
+  'brief_item_completion',
 ] as const;
 
 /**

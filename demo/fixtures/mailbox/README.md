@@ -28,9 +28,11 @@ See EXPECTATIONS.md for what a useful assistant should do with each message.
 ## Regenerating
 
 The `.eml` files (with attachments embedded) are produced deterministically by
-`generate-fixtures.mjs`. To regenerate them byte-identically:
+`generate-fixtures.mjs`. The demo set is dated from one day: today in Lisbon, or
+the day you name. Each day gives new Message-IDs.
 
-    pnpm generate-test-mailbox
+    pnpm generate-test-mailbox                   mail for today in Lisbon
+    pnpm generate-test-mailbox --today 2026-10-19  the committed snapshot, byte for byte
 
 The script needs only Node.js and no extra dependencies. No standalone
 binary attachments are committed; everything is embedded in the `.eml` files.
@@ -48,8 +50,11 @@ tracked). Use `--dry-run` to print what would be sent.
 `demo-set.json` lists the 18 fixtures used for the hackathon demo inbox: 12
 English, 5 Portuguese and 1 Spanish. Everything else (the school newsletter,
 the Spanish internet bill and fixtures 13 to 20 in other languages) stays in
-the repo for tests but is not imported. Dates run from Monday October 12 to
-Sunday October 18, 2026; amounts are in euros.
+the repo for tests but is not imported. In the committed snapshot, dates run
+from Monday October 12 to Sunday October 18, 2026, which is made for Monday
+October 19, 2026; amounts are in euros. Each run of the generator makes the set
+for a chosen day, so every date in it moves with that day. Fixtures outside the
+demo set keep their own fixed dates.
 
 ### Importing into a throwaway Gmail account
 

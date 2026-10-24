@@ -49,6 +49,9 @@ import { fetchSameOrigin, readCappedJson } from './mapsUpstream';
 
 export const MAPS_SERVER_ID = 'maps';
 
+/** Maps tools look up places and routes on outside services and draw a card; they change nothing. */
+const MAPS_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
+
 /**
  * Origin privacy: coordinates sent to a routing provider for the origin are
  * rounded to this many decimal places (3 is about 100 m). The destination is
@@ -478,15 +481,20 @@ function mapsErrorResult({
   field,
   mode,
   refused,
+  stop,
 }: {
   error: MapsUpstreamError;
   field?: string;
   mode?: MapsTravelMode;
   refused?: { name: string; reason: string }[];
+  stop?: string | undefined;
 }): ReturnType<typeof toolResultResponse> {
   const body: MapsErrorBody = { status: 'error', code: error.code };
   if (refused !== undefined) {
     body.refused = refused;
+  }
+  if (stop !== undefined) {
+    body.stop = stop;
   }
   if (field !== undefined) {
     body.field = field;
@@ -503,6 +511,60 @@ function mapsErrorResult({
   return toolResultResponse({ text: JSON.stringify(body), isError: true });
 }
 
+/** A refused place may be sent once more in the same turn; a second refusal ends the map for it. */
+const MAX_PLACE_REFUSALS_PER_TURN = 2;
+
+const TURN_LIMIT_REASON = 'This place was refused twice in this answer. Stop trying the map for it.';
+
+const PLACE_STOP_MESSAGE =
+  'The map check refused these places twice in this answer. Stop trying the map. Answer in text instead: give each place with its address and its link, and say the map could not check it.';
+
+/** Chats whose refusal counts are kept at once; the oldest chat's count goes first. */
+const MAX_CHATS_WITH_REFUSALS = 500;
+
+/**
+ * Refusals per place in each chat's current answer, keyed by the place's name alone, so a retry
+ * with another link or address still counts. It outlives one request, because an approval resumes
+ * the same answer in a new request; only a new message from the person starts a fresh count.
+ */
+export class PlaceRefusalLedger {
+  readonly #chats = new Map<string, Map<string, number>>();
+
+  refusalsOf({ scope, name }: { scope: FetchedPageScope; name: string }): number {
+    return this.#chats.get(chatKey(scope))?.get(placeKey(name)) ?? 0;
+  }
+
+  record({ scope, name }: { scope: FetchedPageScope; name: string }): void {
+    const key = chatKey(scope);
+    const counts = this.#chats.get(key) ?? new Map<string, number>();
+    this.#chats.delete(key);
+    counts.set(placeKey(name), (counts.get(placeKey(name)) ?? 0) + 1);
+    this.#chats.set(key, counts);
+    while (this.#chats.size > MAX_CHATS_WITH_REFUSALS) {
+      const oldest = this.#chats.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.#chats.delete(oldest);
+    }
+  }
+
+  startAnswer(scope: FetchedPageScope): void {
+    this.#chats.delete(chatKey(scope));
+  }
+}
+
+/** The one count every request of a chat shares. */
+export const placeRefusals = new PlaceRefusalLedger();
+
+function chatKey(scope: FetchedPageScope): string {
+  return `${scope.tenant_id}\u0000${scope.conversation_id}`;
+}
+
+function placeKey(name: string): string {
+  return normalizedWords(name).trim();
+}
+
 const REFUSAL_REASONS = {
   source_not_fetched:
     'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
@@ -512,6 +574,10 @@ const REFUSAL_REASONS = {
     "That place only appears in the page's web address. Read a page that lists it, then try again.",
   address_apart_from_name:
     'The name and address are not together on that page. Copy them from one listing and try again.',
+  place_only_in_search_query:
+    'That place only appears in the words you searched with. Read a page that lists it, then try again.',
+  mixed_script_word:
+    'A word in the name or address mixes letters from different alphabets. Copy it from the page in one alphabet and try again.',
 } as const;
 
 const OUT_OF_AREA_REASON =
@@ -685,16 +751,27 @@ export async function renderPlaces({
   service,
   pages,
   scope,
+  retries,
   input,
 }: {
   service: MapsService;
   pages: FetchedPageStore;
   scope: FetchedPageScope;
+  retries: PlaceRefusalLedger;
   input: RenderPlacesInput;
 }): Promise<ReturnType<typeof toolResultResponse>> {
   const refused: { name: string; reason: string }[] = [];
   const grounded = [];
+  // Once a place has been refused twice this turn, it is not checked again.
+  const stopIfSpent = (): string | undefined =>
+    input.places.some(claim => retries.refusalsOf({ scope, name: claim.name }) >= MAX_PLACE_REFUSALS_PER_TURN)
+      ? PLACE_STOP_MESSAGE
+      : undefined;
   for (const claim of input.places) {
+    if (retries.refusalsOf({ scope, name: claim.name }) >= MAX_PLACE_REFUSALS_PER_TURN) {
+      refused.push({ name: claim.name, reason: TURN_LIMIT_REASON });
+      continue;
+    }
     const result = groundPlace({
       claim: {
         name: claim.name,
@@ -711,17 +788,19 @@ export async function renderPlaces({
     if (result.ok) {
       grounded.push(result.place);
     } else {
+      retries.record({ scope, name: claim.name });
       refused.push({ name: claim.name, reason: REFUSAL_REASONS[result.reason] });
     }
   }
   if (grounded.length === 0) {
-    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
+    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused, stop: stopIfSpent() });
   }
   try {
     const places = [];
     for (const place of grounded) {
       const found = await service.geocode(place.address);
       if (found !== null && !isInRequestedArea({ query: place.address, displayName: found.resolved_name })) {
+        retries.record({ scope, name: place.name });
         refused.push({ name: place.name, reason: OUT_OF_AREA_REASON });
         continue;
       }
@@ -732,11 +811,18 @@ export async function renderPlaces({
         already_in_calendar: isInCalendar({ place, locations: input.calendar_locations }),
       });
     }
+    const stop = stopIfSpent();
     if (places.length === 0) {
-      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
+      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused, stop });
     }
     return toolResultResponse({
-      text: JSON.stringify({ status: 'ok', places, refused, attribution: MAPS_ATTRIBUTION }),
+      text: JSON.stringify({
+        status: 'ok',
+        places,
+        refused,
+        attribution: MAPS_ATTRIBUTION,
+        ...(stop === undefined ? {} : { stop }),
+      }),
     });
   } catch (error) {
     if (error instanceof MapsUpstreamError) {
@@ -756,6 +842,7 @@ class MapsTool extends LocalToolMCP {
     private readonly pagesScope: FetchedPageScope,
     private readonly logger: Logger,
     private readonly timezone: string,
+    private readonly retries: PlaceRefusalLedger,
     tracing: AgentTracing,
   ) {
     super({ tracing });
@@ -792,6 +879,7 @@ class MapsTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use only for a place or address the user typed themselves. A place that came from a web page goes through render_places instead, never this tool. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
       schema: RENDER_MAP_INPUT_SCHEMA,
@@ -799,6 +887,7 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_ROUTE_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render a route map between two named places by walking, cycling, driving or transit. Pass both place names as the user gave them; never pass coordinates. Pick mode from the user's words; if unstated, walk short city trips and take transit for longer ones, and mention the other modes. For transit, depart_at or arrive_by (local time like 2026-10-19T09:20) answers 'I need to be there at 9:20'; omit both to leave now. Returns an inline map card; transit lists steps. If no transit route is found, say so and offer walking. The user approves each call. Use only when the user named both origin and destination; there is no current-location mode.",
       schema: RENDER_ROUTE_INPUT_SCHEMA,
@@ -806,11 +895,18 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
-        "Pin places on one map card, each with details from the page it came from. Call after a page reading tool (tavily_extract, web_fetch or another fetch tool) has read the pages. Copy each name, address, language, hours, price and phone word for word from the page; leave out what the page does not state. Short forms such as St are fine. Pass the page's own link as source_url. A refused place comes back with its name and reason; fix that detail and call again. Calendar locations go in calendar_locations. The tool drops any detail it cannot find on the page; the user approves each call.",
+        "Pin places on one map card, each with details from the page it came from. Call after a page reading tool (tavily_extract, web_fetch or another fetch tool) has read the pages. Copy each name, address, language, hours, price and phone word for word from the page; leave out what the page does not state. Short forms such as St are fine. Pass the page's own link as source_url. A refused place comes back with its name and reason; fix that detail and call again, once. If a place is refused again in the same answer, stop using the map and answer in text with the places and their links. Calendar locations go in calendar_locations. The tool drops any detail it cannot find on the page; the user approves each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
       handler: async input =>
-        renderPlaces({ service: this.service, pages: fetchedPages, scope: this.pagesScope, input }),
+        renderPlaces({
+          service: this.service,
+          pages: fetchedPages,
+          scope: this.pagesScope,
+          retries: this.retries,
+          input,
+        }),
     }),
   ];
 
@@ -927,6 +1023,8 @@ export interface MapsCapabilityOptions {
   pages_scope: FetchedPageScope;
   /** IANA zone the user's local times are read in; UTC when the client sent none. */
   timezone?: string | undefined;
+  /** The request carries a new message from the person, so place refusals start a fresh count. */
+  starts_answer: boolean;
 }
 
 /** Build the maps capability from server config. One instance per server. */
@@ -957,6 +1055,9 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
       fetch_limited,
     }),
   };
+  if (options.starts_answer) {
+    placeRefusals.startAnswer(options.pages_scope);
+  }
   const service = new MapsService({
     geocoder_url: configuration.MAPS_GEOCODER_URL,
     road_providers,
@@ -971,6 +1072,7 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
         options.pages_scope,
         options.logger,
         resolveLocalTime(new Date(), options.timezone).zone,
+        placeRefusals,
         options.tracing,
       ),
     ],

@@ -1,8 +1,9 @@
 import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
-import type { ApprovalDecision } from '../events/schema';
+import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
@@ -10,29 +11,37 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
+import {
+  APPROVAL_EXPIRED_REASON_CODE,
+  APPROVAL_EXPIRED_RESULT,
+  isApprovalExpiredReason,
+} from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
-import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import { isMapsToolName } from '../permissions/mapsToolNames';
-import type { ToolBundleName } from '../runtime/toolBundleCatalog';
+import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   countSilentFetches,
   isSearchAskReason,
+  isSilentSearchReason,
   namesUrl,
   recordResultUrls,
   resultTexts,
-  isSilentSearchReason,
   runOneAtATime,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
   isPageReaderTool,
+  isSearchResultTool,
   recordFetchedPages,
+  recordSearchResults,
   type FetchedPageScope,
   type FetchedPageStore,
 } from '../search/fetchedPages';
+import { TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -48,6 +57,7 @@ import {
   type ToolSchema,
   type ToolSource,
 } from './IMCPServer';
+import { dropUnnamedArguments, toParameterSchema } from './toolArgumentCheck';
 import { ToolSelectorPolicy, type ToolSelectorConfig } from './ToolSelectorPolicy';
 
 /**
@@ -67,7 +77,30 @@ export function deniedToolCallText(reason: string | undefined): string {
   if (reason !== undefined && isChangeRequestReason(reason)) {
     return reason;
   }
-  return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+  if (isApprovalExpiredReason(reason)) {
+    return JSON.stringify({ error: APPROVAL_EXPIRED_RESULT });
+  }
+  const said = reason === undefined ? DENIED_SAID : `${DENIED_SAID} Their reason: ${reason}.`;
+  return JSON.stringify({ error: `${said} ${DENIED_NEXT_STEP}` });
+}
+
+// Firm on purpose: a small model reads a bare "denied" as "try another wording".
+const DENIED_SAID = 'The person said no to this.';
+const DENIED_NEXT_STEP =
+  'Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.';
+
+/** Marks a call refused because it repeats a "no" from earlier in the turn; it never asked again. */
+export const REPEATED_DENIAL_REMEDIATION: ToolResultRemediation = {
+  reason_code: 'repeated_denied_action',
+  message: 'You already said no to this, so it was not asked again.',
+  suggested_action: 'contact_user',
+};
+
+/** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
+export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
+  return isApprovalExpiredReason(reason)
+    ? { reason_code: APPROVAL_EXPIRED_REASON_CODE, message: APPROVAL_EXPIRED_RESULT, suggested_action: 'request_approval' }
+    : undefined;
 }
 
 /**
@@ -156,6 +189,12 @@ function autoDenyMessage(decision: TierDecision): string {
   }
 }
 
+/** What the model is told when a web search or page read ran past its deadline. */
+export const SEARCH_TOO_SLOW_MESSAGE =
+  'The search took too long and was stopped. Answer from what you already have, or try one shorter search.';
+
+const SEARCH_TOO_SLOW = Symbol('search-too-slow');
+
 /**
  * Per-agent {@link IToolSet} view over a shared, policy-free {@link ToolSource}, applying the
  * enable/disable/preload/approval selectors. Many can wrap one source without policy bleed.
@@ -175,6 +214,8 @@ export class ToolSet implements IToolSet {
   private readonly pages: FetchedPageStore | undefined;
   private readonly pagesScope: FetchedPageScope | undefined;
   private readonly bundle: ToolBundleName | undefined;
+  private readonly searchCallTimeoutMs: number | undefined;
+  private readonly logger: Logger | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -212,8 +253,15 @@ export class ToolSet implements IToolSet {
      * host names the chat it belongs to. Set by the host only, alongside `pages`.
      */
     pagesScope?: FetchedPageScope | undefined;
-    /** The bundle every tool of this connector is sent with. Set by the host only; absent sends them on every request. */
+    /** The guidance topic every tool of this connector is grouped under. Set by the host only; absent groups them under none. */
     bundle?: ToolBundleName | undefined;
+    /**
+     * How long a web search or page read may take before it is stopped and the model gets a plain
+     * tool error, so the reply goes on. Applies to the designated search provider's tools and to
+     * page readers. Absent, only the turn's general tool deadline applies.
+     */
+    searchCallTimeoutMs?: number | undefined;
+    logger?: Logger | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -231,6 +279,13 @@ export class ToolSet implements IToolSet {
     this.pages = params.pages;
     this.pagesScope = params.pagesScope;
     this.bundle = params.bundle;
+    this.searchCallTimeoutMs = params.searchCallTimeoutMs;
+    this.logger = params.logger;
+  }
+
+  /** Only the designated search provider's listed search and page-read tools; the server's own hints never count. */
+  isHostVouchedReadTool(name: string): boolean {
+    return this.searchProvider && this.searchTools.has(name);
   }
 
   bundleOf(_toolName: string): ToolBundleName | undefined {
@@ -293,10 +348,11 @@ export class ToolSet implements IToolSet {
   }
 
   async callTool(
-    params: CallToolRequest['params'],
+    requested: CallToolRequest['params'],
     decision?: ApprovalDecision,
     context?: ToolInvocationContext,
   ): Promise<CallToolResponse> {
+    let params = requested;
     let listed: ListToolsResponse;
     let tool: AgentToolSchema | undefined;
     try {
@@ -307,6 +363,7 @@ export class ToolSet implements IToolSet {
         return listed;
       }
       tool = findTool(listed.result.tools, params.name);
+      params = this.withNamedArgumentsOnly({ params, tool });
 
       await this.assertToolAllowed(params.name, tool?.annotations);
 
@@ -329,7 +386,7 @@ export class ToolSet implements IToolSet {
       response: normalizeGithubFileContentsResponse({
         serverName: this.name,
         params,
-        response: await this.source.callTool(params, decision, context),
+        response: await this.dispatch({ params, decision, context }),
       }),
     });
     if (
@@ -343,6 +400,24 @@ export class ToolSet implements IToolSet {
       // Only Aman's own page readers record: a tool from any other server may echo its input, so its
       // text is never a page the model read.
       recordFetchedPages({
+        pages: this.pages,
+        scope: this.pagesScope,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
+    }
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true &&
+      isSearchResultTool(params.name) &&
+      ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
+        (this.searchProvider && this.searchTools.has(params.name)))
+    ) {
+      // A search's results are sources, one link at a time; its query and any answer it wrote are not.
+      // A provider's search_tools list also holds its page readers, so only named search tools count.
+      recordSearchResults({
         pages: this.pages,
         scope: this.pagesScope,
         toolArguments: params.arguments ?? {},
@@ -420,7 +495,10 @@ export class ToolSet implements IToolSet {
       return deniedToolCallResponse(decision.reason);
     }
 
-    if (this.sentinel !== undefined && (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))) {
+    if (
+      this.sentinel !== undefined &&
+      (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))
+    ) {
       // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
       // against it. A silent map was recorded when it was classified, so only approved maps are added here.
       const turn = this.sentinel.web_search;
@@ -429,7 +507,12 @@ export class ToolSet implements IToolSet {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
       }
     }
-    if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
+    if (
+      decision === undefined &&
+      classification !== undefined &&
+      isSilentSearchReason(classification.reason) &&
+      this.sentinel !== undefined
+    ) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
@@ -455,6 +538,17 @@ export class ToolSet implements IToolSet {
     return undefined;
   }
 
+  /**
+   * An approval was minted on the arguments the tool takes, so the dispatch check re-derives them the
+   * same way; the wire still carries what the model wrote. A connector that cannot list its tools leaves
+   * the wire arguments as written, which must still match the approval exactly.
+   */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    const tool = await this.resolveTool(params.name).catch(() => undefined);
+    const named = this.withNamedArgumentsOnly({ params, tool });
+    return named === params ? undefined : named.arguments;
+  }
+
   resolveConnector(): ConnectorBinding {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
@@ -465,7 +559,9 @@ export class ToolSet implements IToolSet {
   ): Promise<InternalToolCallInfo> {
     try {
       const tool = await this.resolveTool(params.name);
-      return (await this.buildToolCallInfo(params, tool, resolveUnderlyingTool)).info;
+      // The same pruning as dispatch, so an approval covers exactly the arguments that will be sent.
+      return (await this.buildToolCallInfo(this.withNamedArgumentsOnly({ params, tool }), tool, resolveUnderlyingTool))
+        .info;
     } catch (error) {
       if (error instanceof ToolPolicyBlockedError || error instanceof ToolPreDispatchError) {
         throw error;
@@ -607,6 +703,60 @@ export class ToolSet implements IToolSet {
       },
       classification: decision,
     };
+  }
+
+  /**
+   * Drops arguments the tool's schema does not name. The reply guard already does this for calls
+   * the model makes directly; a call made through `call_tool` carries its arguments inside the
+   * wrapper, so this is where a made-up argument is stopped before it reaches the connector.
+   */
+  private withNamedArgumentsOnly(input: {
+    params: CallToolRequest['params'];
+    tool: AgentToolSchema | undefined;
+  }): CallToolRequest['params'] {
+    const { params, tool } = input;
+    if (tool === undefined || params.arguments === undefined) {
+      return params;
+    }
+    const { args, dropped } = dropUnnamedArguments({
+      schema: toParameterSchema(tool.inputSchema),
+      args: params.arguments,
+    });
+    if (dropped.length === 0) {
+      return params;
+    }
+    this.logger?.debug('Dropped arguments the tool does not take', { server: this.name, tool: params.name, dropped });
+    return { ...params, arguments: args };
+  }
+
+  /** Sends the call. A web search or page read past its deadline comes back as a plain tool error. */
+  private async dispatch(input: {
+    params: CallToolRequest['params'];
+    decision: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }): Promise<CallToolResponse> {
+    const call = this.source.callTool(input.params, input.decision, input.context);
+    const timeoutMs = this.searchCallTimeoutMs;
+    if (timeoutMs === undefined || !(this.searchProvider || isPageReaderTool(input.params.name))) {
+      return call;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tooSlow = new Promise<typeof SEARCH_TOO_SLOW>(resolve => {
+      timer = setTimeout(() => {
+        resolve(SEARCH_TOO_SLOW);
+      }, timeoutMs);
+    });
+    try {
+      // A late answer from the provider is never read: the race has already settled the call.
+      const outcome = await Promise.race([call, tooSlow]);
+      if (outcome !== SEARCH_TOO_SLOW) {
+        return outcome;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    this.logger?.warn('Search took too long; stopped it', { server: this.name, tool: input.params.name, timeoutMs });
+    return toolResultResponse({ text: JSON.stringify({ error: SEARCH_TOO_SLOW_MESSAGE }), isError: true });
   }
 
   private async resolveTool(toolName: string): Promise<AgentToolSchema | undefined> {

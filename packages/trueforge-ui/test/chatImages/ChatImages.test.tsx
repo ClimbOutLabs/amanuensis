@@ -5,12 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { Markdown } from '@/atoms/Markdown.js';
 import { TurnImages } from '@/chatImages/ChatImages.js';
 import { ChatImageScope } from '@/chatImages/chatImageScope.js';
-import { CHAT_IMAGE_REFUSAL_TEXT } from '@/chatImages/refusalText.js';
+import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, emailImagesFailedText } from '@/chatImages/refusalText.js';
 import type {
   ChatImagesCatalog,
   TurnImageList,
   TurnImagesResult,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
+import { createChatImagesCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 
 const IMAGE_ID = 'a'.repeat(32);
 const IMAGE_SRC = `/api/chat-images/sessions/s1/images/${IMAGE_ID}`;
@@ -190,24 +191,112 @@ describe('thumbnails', () => {
 });
 
 describe('turn images', () => {
-  it('shows Images hidden with a Show images action per email, and loads them only after it', async () => {
+  it('shows one quiet line for every email image and asks the server nothing until Load images', async () => {
     const { port, showTurnImages } = fakePort({
-      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 3 }] },
+      list: {
+        artifacts: [],
+        tool_images: [],
+        emails: [
+          { tool_call_id: 'mail-1', count: 3 },
+          { tool_call_id: 'mail-2', count: 2 },
+        ],
+      },
       show: input =>
         input.approved
-          ? { status: 'done', images: [shownImage, shownImage, { status: 'refused', reason: 'too_large' }] }
-          : { status: 'ask', count: 3, host: null },
+          ? { status: 'done', images: [shownImage, { status: 'refused', reason: 'too_large' }] }
+          : { status: 'ask', count: 2, host: null },
     });
     renderInScope({ port, turnImages: true });
-    expect(await screen.findByText('Images hidden')).toBeInTheDocument();
-    expect(screen.queryByText(/Show 3 images from this email/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+    expect(await screen.findByText('5 images from your emails were not loaded.')).toBeInTheDocument();
+    expect(screen.getAllByTestId('aui-email-images-hidden')).toHaveLength(1);
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show images' }));
+    expect(showTurnImages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Load images' }));
     await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2));
+    // Two refusals, one sentence pair.
+    expect(screen.getAllByTestId('aui-chat-image-refused')).toHaveLength(1);
     expect(screen.getByText(CHAT_IMAGE_REFUSAL_TEXT.too_large)).toBeInTheDocument();
-    expect(showTurnImages).toHaveBeenLastCalledWith(
+    expect(showTurnImages).toHaveBeenCalledWith(
       expect.objectContaining({ source: { kind: 'email', tool_call_id: 'mail-1' }, approved: true }),
+    );
+    expect(showTurnImages).toHaveBeenCalledWith(
+      expect.objectContaining({ source: { kind: 'email', tool_call_id: 'mail-2' }, approved: true }),
+    );
+  });
+
+  it('names one email in the singular', async () => {
+    const { port } = fakePort({
+      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 1 }] },
+    });
+    renderInScope({ port, turnImages: true });
+    expect(await screen.findByText('1 image from the email was not loaded.')).toBeInTheDocument();
+  });
+
+  it('says what happened and offers Try again when the chosen images cannot be loaded', async () => {
+    const showTurnImages = vi.fn(() => Promise.reject(new Error('offline')));
+    const port: ChatImagesCatalog = {
+      listTurnImages: () =>
+        Promise.resolve({ artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 4 }] }),
+      showTurnImages,
+      imageUrl: ({ sessionId, imageId }) => `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
+    };
+    renderInScope({ port, turnImages: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
+    expect(
+      await screen.findByText("The 4 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId('aui-email-images-error')).toHaveLength(1);
+    expect(screen.queryByText(CHAT_IMAGE_ERROR_TEXT)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(showTurnImages).toHaveBeenCalledTimes(2));
+  });
+
+  it('offers one Try again line when every image fails to download, and asks the server again on click', async () => {
+    let attempt = 0;
+    const failedDownload = { status: 'refused' as const, reason: 'fetch_failed' as const };
+    const { port, showTurnImages } = fakePort({
+      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 3 }] },
+      show: () => {
+        attempt += 1;
+        return attempt === 1
+          ? { status: 'done', images: [failedDownload, failedDownload, failedDownload] }
+          : { status: 'done', images: [shownImage, shownImage, shownImage] };
+      },
+    });
+    renderInScope({ port, turnImages: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
+    expect(
+      await screen.findByText("The 3 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId('aui-email-images-failed')).toHaveLength(1);
+    expect(screen.queryByText(CHAT_IMAGE_REFUSAL_TEXT.fetch_failed)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(3));
+    expect(showTurnImages).toHaveBeenCalledTimes(2);
+    expect(showTurnImages).toHaveBeenLastCalledWith(expect.objectContaining({ approved: true }));
+    expect(screen.queryByTestId('aui-email-images-failed')).not.toBeInTheDocument();
+  });
+
+  it('says how many of the images failed when only some could not be downloaded', async () => {
+    const { port } = fakePort({
+      list: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 3 }] },
+      show: () => ({
+        status: 'done',
+        images: [shownImage, { status: 'refused', reason: 'fetch_failed' }, shownImage],
+      }),
+    });
+    renderInScope({ port, turnImages: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load images' }));
+    expect(
+      await screen.findByText("1 of 3 images couldn't be downloaded. Check your connection, then choose Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('img')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('names a single failed image in the singular', () => {
+    expect(emailImagesFailedText({ failed: 1, total: 1 })).toBe(
+      "The image couldn't be downloaded. Check your connection, then choose Try again.",
     );
   });
 
@@ -248,5 +337,66 @@ describe('outside a chat turn', () => {
   it('keeps the existing Markdown image rules', () => {
     render(<Markdown content="![alt text](https://example.com/pic.png)" />);
     expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+  });
+});
+
+describe('an answer that copied images from the emails it read', () => {
+  const emailImages = Array.from({ length: 8 }, (_, i) => `https://news.example.com/art/${String(i)}.png`);
+  const tracker = 'https://u1.ct.sendgrid.net/wf/open?upn=xyz';
+  const asked = 'https://example.org/requested-chart.png';
+
+  /** Answers like the real routes: copied email images and trackers come back empty, other links ask. */
+  function serverFetch() {
+    const requests: string[] = [];
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+      if (init?.method !== 'POST') {
+        return Promise.resolve(
+          Response.json({ data: { artifacts: [], tool_images: [], emails: [{ tool_call_id: 'mail-1', count: 8 }] } }),
+        );
+      }
+      const body: unknown = JSON.parse(String(init.body));
+      const link =
+        typeof body === 'object' && body !== null && 'source' in body && typeof body.source === 'object'
+          ? Reflect.get(body.source ?? {}, 'url')
+          : undefined;
+      return Promise.resolve(
+        Response.json({
+          data: link === asked ? { status: 'ask', count: 1, host: 'example.org' } : { status: 'done', images: [] },
+        }),
+      );
+    });
+    return { fetchImpl, requests };
+  }
+
+  it('makes no request off the page, shows no box per image, and keeps one quiet line', async () => {
+    const { fetchImpl, requests } = serverFetch();
+    const port = createChatImagesCatalog({ fetch: fetchImpl });
+    const content = [
+      'Here is your morning brief.',
+      ...emailImages.map(url => `![newsletter art](${url})`),
+      `<img src="${tracker}" width="1" height="1">`,
+    ].join('\n\n');
+    const { container } = renderInScope({ port, content, turnImages: true });
+    expect(await screen.findByText('8 images from the email were not loaded.')).toBeInTheDocument();
+    await waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(10));
+    expect(requests.every(url => url.startsWith('/api/chat-images/'))).toBe(true);
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(remoteImgCount(container)).toBe(0);
+    expect(screen.queryByTestId('aui-chat-image-loading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aui-chat-image-not-shown')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aui-chat-image-error')).not.toBeInTheDocument();
+    expect(screen.queryByText(CHAT_IMAGE_ERROR_TEXT)).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('aui-email-images-hidden')).toHaveLength(1);
+  });
+
+  it('still offers an image the person asked for', async () => {
+    const { fetchImpl } = serverFetch();
+    const port = createChatImagesCatalog({ fetch: fetchImpl });
+    const content = [`![the chart you asked for](${asked})`, ...emailImages.map(url => `![art](${url})`)].join('\n\n');
+    renderInScope({ port, content, turnImages: true });
+    expect(await screen.findByText('Image from example.org hidden')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Show image' })).toHaveLength(1);
   });
 });

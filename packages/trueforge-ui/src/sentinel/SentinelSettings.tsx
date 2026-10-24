@@ -152,7 +152,7 @@ export const SentinelSettings: FC = () => {
           </p>
           <p className="mt-1 text-sm text-text-secondary">
             {
-              "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode."
+              "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode."
             }
           </p>
           {searchError !== null && (

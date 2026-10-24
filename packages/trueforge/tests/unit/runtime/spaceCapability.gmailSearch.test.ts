@@ -162,6 +162,7 @@ describe('a web search after the chat read mail', () => {
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
         sessionId: 's1',
         logger: createLogger({ silent: true }),
+        startsAnswer: true,
       },
       {
         store: new FakeTurnArtifactStore(),

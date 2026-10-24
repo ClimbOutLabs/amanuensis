@@ -428,6 +428,19 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         throw new StaleApprovalContinuationError(input.turn.previous_turn_id, locked.last_turn_id);
       }
 
+      // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+      if (locked.last_turn_id !== null) {
+        const tip = await trx
+          .selectFrom('turn')
+          .select([jsonText<TurnState>(sql.ref('state')).as('state')])
+          .where('session_id', '=', input.session_id)
+          .where('turn_id', '=', locked.last_turn_id)
+          .executeTakeFirst();
+        if (tip?.state.status === 'running') {
+          throw new PreviousTurnRunningError(locked.last_turn_id);
+        }
+      }
+
       const approvalGrants = [
         ...new Set(
           [...locked.approval_grants, ...input.approval_grants].filter(

@@ -16,7 +16,7 @@ import {
   type RepositoryCommandSourceObserver,
   type SandboxProvider,
   type SkillPromptMode,
-  type VercelAILLMConfig,
+  type StreamTimeout,
   type VercelAIProviderConfig,
   type WorkspaceVerificationCoordinator,
 } from '@truefoundry/trueforge-core/core';
@@ -269,8 +269,8 @@ export async function getModelDetails({
   providerConfig: VercelAIProviderConfig;
   defaultModelParams: ModelParams;
   modelProperties: ModelProperties;
-  /** Provider-level override of the server-wide stream progress deadlines, if configured. */
-  streamTimeout: VercelAILLMConfig['streamTimeout'];
+  /** Stream progress deadlines: the provider's own, else the server-wide ones. */
+  streamTimeout: Required<StreamTimeout>;
 }> {
   const parsed = parseModelFqn(name);
   if (parsed === undefined) {
@@ -354,19 +354,13 @@ export function applyTokenFactoryRouting(input: {
 }
 
 /**
- * Server-wide defaults (see VercelAILLM) apply unless the provider manifest overrides one or both
- * deadlines; a manifest without `stream_timeout` passes `undefined` through so the harness's own
- * defaults are what take effect.
+ * The server-wide deadlines apply unless the provider manifest sets one or both. They also bound
+ * every step of a turn (see AgentThread), so a provider can only shorten them there.
  */
-function modelProviderStreamTimeout(
-  streamTimeout: ModelProviderStreamTimeout | undefined,
-): VercelAILLMConfig['streamTimeout'] {
-  if (streamTimeout === undefined) {
-    return undefined;
-  }
+function modelProviderStreamTimeout(streamTimeout: ModelProviderStreamTimeout | undefined): Required<StreamTimeout> {
   return {
-    firstChunkMs: streamTimeout.first_chunk_ms ?? 300_000,
-    chunkMs: streamTimeout.chunk_ms ?? 60_000,
+    firstChunkMs: streamTimeout?.first_chunk_ms ?? configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+    chunkMs: streamTimeout?.chunk_ms ?? configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
   };
 }
 

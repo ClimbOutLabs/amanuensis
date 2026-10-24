@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
+import { clearContextCompaction, publishContextCompaction } from '@/utils/contextCompactionLive.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
@@ -50,7 +51,7 @@ describe('AmanRuntimeRail', () => {
     );
 
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Amanuensis' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     expect(screen.getByText('local-model')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveAttribute(
       'src',
@@ -99,6 +100,9 @@ describe('AmanRuntimeRail', () => {
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async () => settings),
@@ -193,8 +197,9 @@ describe('AmanRuntimeRail', () => {
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
     const selector = '.aman-runtime-rail__avatar {';
     // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations.
-    expect(stylesheet.split(selector)).toHaveLength(2);
+    // would let this read an earlier rule and pass on stale declarations. The one extra block
+    // is the dark-mode override, which swaps the feather for a radial mask.
+    expect(stylesheet.split(selector)).toHaveLength(3);
     const rule = stylesheet.slice(stylesheet.indexOf(selector));
     const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
 
@@ -325,6 +330,44 @@ describe('AmanRuntimeRail', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mira' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
+  });
+
+  it('captions the panda with the owner name in sentence case', async () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <PersonalizationProvider
+          api={{
+            getProfile: async () => ({
+              assistant_name: 'Mira',
+              assistant_identity: null,
+              voice_guidance: null,
+              user_name: 'Maya',
+              address_as: null,
+              user_profile: null,
+              pinned_preferences: [],
+              help_areas: [],
+              learned_profile: null,
+            }),
+            updateProfile: async profile => profile,
+            deleteProfile: async () => {},
+          }}
+        >
+          <AmanRuntimeRail />
+        </PersonalizationProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aui-panda__role');
+  });
+
+  it('captions the panda "Your Chief of Staff" when no owner name is known', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aui-panda__role');
   });
 
   it('groups the rail into labeled answering and model sections', () => {
@@ -471,6 +514,22 @@ describe('AmanRuntimeRail', () => {
       expect(avatar).toHaveAttribute('poster', motionSources.poster);
     });
 
+    it('plays the writing clip while an approval waits, even when the agent is idle', () => {
+      render(
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail
+            avatarSrc="/aman-avatar.png"
+            avatarMotion={motionSources}
+            activity="idle"
+            pendingApprovalIds={['approval-1']}
+          />
+        </RuntimeHarness>,
+      );
+      const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      expect(avatar.tagName).toBe('VIDEO');
+      expect(avatar.getAttribute('src')).toBe(motionSources.writing);
+    });
+
     it('plays the error clip the moment an error is reported', () => {
       render(
         <RuntimeHarness messages={[]}>
@@ -534,6 +593,9 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
   function sentinelWith(settings: SentinelUserSettings): SentinelApi {
     return {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async () => settings),
@@ -551,7 +613,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     vi.unstubAllGlobals();
   });
 
-  it('puts the panda first, then the status line, Needs you, Your rules and Recent actions', async () => {
+  it('puts the panda first, then the status line, Your rules and Recent actions', async () => {
     render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
@@ -568,34 +630,23 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     const order = Array.from(document.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order.slice(0, 4)).toEqual(['panda', 'needs-you', 'rules', 'recent-actions']);
+    expect(order).toEqual(['panda', 'rules', 'recent-actions']);
     expect(screen.getByRole('region', { name: 'Recent actions' })).toContainElement(
       screen.getByText('Recent actions body'),
     );
     expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
   });
 
-  it('gives the Needs you ticket the one gold fill while an approval waits', () => {
+  it('shows one pending signal: no Needs you ticket, and the status line says the approval is waiting', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail pendingApprovalIds={['approval-1', 'approval-2']} />
-      </RuntimeHarness>,
-    );
-    const needsYou = container.querySelector('[data-section="needs-you"]');
-    expect(needsYou).toHaveClass('aui-ticket', 'aui-ticket--selected');
-    expect(screen.getByRole('heading', { name: 'Needs you · 2' })).toBeInTheDocument();
-    expect(screen.getByText('Answer them in the chat.')).toBeInTheDocument();
-    expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(1);
-  });
-
-  it('leaves Needs you out when nothing waits, so the rail carries no gold card', () => {
-    const { container } = render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
+        <AmanRuntimeRail pendingApprovalIds={['approval-1', 'approval-2']} status="ready" />
       </RuntimeHarness>,
     );
     expect(container.querySelector('[data-section="needs-you"]')).toBeNull();
+    expect(screen.queryByText(/Needs you/)).not.toBeInTheDocument();
     expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(0);
+    expect(screen.getByText('Waiting on your approval')).toBeInTheDocument();
   });
 
   it('says what Aman is doing in the status line and keeps it polite for screen readers', () => {
@@ -614,6 +665,24 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </RuntimeHarness>,
     );
     expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Ready');
+  });
+
+  it('says the conversation is being tidied while this chat is shortened, and only this chat', () => {
+    const { container } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="ready" activity="thinking" sessionId="chat-1" />
+      </RuntimeHarness>,
+    );
+    const status = () => container.querySelector('.aman-runtime-rail__status');
+    act(() => publishContextCompaction({ sessionId: 'chat-2', active: true }));
+    expect(status()).toHaveTextContent('Working on it…');
+
+    act(() => publishContextCompaction({ sessionId: 'chat-1', active: true }));
+    expect(status()).toHaveTextContent('Tidying up the conversation');
+
+    act(() => publishContextCompaction({ sessionId: 'chat-1', active: false }));
+    expect(status()).toHaveTextContent('Working on it…');
+    act(() => clearContextCompaction());
   });
 
   it('reads the three rules in plain words from the saved settings', async () => {

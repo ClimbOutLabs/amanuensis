@@ -71,9 +71,10 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
+import { escapeDisplayText } from './displayText';
 import {
-  escapeDisplayText,
   extractCardFields,
+  isCalendarChangeToolName,
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -81,6 +82,7 @@ import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchem
 import {
   isMapsToolName,
   MAPS_AFTER_READ_SILENT_REASON,
+  MAPS_ASK_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -104,6 +106,7 @@ import {
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
+  searchProviderLabel,
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
@@ -159,11 +162,14 @@ import {
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateDetailCheckable,
+  privateDetailCheckNeeded,
   privateFingerprintsUsable,
   privateTextForChecks,
   SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_CHAT_GRANTED_SILENT_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1790,7 +1796,7 @@ async function holdSearchCall(input: {
   const { action, ctx, fields } = input;
   const shown =
     input.summary.length > SEARCH_CARD_TEXT_MAX ? `${input.summary.slice(0, SEARCH_CARD_TEXT_MAX)}...` : input.summary;
-  const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
+  const provider = searchProviderLabel({ host: action.mcp_server_host });
   const tavilyText =
     input.params === undefined
       ? null
@@ -1810,7 +1816,8 @@ async function holdSearchCall(input: {
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
-      destination: action.mcp_server_name ?? null,
+      // The connector id is never shown; "Sends to" carries the provider's brand instead.
+      destination: null,
       recipient: null,
       amount: null,
       parsed_command: null,
@@ -1819,7 +1826,8 @@ async function holdSearchCall(input: {
         params: input.params,
         plumbingFields: action.mcp_search_plumbing_fields ?? [],
       }),
-      destination_host: fields.destination_host,
+      // The card's "Sends to" line names the provider, not the host it is reached on.
+      destination_host: provider ?? SEARCH_SERVER_FALLBACK,
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
@@ -1833,7 +1841,10 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
-  return { ...decision, audit_description: searchHoldAuditText({ server, say: input.say }) };
+  return {
+    ...decision,
+    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say }),
+  };
 }
 
 /**
@@ -1949,6 +1960,7 @@ async function classifySearchProviderTool(input: {
       earlier: ctx.web_search.sentText,
       entries: ctx.web_search.chatFingerprints.entries,
       has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: true,
     });
     if (leak !== null) {
       return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
@@ -1971,6 +1983,26 @@ async function classifySearchProviderTool(input: {
     }
     if (privateReadHeld) {
       return heldPrivate();
+    }
+  }
+  // Recalled memory, the profile, an attached file and earlier turns' reads leave fingerprints too. No grant lifts
+  // this check, and a chat whose fingerprints miss a text asks, since the check cannot vouch for the search.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_unchecked);
+    }
+    const leak = fingerprintLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended
+        ? privateDetailSkipped()
+        : held(SEARCH_PRIVATE_DETAIL_REASON, HOLD_SAY.private_detail);
     }
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
@@ -2027,6 +2059,20 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
   });
 }
 
+/** Said to the owner when a scheduled run's search is skipped because it carried a private detail. */
+const PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE =
+  'One lookup was skipped, because it would have shared something private about you.';
+
+/** A search that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateDetailSkipped(): TierDecision {
+  return autoDenyDecision({
+    reason: 'private_text_check',
+    reason_detail: 'It would have shared a private detail about you.',
+    owner_message: PRIVATE_DETAIL_SKIPPED_OWNER_MESSAGE,
+    sensitive_read: false,
+  });
+}
+
 /**
  * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
  * read does not mark the chat as holding a secret.
@@ -2057,6 +2103,24 @@ async function classifyMapsSilently(input: {
     chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
   ) {
     return undefined;
+  }
+  // The profile, recalled memory and attached files are checked too: a map may name a place from them, never a
+  // person, a contact or a number. A chat whose kept details miss a text shows the card.
+  if (privateDetailCheckNeeded(ctx.web_search)) {
+    if (strings === undefined || !privateDetailCheckable(ctx.web_search)) {
+      return undefined;
+    }
+    const leak = fingerprintLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      entries: ctx.web_search.chatFingerprints.entries,
+      has_text: ctx.web_search.chatFingerprints.has_text,
+      encoded_runs: false,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended ? privateDetailSkipped() : undefined;
+    }
   }
   const readMode = hasReadPrivateData(ctx.web_search);
   const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
@@ -2355,8 +2419,15 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
     review.action === 'create'
       ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
       : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
+  // Says why a guest change asks every time, since no grant can cover it.
+  const alwaysAsks =
+    review.attendees.length === 0
+      ? ''
+      : review.action === 'create'
+        ? ' This change sends an invitation to other people, so Aman always asks.'
+        : ' This change reaches the other people invited to this event, so Aman always asks.';
   return {
-    plain_what: plainWhat,
+    plain_what: `${plainWhat}${alwaysAsks}`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null,
     why_asked_again: null,
@@ -2390,6 +2461,20 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
             },
     },
   };
+}
+
+/** Whether an "Always allow" grant covers this call's tool, looked up as a connector call's grant is. */
+function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Promise<boolean> {
+  if (action.mcp_server_name === undefined) {
+    return Promise.resolve(false);
+  }
+  return ctx.services.tool_grants.hasToolGrant({
+    tenant_id: ctx.tenant_id,
+    created_by: ctx.created_by,
+    mcp_server_name: action.mcp_server_name,
+    tool_name: action.tool_name,
+    mcp_server_host: action.mcp_server_host ?? null,
+  });
 }
 
 /**
@@ -2444,10 +2529,21 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         });
       }
     }
+    // Only a change that reaches no guest can be covered by a standing grant; a guest change always asks.
+    const reachesGuests = review.attendees.length > 0;
+    if (!reachesGuests && (await hasStandingToolGrant(ctx, action))) {
+      return tier1Decision({
+        reason: TOOL_GRANT_REASON,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on your calendar.`,
+        sensitive_read: false,
+      });
+    }
     return tier3Decision({
       card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
-      reason: 'calendar_write',
-      reason_detail: 'Adding or changing a calendar event always asks.',
+      reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
+      reason_detail: reachesGuests
+        ? 'A calendar change that reaches guests always asks.'
+        : 'Adding or changing an event on your own calendar asks.',
       sensitive_read: false,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
@@ -2878,6 +2974,29 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // A connector call named as a calendar change asks every time, whatever the connector claims about it:
+  // no first-party pass and no standing grant, because a grant would cover every later event.
+  if (action.tool_type === 'mcp' && isCalendarChangeToolName(action.tool_name)) {
+    const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: {
+        ...card,
+        plain_what: `A calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check every detail below before you allow it.`,
+        cannot_be_undone: 'Check the details before you go ahead.',
+      },
+      reason: 'connector_calendar_write',
+      reason_detail: 'A calendar change from a connector always asks.',
+      sensitive_read: readsPrivateData,
+      secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
   // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
   // tool (the user's standing grant) skips the card, but only after every escalation above, never
   // for a sensitive path, and only while the tool still claims to be read-only and explicitly
@@ -3128,7 +3247,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: 'maps_tool',
+        reason: MAPS_ASK_REASON,
         reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
@@ -3145,6 +3264,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,
+      hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
           ctx,

@@ -2,6 +2,7 @@ import type { CallToolRequest, ListToolsResult, ToolAnnotations } from '@modelco
 import { z } from 'zod';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import { isMapsToolName } from '../permissions/mapsToolNames';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
@@ -90,7 +91,7 @@ export abstract class LocalToolMCP implements IToolSet {
   readonly preload: boolean = true;
   readonly hasPreloadedTools: boolean = true;
   readonly tracingEnabled: boolean = true;
-  /** The bundle every tool of this set is sent with; undefined sends them on every request. */
+  /** The guidance topic every tool of this set is grouped under; undefined groups them under none. */
   protected readonly bundle: ToolBundleName | undefined = undefined;
 
   private readonly tracing: AgentTracing;
@@ -152,6 +153,11 @@ export abstract class LocalToolMCP implements IToolSet {
         return response;
       },
     );
+  }
+
+  /** The host's own maps tools, the only built-ins the classifier rules a read by name. */
+  isHostVouchedReadTool(name: string): boolean {
+    return isMapsToolName(name) && this.getTools().some(tool => tool.name === name);
   }
 
   // Local tools are not approval gated by default.

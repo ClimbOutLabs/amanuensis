@@ -75,6 +75,7 @@ import { SkillCatalog } from './catalog/SkillCatalog';
 import { type DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -111,7 +112,7 @@ import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
-import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
+import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
@@ -181,6 +182,7 @@ interface ServerPersistence<TTransaction> {
   googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  briefItemStore: IBriefItemCompletionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -414,6 +416,7 @@ async function createStandalonePersistence(options: {
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -583,6 +586,7 @@ async function createDistributedPersistence(options: {
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -623,6 +627,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -652,6 +657,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     }
   }
   const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
+  // Runs before the default seed, so an instance set to Tavily never also gets the Parallel connector as its provider.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    await designateTavilyAtBoot({
+      choice: configuration.SEARCH_PROVIDER,
+      tavilyApiKey: configuration.TAVILY_API_KEY,
+      catalog: mcpCatalog,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
   // Offered once so the first search needs no setup.
   await seedDefaultSearchProviderAtBoot({
     trueFoundryMode: isTrueFoundryModeEnabled(configuration),
@@ -828,6 +844,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     sessions,
     chatImages,
     activeTurns,
@@ -1185,8 +1202,9 @@ try {
       // closed covers the gap where the registry is empty before that late track().
       await activeTurns.shutdownAndWait(CancellationReason.Abandoned);
       await closed;
-      // Wait for detached turn drains (memory retain, profile learning, artifact persistence)
-      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. This
+      // Wait for detached turn drains (artifact persistence, memory retain, profile learning)
+      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. Each drain
+      // also stops watching its follow-up work after its own time limit. This
       // runs before the Redis/DB teardown below because drains still dual-write events.
       if (turnDrains.size > 0) {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);

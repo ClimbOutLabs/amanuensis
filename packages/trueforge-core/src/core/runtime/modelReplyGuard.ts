@@ -80,8 +80,10 @@ export function guardModelReply(input: {
   message: RawAssistantMessage;
   tools: ChatCompletionTool[];
   knownEventIds: ReadonlySet<string>;
+  /** Tools whose reads the host vouches for; for these an optional true-or-false argument that cannot be repaired is dropped. */
+  readOnlyTools: ReadonlySet<string>;
 }): ModelReplyGuardOutcome {
-  const { message, tools, knownEventIds } = input;
+  const { message, tools, knownEventIds, readOnlyTools } = input;
   const schemas = new Map<string, ToolParameterSchema>();
   for (const tool of tools) {
     if (tool.type === 'function') {
@@ -108,7 +110,7 @@ export function guardModelReply(input: {
     let finalArgs = args;
     const schema = schemas.get(call.function.name);
     if (schema !== undefined) {
-      const outcome = checkToolArguments({ schema, args });
+      const outcome = checkToolArguments({ schema, args, readOnly: readOnlyTools.has(call.function.name) });
       finalArgs = outcome.args;
       if (outcome.problems.length > 0) {
         invalidCalls.set(

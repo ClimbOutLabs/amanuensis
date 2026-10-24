@@ -1,6 +1,6 @@
 /**
- * Every tool of a personal instance must get the same permission decision whether its bundle was
- * loaded before the first model call or by load_bundle during the turn: the same tier and reason,
+ * Every tool of a personal instance must get the same permission decision whether the model calls it
+ * straight away or reads its guidance with load_bundle first: the same tier and reason,
  * the same card, the same hold or refusal, and the same audit rows. Run online (cards and silent
  * runs) and offline (refusals).
  */
@@ -25,11 +25,7 @@ import type { AuditRecordInput } from '@truefoundry/trueforge-core/core/permissi
 import { defaultSentinelServices, type SentinelServices } from '@truefoundry/trueforge-core/core/permissions/context';
 import { DEFERRED_TOOLS_SERVER_ID } from '@truefoundry/trueforge-core/core/runtime/DeferredTool';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
-import {
-  LOAD_BUNDLE_TOOL_NAME,
-  TOOL_BUNDLES_SERVER_ID,
-  TOOL_BUNDLES_STATE_KEY,
-} from '@truefoundry/trueforge-core/core/runtime/ToolBundles';
+import { LOAD_BUNDLE_TOOL_NAME, TOOL_BUNDLES_SERVER_ID } from '@truefoundry/trueforge-core/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import { createLogger } from 'winston';
@@ -37,7 +33,7 @@ import { buildPersonalInstance, type PersonalInstance } from '../../../../src/ru
 
 type Mode = 'online' | 'offline';
 
-type Loading = 'before_first_call' | 'load_bundle';
+type Loading = 'direct' | 'load_bundle';
 
 interface ToolRow {
   /** The name the model calls the tool by. */
@@ -168,7 +164,7 @@ async function toolTable(): Promise<ToolRow[]> {
   const instance = await instanceFor({ mode: 'online', audit: [] });
   const builtIns: IToolSet[] = [
     ...instance.capabilities.flatMap(capability => capability.systemToolSets ?? []),
-    instance.sandbox,
+    ...(instance.sandbox === undefined ? [] : [instance.sandbox]),
   ];
   const { convertedTools } = await convertMCPServersToTools({
     tfyManagedServers: builtIns,
@@ -240,9 +236,9 @@ function sentNames(request: LLMCreateParamsStreaming | undefined): string[] {
 }
 
 /**
- * Runs one turn whose model calls the tool, and reads back how the call was judged. Its bundle is
- * either loaded before the first model call (as a chat that loaded it earlier) or loaded with
- * load_bundle in this turn; a tool sent on every request is called after an unrelated load.
+ * Runs one turn whose model calls the tool, and reads back how the call was judged. The model either
+ * calls it straight away or reads its bundle's guidance with load_bundle first; a tool in no bundle
+ * is called after an unrelated read.
  */
 async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Promise<{
   judged: Judged;
@@ -280,10 +276,8 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
     turnToolCallLedger: undefined,
     sandbox: instance.sandbox,
     capabilities,
-    // A message that asks for no bundle, so only the loading under test decides what is sent.
     context: [{ role: 'user', content: 'Go ahead.' }],
-    capabilityState:
-      input.loading === 'before_first_call' ? { [TOOL_BUNDLES_STATE_KEY]: { loaded: [bundle] } } : undefined,
+    capabilityState: undefined,
     sentinel: instance.sentinel,
     toolCallMemo: undefined,
     taskState: undefined,
@@ -313,7 +307,9 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
   // Clock readings differ between two runs; nothing else in a result may.
   const timeless = result
     ?.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '<time>')
-    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0');
+    .replace(/"unixEpochMS":\d+/g, '"unixEpochMS":0')
+    .replace(/"date":"\d{4}-\d{2}-\d{2}"/g, '"date":"<date>"')
+    .replace(/"time":"\d{2}:\d{2}:\d{2}"/g, '"time":"<time>"');
   return {
     judged: {
       name: call.function.name,
@@ -327,7 +323,7 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
   };
 }
 
-describe('the same permission decision for every tool, whenever its bundle was loaded', () => {
+describe('the same permission decision for every tool, whether or not its guidance was read', () => {
   let table: ToolRow[] = [];
 
   beforeAll(async () => {
@@ -386,20 +382,21 @@ describe('the same permission decision for every tool, whenever its bundle was l
       const differences: { tool: string; before: Judged; loaded: Judged }[] = [];
       const judged: Judged[] = [];
       for (const row of table) {
-        const before = await judge({ mode, row, loading: 'before_first_call' });
+        const before = await judge({ mode, row, loading: 'direct' });
         const loaded = await judge({ mode, row, loading: 'load_bundle' });
         judged.push(before.judged);
         if (JSON.stringify(loaded.judged) !== JSON.stringify(before.judged)) {
           differences.push({ tool: row.name, before: before.judged, loaded: loaded.judged });
         }
-        // The tool keeps its own name, and the loading is a lookup: never a card, never held.
+        // The tool keeps its own name, and reading guidance is a lookup: never a card, never held.
         expect(loaded.judged.name).toBe(row.name);
         expect(loaded.load?.tier3_card ?? null).toBeNull();
         expect(loaded.load?.is_approval_required).toBe(false);
-        if (row.bundle !== undefined && mode === 'online') {
+        if (mode === 'online') {
+          // Every tool goes out on the first model call, with or without guidance read.
           expect(before.sentBefore).toContain(row.name);
-          expect(loaded.sentBefore).not.toContain(row.name);
-          expect(loaded.sentAtCall).toContain(row.name);
+          expect(loaded.sentBefore).toContain(row.name);
+          expect(loaded.sentAtCall).toEqual(loaded.sentBefore);
         }
       }
       expect(differences).toEqual([]);

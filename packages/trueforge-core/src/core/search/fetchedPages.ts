@@ -1,4 +1,7 @@
-import { TAVILY_EXTRACT_TOOL_NAME } from './TavilyClient';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import { namesUrl } from '../permissions/webSearch';
+import { hasMixedScriptWord, normalizedWords, significantWords } from './groundPlace';
+import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 
 /**
  * Short-lived server memory of the pages any page reading tool returned, so a place claim can be
@@ -12,6 +15,10 @@ export interface FetchedPage {
   text: string;
   /** Stamped here, from the server clock. */
   fetched_at: string;
+  /** True when this is one search result's own text rather than a page read in full. */
+  is_snippet: boolean;
+  /** True for a search result, or a page read from a link a search of this chat returned. */
+  from_search: boolean;
 }
 
 /** The tenant and chat a page was read in; a stored page is only visible inside that one chat. */
@@ -23,11 +30,35 @@ export interface FetchedPageScope {
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_PAGES = 50;
 
-/** Longest page text kept for checking a place claim; the same bound the Tavily reader hands the model. */
-export const FETCHED_PAGE_TEXT_MAX_CHARS = 8000;
+/** Longest page text kept for checking a place claim. Well above the page read budget (about 10,000 characters), so the full page fits. */
+export const FETCHED_PAGE_TEXT_MAX_CHARS = 64_000;
 
 /** Longest link kept as a store key. A longer link is not recorded; a page a person reads has a far shorter one. */
 const MAX_STORED_URL_CHARS = 2048;
+
+/** Searches remembered per chat, and chats remembered at once, so the query check stays bounded. */
+const MAX_QUERIES_PER_CHAT = 50;
+const MAX_CHATS_WITH_QUERIES = 200;
+/** Result links remembered per chat: every search kept, at up to 20 results each. */
+const MAX_RESULT_LINKS_PER_CHAT = MAX_QUERIES_PER_CHAT * 20;
+
+/**
+ * A claim is an echo when at least this share of its telling words are search words. Over half, so
+ * a real place may share its town or one name word with the search, while a claim built mostly from
+ * the search, in any order or with one word added, is refused.
+ */
+const QUERY_ECHO_SHARE = 0.6;
+
+interface ChatSearches {
+  queries: number;
+  /** Every word of every search this chat ran. */
+  words: Set<string>;
+  /** Store keys of the links those searches returned. */
+  result_links: Set<string>;
+  /** A search had a word that mixes scripts, so its words cannot be compared; every claim counts as an echo. */
+  has_mixed_script_word: boolean;
+  expires_at: number;
+}
 
 /**
  * The key a page is stored and looked up under. Spellings that reach the same page count as one:
@@ -47,13 +78,27 @@ function pageUrlKey(raw: string): string {
   return `${scheme}//${url.hostname.toLowerCase()}${port}${path}${url.search}`;
 }
 
+function chatKey(scope: FetchedPageScope): string {
+  return `${scope.tenant_id}\u0000${scope.conversation_id}\u0000`;
+}
+
 /** The store key of one page in one chat: the chat first, so no two chats ever share an entry. */
 function storeKey({ scope, url }: { scope: FetchedPageScope; url: string }): string {
-  return `${scope.tenant_id}\u0000${scope.conversation_id}\u0000${pageUrlKey(url)}`;
+  return `${chatKey(scope)}${pageUrlKey(url)}`;
+}
+
+function wordsOf(text: string): string[] {
+  const words = normalizedWords(text).trim();
+  return words === '' ? [] : words.split(' ');
 }
 
 export class FetchedPageStore {
   readonly #pages = new Map<string, FetchedPage & { expires_at: number }>();
+  /**
+   * Each chat's searches. A page from a search never outlives them, so it is always checked
+   * against the searches it came from.
+   */
+  readonly #searches = new Map<string, ChatSearches>();
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #maxPages: number;
@@ -64,26 +109,73 @@ export class FetchedPageStore {
     this.#maxPages = input.maxPages;
   }
 
+  /**
+   * A page the person's read tool returned. It replaces any search snippet kept for the same link.
+   * A page read from a link a search of this chat returned is checked against that chat's searches.
+   */
   remember({ scope, url, text }: { scope: FetchedPageScope; url: string; text: string }): FetchedPage {
+    return this.#store({ scope, url, text, is_snippet: false });
+  }
+
+  /**
+   * A search result's own text, kept as a source. It never replaces a page already read for the same
+   * link, so a snippet cannot weaken a page.
+   */
+  rememberSnippet({ scope, url, text }: { scope: FetchedPageScope; url: string; text: string }): FetchedPage {
+    const existing = this.#live({ scope, url });
+    if (existing !== undefined && !existing.is_snippet) {
+      return existing;
+    }
+    return this.#store({ scope, url, text, is_snippet: true });
+  }
+
+  #store({
+    scope,
+    url,
+    text,
+    is_snippet,
+  }: {
+    scope: FetchedPageScope;
+    url: string;
+    text: string;
+    is_snippet: boolean;
+  }): FetchedPage {
     const now = this.#now();
-    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString() };
+    const searches = this.#liveSearches(chatKey(scope));
+    const from_search = is_snippet || searches?.result_links.has(pageUrlKey(url)) === true;
+    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString(), is_snippet, from_search };
     if (url.length > MAX_STORED_URL_CHARS) {
       return page;
     }
     const key = storeKey({ scope, url });
     this.#pages.delete(key);
-    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs });
+    if (from_search && searches === undefined) {
+      // A search result with no search left to check it against is never a source.
+      return page;
+    }
+    const expires_at = Math.min(now + this.#ttlMs, searches?.expires_at ?? Number.POSITIVE_INFINITY);
+    this.#pages.set(key, { ...page, expires_at });
     while (this.#pages.size > this.#maxPages) {
-      const oldest = this.#pages.keys().next();
-      if (oldest.done) {
+      const victim = this.#evictionVictim();
+      if (victim === undefined) {
         break;
       }
-      this.#pages.delete(oldest.value);
+      this.#pages.delete(victim);
     }
     return page;
   }
 
-  recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
+  /** Snippets go first, so a search never pushes out a page a person's read tool fetched. */
+  #evictionVictim(): string | undefined {
+    for (const [key, stored] of this.#pages) {
+      if (stored.is_snippet) {
+        return key;
+      }
+    }
+    return this.#pages.keys().next().value;
+  }
+
+  #live({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
     if (url.length > MAX_STORED_URL_CHARS) {
       return undefined;
     }
@@ -92,11 +184,115 @@ export class FetchedPageStore {
     if (stored === undefined) {
       return undefined;
     }
-    if (stored.expires_at <= this.#now()) {
+    if (stored.expires_at <= this.#now() || (stored.from_search && this.#liveSearches(chatKey(scope)) === undefined)) {
       this.#pages.delete(key);
       return undefined;
     }
-    return { url: stored.url, text: stored.text, fetched_at: stored.fetched_at };
+    return {
+      url: stored.url,
+      text: stored.text,
+      fetched_at: stored.fetched_at,
+      is_snippet: stored.is_snippet,
+      from_search: stored.from_search,
+    };
+  }
+
+  recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
+    return this.#live({ scope, url });
+  }
+
+  /** A search this chat ran, kept so a place copied from the search words is never taken as found. */
+  rememberQuery({ scope, query }: { scope: FetchedPageScope; query: string }): void {
+    const words = wordsOf(query);
+    if (words.length === 0) {
+      return;
+    }
+    const key = chatKey(scope);
+    const entry = this.#liveSearches(key) ?? {
+      queries: 0,
+      words: new Set<string>(),
+      result_links: new Set<string>(),
+      has_mixed_script_word: false,
+      expires_at: 0,
+    };
+    this.#searches.delete(key);
+    entry.queries += 1;
+    for (const word of words) {
+      entry.words.add(word);
+    }
+    entry.expires_at = this.#now() + this.#ttlMs;
+    if (entry.queries > MAX_QUERIES_PER_CHAT) {
+      // Too many searches to keep: start that chat afresh, with nothing taken from the old ones.
+      this.#dropFromSearch(key);
+      entry.queries = 1;
+      entry.words = new Set(words);
+      entry.result_links.clear();
+      entry.has_mixed_script_word = false;
+    }
+    entry.has_mixed_script_word ||= hasMixedScriptWord(query);
+    this.#searches.set(key, entry);
+    while (this.#searches.size > MAX_CHATS_WITH_QUERIES) {
+      const oldest = this.#searches.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.#searches.delete(oldest);
+      this.#dropFromSearch(oldest);
+    }
+  }
+
+  /** A link a search of this chat returned, kept or not, so a page later read from it is checked too. */
+  rememberResultLink({ scope, url }: { scope: FetchedPageScope; url: string }): void {
+    const entry = this.#liveSearches(chatKey(scope));
+    if (entry === undefined) {
+      return;
+    }
+    const link = pageUrlKey(url);
+    entry.result_links.delete(link);
+    entry.result_links.add(link);
+    while (entry.result_links.size > MAX_RESULT_LINKS_PER_CHAT) {
+      const oldest = entry.result_links.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      entry.result_links.delete(oldest);
+    }
+  }
+
+  /**
+   * Whether a name, address or result text is mostly words from this chat's searches, compared as a
+   * set so order, punctuation and an added word do not hide it. Deny by default: text with no telling
+   * words, a chat with no searches left, or a chat whose searches mixed scripts in a word, counts as an echo.
+   */
+  echoesQueries({ scope, text }: { scope: FetchedPageScope; text: string }): boolean {
+    const entry = this.#liveSearches(chatKey(scope));
+    const telling = [...significantWords(text)];
+    if (entry === undefined || entry.has_mixed_script_word || telling.length === 0) {
+      return true;
+    }
+    const searched = telling.filter(word => entry.words.has(word)).length;
+    return searched / telling.length >= QUERY_ECHO_SHARE;
+  }
+
+  #liveSearches(key: string): ChatSearches | undefined {
+    const entry = this.#searches.get(key);
+    if (entry === undefined) {
+      return undefined;
+    }
+    if (entry.expires_at <= this.#now()) {
+      this.#searches.delete(key);
+      this.#dropFromSearch(key);
+      return undefined;
+    }
+    return entry;
+  }
+
+  #dropFromSearch(chat: string): void {
+    for (const [key, stored] of this.#pages) {
+      if (stored.from_search && key.startsWith(chat)) {
+        this.#pages.delete(key);
+      }
+    }
   }
 }
 
@@ -209,6 +405,22 @@ export function isPageReaderTool(name: string): boolean {
 }
 
 /**
+ * The tools whose results are a list of search hits, by name. Only these record snippets: a page
+ * reader's output links to pages it never showed, so its results are never search hits.
+ */
+const SEARCH_RESULT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  TAVILY_SEARCH_TOOL_NAME,
+  'web_search',
+  'web_search_exa',
+  'web_search_advanced_exa',
+]);
+
+/** Whether a tool's results may be recorded one search hit at a time. */
+export function isSearchResultTool(name: string): boolean {
+  return SEARCH_RESULT_TOOL_NAMES.has(name) && !PAGE_READER_TOOL_NAMES.has(name);
+}
+
+/**
  * Records what a page reading tool actually read, so a later place claim can be checked against it.
  * Only a page the call itself named as the page to read counts: a search names no page, even when
  * its text is itself a link, and a page a result only links to was never read. The caller decides
@@ -259,4 +471,70 @@ export function recordFetchedPages(input: {
     }
   }
   return recorded.size;
+}
+
+/**
+ * The words one search result carries about itself: its title, its snippet, and any page text it
+ * has. Only these fields, so a provider's summary or the call's own query never reaches the store.
+ */
+function searchResultPartsOf(record: Record<string, unknown>): string[] {
+  const parts = [stringField(record, 'title'), stringField(record, 'snippet'), pageTextOf(record)].filter(
+    (part): part is string => part !== undefined,
+  );
+  return [...new Set(parts)];
+}
+
+/**
+ * Records each result a search tool returned as a source, keyed by that result's own link. Only the
+ * results list counts: the query, a result whose title or text is mostly this chat's search words,
+ * and any answer a provider wrote are never recorded. A call whose arguments name a link fetched something, so nothing from it is recorded.
+ * A snippet only fills in a link no page read has covered. Returns how many results were recorded.
+ */
+export function recordSearchResults(input: {
+  pages: FetchedPageStore;
+  scope: FetchedPageScope;
+  toolArguments: unknown;
+  texts: readonly string[];
+}): number {
+  const sent = collectOutboundStrings(input.toolArguments);
+  if (sent === undefined || namesUrl(sent.values)) {
+    return 0;
+  }
+  for (const query of sent.values) {
+    input.pages.rememberQuery({ scope: input.scope, query });
+  }
+  let recorded = 0;
+  for (const text of input.texts) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed) || !Array.isArray(parsed['results'])) {
+      continue;
+    }
+    for (const item of parsed['results']) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const url = stringField(item, 'url');
+      if (url === undefined || url.length > MAX_STORED_URL_CHARS) {
+        continue;
+      }
+      input.pages.rememberResultLink({ scope: input.scope, url });
+      const parts = searchResultPartsOf(item);
+      if (parts.length === 0 || parts.some(part => input.pages.echoesQueries({ scope: input.scope, text: part }))) {
+        continue;
+      }
+      const resultText = parts.join('\n');
+      input.pages.rememberSnippet({
+        scope: input.scope,
+        url,
+        text: resultText.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS),
+      });
+      recorded += 1;
+    }
+  }
+  return recorded;
 }

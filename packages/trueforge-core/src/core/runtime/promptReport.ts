@@ -16,7 +16,7 @@ export interface PromptReportRow {
 }
 
 export interface PromptReport {
-  /** System prompt sections in the order sent. Nested rows have a `/` in their name. */
+  /** System prompt sections, then the per-reply block's, in the order sent. Nested rows have a `/` in their name. */
   sections: PromptReportRow[];
   /** Tool definitions in the order sent. */
   tools: PromptReportRow[];
@@ -28,7 +28,9 @@ export interface PromptReportInput {
   definition: Omit<AgentDefinition, 'modelClient'>;
   capabilities?: readonly AgentCapability[] | undefined;
   sandbox?: Sandbox | undefined;
-  /** The person's message the turn answers; it decides which tool bundles the request carries. */
+  /** Whether the server has a sandbox at all. See ITurnResourceResolver.serverSandboxAvailable. */
+  serverSandboxAvailable?: boolean | undefined;
+  /** The person's message the turn answers. The tools and system prompt are the same whatever it says. */
   message: string;
 }
 
@@ -124,6 +126,7 @@ export async function measurePromptRequest(input: PromptReportInput): Promise<Pr
     threadId: 'prompt-report',
     title: 'Prompt report',
     sandbox: input.sandbox,
+    serverSandboxAvailable: input.serverSandboxAvailable,
     capabilities: input.capabilities ?? [],
     context: [{ role: 'user', content: input.message }],
     toolCallMemo: undefined,
@@ -142,9 +145,11 @@ export async function measurePromptRequest(input: PromptReportInput): Promise<Pr
     throw new Error('Prompt report: the thread sent no model request.');
   }
 
-  const systemMessage = request.messages.find(message => message.role === 'system');
-  const system = typeof systemMessage?.content === 'string' ? systemMessage.content : '';
-  const sections = sectionRows(system);
+  // The first system message is the system prompt; the later one is the per-reply block, which
+  // carries the date and, in a chat bound to a repository, its state.
+  const sections = request.messages.flatMap(message =>
+    message.role === 'system' && typeof message.content === 'string' ? sectionRows(message.content) : [],
+  );
   const tools = (request.tools ?? []).map(tool => ({
     name: tool.type === 'function' ? tool.function.name : tool.type,
     tokens: Math.round(estimateTokensForString(JSON.stringify(tool))),

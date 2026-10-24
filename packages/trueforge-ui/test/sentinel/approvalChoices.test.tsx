@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
+import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { offersChangeIt } from '@/sentinel/approvalChoices.js';
@@ -30,9 +31,10 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Approve for this chat in Details, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Approve for this chat in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
+        approvalId="approval-1"
         othersWaiting={0}
         card={card}
         onApprove={vi.fn()}
@@ -41,6 +43,8 @@ describe('approval choices', () => {
       />,
     );
     expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
+    // A choice the server offers is never folded into the closed Details block.
+    expect(screen.getByRole('button', { name: 'Approve for this chat' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
       'title',
@@ -78,6 +82,9 @@ describe('approval choices', () => {
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async patch => ({ ...settings, ...patch })),
@@ -134,6 +141,11 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, email: mail })).toBe(true);
     expect(offersChangeIt({ ...card, calendar_event: event })).toBe(true);
     expect(offersChangeIt({ ...card, schedule })).toBe(true);
+  });
+
+  it('offers Change it for a held web search, so its words can be edited before it is sent', () => {
+    const plain_what = searchHoldCardText({ summary: 'Example Person clinic hours', say: HOLD_SAY.private_detail });
+    expect(offersChangeIt({ ...card, plain_what })).toBe(true);
   });
 
   it('offers Change it for a new specialist', () => {

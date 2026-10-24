@@ -30,7 +30,7 @@ async function screenshotDir(): Promise<string> {
 /** Opens Settings > Memory > Sharing from the shell, the way a person reaches it. */
 async function openSharingTab(page: Page) {
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  await page.getByRole('button', { name: 'Memory', exact: true }).click();
+  await page.getByRole('tab', { name: 'Memory', exact: true }).click();
   await page.getByRole('tab', { name: 'Sharing' }).click();
   await page.getByRole('list', { name: LIST_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 }

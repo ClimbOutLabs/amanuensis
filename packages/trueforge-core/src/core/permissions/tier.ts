@@ -5,6 +5,7 @@
  */
 import { z } from '@hono/zod-openapi';
 
+import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
 import { Tier3MailboxSchema } from './tierMailbox';
 
@@ -37,22 +38,33 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'mcp_destructive_hint',
   'mcp_open_world_hint',
   'connector_send',
-  'calendar_write',
+  'calendar_write_guests',
+  'caldav_calendar_guests',
+  'caldav_invitation_reply',
+  'connector_calendar_write',
   'schedule_write',
   'persona_write',
 ]);
+
+/**
+ * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
+ * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ */
+export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
-/** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
+/** Machine-readable reasons a Tier 3 action is auto-denied: without a card, or after its card went unanswered. */
 export const AUTO_DENY_REASONS = [
+  APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
   'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
   'private_text_check',
+  'tool_not_prepared',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];

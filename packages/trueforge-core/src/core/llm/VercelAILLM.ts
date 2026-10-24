@@ -31,6 +31,7 @@ import type {
   ChatCompletionContentPart,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
+  ChatCompletionSystemMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
@@ -844,9 +845,11 @@ export interface ConvertedMessages {
 }
 
 /**
- * System messages are extracted into `instructions`, since SDK v7 no longer accepts
- * `{ role: 'system' }` in the messages array. The toolCallId → toolName lookup is built first
- * because tool result messages carry only the id.
+ * The first message, when it is a system message, is the static instruction and becomes `instructions`.
+ * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
+ * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
+ * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
+ * toolName lookup is built first because tool result messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -871,16 +874,37 @@ export function convertMessages({
     }
   }
 
+  const lastUserIndex = findLastUserIndex(messages);
   const systemParts: string[] = [];
-  const result: ModelMessage[] = [];
-  for (const msg of messages) {
-    if (msg.role === 'system') {
-      const content = typeof msg.content === 'string' ? msg.content : msg.content.map(p => p.text).join('');
+  // With no user message there is nothing to carry per-reply context, so it stays in instructions.
+  const turnContextParts: string[] = [];
+  for (const [index, msg] of messages.entries()) {
+    if (msg.role !== 'system') {
+      continue;
+    }
+    const content = systemContentText(msg.content);
+    if (index === 0 || lastUserIndex === -1) {
       systemParts.push(content);
+    } else {
+      turnContextParts.push(content);
+    }
+  }
+
+  const result: ModelMessage[] = [];
+  for (const [index, msg] of messages.entries()) {
+    if (msg.role === 'system') {
       continue;
     }
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: toUserContent(msg.content) });
+      const userContent = toUserContent(msg.content);
+      if (index !== lastUserIndex || turnContextParts.length === 0) {
+        result.push({ role: 'user', content: userContent });
+        continue;
+      }
+      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
+      const ownParts: UserContent =
+        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
+      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -906,6 +930,23 @@ export function convertMessages({
     // 'developer' / 'function' roles — not used in the harness pipeline; skip.
   }
   return { instructions: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, messages: result };
+}
+
+function systemContentText(content: ChatCompletionSystemMessageParam['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return content.map(p => p.text).join('');
+}
+
+/** Index of the latest user message, or -1 when there is none. */
+function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */
@@ -1102,6 +1143,46 @@ export function providerStatusCode(raw: unknown): number | undefined {
   return undefined;
 }
 
+// Wording providers use when a request does not fit the model's context window
+// (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama, llama.cpp).
+const CONTEXT_LENGTH_ERROR_PATTERN =
+  /context[ _-]?(?:length|window|limit)|available context size|maximum model length|prompt is too long|input is too long|input token count/i;
+
+/**
+ * True when a model error says the request did not fit the model's context window. Checks the
+ * message, the provider's response body, and the cause chain, since the wording can sit at any level.
+ */
+export function isContextLengthError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    const texts: unknown[] = [];
+    if (typeof current === 'string') {
+      texts.push(current);
+    } else if (typeof current === 'object') {
+      if ('message' in current) {
+        texts.push(current.message);
+      }
+      if (APICallError.isInstance(current)) {
+        texts.push(current.responseBody);
+      }
+      if ('data' in current && typeof current.data === 'object' && current.data !== null) {
+        const data: object = current.data;
+        if ('message' in data) {
+          texts.push(data.message);
+        }
+        if ('code' in data) {
+          texts.push(data.code);
+        }
+      }
+    }
+    if (texts.some(text => typeof text === 'string' && CONTEXT_LENGTH_ERROR_PATTERN.test(text))) {
+      return true;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 export function toStreamError(raw: unknown): Error {
   if (raw instanceof Error) {
     return raw;
@@ -1231,9 +1312,11 @@ const REPETITION_PROGRESS_WINDOW_WORDS = REPETITION_SAMPLE_SHINGLES * 4;
  * stream mid-response without a finish signal, or the stream reports a transport-level failure
  * rather than a definite provider response (an `APICallError` carrying a status code, such as an
  * auth or rate-limit failure, is never wrapped as this: that is a real provider answer, not a
- * broken stream, and retrying it after compaction would not help). This is a model fault, not a
- * host fault: the caller (AgentThread) compacts context and retries the call once before giving
- * up. See mapStreamToChunks for the three places a stream is classified this way.
+ * broken stream, and retrying it would not help), except a provider answer that the request is
+ * over the context window (see isContextLengthError). This is a model fault, not a host fault:
+ * the caller (AgentThread) retries the call once before giving up, shortening history first only
+ * for a context-length fault. See mapStreamToChunks for the three places a stream is classified
+ * this way.
  */
 export class ModelStreamFault extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -1392,9 +1475,7 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
  * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
- * so downstream error handling is unchanged; the underlying request is expected to observe that
- * abort (via a combined `AbortSignal`) and end the source stream, which unblocks the `for await`
- * below with a rejection.
+ * so downstream error handling is unchanged, and rejects the pending read at once.
  */
 export async function* enforceStreamDeadlines<T>({
   stream,
@@ -1424,12 +1505,33 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.chunkMs);
   };
 
+  // A provider stream does not always end when its request is aborted, so an expired deadline
+  // rejects the pending read itself; the source is asked to close but never awaited.
+  const iterator = stream[Symbol.asyncIterator]();
+  const expired = new Promise<never>((_, reject) => {
+    const onExpired = () => {
+      const reason: unknown = deadlineController.signal.reason;
+      const expiredError = new Error(describeStreamError(reason), { cause: reason });
+      expiredError.name = 'TimeoutError';
+      reject(expiredError);
+    };
+    if (deadlineController.signal.aborted) {
+      onExpired();
+    } else {
+      deadlineController.signal.addEventListener('abort', onExpired, { once: true });
+    }
+  });
+  // Observed here so an expiry nobody is reading never surfaces as an unhandled rejection.
+  expired.catch(() => undefined);
+
   armFirstChunkTimer();
   try {
-    // The underlying stream is expected to end (reject) shortly after `deadlineController` aborts,
-    // since callers combine it into the signal driving the request — a fired timer is not handled
-    // here so that rejection, not a silent early return, is what ends this generator.
-    for await (const part of stream) {
+    for (;;) {
+      const result = await Promise.race([iterator.next(), expired]);
+      if (result.done === true) {
+        return;
+      }
+      const part = result.value;
       if (hasSubstance(part)) {
         clearTimeout(timer);
         armChunkTimer();
@@ -1438,6 +1540,9 @@ export async function* enforceStreamDeadlines<T>({
     }
   } finally {
     clearTimeout(timer);
+    void Promise.resolve()
+      .then(() => iterator.return?.())
+      .catch(() => undefined);
   }
 }
 
@@ -1678,8 +1783,9 @@ export async function* mapStreamToChunks({
         // Error. Any other error part (no status code: a transport failure or a
         // malformed-response parse failure, the shape a cut/malformed stream like vLLM's
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
-        // ModelStreamFault.
-        if (providerStatusCode(raw) != null) {
+        // ModelStreamFault. A provider answer saying the request is over the context window is
+        // the one definite answer a shorter history can fix, so it is a ModelStreamFault too.
+        if (providerStatusCode(raw) != null && !isContextLengthError(raw)) {
           throw new Error(message, { cause });
         }
         throw new ModelStreamFault(message, { cause });

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { parseToolNotDoneReason } from '@/utils/toolCallParsing.js';
 import {
+  arrivalSignature,
   buildLongWaitAnnouncement,
   buildLongWaitNote,
+  COMPACTING_LINE,
+  countWords,
   deriveWaitQueue,
   LONG_WAIT_MS,
   type WaitQueueInput,
@@ -74,6 +78,24 @@ describe('deriveWaitQueue', () => {
 
     expect(stationState(snapshot, 'remembering')).toBe('done');
     expect(snapshot.ticks).toEqual([]);
+  });
+
+  it('says the history is being tidied while compaction runs, and gives way once writing starts', () => {
+    const compacting = deriveWaitQueue(input({ compacting: true }));
+    expect(compacting.microcopy).toBe(COMPACTING_LINE);
+    expect(
+      buildLongWaitNote({
+        elapsedMs: 125_000,
+        activeStation: compacting.activeStation,
+        microcopy: compacting.microcopy,
+      }),
+    ).toMatch(/^Still tidying up the conversation, /);
+    expect(
+      buildLongWaitAnnouncement({ activeStation: compacting.activeStation, microcopy: compacting.microcopy }),
+    ).toBe('Still tidying up the conversation. This can take a few minutes.');
+
+    const writing = deriveWaitQueue(input({ compacting: true, parts: [part({ type: 'text' })] }));
+    expect(writing.microcopy).toBe('Writing…');
   });
 
   it('lights Writing when the first tokens stream', () => {
@@ -326,5 +348,160 @@ describe('long-wait show', () => {
     expect(first).toBe(second);
     expect(first).not.toMatch(/\d+s/);
     expect(first).toBe('Still searching the web — this is taking longer than usual.');
+  });
+});
+
+/** A tool result envelope as the server writes it, for one disposition. */
+function toolResult(outcome: Record<string, unknown>): string {
+  return JSON.stringify({ schema_version: 'tool.response.v2', outcome, result: {} });
+}
+
+describe('refused and not-run tool calls in progress lines', () => {
+  it('says a refused send_draft was not sent, using the owner line the chat shows', () => {
+    const result = toolResult({
+      disposition: 'policy_blocked',
+      remediation: { suggested_action: 'contact_user', message: 'Sending mail needs your approval first.' },
+    });
+    const snapshot = deriveWaitQueue(
+      input({
+        parts: [
+          part({
+            type: 'tool-call',
+            toolName: 'send_draft',
+            statusType: 'complete',
+            notDoneReason: parseToolNotDoneReason(result),
+          }),
+        ],
+      }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Not sent: Sending mail needs your approval first.']);
+  });
+
+  it('says a refused create_event was not done, and never shows it as finished', () => {
+    const snapshot = deriveWaitQueue(
+      input({
+        parts: [
+          part({
+            type: 'tool-call',
+            toolName: 'create_event',
+            statusType: 'complete',
+            notDoneReason: parseToolNotDoneReason(toolResult({ disposition: 'denied' })),
+          }),
+        ],
+      }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Not done: you said no']);
+    expect(snapshot.ticks.some(tick => tick.startsWith('Finished'))).toBe(false);
+  });
+
+  it('keeps the normal tick for a call that ran', () => {
+    const result = toolResult({ disposition: 'executed_ok' });
+    expect(parseToolNotDoneReason(result)).toBeUndefined();
+    const snapshot = deriveWaitQueue(
+      input({ parts: [part({ type: 'tool-call', toolName: 'send_draft', statusType: 'complete' })] }),
+    );
+
+    expect(snapshot.ticks).toEqual(['Finished Send draft']);
+  });
+});
+
+describe('reasoning in the wait line', () => {
+  it('says "Reasoning…" with a live word count while reasoning streams', () => {
+    const snapshot = deriveWaitQueue(input({ parts: [part({ type: 'reasoning', reasoningWords: 1240 })] }));
+
+    expect(snapshot.microcopy).toBe('Reasoning… 1,240 words so far');
+    expect(stationState(snapshot, 'listening')).toBe('done');
+  });
+
+  it('counts words across every reasoning part of the turn', () => {
+    const snapshot = deriveWaitQueue(
+      input({
+        parts: [
+          part({ type: 'reasoning', statusType: 'complete', reasoningWords: 300 }),
+          part({ type: 'tool-call', toolName: 'web_search', statusType: 'complete' }),
+          part({ type: 'reasoning', reasoningWords: 1 }),
+        ],
+      }),
+    );
+
+    expect(snapshot.microcopy).toBe('Reasoning… 301 words so far');
+  });
+
+  it('says "1 word" for a single word', () => {
+    const snapshot = deriveWaitQueue(input({ parts: [part({ type: 'reasoning', reasoningWords: 1 })] }));
+
+    expect(snapshot.microcopy).toBe('Reasoning… 1 word so far');
+  });
+
+  it('says just "Reasoning…" when the stream carries no reasoning text', () => {
+    const snapshot = deriveWaitQueue(input({ parts: [part({ type: 'reasoning', reasoningWords: 0 })] }));
+
+    expect(snapshot.microcopy).toBe('Reasoning…');
+  });
+
+  it('gives way to writing and to running tools', () => {
+    const writing = deriveWaitQueue(
+      input({ parts: [part({ type: 'reasoning', reasoningWords: 50 }), part({ type: 'text' })] }),
+    );
+    const tool = deriveWaitQueue(
+      input({
+        parts: [part({ type: 'reasoning', reasoningWords: 50 }), part({ type: 'tool-call', toolName: 'web_search' })],
+      }),
+    );
+
+    expect(writing.microcopy).toBe('Writing…');
+    expect(tool.microcopy).toBe('Searching the web…');
+  });
+
+  it('goes back to "Thinking it through…" once reasoning has finished', () => {
+    const snapshot = deriveWaitQueue(
+      input({ parts: [part({ type: 'reasoning', statusType: 'complete', reasoningWords: 80 })] }),
+    );
+
+    expect(snapshot.microcopy).toBe('Thinking it through…');
+  });
+
+  it('counts words the way a person would', () => {
+    expect(countWords('')).toBe(0);
+    expect(countWords('   ')).toBe(0);
+    expect(countWords('Check the calendar,\nthen  reply.')).toBe(5);
+  });
+});
+
+describe('arrivalSignature', () => {
+  const memory = { available: true, landed: false };
+
+  it('changes when more reasoning text arrives', () => {
+    const before = arrivalSignature({ parts: [part({ type: 'reasoning', arrivedChars: 10 })], memory });
+    const after = arrivalSignature({ parts: [part({ type: 'reasoning', arrivedChars: 42 })], memory });
+
+    expect(after).not.toBe(before);
+  });
+
+  it('changes when a part finishes, a part appears, or memory lands', () => {
+    const base = arrivalSignature({ parts: [part({ type: 'tool-call', arrivedChars: 2 })], memory });
+
+    expect(
+      arrivalSignature({ parts: [part({ type: 'tool-call', statusType: 'complete', arrivedChars: 3 })], memory }),
+    ).not.toBe(base);
+    expect(
+      arrivalSignature({
+        parts: [part({ type: 'tool-call', arrivedChars: 2 }), part({ type: 'text', arrivedChars: 1 })],
+        memory,
+      }),
+    ).not.toBe(base);
+    expect(
+      arrivalSignature({ parts: [part({ type: 'tool-call', arrivedChars: 2 })], memory: { ...memory, landed: true } }),
+    ).not.toBe(base);
+  });
+
+  it('stays the same when nothing new arrived', () => {
+    const parts = [part({ type: 'reasoning', arrivedChars: 10 }), part({ type: 'indicator' })];
+
+    expect(arrivalSignature({ parts, memory })).toBe(
+      arrivalSignature({ parts: [part({ type: 'reasoning', arrivedChars: 10 })], memory }),
+    );
   });
 });

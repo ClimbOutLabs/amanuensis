@@ -95,11 +95,19 @@ function fakeApi(state: FakeState): RepositoryWorkApi {
   };
 }
 
-function renderControls(api: RepositoryWorkApi, props: { sessionId: string | null; isRunning?: boolean }) {
+function renderControls(
+  api: RepositoryWorkApi,
+  props: { sessionId: string | null; isRunning?: boolean; sandboxOff?: boolean },
+) {
   const sendMessage = vi.fn();
   const view = render(
     <RepositoryWorkProvider api={api}>
-      <WorkOnRepoControls sessionId={props.sessionId} isRunning={props.isRunning ?? false} sendMessage={sendMessage} />
+      <WorkOnRepoControls
+        sessionId={props.sessionId}
+        isRunning={props.isRunning ?? false}
+        sandboxOff={props.sandboxOff ?? false}
+        sendMessage={sendMessage}
+      />
     </RepositoryWorkProvider>,
   );
   return { sendMessage, view };
@@ -123,14 +131,14 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -156,12 +164,18 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} turnFailed sendMessage={sendMessage} />
+        <WorkOnRepoControls
+          sessionId="session-1"
+          isRunning={false}
+          turnFailed
+          sandboxOff={false}
+          sendMessage={sendMessage}
+        />
       </RepositoryWorkProvider>,
     );
 
@@ -178,12 +192,12 @@ describe('WorkOnRepoControls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start work' }));
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -273,6 +287,21 @@ describe('WorkOnRepoControls', () => {
     expect(screen.getByText('ruff check .')).toBeInTheDocument();
   });
 
+  it('explains the sandbox switch instead of opening the picker when the sandbox is off', async () => {
+    const state: FakeState = { bound: false, proposals: [] };
+    const api = fakeApi(state);
+    renderControls(api, { sessionId: 'session-1', sandboxOff: true });
+
+    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Your GitHub repos')).not.toBeInTheDocument();
+    expect(api.listGithubRepositories).not.toHaveBeenCalled();
+  });
+
   it('stops working on the repo from the indicator', async () => {
     const state: FakeState = { bound: true, proposals: [] };
     const api = fakeApi(state);
@@ -306,14 +335,14 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {

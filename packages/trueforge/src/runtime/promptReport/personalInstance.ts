@@ -34,14 +34,20 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
-export type PersonalInstanceName = 'personal' | 'personal-with-google';
+export type PersonalInstanceName =
+  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox';
 
 /** Every standard setup the report measures, in report order. */
-export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
+export const PERSONAL_INSTANCE_NAMES = [
+  'personal',
+  'personal-with-google',
+  'personal-no-sandbox',
+  'personal-no-server-sandbox',
+] satisfies PersonalInstanceName[];
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
 
-/** Typical turns, each a message the person sends: what it asks for decides which tool bundles go out. */
+/** Typical turns, each a message the person sends; every turn sends the same prompt and tools. */
 export const PROMPT_REPORT_TURNS: Record<PromptReportTurn, string> = {
   'core-only': 'Thanks, that is all for now.',
   calendar: 'Add a reminder to my calendar for Thursday at 9:00: dentist.',
@@ -71,7 +77,7 @@ const GOOGLE_WRITE_SCOPES = [
 export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
+  recallMaxTokens: 600,
   recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
@@ -229,11 +235,11 @@ function webSearchConnector(): { url: string; headers: Record<string, string>; s
   };
 }
 
-function personalSpec(): AgentSpec {
+function personalSpec(input: { sandbox: boolean }): AgentSpec {
   return AgentSpecSchema.parse({
     model: { name: MODEL_NAME },
     instructions: '',
-    config: { sandbox: { enabled: true } },
+    config: { sandbox: { enabled: input.sandbox } },
     mcp_servers: [{ name: WEB_SEARCH_SERVER }],
   });
 }
@@ -242,7 +248,8 @@ function personalSpec(): AgentSpec {
 export interface PersonalInstance {
   definition: ResolvedAgentDefinition['definition'];
   capabilities: AgentCapability[];
-  sandbox: Sandbox;
+  /** Absent for a configuration whose spec turns the sandbox off. */
+  sandbox: Sandbox | undefined;
   /** The permission context the turn's own thread gets, sharing the resolver's search state. */
   sentinel: SentinelHostContext;
 }
@@ -258,8 +265,12 @@ export async function buildPersonalInstance(input: {
 }): Promise<PersonalInstance> {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const sandbox = new Sandbox({
     provider: sandboxProvider(),
+    fileDownloadEnabled: spec.config.sandbox.file_downloads,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -281,6 +292,7 @@ export async function buildPersonalInstance(input: {
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
     schedules: scheduleContext(logger),
+    startsAnswer: true,
   };
   const resolver = new SpaceTurnResourceResolver(
     {
@@ -317,7 +329,6 @@ export async function buildPersonalInstance(input: {
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  const spec = personalSpec();
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,
@@ -333,8 +344,8 @@ export async function buildPersonalInstance(input: {
     definition,
     compactionModel: resolved.compactionModel,
     isChild: false,
-    sandbox,
-    sandboxAvailable: true,
+    sandbox: sandboxEnabled ? sandbox : undefined,
+    sandboxAvailable: sandboxEnabled,
     tracing,
     logger,
     extraCapabilities: resolved.extraCapabilities,
@@ -346,7 +357,7 @@ export async function buildPersonalInstance(input: {
     conversation_id: SESSION_ID,
     web_search: resolver.webSearchTurn,
   });
-  return { definition, capabilities, sandbox, sentinel };
+  return { definition, capabilities, sandbox: sandboxEnabled ? sandbox : undefined, sentinel };
 }
 
 /** Measures one standard configuration answering one typical turn. */
@@ -359,5 +370,13 @@ export async function measurePersonalInstance(input: {
     googleAccess: 'read',
     sentinelServices: undefined,
   });
-  return measurePromptRequest({ definition, capabilities, sandbox, message: PROMPT_REPORT_TURNS[input.turn] });
+  // 'personal-no-sandbox' turns the sandbox off for this chat while the server still has one (sandbox-off line).
+  // 'personal-no-server-sandbox' has no server sandbox at all (no-sandbox line).
+  return measurePromptRequest({
+    definition,
+    capabilities,
+    sandbox,
+    serverSandboxAvailable: input.name !== 'personal-no-server-sandbox',
+    message: PROMPT_REPORT_TURNS[input.turn],
+  });
 }

@@ -1,6 +1,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from 'winston';
 import type { z } from 'zod';
+import type { ApprovalDecision } from '../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../google/errors';
 import type { GoogleFeature } from '../google/scopes';
 import { errorResult, failureResult, jsonResult } from '../google/toolResults';
@@ -16,7 +17,7 @@ import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { extractErrorLogFields } from '../util/errorLogFields';
-import { CalendarApi } from './CalendarApi';
+import type { CalendarApiPort } from './CalendarApi';
 import {
   hashEventWrite,
   resolveCreate,
@@ -45,12 +46,50 @@ import {
   type UpdateEventInput,
 } from './toolContract';
 
-/** Keys the host adds to an approved write: the zone the times were read in, and the hash of what was shown. */
+/**
+ * Keys the host adds to an approved write: the zone the times were read in, the hash of what was shown, and
+ * whether the write reaches any guest. A standing grant admits only a write that reaches no guest.
+ */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
 const REVIEW_HASH_KEY = 'review_hash';
+const REACHES_GUESTS_KEY = 'reaches_guests';
 
 const NO_ZONE =
   "Nothing was saved because Aman doesn't know which time zone the times are in. Ask the user, then pass time_zone.";
+const NO_ZONE_OWNER =
+  'Aman could not change the event: it does not know which time zone the times are in. Ask again and say your time zone.';
+
+/** Plain names for the event fields a person would recognise, used in refusals. */
+const EVENT_FIELD_LABELS: Readonly<Record<string, string>> = {
+  start: 'start time',
+  end: 'end time',
+  title: 'title',
+  location: 'location',
+  description: 'description',
+  attendees: 'guests',
+  send_updates: 'guest email setting',
+  time_zone: 'time zone',
+};
+
+/** A write that cannot be shown or saved: `failure` goes to the model, `owner_message` is the one line the person sees. */
+interface WriteRefusal {
+  failure: string;
+  owner_message: string;
+}
+
+/** Names the field that failed a schema check, in plain words, so the model and the person can fix it. */
+function describeInvalidEvent(input: { error: z.ZodError; args: unknown }): string {
+  const issue = input.error.issues[0];
+  const field = issue?.path[0];
+  if (typeof field !== 'string') {
+    return `The event details were not valid: ${issue?.message ?? 'a check failed'}.`;
+  }
+  const label = EVENT_FIELD_LABELS[field] ?? `${field} field`;
+  const given = typeof input.args === 'object' && input.args !== null && field in input.args;
+  return given
+    ? `The event details were not valid: the ${label} was not in the right form.`
+    : `The event details were not valid: the ${label} was missing.`;
+}
 
 const NOT_APPROVED = 'This was not approved, so nothing was saved. Ask again to add or change the event.';
 
@@ -60,7 +99,7 @@ const NO_WRITE_NOTE =
 
 interface CalendarToolSetOptions {
   tracing: AgentTracing;
-  api: CalendarApi;
+  api: CalendarApiPort;
   /** The connected address, named in every result. */
   account: string;
   /** Features Google actually granted: tools are offered only for these. */
@@ -124,7 +163,7 @@ export class CalendarToolSet extends LocalToolMCP {
                 "Add an event to the user's primary Google Calendar. Use this, not a calendar file, when the user wants an event saved. Times are local wall-clock times (2026-10-19T09:00) in time_zone, or the user's own zone when it is left out; two dates make an all-day event. With attendees, send_updates must say whether Google emails them. The user sees the whole event and is asked first.",
               schema: CreateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
-              handler: (input, _approval, context) => this.#createEvent({ input, context }),
+              handler: (input, approval, context) => this.#createEvent({ input, approval, context }),
             }),
             defineTool({
               name: UPDATE_EVENT_TOOL_NAME,
@@ -132,7 +171,7 @@ export class CalendarToolSet extends LocalToolMCP {
                 'Move or rename an event the user organizes, by event_id from list_events. Set only what changes; a new start alone keeps the length. If the event has guests, send_updates must say whether Google emails them. Guests cannot be changed and events cannot be deleted. The user sees before and after and is asked first.',
               schema: UpdateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
-              handler: (input, _approval, context) => this.#updateEvent({ input, context }),
+              handler: (input, approval, context) => this.#updateEvent({ input, approval, context }),
             }),
           ]
         : []),
@@ -155,7 +194,14 @@ export class CalendarToolSet extends LocalToolMCP {
     }
     const prepared = isCalendarWriteToolName(params.name) ? await this.#prepareWrite(params) : undefined;
     if (prepared !== undefined && 'failure' in prepared) {
-      return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: prepared.failure } };
+      return {
+        ...info,
+        pre_dispatch_failure: {
+          kind: 'policy_blocked',
+          message: prepared.failure,
+          owner_message: prepared.owner_message,
+        },
+      };
     }
     const canonical = prepared?.approved ?? params.arguments ?? {};
     const decision = await classifyHostToolCall({
@@ -200,23 +246,28 @@ export class CalendarToolSet extends LocalToolMCP {
   /** What a write call will do, for its card; a failure says why it cannot be shown and so is not offered. */
   async #prepareWrite(
     params: CallToolRequest['params'],
-  ): Promise<{ approved: Record<string, unknown>; review: CalendarWriteReview } | { failure: string }> {
+  ): Promise<{ approved: Record<string, unknown>; review: CalendarWriteReview } | WriteRefusal> {
+    const verb = params.name === CREATE_EVENT_TOOL_NAME ? 'add' : 'change';
     try {
       const named = params.arguments?.['time_zone'];
       const zone = await this.#writeZone(named);
       if (zone === null) {
-        return { failure: NO_ZONE };
+        return { failure: NO_ZONE, owner_message: NO_ZONE_OWNER };
       }
       // A held write is classified again when the owner approves it, on their device's zone; naming the zone
       // keeps the times the card shows.
       if (this.#options.sentinel.services.unattended && named === undefined) {
         return {
           failure: `Nothing was saved. In a scheduled run, pass time_zone (here it is ${zone}) so the event keeps its times when the owner approves it.`,
+          owner_message: `Aman could not ${verb} the event: this scheduled run did not name a time zone. Ask again with the time zone.`,
         };
       }
       const resolved = await this.#resolveWrite({ name: params.name, args: params.arguments ?? {}, zone });
       if (!resolved.ok) {
-        return { failure: `Nothing was saved. ${resolved.error}` };
+        return {
+          failure: `Nothing was saved. ${resolved.error}`,
+          owner_message: `Aman could not ${verb} the event. ${resolved.error} Ask again with the details corrected.`,
+        };
       }
       // A create of the same event this chat already made in the last few minutes asks first:
       // the card says so, so the owner can stop a duplicate instead of approving a second copy.
@@ -233,16 +284,22 @@ export class CalendarToolSet extends LocalToolMCP {
           ...(params.arguments ?? {}),
           [APPROVED_ZONE_KEY]: zone,
           [REVIEW_HASH_KEY]: hashEventWrite(resolved.request),
+          [REACHES_GUESTS_KEY]: resolved.review.attendees.length > 0,
         },
         review: resolved.review,
       };
     } catch (error) {
-      if (
-        error instanceof GoogleReconnectRequiredError ||
-        error instanceof GoogleApiError ||
-        error instanceof GoogleOAuthError
-      ) {
-        return { failure: `This could not be shown to you, so nothing was saved. ${error.message}` };
+      if (error instanceof GoogleReconnectRequiredError || error instanceof GoogleOAuthError) {
+        return {
+          failure: `This could not be shown to you, so nothing was saved. ${error.message}`,
+          owner_message: `Aman could not ${verb} the event: Google access needs to be renewed. Open Settings, Connectors, Google and reconnect.`,
+        };
+      }
+      if (error instanceof GoogleApiError) {
+        return {
+          failure: `This could not be shown to you, so nothing was saved. ${error.message}`,
+          owner_message: `Aman could not ${verb} the event: Google Calendar did not answer. Ask again in a few minutes.`,
+        };
       }
       throw error;
     }
@@ -250,16 +307,15 @@ export class CalendarToolSet extends LocalToolMCP {
 
   /** Settles one write from its arguments in a known zone; a change reads the event as Google holds it now. */
   async #resolveWrite(input: { name: string; args: unknown; zone: string }): Promise<ResolvedEventWrite> {
-    const invalid: ResolvedEventWrite = { ok: false, error: 'The event details were not valid.' };
     if (input.name === CREATE_EVENT_TOOL_NAME) {
       const parsed = CreateEventSchema.safeParse(input.args);
       return parsed.success
         ? resolveCreate({ call: parsed.data, zone: input.zone, account: this.#options.account })
-        : invalid;
+        : { ok: false, error: describeInvalidEvent({ error: parsed.error, args: input.args }) };
     }
     const parsed = UpdateEventSchema.safeParse(input.args);
     if (!parsed.success) {
-      return invalid;
+      return { ok: false, error: describeInvalidEvent({ error: parsed.error, args: input.args }) };
     }
     const existing = await this.#options.api.getEvent({ eventId: parsed.data.event_id, timeZone: input.zone });
     return resolveUpdate({ call: parsed.data, zone: input.zone, account: this.#options.account, existing });
@@ -286,22 +342,59 @@ export class CalendarToolSet extends LocalToolMCP {
   }
 
   /**
+   * An answer to this call decides it. With no answer, only a standing grant can admit it, and the classifier
+   * grants one only for a change that reaches no guest, so the card never waives a guest change.
+   */
+  async #writePermitted({
+    approval,
+    toolName,
+    reachesGuests,
+  }: {
+    approval: ApprovalDecision | undefined;
+    toolName: string;
+    reachesGuests: unknown;
+  }): Promise<boolean> {
+    if (approval !== undefined) {
+      return approval.status === 'allow';
+    }
+    if (reachesGuests !== false) {
+      return false;
+    }
+    const { sentinel } = this.#options;
+    return sentinel.services.tool_grants.hasToolGrant({
+      tenant_id: sentinel.tenant_id,
+      created_by: sentinel.created_by,
+      mcp_server_name: CALENDAR_SERVER_ID,
+      tool_name: toolName,
+      mcp_server_host: null,
+    });
+  }
+
+  /**
    * The zone and hash the user approved this exact call under. A call that arrives without them, or with arguments
    * other than the approved ones, writes nothing; so does any call in a scheduled run, where nobody approved it.
    */
-  #approvedWrite<T>(input: {
+  async #approvedWrite<T>(input: {
     call: T;
     schema: z.ZodType<T>;
+    toolName: string;
+    approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
-  }): { zone: string; hash: string } | { refusal: string } {
+  }): Promise<{ zone: string; hash: string } | { refusal: string }> {
     if (this.#options.sentinel.services.unattended) {
       return { refusal: "Scheduled runs never change the calendar. This waits for the owner's OK." };
     }
     const {
       [APPROVED_ZONE_KEY]: zone,
       [REVIEW_HASH_KEY]: hash,
+      [REACHES_GUESTS_KEY]: reachesGuests,
       ...approvedArgs
     } = input.context?.approved_params ?? {};
+    // The approved params are settled when the call is classified, before anyone answers, so only the person's
+    // answer to this very call, or a standing grant the classifier admitted, lets it write.
+    if (!(await this.#writePermitted({ approval: input.approval, toolName: input.toolName, reachesGuests }))) {
+      return { refusal: NOT_APPROVED };
+    }
     if (typeof zone !== 'string' || typeof hash !== 'string') {
       return { refusal: NOT_APPROVED };
     }
@@ -418,8 +511,22 @@ export class CalendarToolSet extends LocalToolMCP {
     });
   }
 
-  async #createEvent({ input, context }: { input: CreateEventInput; context: ToolInvocationContext | undefined }) {
-    const approved = this.#approvedWrite({ call: input, schema: CreateEventSchema, context });
+  async #createEvent({
+    input,
+    approval,
+    context,
+  }: {
+    input: CreateEventInput;
+    approval: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }) {
+    const approved = await this.#approvedWrite({
+      call: input,
+      schema: CreateEventSchema,
+      toolName: CREATE_EVENT_TOOL_NAME,
+      approval,
+      context,
+    });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }
@@ -432,8 +539,22 @@ export class CalendarToolSet extends LocalToolMCP {
     });
   }
 
-  async #updateEvent({ input, context }: { input: UpdateEventInput; context: ToolInvocationContext | undefined }) {
-    const approved = this.#approvedWrite({ call: input, schema: UpdateEventSchema, context });
+  async #updateEvent({
+    input,
+    approval,
+    context,
+  }: {
+    input: UpdateEventInput;
+    approval: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }) {
+    const approved = await this.#approvedWrite({
+      call: input,
+      schema: UpdateEventSchema,
+      toolName: UPDATE_EVENT_TOOL_NAME,
+      approval,
+      context,
+    });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }

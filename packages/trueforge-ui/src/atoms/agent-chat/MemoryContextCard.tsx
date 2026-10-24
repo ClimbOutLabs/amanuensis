@@ -20,13 +20,6 @@ export type MemoryContextCardProps = {
   unavailable?: boolean;
   /** Retries the failed fetch. Only rendered when both `unavailable` and this are set. */
   onRetry?: () => void;
-  /**
-   * The chat-level "Show agent details" switch. A successful recall's item/entity counts are part
-   * of agent details, so they render only while this is true; a recall that needs attention
-   * (timeout/error) still renders regardless, since that state is actionable, not decorative.
-   * Defaults to `true` so existing callers keep their prior behavior.
-   */
-  agentDetailsVisible?: boolean;
   className?: string;
 };
 
@@ -152,18 +145,8 @@ function ProfileRow({ event }: { event: TrueForgeApi.ProfileLearnedPersistedEven
  * happened" this turn. A viewer, not an editor: there is no control here that changes anything the
  * host holds — `onRetry` only re-issues the read.
  */
-export function MemoryContextCard({
-  recall,
-  profile,
-  unavailable,
-  onRetry,
-  agentDetailsVisible = true,
-  className,
-}: MemoryContextCardProps) {
-  const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
-  const visibleRecall = recall != null && (agentDetailsVisible || recallOutcomeBad) ? recall : undefined;
-
-  if (visibleRecall == null && profile == null) {
+export function MemoryContextCard({ recall, profile, unavailable, onRetry, className }: MemoryContextCardProps) {
+  if (recall == null && profile == null) {
     if (!unavailable) return null;
     return (
       <div
@@ -198,7 +181,7 @@ export function MemoryContextCard({
       className={cn('mb-3 flex flex-col gap-3 rounded-lg border border-border bg-card-bg p-2', className)}
       data-testid="memory-context-card"
     >
-      {visibleRecall && <RecallRow event={visibleRecall} />}
+      {recall && <RecallRow event={recall} />}
       {profile && <ProfileRow event={profile} />}
     </div>
   );

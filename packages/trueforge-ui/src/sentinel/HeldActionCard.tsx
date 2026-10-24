@@ -144,9 +144,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {card.outbound_text !== null && (
           <div className="rounded border border-border bg-secondary-bg px-3 py-2">
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
-              Exactly what will be sent
-            </p>
+            <p className="mb-1 text-xs font-medium text-text-secondary">Full request</p>
             {card.outbound_truncated && (
               <p className="mb-1 text-sm font-medium text-text-primary" data-role="held-action-truncated">
                 Part of this is not shown in full. Check it before you approve.

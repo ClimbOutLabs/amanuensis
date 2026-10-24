@@ -51,6 +51,7 @@ export type VendorIncompatibleEventType =
   | 'aman.sandbox.provisioning'
   | 'aman.model.usage'
   | 'agent.context.compaction'
+  | 'agent.context.compaction_started'
   | 'document.ingestion';
 
 const INCOMPATIBLE_EVENT_TYPES: readonly string[] = [
@@ -61,6 +62,7 @@ const INCOMPATIBLE_EVENT_TYPES: readonly string[] = [
   'aman.sandbox.provisioning',
   'aman.model.usage',
   'agent.context.compaction',
+  'agent.context.compaction_started',
   'document.ingestion',
 ];
 

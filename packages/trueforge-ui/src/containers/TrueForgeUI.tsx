@@ -7,7 +7,12 @@ import PostMcpOauthScreen from './McpOauthContainer/PostMcpOauthScreen.js';
 import { ServerInitLoader, TrueForgeUIShell, type TrueForgeUIProps } from './TrueForgeUIShell.js';
 
 export type { RoutePlace, RoutesConfig } from '../routing/types.js';
-export type { ChatFolder, ChatFolderSnapshot, ChatFolderStore } from '../server/ChatFolderContext.js';
+export type {
+  ChatFolder,
+  ChatFolderSession,
+  ChatFolderSnapshot,
+  ChatFolderStore,
+} from '../server/ChatFolderContext.js';
 export type { AgentConfig } from '../server/ShellModeContext.js';
 export type { Space, SpaceStatus, SpaceStore } from '../server/SpaceContext.js';
 export type { TrueForgeBuiltInServerConfig, TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';

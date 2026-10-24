@@ -283,6 +283,7 @@ describe('maps connector binding', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
       pages_scope: PAGES_SCOPE,
+      starts_answer: true,
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -296,11 +297,29 @@ describe('maps connector binding', () => {
     expect(binding).toEqual({ server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(info.maps_hosts) });
   });
 
+  it('declares every maps tool read-only, so a map lookup never counts as a change', async () => {
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+      starts_answer: true,
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('maps capability has no tool sets');
+    }
+    for (const name of ['render_map', 'render_route', 'render_places']) {
+      const info = await toolSet.toolCallInfo({ name, arguments: {} });
+      expect(info).toMatchObject({ read_only_hint: true, open_world_hint: true });
+    }
+  });
+
   it('names the walking, cycling and public transport services in the approval destination', async () => {
     const capability = mapsCapability({
       tracing: NOOP_AGENT_TRACING,
       logger: createLogger({ silent: true }),
       pages_scope: PAGES_SCOPE,
+      starts_answer: true,
     });
     const binding = capability.systemToolSets?.[0]?.resolveConnector?.({
       name: 'render_route',

@@ -1,4 +1,5 @@
 import {
+  AmanPandaSourceProvider,
   AmanRuntimeRail,
   AmanSetupProvider,
   AmanWelcome,
@@ -91,6 +92,9 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
   error: apiPath('/aman-avatar/error.mp4'),
   poster: apiPath('/aman-avatar/poster.jpg'),
 };
+
+/** The panda picture, shown by the rail and by the phone's first frame. */
+const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
   defaultMode: 'light',
@@ -217,7 +221,7 @@ function AmanShell({
   // Active session id, lifted out of the chat runtime so the right-rail permissions
   // feed can follow the session the user is looking at.
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
-  // Approvals waiting in the active chat, for the rail's Needs you ticket.
+  // Approvals waiting in the active chat, for the rail's waiting status and panda.
   const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
   return (
     <div className="aman-shell">
@@ -232,12 +236,13 @@ function AmanShell({
       />
       <AmanRuntimeRail
         modelName={modelName}
-        avatarSrc={apiPath('/aman-avatar.png')}
+        avatarSrc={AMAN_PANDA_SRC}
         avatarMotion={AMAN_AVATAR_MOTION_SOURCES}
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
         settingsHref="/settings"
+        sessionId={activeSessionId}
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
@@ -526,17 +531,19 @@ export function App() {
                                 }}
                               >
                                 <ComposerDraftScopeProvider scope={draftScope}>
-                                  <AmanShell
-                                    defaultAgentSpec={boot.defaultAgentSpec}
-                                    openSettings={boot.openSettings}
-                                    displayName={session.displayName}
-                                    overrides={overrides}
-                                    modelName={
-                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                    }
-                                    version={boot.build?.version}
-                                    buildRef={boot.build?.ref}
-                                  />
+                                  <AmanPandaSourceProvider src={AMAN_PANDA_SRC}>
+                                    <AmanShell
+                                      defaultAgentSpec={boot.defaultAgentSpec}
+                                      openSettings={boot.openSettings}
+                                      displayName={session.displayName}
+                                      overrides={overrides}
+                                      modelName={
+                                        setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                      }
+                                      version={boot.build?.version}
+                                      buildRef={boot.build?.ref}
+                                    />
+                                  </AmanPandaSourceProvider>
                                 </ComposerDraftScopeProvider>
                               </AmanSetupProvider>
                             </HelpProvider>
