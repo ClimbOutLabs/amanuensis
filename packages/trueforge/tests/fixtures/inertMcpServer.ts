@@ -47,6 +47,8 @@ export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
 export const INERT_WEB_SEARCH_TOOL = 'web_search';
+/** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
+export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
 export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
 
@@ -111,6 +113,7 @@ export interface InertMcpServer {
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
   webSearchInvocations: () => number;
+  webFetchInvocations: () => number;
   /**
    * Resets every invocation counter, the request count and the last `Authorization` value, drops
    * any redirect, and returns both memory tools to `'result'` mode.
@@ -123,6 +126,11 @@ export interface InertMcpServer {
   redirectAllTo: (redirect: InertRedirect | undefined) => void;
   /** HTTP requests received since the last reset, whatever they were answered with. */
   requestsSeen: () => number;
+  /**
+   * While set, the search provider's `web_search` answers each query with these page links, as JSON results
+   * that each carry their own `url` like a real provider's, instead of its invented line. `undefined` restores it.
+   */
+  setSearchResults: (results: ((query: string) => string[]) | undefined) => void;
   /** Parks the next write invocation so a turn can be cancelled mid-execution. */
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
@@ -158,6 +166,11 @@ interface Counters {
   askMemory: number;
   searchMemory: number;
   webSearch: number;
+  webFetch: number;
+}
+
+interface SearchResults {
+  current: ((query: string) => string[]) | undefined;
 }
 
 interface MemoryModes {
@@ -211,13 +224,17 @@ function buildMcpServer({
   counters,
   gates,
   memoryModes,
+  searchResults,
   webSearch,
+  searchProvider,
   mail,
 }: {
   counters: Counters;
   gates: WriteGate[];
   memoryModes: MemoryModes;
+  searchResults: SearchResults;
   webSearch: boolean;
+  searchProvider: boolean;
   mail: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
@@ -327,6 +344,59 @@ function buildMcpServer({
     );
   }
 
+  if (searchProvider) {
+    server.registerTool(
+      INERT_WEB_SEARCH_TOOL,
+      {
+        description: 'Pretends to search the open web for each query. Never reaches the network.',
+        inputSchema: {
+          objective: z.string(),
+          search_queries: z.array(z.string()),
+          session_id: z.string().optional(),
+          model_name: z.string().optional(),
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      ({ search_queries }) => {
+        counters.webSearch += 1;
+        const n = counters.webSearch;
+        const results = searchResults.current;
+        if (results !== undefined) {
+          // A real provider's shape: each result carries its own `url`, which a later page read may name.
+          return textResult(
+            JSON.stringify({
+              results: search_queries.flatMap(query =>
+                results(query).map(url => ({ url, title: `Result for ${query}`, excerpts: [`About ${query}.`] })),
+              ),
+            }),
+          );
+        }
+        return textResult(
+          search_queries
+            .map(query => `Result for ${query}: https://source-${String(n)}.example.org/article`)
+            .join('\n'),
+        );
+      },
+    );
+    server.registerTool(
+      INERT_WEB_FETCH_TOOL,
+      {
+        description: 'Pretends to read web pages. Never reaches the network.',
+        inputSchema: {
+          urls: z.array(z.string()),
+          objective: z.string().optional(),
+          session_id: z.string().optional(),
+          model_name: z.string().optional(),
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      ({ urls }) => {
+        counters.webFetch += 1;
+        return textResult(urls.map(url => `${url}: a short page about Lantern Row.`).join('\n'));
+      },
+    );
+  }
+
   if (mail) {
     for (const name of INERT_MAIL_TOOLS) {
       server.registerTool(
@@ -386,9 +456,18 @@ export function asTransport(transport: StreamableHTTPServerTransport): Transport
   };
 }
 
-export async function startInertMcpServer(options?: { webSearch?: boolean; mail?: boolean }): Promise<InertMcpServer> {
+export async function startInertMcpServer(options?: {
+  webSearch?: boolean;
+  /** Adds `web_search` and `web_fetch` in the search provider's argument shape; excludes `webSearch`. */
+  searchProvider?: boolean;
+  mail?: boolean;
+}): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
+  const searchProvider = options?.searchProvider === true;
   const mail = options?.mail === true;
+  if (webSearch && searchProvider) {
+    throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
+  }
   const counters: Counters = {
     echo: 0,
     read: 0,
@@ -397,8 +476,10 @@ export async function startInertMcpServer(options?: { webSearch?: boolean; mail?
     askMemory: 0,
     searchMemory: 0,
     webSearch: 0,
+    webFetch: 0,
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
+  const searchResults: SearchResults = { current: undefined };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
@@ -463,7 +544,9 @@ export async function startInertMcpServer(options?: { webSearch?: boolean; mail?
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, webSearch, mail }).connect(asTransport(transport));
+    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider, mail }).connect(
+      asTransport(transport),
+    );
     await transport.handleRequest(req, res, body);
   }
 
@@ -534,6 +617,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean; mail?
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,
     webSearchInvocations: () => counters.webSearch,
+    webFetchInvocations: () => counters.webFetch,
     resetInvocations: () => {
       counters.echo = 0;
       counters.read = 0;
@@ -542,6 +626,7 @@ export async function startInertMcpServer(options?: { webSearch?: boolean; mail?
       counters.askMemory = 0;
       counters.searchMemory = 0;
       counters.webSearch = 0;
+      counters.webFetch = 0;
       memoryModes.ask = 'result';
       memoryModes.search = 'result';
       lastAuthorizationHeader = undefined;
@@ -552,6 +637,9 @@ export async function startInertMcpServer(options?: { webSearch?: boolean; mail?
       redirect = next;
     },
     requestsSeen: () => requestCount,
+    setSearchResults: results => {
+      searchResults.current = results;
+    },
     holdNextWrite: () => {
       const entered: PromiseWithResolvers<void> = Promise.withResolvers();
       const released: PromiseWithResolvers<void> = Promise.withResolvers();
