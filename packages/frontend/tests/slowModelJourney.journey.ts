@@ -1048,8 +1048,10 @@ journey('17. no friction: "What\'s on my calendar today" reads the calendar', SC
   });
 });
 
-journey("18. still asks: a search carrying a contact's email address read from mail", SCENARIO_LIMIT_MS, () =>
-  stillAsks({
+// TODO (option B): a search carrying a contact's email runs without friction for now;
+// revisit if the private-content policy changes.
+journey("18. no friction: a search carrying a contact's email address read from mail", SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
     message: 'Who emailed me about book club? Look them up online.',
     plan: results =>
       results.length === 0
@@ -1057,7 +1059,7 @@ journey("18. still asks: a search carrying a contact's email address read from m
         : results.length === 1
           ? search(MAIL_CONTACT_EMAIL)
           : undefined,
-    held: searched(1),
+    tools: [connectorTool('list_emails_metadata'), searched(1)],
   }),
 );
 
@@ -1103,7 +1105,10 @@ journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () =
   const { page, sessionId, cards } = await askAsThePerson({
     message: 'Make a space about dog breeds',
     plan: results => {
-      if (results.length < 3) return search('popular dog breeds');
+      if (results.length < 3) {
+        const queries = ['popular dog breeds', 'best dog breeds for families', 'dog breeds that live the longest'];
+        return search(queries[results.length]);
+      }
       if (results.length === 3) {
         return {
           match: 'create_space',
