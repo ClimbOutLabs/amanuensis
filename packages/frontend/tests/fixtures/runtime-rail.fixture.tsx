@@ -53,7 +53,6 @@ createRoot(rootElement).render(
         <AmanRuntimeRail
           avatarSrc="/aman-avatar.png"
           status="ready"
-          settingsHref="/settings"
           auditFeed={<SentinelAuditFeed sessionId="chat-1" />}
         />
       </div>

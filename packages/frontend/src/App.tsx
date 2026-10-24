@@ -239,7 +239,6 @@ function AmanShell({
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
-        settingsHref="/settings"
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />

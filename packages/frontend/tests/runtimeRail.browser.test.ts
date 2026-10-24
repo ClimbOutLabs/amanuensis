@@ -25,7 +25,7 @@ function contrast({ a, b }: { a: string; b: string }): number {
 }
 
 test(
-  'the right panel uses one body font, one Settings link, a clear fold button, and nothing over the picture',
+  'the right panel uses one body font, no Settings link, Activity above Rules, a clear fold button, and nothing over the picture',
   {
     timeout: 180_000,
   },
@@ -83,7 +83,14 @@ test(
         );
         assert.deepEqual(fonts.spacing, ['normal'], 'no letter spacing in the panel');
 
-        assert.equal(await panel.getByRole('link', { name: /Settings/ }).count(), 1, 'exactly one link to Settings');
+        assert.equal(await panel.getByRole('link', { name: /Settings/ }).count(), 0, 'no Settings link');
+        const folds = await panel
+          .locator('[data-section]')
+          .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-section')));
+        assert.ok(
+          folds.indexOf('activity') < folds.indexOf('rules'),
+          `Activity comes before Rules: ${folds.join(', ')}`,
+        );
         assert.equal(await panel.locator('[data-section="memory"]').count(), 0, 'no Memory section');
         assert.equal(await panel.locator('[data-section="activity"] li').count(), 5, 'at most five actions');
         assert.equal(await panel.getByText(/·\s*\d/).count(), 0, 'no counts after an action');

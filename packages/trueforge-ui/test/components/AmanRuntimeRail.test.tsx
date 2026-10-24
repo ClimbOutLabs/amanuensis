@@ -276,7 +276,7 @@ describe('AmanRuntimeRail', () => {
     expect(container.querySelector('.aman-runtime-rail__footer')).toBeNull();
   });
 
-  it('folds Rules and Activity closed by default, with the chevron on the left of each label, and has no Memory row', () => {
+  it('folds Activity and Rules closed by default, with the chevron on the left of each label, and has no Memory row', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" auditFeed={<p>Recent actions body</p>} />
@@ -284,7 +284,7 @@ describe('AmanRuntimeRail', () => {
     );
 
     const rows = Array.from(container.querySelectorAll<HTMLDetailsElement>('details.aman-runtime-rail__details'));
-    expect(rows.map(row => row.dataset.section)).toEqual(['rules', 'activity']);
+    expect(rows.map(row => row.dataset.section)).toEqual(['activity', 'rules']);
     for (const row of rows) {
       expect(row.open).toBe(false);
       const summary = row.querySelector('summary');
@@ -701,7 +701,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(screen.queryByText(/Show all/i)).not.toBeInTheDocument();
   });
 
-  it('puts the panda first, then the status line, Rules and Activity, then one Settings link at the foot', async () => {
+  it('puts the panda first, then Activity above Rules, and has no Settings link', async () => {
     const { container } = render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
@@ -709,7 +709,6 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
             avatarSrc="/aman-avatar.png"
             pendingApprovalIds={['approval-1']}
             auditFeed={<p>Recent actions body</p>}
-            settingsHref="/settings"
           />
         </RuntimeHarness>
       </SentinelApiProvider>,
@@ -718,15 +717,12 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     const order = Array.from(container.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order).toEqual(['panda', 'rules', 'activity']);
+    expect(order).toEqual(['panda', 'activity', 'rules']);
     expect(container.querySelector('[data-section="activity"]')).toContainElement(
       screen.getByText('Recent actions body'),
     );
-    const settingsLinks = screen.getAllByRole('link', { name: /Settings/ });
-    expect(settingsLinks).toHaveLength(1);
-    expect(settingsLinks[0]).toHaveTextContent(/^Settings$/);
-    expect(settingsLinks[0]).toHaveAttribute('href', '/settings');
-    expect(container.querySelector('aside')?.lastElementChild).toBe(settingsLinks[0]);
+    expect(screen.queryByRole('link', { name: /Settings/ })).not.toBeInTheDocument();
+    expect(container.querySelector('aside')).not.toHaveTextContent(/Settings/);
   });
 
   it('shows one pending signal: no Needs you ticket, and the status line says the approval is waiting', () => {

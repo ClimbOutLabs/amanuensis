@@ -42,8 +42,6 @@ export type AmanRuntimeRailProps = {
   version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
-  /** Where the panel's Settings link points; omitted hides the link. */
-  settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
   /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
@@ -154,7 +152,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   activity = 'idle',
   personaName,
   status: statusOverride,
-  settingsHref,
   pendingApprovalIds = [],
   auditFeed,
 }) => {
@@ -296,6 +293,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             </section>
           )}
 
+          <FoldedRow section="activity" title="Activity">
+            {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
+          </FoldedRow>
+
           <FoldedRow section="rules" title="Rules">
             {rules.length === 0 ? (
               <p className="aman-runtime-rail__row-text">No rules to show yet.</p>
@@ -307,16 +308,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </ul>
             )}
           </FoldedRow>
-
-          <FoldedRow section="activity" title="Activity">
-            {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
-          </FoldedRow>
-
-          {settingsHref === undefined ? null : (
-            <a className="aman-runtime-rail__link aman-runtime-rail__settings" href={settingsHref}>
-              Settings
-            </a>
-          )}
         </>
       )}
     </aside>

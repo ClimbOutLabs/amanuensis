@@ -597,20 +597,6 @@
   margin: 0;
 }
 
-.aman-runtime-rail__link {
-  justify-self: start;
-  color: var(--gold-ink);
-  font-size: 0.8125rem;
-  text-decoration: underline;
-  text-underline-offset: 0.125rem;
-}
-
-/* The panel's one way to Settings, at its foot. */
-.aman-runtime-rail__settings {
-  margin-top: auto;
-  align-self: flex-start;
-}
-
 /* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
 ::placeholder {
   color: var(--text-muted);
