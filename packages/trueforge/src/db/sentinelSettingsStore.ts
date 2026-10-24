@@ -33,7 +33,7 @@ export const DEFAULT_SENTINEL_USER_SETTINGS: SentinelUserSettings = {
   offline_mode: false,
   tier2_auto_allow: [],
   search_without_asking: true,
-  maps_without_asking: false,
+  maps_without_asking: true,
   sandbox_without_asking: true,
 };
 

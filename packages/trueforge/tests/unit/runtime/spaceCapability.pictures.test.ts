@@ -5,7 +5,8 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
-import { createWebSearchTurnState, recordResultUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
@@ -42,7 +43,7 @@ const COLLIE_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Border_C
 const POODLE_URL = 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Standard_Poodle.jpg';
 
 const NOT_SEEN_PICTURE =
-  "This picture's link did not come from a search or page in this chat. Search for the picture first, then use a link from the results.";
+  "This picture's link did not come from the person or a search in this chat. Search for the picture first, then use a link from the results.";
 
 function textOf(response: CallToolResponse): string {
   if (!('result' in response)) {
@@ -134,13 +135,16 @@ describe('space pictures and links come only from this chat', () => {
       ...createArgs(`![Collie](https://images.wikimedia.org/invented/border-collie.jpg)`),
     });
     expect(await errorOf(response)).toBe(
-      "This picture's link did not come from a search or page in this chat. Search for the picture first, then use a link from the results.",
+      "This picture's link did not come from the person or a search in this chat. Search for the picture first, then use a link from the results.",
     );
   });
 
   it('refuses a placeholder domain even when a search result returned it', async () => {
     const webSearch = createWebSearchTurnState();
-    recordResultUrls({ state: webSearch, texts: [searchResult(['https://example.com/collie.jpg'])] });
+    recordSearchResults({
+      provenance: webSearch.provenance,
+      texts: [searchResult(['https://example.com/collie.jpg'])],
+    });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs('<img src="https://example.com/collie.jpg" alt="Collie">'),
@@ -154,7 +158,7 @@ describe('space pictures and links come only from this chat', () => {
 
   it('keeps a picture link that a search result returned, exactly as returned', async () => {
     const webSearch = createWebSearchTurnState();
-    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL])] });
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL])] });
     const call = setup(webSearch);
     const created = JSON.parse(
       textOf(await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${COLLIE_URL}" alt="Collie">`) })),
@@ -164,7 +168,7 @@ describe('space pictures and links come only from this chat', () => {
 
   it('refuses a seen link with query data appended, since that is a different address', async () => {
     const webSearch = createWebSearchTurnState();
-    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL])] });
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL])] });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs(`<img src="${COLLIE_URL}?email=person%40example.org" alt="Collie">`),
@@ -180,7 +184,7 @@ describe('space pictures and links come only from this chat', () => {
       bodyHtml: `<img src="${POODLE_URL}">`,
       linked_images: [POODLE_URL],
     });
-    recordResultUrls({ state: webSearch, texts: [mail] });
+    recordSearchResults({ provenance: webSearch.provenance, texts: [mail] });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${POODLE_URL}" alt="Poodle">`) });
     expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
@@ -189,7 +193,7 @@ describe('space pictures and links come only from this chat', () => {
   it('refuses an http picture even when a result returned it', async () => {
     const webSearch = createWebSearchTurnState();
     const plain = COLLIE_URL.replace('https://', 'http://');
-    recordResultUrls({ state: webSearch, texts: [searchResult([plain])] });
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([plain])] });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${plain}" alt="Collie">`) });
     expect(await errorOf(response)).toContain('must use a secure https link');
@@ -216,7 +220,7 @@ describe('space pictures and links come only from this chat', () => {
     const store = makeStore();
     // Turn one: the search ran, and the skeleton used its picture.
     const turnOne = createWebSearchTurnState();
-    recordResultUrls({ state: turnOne, texts: [searchResult([COLLIE_URL])] });
+    recordSearchResults({ provenance: turnOne.provenance, texts: [searchResult([COLLIE_URL])] });
     const created = JSON.parse(
       textOf(
         await setup(turnOne, store)(CREATE_SPACE_TOOL_NAME, {
@@ -260,7 +264,7 @@ describe('scripted run: dog breeds with pictures', () => {
     const call = setup(webSearch);
 
     // Step 1: the search. The host records each result's own url, as the designated provider returns it.
-    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL, POODLE_URL])] });
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL, POODLE_URL])] });
 
     // Step 2: the skeleton, with the pictures from the search results.
     const created = JSON.parse(

@@ -30,6 +30,7 @@ import {
 import { EVENTS_PAGE_LIMIT } from './common';
 import { MemoryRecallPersistedEventSchema, type MemoryRecallPersistedEvent } from './memoryEvents';
 import { ModelUsagePersistedEventSchema, type ModelUsagePersistedEvent } from './modelUsageEvents';
+import { ModelWaitingPersistedEventSchema, type ModelWaitingPersistedEvent } from './modelWaitingEvents';
 import { ProfileLearnedPersistedEventSchema, type ProfileLearnedPersistedEvent } from './profileLearningEvents';
 import { ProvisioningPersistedEventSchema, type ProvisioningPersistedEvent } from './provisionEvents';
 import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './skillEvents';
@@ -37,10 +38,10 @@ import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './s
 /**
  * `SessionEventSchema` (agent-session, core) enumerates only built-in durable events and
  * deliberately excludes passthrough events. `aman.memory.recall`, `aman.profile.learned`,
- * `aman.skill.used`, `aman.sandbox.provisioning`, and `aman.model.usage` are passthrough events registered by
+ * `aman.skill.used`, `aman.sandbox.provisioning`, `aman.model.usage`, and `aman.model.waiting` are passthrough events registered by
  * trueforge (see runtime/memory/memoryEvents.ts, schemas/memoryEvents.ts,
  * runtime/profileLearning.ts, schemas/profileLearningEvents.ts,
- * schemas/skillEvents.ts, schemas/provisionEvents.ts, schemas/modelUsageEvents.ts), so the actual persisted event stream
+ * schemas/skillEvents.ts, schemas/provisionEvents.ts, schemas/modelUsageEvents.ts, schemas/modelWaitingEvents.ts), so the actual persisted event stream
  * this route lists can include them, so this widens the wire schema to match what the store
  * can actually return, the same way any future passthrough event added here would.
  */
@@ -52,6 +53,7 @@ export const SessionEventWithPassthroughSchema = z
     SkillUsedPersistedEventSchema,
     ProvisioningPersistedEventSchema,
     ModelUsagePersistedEventSchema,
+    ModelWaitingPersistedEventSchema,
   ])
   .openapi('SessionEvent');
 
@@ -68,6 +70,7 @@ export const SessionEventTypeSchema = z
     ProfileLearnedPersistedEventSchema.shape.type.value,
     SkillUsedPersistedEventSchema.shape.type.value,
     ProvisioningPersistedEventSchema.shape.type.value,
+    ModelWaitingPersistedEventSchema.shape.type.value,
   ])
   .openapi('SessionEventType');
 
@@ -106,6 +109,7 @@ export const TurnStreamingEventSchema = z
     SkillUsedPersistedEventSchema,
     ProvisioningPersistedEventSchema,
     ModelUsagePersistedEventSchema,
+    ModelWaitingPersistedEventSchema,
     // Context compaction can run mid-turn and writes to the live stream just like the
     // persisted log; omitting it here breaks SDK deserialization of the turn stream the
     // moment compaction fires (see AgentThread.ts / ContextCompaction.ts).
@@ -187,5 +191,6 @@ export type PersistedPassthroughEvent =
   | ProfileLearnedPersistedEvent
   | SkillUsedPersistedEvent
   | ProvisioningPersistedEvent
-  | ModelUsagePersistedEvent;
+  | ModelUsagePersistedEvent
+  | ModelWaitingPersistedEvent;
 export type TurnStreamingEvent = z.infer<typeof TurnStreamingEventSchema>;

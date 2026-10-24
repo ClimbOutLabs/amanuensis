@@ -50,8 +50,8 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
 
     const ticket = page.getByTestId('ticket-card');
     const plain = page.getByTestId('plain-card');
-    const ticketChoices = ['Allow it', 'Not now', 'Allow searches in this chat'];
-    const plainChoices = ['Allow it', 'Not now', 'Approve for this chat'];
+    const ticketChoices = ['Allow it', 'Not now', 'Always allow this here'];
+    const plainChoices = ['Allow it', 'Not now', 'Always allow this here'];
     await ticket
       .getByRole('button', { name: ticketChoices[0] })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });

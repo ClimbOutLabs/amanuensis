@@ -1,7 +1,7 @@
 /**
  * A scheduled brief over the real server path: no one is watching, so nothing may stop at a card. The
- * scripted model reads the inbox, searches the web, then maps the address the inbox names. A search that
- * would carry a name copied from the mail is skipped instead, and the tool never runs.
+ * scripted model reads the inbox, searches the web, then maps the address the inbox names. A search that names
+ * someone from the mail runs too: the person's own mail is theirs to use.
  */
 import { z } from '@hono/zod-openapi';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
@@ -23,7 +23,6 @@ const TAVILY_SERVER_NAME = 'tavily';
 const CLEAN_QUERY = 'Lantern Row bakery';
 /** Carries the sender's name, which the mail header copies. */
 const NAMED_QUERY = `${MAIL_SENDER_NAME} bakery`;
-const OWNER_SKIP_MESSAGE = 'One lookup was skipped, because it would have shared something from your mail or calendar.';
 
 const AGENT_SPEC = AgentSpecSchema.parse({
   model: { name: MODEL_FQN },
@@ -58,8 +57,6 @@ const AuditLogResponseSchema = z.object({
       .loose(),
   ),
 });
-
-const ListSessionEventsSchema = z.object({ data: z.array(z.object({ event: z.unknown() }).loose()) });
 
 function jsonInit(body: unknown, method = 'POST'): RequestInit {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -229,7 +226,9 @@ describe('scheduled brief: search and map after reading the mail', () => {
 
       const entries = await auditEntries(server, sessionId);
       const search = entries.find(e => e.tool_name === 'tavily_search' && e.description === `Searched: ${CLEAN_QUERY}`);
-      const map = entries.find(e => e.tool_name === 'render_map' && e.description === `Map: ${HARBOUR_ADDRESS}`);
+      const map = entries.find(
+        e => e.tool_name === 'render_map' && e.description === `Maps ran without asking: ${HARBOUR_ADDRESS}`,
+      );
       expect(search).toMatchObject({ tier: 1, outcome: 'logged' });
       expect(map).toMatchObject({ tier: 1, outcome: 'logged' });
     },
@@ -237,9 +236,9 @@ describe('scheduled brief: search and map after reading the mail', () => {
   );
 
   it(
-    'skips a search whose query copies the sender name, without a card or a call to the tool',
+    'runs a search that names the sender of the mail it read, with no card',
     async () => {
-      const { sessionId, turn } = await runScheduledBrief({
+      const { turn } = await runScheduledBrief({
         agent,
         server,
         search: NAMED_QUERY,
@@ -247,15 +246,8 @@ describe('scheduled brief: search and map after reading the mail', () => {
 
       expect(turn.state.status).toBe('done');
       expect(turn.state).toMatchObject({ required_actions: [] });
-      expect(tavily.calls).toEqual([]);
-
-      const entries = await auditEntries(server, sessionId);
-      const skipped = entries.find(e => e.tool_name === 'tavily_search' && e.auto_deny_reason === 'private_text_check');
-      expect(skipped).toBeDefined();
-      const events = ListSessionEventsSchema.parse(
-        await (await server.request(`/api/v1/sessions/${sessionId}/events`)).json(),
-      );
-      expect(JSON.stringify(events.data)).toContain(OWNER_SKIP_MESSAGE);
+      expect(tavily.calls.map(call => call.path)).toEqual(['/search']);
+      expect(tavily.calls[0]?.body).toMatchObject({ query: NAMED_QUERY });
     },
     TURN_TIMEOUT_MS,
   );

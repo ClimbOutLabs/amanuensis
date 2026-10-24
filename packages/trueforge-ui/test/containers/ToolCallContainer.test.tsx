@@ -642,7 +642,7 @@ describe('ToolCallContainer', () => {
     );
 
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
@@ -717,7 +717,7 @@ describe('ToolCallContainer', () => {
     );
   });
 
-  it('preserves the chat scope option when Approve for this chat is clicked', () => {
+  it('preserves the chat scope option when Always allow this here is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -742,7 +742,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Approve for this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -773,7 +773,7 @@ describe('ToolCallContainer', () => {
     expect(screen.getByText('pnpm test')).toBeInTheDocument();
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -1030,7 +1030,8 @@ describe('ToolCallContainer: held search request', () => {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
-        say: 'This search contains something that looks like a password or key.',
+        say: 'This sends something that looks like a password or key.',
+        page: false,
       }),
       plain_why: null,
       cannot_be_undone: null,

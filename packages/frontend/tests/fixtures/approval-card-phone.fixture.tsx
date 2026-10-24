@@ -7,7 +7,7 @@ if (rootElement == null) throw new Error('Missing fixture root');
 
 const noop = () => {};
 
-// A search held after the chat read private text: the one held search the server offers a chat-wide grant for.
+// A held search with every choice a ticket card can show, the chat-wide one included.
 createRoot(rootElement).render(
   <SlotsProvider theme={{ webFonts: false }}>
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem', display: 'grid', gap: '1rem' }}>
@@ -16,7 +16,7 @@ createRoot(rootElement).render(
           approvalId="approval-phone"
           card={{
             plain_what:
-              'Web search: Find quiet coffee shops near the Ferry Building in San Francisco. This chat has read your private data, so Aman is checking before searching.',
+              'Web search: Find quiet coffee shops near the Ferry Building in San Francisco. Searches are set to ask, so Aman is checking with you first.',
             plain_why: null,
             cannot_be_undone: null,
             why_asked_again: null,

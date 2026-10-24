@@ -131,6 +131,7 @@ import {
   getModelDetails,
   isGithubConnectorAttached,
   isWebConnectorAttached,
+  modelRequestGate,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -529,6 +530,12 @@ function createTurnResolver(deps: {
                   build: buildClient,
                 }),
           defaultModelParams: resolved.defaultModelParams,
+          // The per-model request limit, keyed by the configured model whatever provider ends
+          // up serving it: a step on this model waits for a place before it sends.
+          modelRequestGate:
+            resolved.maxConcurrentRequests === undefined
+              ? undefined
+              : { gate: modelRequestGate, key: name, limit: resolved.maxConcurrentRequests },
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
           // prompt names what it really is.
@@ -1462,7 +1469,6 @@ async function abandonTurnThatCouldNotStart(input: {
   logger: Logger;
 }): Promise<void> {
   input.abortController.abort(CancellationReason.CouldNotStart);
-  input.turn.forgetUnstarted();
   await input.resolver.close().catch((closeError: unknown) => {
     input.logger.warn('Failed to close turn resources for a turn that could not start', {
       sessionId: input.session.session_id,
@@ -2639,7 +2645,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.CouldNotStart);
-      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,

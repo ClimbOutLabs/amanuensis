@@ -69,21 +69,20 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
+import { streamDeadlineDetailsOf, type StreamDeadlineDetails } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
-  allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
   awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
-  offersChatApproval,
-  SEARCH_CHAT_GRANT_KEY,
 } from '../mcp/approvalGrant';
 import { convertMCPServersToTools, type ConvertToolsResult, type MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -139,12 +138,6 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
-import {
-  keepSubAgentAnswerText,
-  markAttachedFileUnreadable,
-  recordAttachedFile,
-  recordPrivateContextText,
-} from '../permissions/webSearch';
 import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
@@ -290,7 +283,6 @@ import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
   buildIngestionUnavailableNote,
-  documentPlainText,
   isEmptyMessageContent,
   processAgentUserInput,
   type AgentInputUserMessage,
@@ -1003,7 +995,7 @@ function validateApprovalMessage({
   if (
     message.approval.status === 'allow' &&
     message.approval.scope === 'chat' &&
-    !offersChatApproval(pending.tool_info)
+    !allowsChatApproval(pending.tool_info)
   ) {
     throw new InvalidAgentSendInputError(
       `messages[${String(index)}] chat-scoped approval is not available for tool_call_id '${message.tool_call_id}'`,
@@ -1387,6 +1379,8 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params: effectiveParams,
       tool_type: info.type,
+      // A built-in's server name routes it to its own rules; without it a space write reads as an unknown connector tool.
+      ...(info.mcp_server_name === '' ? {} : { mcp_server_name: info.mcp_server_name }),
       ...(connector === undefined
         ? {}
         : {
@@ -1721,6 +1715,10 @@ export class AgentThread {
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.sentinel = input.sentinel;
+    // Cards speak in the name the person gave the assistant; a sub-agent keeps the root's.
+    if (input.parent === undefined && input.sentinel !== undefined) {
+      input.sentinel.web_search.assistantName = assistantDisplayName(input.definition.identity?.assistantName);
+    }
     this.stopAfterToolResponse = input.stopAfterToolResponse === true;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     // A sub-agent counts into the ledger of the turn that started it, not a fresh one.
@@ -2002,13 +2000,6 @@ export class AgentThread {
           clientSideToolResponses.push(m);
         } else if (isInputUserMessage(m)) {
           const result = await processAgentUserInput(m, this.sandbox, this.definition.modelSupportsVision ?? false);
-          // Kept before the model sees the files, so a search that copies one asks first.
-          const sentinel = this.sentinel;
-          if (sentinel !== undefined) {
-            for (const content of result.attachedFiles) {
-              recordAttachedFile({ state: sentinel.web_search, content });
-            }
-          }
           contextMessages.push(result.message);
           if (result.sandboxCreated) {
             this.pendingSandboxCreatedEvents.push(buildSandboxCreatedEvent(result.sandboxCreated));
@@ -2056,8 +2047,6 @@ export class AgentThread {
             allowsChatApproval(pending.tool_info)
           ) {
             this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
-          } else if (approval.approval.scope === 'chat' && allowsSearchChatGrant(pending.tool_info)) {
-            this.chatApprovalGrants.add(SEARCH_CHAT_GRANT_KEY);
           }
           if (
             approval.approval.scope === 'always' &&
@@ -2508,13 +2497,26 @@ export class AgentThread {
     };
   }
 
-  /** Ends the step after the model went silent; the steps already done stay in the turn. */
-  private *endStepModelSilent(): Generator<AgentThreadEvent, void, unknown> {
+  /**
+   * Ends the step after the model went silent twice in a row; the steps already done stay in
+   * the turn. The log line names which deadline fired, on which step, and how large the request
+   * was, so one line answers what happened without a second log to compare against.
+   */
+  private *endStepModelSilent(input: {
+    deadline: 'first_chunk' | 'chunk' | 'unknown';
+    requestTokens: number;
+    details: StreamDeadlineDetails | undefined;
+  }): Generator<AgentThreadEvent, void, unknown> {
     this.logger.warn('Model went silent; ending the step', {
       threadId: this.threadId,
       model: this.definition.modelId ?? 'unknown',
+      deadline: input.deadline,
+      step: this.metrics.iterations,
+      requestTokens: input.requestTokens,
       firstResponseTimeoutMs: this.modelFirstResponseTimeoutMs,
       idleTimeoutMs: this.modelIdleTimeoutMs,
+      lastProgressField: input.details?.lastProgressField ?? null,
+      msSinceLastProgress: input.details?.msSinceLastProgress ?? null,
     });
     yield this.generateErrorEvent(MODEL_STOPPED_ANSWERING_MESSAGE, undefined, 'model_response_timeout');
   }
@@ -3082,169 +3084,143 @@ export class AgentThread {
       }
     };
 
-    // A file whose text was not kept, for any reason, leaves the chat unable to check its searches.
-    const keptFiles = new Set<string>();
-    try {
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        if (file === undefined) {
-          continue;
-        }
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      if (file === undefined) {
+        continue;
+      }
 
-        if (signal?.aborted) {
-          // Never reached extraction: no `started` event for these, per the cancellation contract.
-          for (const progress of cancelFrom(files.slice(index))) {
+      if (signal?.aborted) {
+        // Never reached extraction: no `started` event for these, per the cancellation contract.
+        for (const progress of cancelFrom(files.slice(index))) {
+          yield buildDocumentIngestionEvent(progress, this.threadId);
+          extractedTextParts.push(
+            buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
+          );
+        }
+        break;
+      }
+
+      yield buildDocumentIngestionEvent(
+        { fileName: file.filename, stagedPath: file.path, phase: 'started' },
+        this.threadId,
+      );
+
+      let terminalDocumentProgress: DocumentFileProgress | undefined;
+      try {
+        const extraction = await extractDocumentsFromSandbox(
+          this.sandbox,
+          [file.path],
+          signal,
+          progress => {
+            if (progress.phase !== 'started') {
+              terminalDocumentProgress = progress;
+            }
+          },
+          budget,
+        );
+        const document = extraction.documents[0];
+        if (terminalDocumentProgress === undefined && document !== undefined) {
+          // Defensive: onFileProgress above should always have fired for the one file requested.
+          terminalDocumentProgress = {
+            phase: document.pages.length > 0 ? 'finished' : 'failed',
+            filename: file.filename,
+            path: file.path,
+            elapsedMs: 0,
+            document,
+          };
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          // The file currently in flight still gets a terminal event; it never leaves `started`
+          // dangling. Remaining, unreached files are cancelled without ever having started.
+          yield buildDocumentIngestionEvent(
+            { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
+            this.threadId,
+          );
+          extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
+          for (const progress of cancelFrom(files.slice(index + 1))) {
             yield buildDocumentIngestionEvent(progress, this.threadId);
             extractedTextParts.push(
               buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
             );
           }
-          break;
+          return;
         }
-
+        const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
         yield buildDocumentIngestionEvent(
-          { fileName: file.filename, stagedPath: file.path, phase: 'started' },
+          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
           this.threadId,
         );
-
-        let terminalDocumentProgress: DocumentFileProgress | undefined;
-        // What extraction returns, after its page limits: only it says whether pages were left unread.
-        let returnedIssue: string | null | undefined;
-        try {
-          const extraction = await extractDocumentsFromSandbox(
-            this.sandbox,
-            [file.path],
-            signal,
-            progress => {
-              if (progress.phase !== 'started') {
-                terminalDocumentProgress = progress;
-              }
-            },
-            budget,
-          );
-          const document = extraction.documents[0];
-          returnedIssue = document?.issue;
-          if (terminalDocumentProgress === undefined && document !== undefined) {
-            // Defensive: onFileProgress above should always have fired for the one file requested.
-            terminalDocumentProgress = {
-              phase: document.pages.length > 0 ? 'finished' : 'failed',
-              filename: file.filename,
-              path: file.path,
-              elapsedMs: 0,
-              document,
-            };
-          }
-        } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            // The file currently in flight still gets a terminal event; it never leaves `started`
-            // dangling. Remaining, unreached files are cancelled without ever having started.
-            yield buildDocumentIngestionEvent(
-              { fileName: file.filename, stagedPath: file.path, phase: 'cancelled' },
-              this.threadId,
-            );
-            extractedTextParts.push(buildIngestionCancelledNote({ filename: file.filename, path: file.path }));
-            for (const progress of cancelFrom(files.slice(index + 1))) {
-              yield buildDocumentIngestionEvent(progress, this.threadId);
-              extractedTextParts.push(
-                buildIngestionCancelledNote({ filename: progress.fileName, path: progress.stagedPath }),
-              );
-            }
-            return;
-          }
-          const issue = `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`;
-          yield buildDocumentIngestionEvent(
-            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
-            this.threadId,
-          );
-          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-          continue;
-        }
-
-        if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
-          // Should be unreachable (extraction resolved without ever reporting a terminal phase);
-          // still emit a terminal event so `started` is never left dangling.
-          const issue = 'Extraction produced no text';
-          yield buildDocumentIngestionEvent(
-            { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
-            this.threadId,
-          );
-          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-          continue;
-        }
-
-        const document = terminalDocumentProgress.document;
-        if (terminalDocumentProgress.phase === 'finished') {
-          yield buildDocumentIngestionEvent(
-            {
-              fileName: file.filename,
-              stagedPath: file.path,
-              phase: 'finished',
-              method:
-                document.extraction_mode === 'text'
-                  ? 'native text'
-                  : document.extraction_mode === 'ocr'
-                    ? 'OCR'
-                    : 'mixed',
-              pageCount: document.pages.length,
-              elapsedMs: terminalDocumentProgress.elapsedMs,
-            },
-            this.threadId,
-          );
-          const ingested = await this.screenIngestedText({
-            part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
-            file: { filename: file.filename, path: file.path },
-            signal,
-          });
-          // An attached file is the person's own: a later search that carries its details asks first. The whole text
-          // is kept, since the model can read past the part shown here.
-          if (this.sentinel !== undefined) {
-            recordPrivateContextText({
-              state: this.sentinel.web_search,
-              text: documentPlainText(document),
-              source: 'attachment',
-            });
-          }
-          // A file read only in part (a page limit, a page with no text) is not covered: the model can still read
-          // the rest, and nothing here would see it.
-          if (returnedIssue === null) {
-            keptFiles.add(file.path);
-          }
-          extractedTextParts.push(ingested);
-        } else {
-          const issue = document.issue ?? 'Extraction produced no text';
-          yield buildDocumentIngestionEvent(
-            {
-              fileName: file.filename,
-              stagedPath: file.path,
-              phase: 'failed',
-              issue,
-              elapsedMs: terminalDocumentProgress.elapsedMs,
-            },
-            this.threadId,
-          );
-          extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
-        }
+        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+        continue;
       }
 
-      // Append extracted text parts to context as a synthetic user message so the model sees them
-      // before the LLM call. This message contains the extracted text from the staged documents.
-      if (extractedTextParts.length > 0) {
-        const contextMessage: ContextMessage = {
-          role: 'user',
-          content: extractedTextParts,
-        };
-        yield* this.appendToContext({
-          context: [contextMessage],
-          output: [],
-          currentContextUsage: undefined,
-          usage: undefined,
+      if (terminalDocumentProgress === undefined || terminalDocumentProgress.phase === 'started') {
+        // Should be unreachable (extraction resolved without ever reporting a terminal phase);
+        // still emit a terminal event so `started` is never left dangling.
+        const issue = 'Extraction produced no text';
+        yield buildDocumentIngestionEvent(
+          { fileName: file.filename, stagedPath: file.path, phase: 'failed', issue, elapsedMs: 0 },
+          this.threadId,
+        );
+        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
+        continue;
+      }
+
+      const document = terminalDocumentProgress.document;
+      if (terminalDocumentProgress.phase === 'finished') {
+        yield buildDocumentIngestionEvent(
+          {
+            fileName: file.filename,
+            stagedPath: file.path,
+            phase: 'finished',
+            method:
+              document.extraction_mode === 'text'
+                ? 'native text'
+                : document.extraction_mode === 'ocr'
+                  ? 'OCR'
+                  : 'mixed',
+            pageCount: document.pages.length,
+            elapsedMs: terminalDocumentProgress.elapsedMs,
+          },
+          this.threadId,
+        );
+        const ingested = await this.screenIngestedText({
+          part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
+          file: { filename: file.filename, path: file.path },
+          signal,
         });
+        extractedTextParts.push(ingested);
+      } else {
+        const issue = document.issue ?? 'Extraction produced no text';
+        yield buildDocumentIngestionEvent(
+          {
+            fileName: file.filename,
+            stagedPath: file.path,
+            phase: 'failed',
+            issue,
+            elapsedMs: terminalDocumentProgress.elapsedMs,
+          },
+          this.threadId,
+        );
+        extractedTextParts.push(buildIngestionUnavailableNote({ filename: file.filename, path: file.path }, issue));
       }
-    } finally {
-      const sentinel = this.sentinel;
-      if (sentinel !== undefined && files.some(file => !keptFiles.has(file.path))) {
-        markAttachedFileUnreadable(sentinel.web_search);
-      }
+    }
+
+    // Append extracted text parts to context as a synthetic user message so the model sees them
+    // before the LLM call. This message contains the extracted text from the staged documents.
+    if (extractedTextParts.length > 0) {
+      const contextMessage: ContextMessage = {
+        role: 'user',
+        content: extractedTextParts,
+      };
+      yield* this.appendToContext({
+        context: [contextMessage],
+        output: [],
+        currentContextUsage: undefined,
+        usage: undefined,
+      });
     }
   }
 
@@ -3487,159 +3463,240 @@ export class AgentThread {
     const MAX_MODEL_STREAM_FAULT_ATTEMPTS = 2;
     let modelMessageUsage: ModelMessageUsage | undefined;
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
-    for (let attempt = 1; ; attempt++) {
-      const llmStream = this.definition.modelClient.create(requestBody);
-      const requestLLMStreamClose = createAsyncIteratorCloseRequest(llmStream);
-
-      // We start the delta stream with a model message event.
-      yield {
-        type: EventType.MODEL_MESSAGE,
-        thread_id: this.threadId,
-        created_at: new Date().toISOString(),
-        id: modelMessageEventId,
-      } satisfies ModelMessageEvent;
-
-      let firstDeltaTimestamped = false;
-      let firstTokenMs: number | null = null;
-      const modelRequestStartedAt = Date.now();
-      modelMessageUsage = undefined;
-      try {
-        // Every chunk waits behind a silence bound, so a provider that accepts the request and then
-        // goes quiet ends the step with a plain message instead of holding the turn open.
-        let attemptResult = await nextModelChunkWithin({
-          iterator: llmStream,
-          signal,
-          requestClose: requestLLMStreamClose,
-          timeoutMs: this.modelFirstResponseTimeoutMs,
-        });
-        while (
-          attemptResult !== ASYNC_ITERATOR_ABORTED &&
-          attemptResult !== MODEL_STREAM_SILENT &&
-          !attemptResult.done
-        ) {
-          const chunk = attemptResult.value;
-          if (chunk.usage) {
-            modelMessageUsage = this.computeAssistantMessageUsage({
-              requestBody,
-              usage: chunk.usage,
-              toolMapping,
+    // The request's size in tokens, estimated from the context it is built from; the silence
+    // report names it, so an oversized request is visible in the one line that reports the ending.
+    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    // A step that goes silent is retried once before the turn ends: the finished tool results
+    // behind it stay in the history the retry sends, and a partial tool call never runs because
+    // calls only execute from a completed step. Only a second silence ends the step.
+    let silenceRetried = false;
+    // Per-model request limit: take this model's place before the request is created, so the
+    // silence deadlines in the loop only ever measure a request that was actually sent. While
+    // the step waits, the chat shows the waiting line once.
+    const gateSpec = this.definition.modelRequestGate;
+    const modelSlot = gateSpec?.gate.begin(gateSpec);
+    try {
+      if (modelSlot?.queued) {
+        yield { type: InternalEventType.PASSTHROUGH, event: buildModelWaitingEvent() };
+        const granted = await new Promise<boolean>(resolve => {
+          if (signal === undefined) {
+            void modelSlot.granted.then(() => {
+              resolve(true);
             });
+            return;
           }
-          // On the forced answer no tool call is shown, since none of its calls will run.
-          const event = await buildModelMessageDeltaEvent({
-            chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
-            threadId: this.threadId,
-            toolMapping,
-            usage: modelMessageUsage,
-            id: modelMessageEventId,
-            logger: this.logger,
+          if (signal.aborted) {
+            resolve(false);
+            return;
+          }
+          const onAbort = () => {
+            resolve(false);
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+          void modelSlot.granted.then(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(!signal.aborted);
           });
-          if (event) {
-            if (!firstDeltaTimestamped) {
-              firstDeltaTimestamped = true;
-              firstTokenMs = Date.now() - modelRequestStartedAt;
-              this.metrics.time_to_first_token_ms ??= firstTokenMs;
-              yield { ...event, created_at: new Date().toISOString() };
-            } else {
-              yield event;
-            }
-          }
-          attemptResult = await nextModelChunkWithin({
+        });
+        if (!granted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+      }
+      for (let attempt = 1; ; attempt++) {
+        const llmStream = this.definition.modelClient.create(requestBody);
+        const requestLLMStreamClose = createAsyncIteratorCloseRequest(llmStream);
+
+        // We start the delta stream with a model message event.
+        yield {
+          type: EventType.MODEL_MESSAGE,
+          thread_id: this.threadId,
+          created_at: new Date().toISOString(),
+          id: modelMessageEventId,
+        } satisfies ModelMessageEvent;
+
+        let firstDeltaTimestamped = false;
+        let firstTokenMs: number | null = null;
+        const modelRequestStartedAt = Date.now();
+        modelMessageUsage = undefined;
+        try {
+          // Every chunk waits behind a silence bound, so a provider that accepts the request and then
+          // goes quiet ends the step with a plain message instead of holding the turn open.
+          // Which bound the pending wait is on, so a silence can name the deadline that fired.
+          let awaitedDeadline: 'first_chunk' | 'chunk' = 'first_chunk';
+          let attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
             requestClose: requestLLMStreamClose,
-            timeoutMs: this.modelIdleTimeoutMs,
+            timeoutMs: this.modelFirstResponseTimeoutMs,
           });
-        }
-        if (attemptResult === ASYNC_ITERATOR_ABORTED) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (attemptResult === MODEL_STREAM_SILENT) {
-          yield* this.endStepModelSilent();
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        result = attemptResult;
-        // One line per model step, so a slow step shows in the logs without a trace viewer.
-        this.logger.info('Model step finished', {
-          threadId: this.threadId,
-          step: this.metrics.iterations,
-          attempt,
-          firstTokenMs,
-          durationMs: Date.now() - modelRequestStartedAt,
-          toolCount: tools.length,
-        });
-        break;
-      } catch (error) {
-        // Cancellation and every non-stream-fault error keep their existing handling
-        // (ASYNC_ITERATOR_ABORTED above for cancellation; execute()'s outer catch, fatal_error,
-        // for anything else) rather than being retried here.
-        if (!signal?.aborted && isModelStreamDeadline(error)) {
-          yield* this.endStepModelSilent();
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (signal?.aborted || !(error instanceof ModelStreamFault)) {
-          throw error;
-        }
-        if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          // A repetition fault carries its own actionable guidance, and only a context-length
-          // fault is blamed on the chat's length; anything else would mislead the user.
-          const message =
-            error instanceof ModelOutputRepetitionError
-              ? error.message
-              : isContextLengthError(error)
-                ? CHAT_TOO_LONG_MESSAGE
-                : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
-          yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (!isContextLengthError(error)) {
-          this.logger.warn('Model stream fault; retrying the call once with the same history', {
+          while (
+            attemptResult !== ASYNC_ITERATOR_ABORTED &&
+            attemptResult !== MODEL_STREAM_SILENT &&
+            !attemptResult.done
+          ) {
+            const chunk = attemptResult.value;
+            if (chunk.usage) {
+              modelMessageUsage = this.computeAssistantMessageUsage({
+                requestBody,
+                usage: chunk.usage,
+                toolMapping,
+              });
+            }
+            // On the forced answer no tool call is shown, since none of its calls will run.
+            const event = await buildModelMessageDeltaEvent({
+              chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
+              threadId: this.threadId,
+              toolMapping,
+              usage: modelMessageUsage,
+              id: modelMessageEventId,
+              logger: this.logger,
+            });
+            if (event) {
+              if (!firstDeltaTimestamped) {
+                firstDeltaTimestamped = true;
+                firstTokenMs = Date.now() - modelRequestStartedAt;
+                this.metrics.time_to_first_token_ms ??= firstTokenMs;
+                yield { ...event, created_at: new Date().toISOString() };
+              } else {
+                yield event;
+              }
+            }
+            awaitedDeadline = 'chunk';
+            attemptResult = await nextModelChunkWithin({
+              iterator: llmStream,
+              signal,
+              requestClose: requestLLMStreamClose,
+              timeoutMs: this.modelIdleTimeoutMs,
+            });
+          }
+          if (attemptResult === ASYNC_ITERATOR_ABORTED) {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (attemptResult === MODEL_STREAM_SILENT) {
+            if (!silenceRetried) {
+              silenceRetried = true;
+              this.logger.warn('Model went silent; retrying the step once', {
+                threadId: this.threadId,
+                model: this.definition.modelId ?? 'unknown',
+                deadline: awaitedDeadline,
+                step: this.metrics.iterations,
+                requestTokens: requestTokenEstimate,
+              });
+              continue;
+            }
+            yield* this.endStepModelSilent({
+              deadline: awaitedDeadline,
+              requestTokens: requestTokenEstimate,
+              details: undefined,
+            });
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          result = attemptResult;
+          // One line per model step, so a slow step shows in the logs without a trace viewer.
+          this.logger.info('Model step finished', {
+            threadId: this.threadId,
+            step: this.metrics.iterations,
+            attempt,
+            firstTokenMs,
+            durationMs: Date.now() - modelRequestStartedAt,
+            toolCount: tools.length,
+          });
+          break;
+        } catch (error) {
+          // Cancellation and every non-stream-fault error keep their existing handling
+          // (ASYNC_ITERATOR_ABORTED above for cancellation; execute()'s outer catch, fatal_error,
+          // for anything else) rather than being retried here.
+          if (!signal?.aborted && isModelStreamDeadline(error)) {
+            const details = streamDeadlineDetailsOf(error);
+            if (!silenceRetried) {
+              silenceRetried = true;
+              this.logger.warn('Model went silent; retrying the step once', {
+                threadId: this.threadId,
+                model: this.definition.modelId ?? 'unknown',
+                deadline: details?.deadline ?? 'unknown',
+                step: this.metrics.iterations,
+                requestTokens: requestTokenEstimate,
+                lastProgressField: details?.lastProgressField ?? null,
+                msSinceLastProgress: details?.msSinceLastProgress ?? null,
+              });
+              continue;
+            }
+            yield* this.endStepModelSilent({
+              deadline: details?.deadline ?? 'unknown',
+              requestTokens: requestTokenEstimate,
+              details,
+            });
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (signal?.aborted || !(error instanceof ModelStreamFault)) {
+            throw error;
+          }
+          if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
+            // A repetition fault carries its own actionable guidance, and only a context-length
+            // fault is blamed on the chat's length; anything else would mislead the user.
+            const message =
+              error instanceof ModelOutputRepetitionError
+                ? error.message
+                : isContextLengthError(error)
+                  ? CHAT_TOO_LONG_MESSAGE
+                  : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";
+            yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          if (!isContextLengthError(error)) {
+            this.logger.warn('Model stream fault; retrying the call once with the same history', {
+              ...extractErrorLogFields(error),
+              attempt,
+            });
+            continue;
+          }
+          this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
             ...extractErrorLogFields(error),
             attempt,
           });
-          continue;
-        }
-        this.logger.warn('Model stream fault over context length; compacting context and retrying the call once', {
-          ...extractErrorLogFields(error),
-          attempt,
-        });
-        try {
-          for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
-            yield event;
-          }
-        } catch (error) {
-          if (!(error instanceof NoProgressTimeoutError)) {
-            throw error;
-          }
-          yield this.generateErrorEvent(
-            `${error.message}, so the turn was stopped instead of hanging. ` +
-              `A context processor stalled without producing output; try again, and if the ` +
-              `problem persists, start a new chat.`,
-            undefined,
-            'fatal_error',
-          );
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (signal?.aborted) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        try {
-          const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
-          if (retryFit === 'aborted') {
+          try {
+            for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
+              yield event;
+            }
+          } catch (error) {
+            if (!(error instanceof NoProgressTimeoutError)) {
+              throw error;
+            }
+            yield this.generateErrorEvent(
+              `${error.message}, so the turn was stopped instead of hanging. ` +
+                `A context processor stalled without producing output; try again, and if the ` +
+                `problem persists, start a new chat.`,
+              undefined,
+              'fatal_error',
+            );
             return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-        } catch (fitError) {
-          if (!(fitError instanceof RequestOverLimitError)) {
-            throw fitError;
+          if (signal?.aborted) {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-          this.logger.warn('Shortened history is still over the model limit; not retrying', {
-            ...extractErrorLogFields(fitError),
-          });
-          yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          try {
+            const retryFit = yield* this.ensureRequestFits({ tools, signal, compactedThisTurn: true });
+            if (retryFit === 'aborted') {
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+          } catch (fitError) {
+            if (!(fitError instanceof RequestOverLimitError)) {
+              throw fitError;
+            }
+            this.logger.warn('Shortened history is still over the model limit; not retrying', {
+              ...extractErrorLogFields(fitError),
+            });
+            yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'model_stream_fault');
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+          requestBody = this.transformToLLMRequest(tools);
         }
-        requestBody = this.transformToLLMRequest(tools);
       }
+    } finally {
+      // Hand the model's place back on every way out of the loop. cancel() also withdraws a
+      // wait that never got its place, so an abandoned wait cannot wedge the queue.
+      modelSlot?.release();
+      modelSlot?.cancel();
     }
 
     // If the stream was aborted mid-way, result.value.output is only a partial
@@ -3965,9 +4022,6 @@ export class AgentThread {
         };
       } else if (!hasToolCalls(assistantMessage)) {
         const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
-        if (this.sentinel !== undefined) {
-          keepSubAgentAnswerText({ state: this.sentinel.web_search, text: content });
-        }
         completion = {
           type: 'done',
           output: agentAssistantMessage,
@@ -5164,7 +5218,7 @@ export class AgentThread {
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
-          can_chat_allow: offersChatApproval(toolCall.tool_info),
+          can_chat_allow: allowsChatApproval(toolCall.tool_info),
           can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };

@@ -1,4 +1,3 @@
-import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type { SessionAgent, SessionMetadata, SessionMetrics, SessionSource } from '../schemas/session';
 import type { CreatedBySubject } from '../schemas/subject';
 import type { TaskChecklist } from '../schemas/taskChecklist';
@@ -48,10 +47,8 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
    * updateSession, and createTurn — never on reads.
    */
   last_activity_timestamp_ms: number;
-  /** Server-derived grants created by "Approve for this chat" and "Allow searches in this chat". */
+  /** Server-derived grants created by "Always allow this here". */
   approval_grants: string[];
-  /** Fingerprints of the chat's private texts, kept for the searches of later turns. Never sent to a client. Null until a private read. */
-  private_fingerprints: ChatPrivateFingerprints | null;
   /** Host-owned ordered task state, persisted outside the model context. */
   task_checklist: TaskChecklist;
   metrics: SessionMetrics;

@@ -12,9 +12,7 @@ export const SentinelUserSettingsSchema = z
     search_without_asking: z
       .boolean()
       .describe('While on, your designated search provider runs web searches without asking. Off asks for each one.'),
-    maps_without_asking: z
-      .boolean()
-      .describe('While on, map requests run without asking unless private data was read in this chat.'),
+    maps_without_asking: z.boolean().describe('While on, map requests run without asking. Off asks for each one.'),
     sandbox_without_asking: z
       .boolean()
       .describe(

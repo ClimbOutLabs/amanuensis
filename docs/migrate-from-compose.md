@@ -8,7 +8,7 @@ Do one person at a time. The short way is two commands (see "The one command" be
 
 ## What moves and what does not
 
-Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Approve for this chat" choices start over.
+Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Always allow this here" choices start over.
 
 The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.
 

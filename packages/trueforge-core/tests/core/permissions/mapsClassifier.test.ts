@@ -13,12 +13,8 @@ import {
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
-import { InMemoryPrivateDataReadStore } from '../../../src/core/permissions/privateDataReads';
-import {
-  createWebSearchTurnState,
-  markPrivateDataRead,
-  recordPrivateContextText,
-} from '../../../src/core/permissions/webSearch';
+import { recordPersonText } from '../../../src/core/permissions/provenance';
+import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -355,17 +351,14 @@ describe('maps without asking', () => {
 
   it('gives the always-Tier-3 detail when the setting is off', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(maps_off));
-    expect(decision.reason_detail).toBe('Maps always ask first, so Aman is checking with you.');
+    expect(decision.reason_detail).toBe('Maps are set to ask, so Aman is checking with you first.');
   });
 
-  it('says why a map asked when the setting is on but the chat is not clean', async () => {
-    const ctx = makeCtx(maps_on);
-    markPrivateDataRead(ctx.web_search);
-    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+  it('says why a map asked when the setting is on and the place holds a key', async () => {
+    const key = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+    const decision = await classifyTier(mapsAction('render_map', { place_name: key }), makeCtx(maps_on));
     expect(decision.tier).toBe(3);
-    expect(decision.reason_detail).toBe(
-      'This chat has private data or text that must not leave, so Aman is checking before using maps.',
-    );
+    expect(decision.reason_detail).toBe('This sends something that looks like a password or key.');
   });
 
   it('runs a clean chat silently when the setting is on', async () => {
@@ -400,36 +393,25 @@ describe('maps without asking', () => {
     expect(second.reason).toBe('maps_tool');
   });
 
-  it('asks again after the chat read email or calendar', async () => {
+  it("runs after the chat read mail, since a lookup on the person's behalf is the point", async () => {
     const ctx = makeCtx(maps_on);
-    markPrivateDataRead(ctx.web_search);
-    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
-    expect(decision.tier).toBe(3);
-    expect(decision.reason).toBe('maps_tool');
-  });
-
-  it("asks when a silent map would send the person's name or phone from their profile, but not a place", async () => {
-    const ctx = makeCtx(maps_on);
-    recordPrivateContextText({
+    recordToolResultProvenance({
       state: ctx.web_search,
-      text: '<user-name>Teodoro Brambleworth</user-name>\n<user-profile>Phone +351 912 345 678.</user-profile>',
-      source: 'each_turn',
+      tool_name: 'read_email',
+      argument_values: ['m1'],
+      texts: ['From: Dana Wolfe <dana@example.org>\nLunch at 12 Harbour Street, Lisbon on Friday.'],
     });
-    const named = await classifyTier(mapsAction('render_map', { place_name: 'Teodoro Brambleworth home' }), ctx);
-    expect(named.tier).toBe(3);
-    const phoned = await classifyTier(mapsAction('render_map', { place_name: '+351 912 345 678' }), ctx);
-    expect(phoned.tier).toBe(3);
-    const place = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
-    expect(place.tier).toBe(1);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Harbour Street, Lisbon' }), ctx);
+    expect(decision.tier).toBe(1);
   });
 
-  it('asks again after the chat read something private like a secrets file', async () => {
-    const private_reads = new InMemoryPrivateDataReadStore();
-    private_reads.markPrivateDataRead({ tenant_id: 't1', conversation_id: 'conv-1' });
-    const services = withServices({ mapsWithoutAsking: () => Promise.resolve(true), private_reads });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services));
-    expect(decision.tier).toBe(3);
-    expect(decision.reason).toBe('maps_tool');
+  it("runs a map of the person's own city from their profile", async () => {
+    const ctx = makeCtx(maps_on);
+    recordPersonText({
+      provenance: ctx.web_search.provenance,
+      text: '<user-name>Teodoro Brambleworth</user-name>\n<user-profile>Lives in San Francisco.</user-profile>',
+    });
+    expect((await classifyTier(mapsAction('render_map', { place_name: 'San Francisco' }), ctx)).tier).toBe(1);
   });
 
   it('asks with the card when a place holds a secret the host keeps', async () => {
