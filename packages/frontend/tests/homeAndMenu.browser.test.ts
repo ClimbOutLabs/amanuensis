@@ -22,7 +22,7 @@ const THEMES = [
 
 /** Where the home cards end, and anything on home that would need scrolling. */
 async function homeFit(page: Page) {
-  await page.getByRole('heading', { name: /Some things .* can do/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.getByRole('heading', { name: /Some things .* can do/ }).waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
   await page.waitForTimeout(500);
   return page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll('[aria-labelledby="aman-home-cards-heading"] li'));
