@@ -11,6 +11,8 @@ import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
+/** The first page waits for the dev server's cold compile, which is slow while other suites run. */
+const FIRST_LOAD_TIMEOUT_MS = 120_000;
 const THEMES = [
   { preset: 'paper', mode: 'light' },
   { preset: 'paper', mode: 'dark' },
