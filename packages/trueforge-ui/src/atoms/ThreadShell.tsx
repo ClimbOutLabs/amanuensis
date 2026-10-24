@@ -70,7 +70,7 @@ export const ThreadComposerAreaShell = forwardRef<HTMLDivElement, ThreadComposer
         // Desktop: square top edge, and nothing overlays the messages above the composer. A
         // gradient fade there washed over the bottom of a waiting approval card while it was
         // scrolled into view, so its buttons looked faded, as if the card were disabled.
-        'aui-thread-composer bg-primary-bg relative mx-auto flex w-full min-w-0 max-w-(--thread-max-width) shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
+        'aui-thread-composer bg-primary-bg mx-auto flex w-full min-w-0 max-w-(--thread-max-width) shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
         !isEmpty && 'rounded-t-(--composer-radius) md:rounded-t-none',
         className,
       )}

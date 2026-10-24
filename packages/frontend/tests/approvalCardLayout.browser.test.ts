@@ -1,33 +1,23 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { createServer, type Plugin } from 'vite';
+import { createServer } from 'vite';
 
-import {
-  MODEL_FQN,
-  startApprovalTestServer,
-  type ApprovalTestServer,
-} from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { screenshotDir } from './support/screenshotDir.ts';
 
 /**
  * Layout proof for a waiting approval card, against the real app and server.
  *
- * Two faults from the owner's report are pinned here (the third, the right panel calling a
- * waiting card "no activity", is an audit-data question and is not covered by this test):
- * - The scroll-to-bottom arrow floated over the bottom of the message list, where a waiting
- *   card's buttons come to rest when the card is scrolled into view, so it covered them.
- * - A gradient fade over the messages above the composer washed over the bottom of the
- *   card in the same position, so its buttons looked faded, as if the card were disabled.
- *
- * The screenshots show what the person should see: the card at rest, then scrolled up into
- * answering position with the arrow sitting in the composer area, clear of the card.
+ * - The scroll-to-bottom arrow sits in the composer area and never covers a waiting card's
+ *   buttons, at rest or scrolled up into answering position.
+ * - No gradient fade over the messages above the composer washes over the card, so its
+ *   buttons never look faded, as if the card were disabled.
  */
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -36,99 +26,11 @@ const DENY = 'Not now';
 /** How far short of the bottom the thread is scrolled: the natural answering position. */
 const SCROLL_UP_PX = 110;
 
-const AGENT_SPEC = {
-  model: { name: MODEL_FQN },
-  instructions: 'Use the inert connector exactly as instructed.',
-  mcp_servers: [
-    { name: 'inert', preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
-  ],
-  config: {
-    sandbox: { enabled: false },
-    generative_ui: { enabled: false },
-    ask_user_questions: { enabled: false },
-    dynamic_sub_agents: { enabled: false },
-    context_management: { compaction: { enabled: false }, large_tool_response: { enabled: false } },
-  },
-};
-
-function jsonInit(body: unknown): RequestInit {
-  return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
-}
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-card-layout-'));
-}
-
-/** Serves `/api/*` from the real server app in this process, as the dev proxy would. */
-function inProcessApi(api: ApprovalTestServer): Plugin {
-  return {
-    name: 'in-process-api',
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const url = req.url;
-        if (url === undefined || !url.startsWith('/api/')) {
-          next();
-          return;
-        }
-        const chunks: Buffer[] = [];
-        req.on('data', (chunk: Buffer) => chunks.push(chunk));
-        req.on('end', () => {
-          const headers = new Headers();
-          for (const [name, value] of Object.entries(req.headers)) {
-            if (typeof value === 'string') headers.set(name, value);
-          }
-          const method = req.method ?? 'GET';
-          const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks);
-          api
-            .request(url, { method, headers, body })
-            .then(response => {
-              res.statusCode = response.status;
-              response.headers.forEach((value, name) => res.setHeader(name, value));
-              if (response.body === null) {
-                res.end();
-                return;
-              }
-              Readable.fromWeb(response.body).pipe(res);
-            })
-            .catch((error: unknown) => {
-              res.statusCode = 500;
-              res.end(String(error));
-            });
-        });
-      });
-    },
-  };
-}
-
-/** Sends one turn and drains its stream, which waits for the turn to finish or pause. */
-async function sendTurn(api: ApprovalTestServer, sessionId: string, text: string): Promise<void> {
-  const turn = await api.request(
-    `/api/v1/sessions/${sessionId}/turns`,
-    jsonInit({ input: [{ type: 'user.message', content: text }], stream: true }),
-  );
-  assert.equal(turn.status, 200, `turn "${text}" was accepted`);
-  await turn.text();
-}
-
-/**
- * A session with enough finished conversation to scroll, ending in a turn paused on a
- * waiting approval card.
- */
-async function scrollablePausedSession(api: ApprovalTestServer): Promise<string> {
-  const session = await api.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
-  assert.equal(session.status, 201);
-  const sessionId = ((await session.json()) as { data: { id: string } }).data.id;
-  for (let index = 1; index <= 8; index += 1) {
-    await sendTurn(api, sessionId, `Harbour note ${String(index)}: the ferry times are pinned by the office door.`);
-  }
-  await sendTurn(api, sessionId, 'run:inert_write please');
-  return sessionId;
-}
+/** Enough finished conversation ahead of the card for the chat to scroll. */
+const EARLIER_MESSAGES = Array.from(
+  { length: 8 },
+  (_, index) => `Harbour note ${String(index + 1)}: the ferry times are pinned by the office door.`,
+);
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -155,7 +57,7 @@ test(
   { timeout: 600_000 },
   async () => {
     const api = await startApprovalTestServer();
-    const sessionId = await scrollablePausedSession(api);
+    const { sessionId } = await pausedSession(api, { earlierMessages: EARLIER_MESSAGES });
     const vite = await createServer({
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'error',
@@ -163,7 +65,7 @@ test(
       server: { host: '127.0.0.1', port: 0, strictPort: false },
     });
     let browser: Browser | undefined;
-    const outDir = await screenshotDir();
+    const outDir = await screenshotDir('aman-card-layout-');
     try {
       await vite.listen();
       const address = vite.httpServer?.address();

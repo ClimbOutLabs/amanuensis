@@ -29,8 +29,8 @@ describe('ScrollToBottomButton', () => {
     const wrapper = button.parentElement;
     // A floating wrapper (absolute, raised above the composer) lands on the bottom of the
     // message list, over a waiting approval card's buttons. In flow it can cover nothing.
-    expect(wrapper).not.toHaveClass('absolute', '-top-14', 'z-10');
-    expect(wrapper).toHaveClass('flex', 'justify-center');
+    expect(wrapper).not.toHaveClass('absolute');
+    expect(wrapper).toHaveClass('flex', 'justify-end');
   });
 
   it('does not render while disabled', () => {
