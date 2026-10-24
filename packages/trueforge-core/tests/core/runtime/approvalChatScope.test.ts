@@ -71,10 +71,25 @@ async function canChatAllow(
 }
 
 describe('the approval event says whether chat scope is offered', () => {
-  it('offers it for a plain read and for a send, and withholds it for a send that read content steered', async () => {
+  it('offers it for a plain read and for saving a draft, and withholds it for a steered call', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
-    expect(await canChatAllow('connector_send')).toBe(true);
+    expect(await canChatAllow('gmail_draft')).toBe(true);
     expect(await canChatAllow('content_steered')).toBe(false);
+  });
+
+  it('withholds it from every send and every change that invites or emails guests', async () => {
+    for (const reason of [
+      'gmail_send',
+      'external_service',
+      'connector_send',
+      'mail_new_recipient',
+      'calendar_write_guests',
+      'caldav_calendar_guests',
+      'caldav_invitation_reply',
+      'connector_calendar_write',
+    ]) {
+      expect({ reason, offered: await canChatAllow(reason) }).toEqual({ reason, offered: false });
+    }
   });
 
   it('withholds the chat choice from a lookup that read content steered', async () => {

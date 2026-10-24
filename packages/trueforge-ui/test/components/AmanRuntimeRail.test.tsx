@@ -700,6 +700,18 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(screen.queryByRole('switch', { name: /offline/i })).not.toBeInTheDocument();
   });
 
+  it('says only what the sandbox switch really lets run without asking', async () => {
+    render(
+      <SentinelApiProvider api={sentinelWith({ ...settingsStub, sandbox_without_asking: true })}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    expect(await screen.findByText("Aman's own sandbox code runs without asking")).toBeInTheDocument();
+    expect(screen.queryByText('Sandbox code runs without asking')).not.toBeInTheDocument();
+  });
+
   it('keeps the model in Details and out of the visible rail', () => {
     render(
       <RuntimeHarness messages={[]}>

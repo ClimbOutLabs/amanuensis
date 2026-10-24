@@ -37,8 +37,7 @@ function userTexts(content: LLMUserMessage['content']): string[] {
  * Records where the links and addresses of the chat so far came from, before every model step, so a call the model
  * makes is judged against everything it has read in this chat, earlier turns included. The person's own words are
  * theirs; file text, host notes such as an earlier summary, and tool results are data, except a search's result
- * links and the person's own contacts. Each message is read once. Root thread only: a sub-agent's results are
- * recorded as they arrive.
+ * links. Each message is read once. Root thread only: a sub-agent's results are recorded as they arrive.
  */
 export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): AgentCapability {
   const read = new WeakSet<object>();

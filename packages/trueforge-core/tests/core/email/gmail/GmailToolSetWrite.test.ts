@@ -761,10 +761,17 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('may be answered once for this chat, never by a standing "Always allow"', async () => {
+  it('is never covered by a standing "Always allow" or by "Always allow this here"', async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(info.tier).toBe(3);
+    expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('lets a draft, which sends nothing, be answered once for this chat but never by a standing grant', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     for (const [name, args] of [
-      ['send_draft', { draft_id: 'd1' }],
       ['update_draft', { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
       ['draft_email', { to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
     ] as const) {
@@ -775,31 +782,32 @@ describe('send_draft', () => {
     }
   });
 
-  it('after "Always allow this here", sends again in that chat with no card, and still asks in another chat', async () => {
+  it('after one Allow, asks again for the next send to the same person in the same chat', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const call = {
-      id: 'call-2',
+    const send = (id: string) => ({
+      id,
       type: 'function' as const,
-      function: { name: 'send_draft', arguments: '{}' },
+      function: { name: 'send_draft', arguments: '{"draft_id":"d1"}' },
       tool_info: info,
-    };
-    const thisChat = new Set([approvalGrantKey(info)]);
-    const admitted = effectiveToolAdmissions({
-      calls: [call],
-      decisions: new Map(),
-      chatApprovalGrants: thisChat,
-      implementationPlanGrants: new Set(),
     });
-    expect(admitted.get('call-2')?.decision).toEqual({ status: 'allow', scope: 'chat' });
-
-    const otherChat = effectiveToolAdmissions({
-      calls: [call],
-      decisions: new Map(),
+    const first = effectiveToolAdmissions({
+      calls: [send('call-1')],
+      decisions: new Map([['call-1', { status: 'allow' as const }]]),
       chatApprovalGrants: new Set(),
       implementationPlanGrants: new Set(),
     });
-    expect(otherChat.get('call-2')?.decision).toBeUndefined();
+    expect(first.get('call-1')?.decision).toEqual({ status: 'allow' });
+
+    // Even a chat grant saved for this send before sends lost the chat-wide answer does not cover the next one.
+    const next = effectiveToolAdmissions({
+      calls: [send('call-2')],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(next.get('call-2')?.decision).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
   });
 });
 

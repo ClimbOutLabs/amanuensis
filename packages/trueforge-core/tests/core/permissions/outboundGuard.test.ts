@@ -4,7 +4,9 @@ import {
   collectOutboundStrings,
   describeOutboundRule,
   OUTBOUND_GUARD_RULES,
+  OUTBOUND_MAX_CHARS,
   OUTBOUND_MAX_PLUMBING_CHARS,
+  OUTBOUND_MAX_TOTAL_CHARS,
   type OutboundGuardRule,
 } from '../../../src/core/permissions/outboundGuard';
 
@@ -130,10 +132,19 @@ describe('outbound guard: rules that trip', () => {
     expect(ruleFor({ query: 'balance', card: 4242424242424242 })).toBe('card_number');
   });
 
-  test('length alone never trips: a long search or link is not a secret', () => {
+  test('a string of more than 200 characters', () => {
     const words = 'the quick brown fox jumps over the lazy dog ';
-    expect(ruleFor({ query: words.repeat(30) })).toBeUndefined();
-    expect(ruleFor({ queries: Array.from({ length: 10 }, () => words.repeat(5)) })).toBeUndefined();
+    expect(ruleFor({ query: words.repeat(5).slice(0, OUTBOUND_MAX_CHARS) })).toBeUndefined();
+    expect(ruleFor({ query: words.repeat(5).slice(0, OUTBOUND_MAX_CHARS + 1) })).toBe('too_long');
+    expect(ruleFor({ queries: [words.repeat(5).slice(0, OUTBOUND_MAX_CHARS + 1)] })).toBe('too_long');
+  });
+
+  test('strings are measured one by one, with a larger cap on all of them together', () => {
+    const words = 'the quick brown fox jumps over the lazy dog ';
+    const field = words.repeat(5).slice(0, OUTBOUND_MAX_CHARS);
+    expect(ruleFor({ a: field, b: field, c: field })).toBeUndefined();
+    const fieldCount = Math.floor(OUTBOUND_MAX_TOTAL_CHARS / OUTBOUND_MAX_CHARS) + 1;
+    expect(ruleFor({ queries: Array.from({ length: fieldCount }, () => field) })).toBe('too_long');
   });
 
   test('arguments too deep to inspect trip rather than pass unread', () => {
@@ -182,9 +193,10 @@ describe('outbound guard: re-encoded and disguised secrets', () => {
     expect(ruleFor({ url: `https://example.test/?q=${encode(privateKeyHeader)}` })).toBe('private_key');
   });
 
-  test('a percent sign that is not an escape stays as written', () => {
+  test('a percent sign that is not an escape stays as written and a decoded query still counts toward length', () => {
     expect(ruleFor({ query: '100% of 50% off sale' })).toBeUndefined();
     expect(ruleFor({ query: 'bad escape %E0%A4%A' })).toBeUndefined();
+    expect(ruleFor({ query: 'x'.repeat(OUTBOUND_MAX_CHARS + 1) })).toBe('too_long');
   });
 
   test('a server secret escaped twice, and a card number written in Arabic-Indic digits', () => {

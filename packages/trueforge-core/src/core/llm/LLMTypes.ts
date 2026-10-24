@@ -149,6 +149,12 @@ export const InternalToolCallInfoSchema = z.object({
   git_remote_precondition: GitRemotePreconditionSchema.optional().describe(
     'Host-observed git remotes captured before approval. Never model-authored or client supplied.',
   ),
+  sandbox_workspace_grant: z
+    .string()
+    .optional()
+    .describe(
+      'Host-derived sandbox workspace that "Always allow this here" on this command covers for the rest of the chat. Absent when the command must ask each time. Never model-authored or client supplied.',
+    ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
   ),

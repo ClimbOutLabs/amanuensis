@@ -115,8 +115,10 @@ import {
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
+  parseReadOnlyList,
   parseSimpleCommand,
   type ParsedSimpleCommand,
+  type ReadOnlyList,
   type ShellAllowlistConfig,
 } from './shellAllowlist';
 import {
@@ -461,6 +463,34 @@ function shellOperandsInsideWorkspace(input: {
     if (!isUnderRoot({ identity, root, separator })) {
       return false;
     }
+  }
+  return true;
+}
+
+/**
+ * Whether every step of a read-only list stays inside the workspace: each `cd` lands inside it, and each command's
+ * operands resolve inside it from the directory that step runs in.
+ */
+function readOnlyListInsideWorkspace(input: {
+  list: ReadOnlyList;
+  cwd: string;
+  workspace_root: string;
+  resolution: PathResolution | undefined;
+}): boolean {
+  const { resolution, workspace_root } = input;
+  let cwd = input.cwd;
+  for (const step of input.list.steps) {
+    if (step.kind === 'run') {
+      if (!shellOperandsInsideWorkspace({ parsed: step.parsed, cwd, workspace_root, resolution })) {
+        return false;
+      }
+      continue;
+    }
+    const target = canonicalFileIdentity({ p: step.dir, cwd, resolution });
+    if (target === null || !isInsideWorkspace({ p: target, cwd: '/', workspace_root, resolution })) {
+      return false;
+    }
+    cwd = target;
   }
   return true;
 }
@@ -1331,6 +1361,31 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     }
   }
 
+  // Reads joined into one list, such as `cd repo && sed -n '5,9p' README.md`, run like each read would on its own.
+  const list = parsed === undefined ? parseReadOnlyList({ command, config: services.shell_allowlist }) : undefined;
+  if (
+    list !== undefined &&
+    ctx.workspace_cwd !== null &&
+    isInsideWorkspace({
+      p: resolveIdentityCwd(ctx, cwd),
+      cwd: '/',
+      workspace_root: ctx.workspace_cwd,
+      resolution: ctx.path_resolution,
+    }) &&
+    readOnlyListInsideWorkspace({
+      list,
+      cwd: resolveIdentityCwd(ctx, cwd),
+      workspace_root: ctx.workspace_cwd,
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return tier1Decision({
+      reason: 'shell_read_only_list',
+      reason_detail: 'Ran a list of read-only commands inside the workspace.',
+      sensitive_read: containsSecretPath(action.canonical_params),
+    });
+  }
+
   // Not allowlisted: Tier 3 with the full parsed binding.
   const form = await canonicalShellFormFor({
     command,
@@ -1968,11 +2023,14 @@ function steeringChecked(input: {
   const steered = steeredDestinations({
     provenance: ctx.web_search.provenance,
     addresses: mail === null ? [] : [...mail.to, ...mail.cc, ...mail.bcc].map(mailbox => mailbox.address),
+    // The connector's own configured host is the person's setup, not something read content could choose.
     values: [
-      ...[card.recipient, card.destination, card.destination_host].filter(value => value !== null),
+      ...[card.recipient, card.destination].filter(value => value !== null),
       ...(card.calendar_event?.attendees ?? []),
       ...input.guests,
     ],
+    // Only the host-read sender of the one message this replies to; never the model's or the message's own claim.
+    reply_sender: mail?.reply_in_thread?.from ?? null,
   });
   if (steered.length === 0) {
     return decision;
@@ -2254,8 +2312,12 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
  * The approval card for a Calendar write, built from the request the host will send, never from model prose.
  * Every guest is listed, and whether Google emails them is said in words.
  */
-function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: string | null }): Tier3Card {
-  const { review } = input;
+function calendarWriteCard(input: {
+  review: CalendarWriteReview;
+  agent_intent: string | null;
+  assistant: string;
+}): Tier3Card {
+  const { review, assistant } = input;
   const show = (text: string) => escapeDisplayText(text);
   const title = cardSubject(review.title);
   const guests = displayList(review.attendees);
@@ -2275,13 +2337,13 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
     review.action === 'create'
       ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
       : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
-  // Says why a guest change asks every time, since no grant can cover it.
+  // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
   const alwaysAsks =
     review.attendees.length === 0
       ? ''
       : review.action === 'create'
-        ? ' This change sends an invitation to other people, so Aman always asks.'
-        : ' This change reaches the other people invited to this event, so Aman always asks.';
+        ? ` This change sends an invitation to other people, so ${assistant} always asks.`
+        : ` This change reaches the other people invited to this event, so ${assistant} always asks.`;
   return {
     plain_what: `${plainWhat}${alwaysAsks}`,
     plain_why: plainWhy(input.agent_intent),
@@ -2395,7 +2457,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
       });
     }
     return tier3Decision({
-      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
+      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
       reason_detail: reachesGuests
         ? 'A calendar change that reaches guests always asks.'
@@ -2776,7 +2838,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         destination_host: fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
       },
-      reason: destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
+      // A send keeps its own reason whatever the annotations say, so no chat-wide answer ever covers it.
+      reason: extraction.sends ? 'connector_send' : destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: readsPrivateData,
       escalated: true,

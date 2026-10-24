@@ -36,6 +36,8 @@ export const CONTENT_STEERED_REASON = 'content_steered';
  */
 export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
+  'gmail_send',
+  'mail_new_recipient',
   'destructive_action',
   'install_action',
   'mcp_destructive_hint',
@@ -52,18 +54,12 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
- * binds the tool and its destination, never a standing grant across chats. A steered call is never among them.
+ * binds the tool and its destination, never a standing grant across chats. A send, a guest change and a steered call
+ * are never among them: each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
-  'gmail_send',
   'gmail_draft',
-  'calendar_write_guests',
-  'caldav_calendar_guests',
-  'caldav_invitation_reply',
-  'connector_calendar_write',
-  'connector_send',
   'connector_outbound',
-  'external_service',
   'destructive_action',
   'mcp_destructive_hint',
   'mcp_open_world_hint',

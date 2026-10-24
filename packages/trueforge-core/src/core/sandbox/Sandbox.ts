@@ -50,7 +50,13 @@ import {
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { gitHardeningEnv } from '../permissions/gitHardening';
-import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
+import { containsSecretPath } from '../permissions/secretPaths';
+import {
+  gitLocalConfigIsSafe,
+  pinAllowlistedExec,
+  pinReadOnlyList,
+  type PinnedReadOnlyList,
+} from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -1472,6 +1478,57 @@ export function sandboxCommandApprovalIdentity(input: {
   return `${SANDBOX_EXEC_TOOL_NAME}:${effect}:${digest}`;
 }
 
+/** Card reasons for a sandbox command that stays in its workspace: only these may share one chat-wide answer. */
+const WORKSPACE_GRANT_REASONS: ReadonlySet<string> = new Set([
+  'shell_not_allowlisted',
+  'tracked_executable_unapproved',
+]);
+
+/** Words that name a download or a remote, in git and in package runners; any of them keeps a command asking. */
+const REACHES_OUT_WORDS: ReadonlySet<string> = new Set([
+  'clone',
+  'fetch',
+  'pull',
+  'push',
+  'ls-remote',
+  'remote',
+  'submodule',
+  'npx',
+  'dlx',
+  'bunx',
+  'uvx',
+]);
+
+/**
+ * Whether "Always allow this here" on this sandbox command may cover every later command in the same workspace. Only a
+ * command that stays in the workspace qualifies: never a commit or a push, anything that names a network tool, a
+ * download or a remote, custom environment variables, or a key file. This reads the command's words, so a program it
+ * starts that reaches out on its own is covered as the person's own approval of it would be.
+ */
+function workspaceGrantCovers(input: {
+  command: string;
+  effect: SandboxCommandEffect;
+  env: Readonly<Record<string, string>>;
+  tier_reason: string | undefined;
+  secret_path_read: boolean;
+  networkIntent: boolean;
+}): boolean {
+  const words = input.command.toLowerCase().split(/[^a-z0-9_.-]+/u);
+  return (
+    (input.effect === 'inspect' ||
+      input.effect === 'edit' ||
+      input.effect === 'execute' ||
+      input.effect === 'verify') &&
+    input.tier_reason !== undefined &&
+    WORKSPACE_GRANT_REASONS.has(input.tier_reason) &&
+    Object.keys(input.env).length === 0 &&
+    !input.secret_path_read &&
+    !input.networkIntent &&
+    !commandDownloadsPackages(input.command) &&
+    !words.some(word => REACHES_OUT_WORDS.has(word))
+  );
+}
+
 function commandFromToolArguments(argumentsValue: unknown): string {
   if (typeof argumentsValue !== 'object' || argumentsValue === null || !('command' in argumentsValue)) {
     return '';
@@ -2364,14 +2421,16 @@ export class Sandbox extends LocalToolMCP {
     // override applies. Invalid calls are fail-closed to
     // approval-required=false with their existing pre-dispatch failure.
     const sentinelHost = this.sentinelContext;
+    // The workspace a chat-wide answer to a sandbox command is bound to; never the call's own cwd.
+    const sandboxWorkspace =
+      this.boundRepository?.workspace_cwd ?? sentinelHost?.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
     let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
     if (sentinelHost !== undefined) {
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
-        workspace_cwd:
-          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        workspace_cwd: sandboxWorkspace,
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
@@ -2518,6 +2577,23 @@ export class Sandbox extends LocalToolMCP {
             },
           }),
       ...(gitRemotePrecondition === undefined ? {} : { git_remote_precondition: gitRemotePrecondition }),
+      ...(params.name === SANDBOX_EXEC_TOOL_NAME &&
+      sentinelStamp?.is_approval_required === true &&
+      !invalidCall &&
+      hostGitCard === undefined &&
+      gitRemotePrecondition === undefined &&
+      sandboxWorkspace !== null &&
+      effect !== undefined &&
+      workspaceGrantCovers({
+        command,
+        effect,
+        env: env ?? {},
+        tier_reason: sentinelStamp.tier_reason,
+        secret_path_read: sentinelStamp.secret_path_read === true || containsSecretPath(effectiveArguments ?? {}),
+        networkIntent,
+      })
+        ? { sandbox_workspace_grant: sandboxWorkspace }
+        : {}),
       ...(implementationPlanGrant === undefined ? {} : { implementation_plan_grant: implementationPlanGrant }),
       ...(implementationPlanScope === undefined ? {} : { implementation_plan_scope: implementationPlanScope }),
       ...(implementationPlanBinding === undefined ? {} : { implementation_plan_binding: implementationPlanBinding }),
@@ -4999,7 +5075,18 @@ export class Sandbox extends LocalToolMCP {
         ? undefined
         : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (pinned === undefined) {
-      return { exec: input.exec, env: {}, preflight: undefined };
+      const list =
+        allowlist === undefined
+          ? undefined
+          : pinReadOnlyList({
+              command: input.exec.command,
+              config: allowlist,
+              workspace_root: workspaceRoot,
+              cwd: input.exec.cwd ?? workspaceRoot ?? '/',
+            });
+      return list === undefined
+        ? { exec: input.exec, env: {}, preflight: undefined }
+        : this.preparePinnedList({ sandboxId: input.sandboxId, exec: input.exec, list });
     }
     if (pinned.git_needs_workspace_root) {
       return {
@@ -5036,6 +5123,57 @@ export class Sandbox extends LocalToolMCP {
       env: pinned.env,
       preflight,
     };
+  }
+
+  /**
+   * A list of reads runs as the pinned form of each of its commands, joined by the list's own separators, so no
+   * command in it is looked up on the sandbox PATH. Each directory a git step runs in gets the same config probe as a
+   * single git command, under the same workspace lock.
+   */
+  private preparePinnedList(input: { sandboxId: string; exec: SandboxRuntimeExecInput; list: PinnedReadOnlyList }): {
+    exec: SandboxRuntimeExecInput;
+    env: Record<string, string>;
+    preflight: ExecPreflight | undefined;
+  } {
+    const { list } = input;
+    if (list.git_needs_workspace_root) {
+      return { exec: input.exec, env: {}, preflight: () => Promise.resolve(GIT_CONFIG_UNREADABLE_REFUSAL) };
+    }
+    const pinnedCommand = (argv: readonly string[]): string =>
+      [ENV_BINARY, `PATH=${list.pinned_path}`, ...argv].map(shellEscape).join(' ');
+    const command = list.steps
+      .map((step, index) => {
+        const text = step.kind === 'cd' ? `cd ${shellEscape(step.dir)}` : pinnedCommand(step.argv);
+        const separator = list.separators[index];
+        return separator === undefined ? text : `${text} ${separator}`;
+      })
+      .join(' ');
+    const preflight: ExecPreflight | undefined =
+      list.probes.length === 0
+        ? undefined
+        : async () => {
+            for (const probeStep of list.probes) {
+              const probe = await this.hostExec({
+                sandboxId: input.sandboxId,
+                command: pinnedCommand(probeStep.argv),
+                cwd: probeStep.cwd,
+                env: { ...list.env, LC_ALL: 'C' },
+              });
+              if (!probe.success) {
+                return GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (probe.response.exitCode !== 0) {
+                return /git repository/iu.test(probe.response.result)
+                  ? 'This directory is not a git repository, so this git command cannot run.'
+                  : GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (!gitLocalConfigIsSafe(probe.response.result)) {
+                return GIT_CONFIG_UNSAFE_REFUSAL;
+              }
+            }
+            return undefined;
+          };
+    return { exec: { ...input.exec, command }, env: list.env, preflight };
   }
 
   /**

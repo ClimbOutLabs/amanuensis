@@ -129,7 +129,7 @@ describe('ToolSet Sentinel classification of connector tools', () => {
   });
 
   it.each([
-    ['send_message', 'a name the classifier ranks as a send', true],
+    ['send_message', 'a name the classifier ranks as a send', false],
     ['delete_note', 'a name the classifier ranks as destructive', true],
     ['install_note_pack', 'a name the classifier ranks as an install', false],
   ])(
@@ -148,7 +148,7 @@ describe('ToolSet Sentinel classification of connector tools', () => {
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(true);
       expect(info.effect).toBe('inspect');
-      // A send or a delete is a consequence the person may answer once for the chat; an install is not.
+      // A delete may be answered once for the chat; a send asks every time, and so does an install.
       expect(allowsChatApproval(info)).toBe(chat);
       expect(allowsToolGrant(info)).toBe(false);
     },
@@ -444,7 +444,7 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
   const ARGS = { summary: 'Lunch', start: '2026-10-22T12:00' };
 
   it.each(['create_event', 'update_event', 'add_event', 'insert_event', 'quick_add_event', 'reschedule_meeting'])(
-    'asks for %s with its own card, offering "Always allow this here" but never a standing grant',
+    'asks for %s with its own card and offers neither chat nor always scope',
     async name => {
       const info = await makeToolSet({ tools: [claimsRead(name)], services: servicesWithGrants([]) }).toolCallInfo({
         name,
@@ -452,7 +452,7 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
       });
       expect(info).toMatchObject({ tier: 3, tier_reason: 'connector_calendar_write', is_approval_required: true });
       expect(info.approval_token_id).toEqual(expect.any(String));
-      expect(allowsChatApproval(info)).toBe(true);
+      expect(allowsChatApproval(info)).toBe(false);
       expect(allowsToolGrant(info)).toBe(false);
     },
   );
@@ -492,9 +492,9 @@ describe("the operator's own Email sidecar, whose tools publish no annotations",
     for (const name of ['get_emails_content', 'list_emails_metadata']) {
       expect(await email.toolCallInfo({ name, arguments: {} })).toMatchObject({ tier: 1, is_approval_required: false });
     }
-    expect(
-      (await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } })).is_approval_required,
-    ).toBe(true);
+    const send = await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } });
+    expect(send.is_approval_required).toBe(true);
+    expect(allowsChatApproval(send)).toBe(false);
   });
 
   it('keeps the default gate for the same tools on a connector the host does not vouch for', async () => {

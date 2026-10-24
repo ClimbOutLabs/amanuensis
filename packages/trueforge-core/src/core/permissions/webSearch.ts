@@ -2,11 +2,9 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { isSearchResultTool } from '../search/fetchedPages';
-import { isPrivateReadToolName } from './privateReadTools';
 import {
   emptyChatProvenance,
   namesUrl,
-  recordOwnStoreResult,
   recordSearchResults,
   recordUntrustedText,
   type ChatProvenance,
@@ -105,7 +103,7 @@ export function resultTexts(result: CallToolResult): string[] {
 
 /**
  * Records where the links and addresses of one tool result came from, before the model reads it. A search's results
- * are the person's to open; a read of their own mail or calendar gives their contacts; every other text is data.
+ * are the person's to open; every other text is data, the headers of their own mail and their events' guests too.
  * `argument_values` are the call's own strings, so a search that names a link counts as opening a page.
  */
 export function recordToolResultProvenance(input: {
@@ -119,10 +117,6 @@ export function recordToolResultProvenance(input: {
   const baseName = separator < 0 ? input.tool_name : input.tool_name.slice(separator + 2);
   if (isSearchResultTool(baseName) && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
-    return;
-  }
-  if (isPrivateReadToolName(input.tool_name)) {
-    recordOwnStoreResult({ provenance, texts: input.texts });
     return;
   }
   for (const text of input.texts) {

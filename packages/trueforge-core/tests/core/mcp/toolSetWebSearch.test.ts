@@ -1,12 +1,12 @@
 import { tmpdir } from 'node:os';
 import { createLogger } from 'winston';
 import {
-  RemoteMCP,
-  ToolSet,
   classifyHostToolCall,
   createSentinelHostContext,
   createWebSearchTurnState,
   defaultSentinelServices,
+  RemoteMCP,
+  ToolSet,
   type SentinelHostContext,
 } from '../../../src/core';
 import {
@@ -251,7 +251,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
     const card = info.tier3_card;
     expect(card?.plain_what).toBe(
-      "Web search: debug sy••••••11 now. This sends something that looks like a password or key.",
+      'Web search: debug sy••••••11 now. This sends something that looks like a password or key.',
     );
     expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
     expect(card?.why_asked_again).toBeNull();
@@ -285,7 +285,11 @@ describe('the outbound guard on the designated provider', () => {
   });
 
   it.each([
-    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.'), 'password or key'],
+    [
+      'a signed token',
+      ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.'),
+      'password or key',
+    ],
     ['a card number', 'refund to 4111 1111 1111 1111', 'payment card number'],
     ['a password label', 'password: hunter2hunter2', 'password or key'],
   ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query, looksLike) => {
@@ -313,12 +317,15 @@ describe('the outbound guard on the designated provider', () => {
     expect(h.dispatched).toEqual([]);
   });
 
-  it('asks about a private key block the same way, but runs a long ordinary search', async () => {
+  it('asks about a private key block the same way, and runs an ordinary search under the length cap', async () => {
     const h = harness({ searchProvider: true, unattended: true });
     const header = ['-----BEGIN ', 'EC ', 'PRIVATE ', 'KEY-----'].join('');
     expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: header } })).tier).toBe(3);
+    const ordinary = 'weather forecast for the coming week '.repeat(5);
+    expect(ordinary.length).toBeLessThanOrEqual(200);
+    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: ordinary } })).tier).toBe(1);
     const long = 'weather forecast for the coming week '.repeat(8);
-    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: long } })).tier).toBe(1);
+    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: long } })).tier).toBe(3);
   });
 
   it('reads every string argument, not only a field called query', async () => {
@@ -362,17 +369,21 @@ describe('provider plumbing fields on the designated provider', () => {
     expect(h.dispatched[0]?.args).toMatchObject({ session_id: uuid, model_name: 'invented-model-7' });
   });
 
-  it('runs a long single query: its length alone is not a secret', async () => {
+  it('still holds a single query over the cap, and a card shows the exact text', async () => {
     const h = harness({ searchProvider: true, plumbingFields });
-    const long = 'quillfeather '.repeat(20);
-    expect((await info(h, { objective, search_queries: [long], session_id: uuid })).tier).toBe(1);
+    const tooLong = 'quillfeather '.repeat(20);
+    const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.outbound_text).toContain(tooLong.trim());
+    expect(result.tier3_card?.plain_what).toContain('This is a long search, so Aman is checking with you first.');
+    expect(result.tier3_card?.why_asked_again).toBeNull();
   });
 
-  it('still holds a provider field too long to check, and the card says so plainly', async () => {
+  it('still holds a provider field too long to check', async () => {
     const h = harness({ searchProvider: true, plumbingFields });
     const result = await info(h, { objective: 'loom', session_id: 'x'.repeat(60) });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toContain('This sends a search service detail that is too long to check.');
+    expect(result.tier3_card?.plain_what).toContain('This is a long search, so Aman is checking with you first.');
   });
 
   it('names a held search in one plain line: its objective, with the ids, model and provider left out', async () => {
@@ -384,7 +395,9 @@ describe('provider plumbing fields on the designated provider', () => {
       model_name: 'invented-model-7',
     });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe(`Web search: ${objective}. Searches are set to ask, so Aman is checking with you first.`);
+    expect(result.tier3_card?.plain_what).toBe(
+      `Web search: ${objective}. Searches are set to ask, so Aman is checking with you first.`,
+    );
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -443,7 +456,9 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe('Web search: loom. This sends something that looks like a password or key.');
+    expect(result.tier3_card?.plain_what).toBe(
+      'Web search: loom. This sends something that looks like a password or key.',
+    );
     expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
     expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
@@ -531,9 +546,9 @@ describe('a map the user approved, and the text the next silent search is checke
     await h.toolSet.callTool({ name: 'render_map', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
     expect(h.dispatched.map(call => call.name)).toEqual(['render_map']);
-    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
-      true,
-    );
+    expect(
+      isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true),
+    ).toBe(true);
   });
 });
 
@@ -544,9 +559,9 @@ describe('a search the user approved, and the text the next silent search is che
     await h.toolSet.callTool({ name: 'lookup', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
     expect(h.dispatched.map(call => call.args)).toEqual([{ query: secret.slice(0, 16) }]);
-    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
-      true,
-    );
+    expect(
+      isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true),
+    ).toBe(true);
   });
 });
 
@@ -574,7 +589,10 @@ describe('links and where they came from', () => {
 
   it('opens a page the person typed, or one the model chose, without asking', async () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
-    recordPersonText({ provenance: h.host.web_search.provenance, text: 'What does https://docs.example.net/guide say?' });
+    recordPersonText({
+      provenance: h.host.web_search.provenance,
+      text: 'What does https://docs.example.net/guide say?',
+    });
     expect((await fetchInfo(h, 'https://docs.example.net/guide')).tier).toBe(1);
     expect((await fetchInfo(h, 'https://forecast.weather.example/MapClick.php?lat=37.77&lon=-122.42')).tier).toBe(1);
   });
@@ -614,11 +632,12 @@ describe('links and where they came from', () => {
     expect(info.tier).toBe(3);
   });
 
-  it('does not hold the link when the person named the same site', async () => {
+  it('still holds the link when the person named the same site, since the mail chose the page and the call adds to it', async () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });
     recordPersonText({ provenance: h.host.web_search.provenance, text: 'log me in at evil.example please' });
-    expect((await fetchInfo(h, `${mailLink}sam`)).tier).toBe(1);
+    expect((await fetchInfo(h, `${mailLink}sam`)).tier).toBe(3);
+    expect((await fetchInfo(h, 'https://evil.example')).tier).toBe(1);
   });
 
   it('skips such a link in a scheduled run with a plain line for the owner', async () => {
@@ -645,13 +664,21 @@ describe('links and where they came from', () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     for (const n of [1, 2, 3, 4]) {
       expect((await fetchInfo(h, `https://news.example.org/story-${String(n)}`)).tier).toBe(1);
-      await h.toolSet.callTool({ name: 'read_page', arguments: { url: `https://news.example.org/story-${String(n)}` } });
+      await h.toolSet.callTool({
+        name: 'read_page',
+        arguments: { url: `https://news.example.org/story-${String(n)}` },
+      });
     }
     expect(h.dispatched).toHaveLength(4);
   });
 
   it('says a held page read opens a page, never that it searches', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results, searchWithoutAsking: false });
+    const h = harness({
+      searchProvider: true,
+      searchTools: ['read_page'],
+      result: results,
+      searchWithoutAsking: false,
+    });
     const info = await fetchInfo(h, page);
     expect(info.tier3_card?.plain_what).toBe(
       `Open a web page: ${page}. Searches are set to ask, so Aman is checking with you first.`,

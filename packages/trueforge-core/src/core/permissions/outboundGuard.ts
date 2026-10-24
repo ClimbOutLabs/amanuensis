@@ -10,6 +10,12 @@
 
 import { SERVER_SECRET_REASON } from './searchHoldText.js';
 
+/** Most characters one string of the arguments (a query, an objective) may carry in a silent call. */
+export const OUTBOUND_MAX_CHARS = 200;
+
+/** Most characters all of a call's strings together may carry, so many short fields cannot add up to a bulk send. */
+export const OUTBOUND_MAX_TOTAL_CHARS = 1000;
+
 /**
  * Most characters a provider plumbing value (a session id, a model name) may carry and still skip the
  * encoded-run rule. The model fills these fields itself, so the cap bounds what they can carry out.
@@ -531,8 +537,12 @@ export function checkOutboundStrings(input: {
   if (hasCardNumber(text)) {
     return { ok: false, rule: 'card_number' };
   }
-  // The model fills a provider's own fields, so their length bounds what they could carry out unread.
-  if (raw.slice(userCount).some(value => value.length > OUTBOUND_MAX_PLUMBING_CHARS)) {
+  const userText = raw.slice(0, userCount);
+  if (
+    userText.some(value => value.length > OUTBOUND_MAX_CHARS) ||
+    userText.reduce((total, value) => total + value.length, 0) > OUTBOUND_MAX_TOTAL_CHARS ||
+    raw.slice(userCount).some(value => value.length > OUTBOUND_MAX_PLUMBING_CHARS)
+  ) {
     return { ok: false, rule: 'too_long' };
   }
   return { ok: true };
@@ -556,7 +566,7 @@ export function describeOutboundRule(rule: OutboundGuardRule): string {
     case 'card_number':
       return 'it contains a payment card number';
     case 'too_long':
-      return `a search service detail in it is longer than ${String(OUTBOUND_MAX_PLUMBING_CHARS)} characters`;
+      return `it is longer than a search may be without asking: ${String(OUTBOUND_MAX_CHARS)} characters in one part, ${String(OUTBOUND_MAX_TOTAL_CHARS)} in all, or ${String(OUTBOUND_MAX_PLUMBING_CHARS)} in a provider's own detail`;
     case 'uninspectable':
       return 'its arguments are too large to inspect';
   }

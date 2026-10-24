@@ -477,14 +477,14 @@ describe('the permissions log', () => {
 });
 
 describe('durable approvals', () => {
-  it('offers "Always allow this here" but never a standing grant for a change that reaches guests', async () => {
+  it('never offers approve-for-this-chat or always-allow for a change that reaches guests', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
     const info = await built.tools.toolCallInfo({
       name: 'create_event',
       arguments: { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'all' },
     });
     expect(info.tier_reason).toBe('calendar_write_guests');
-    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
   });
 

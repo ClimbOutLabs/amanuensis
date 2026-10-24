@@ -330,9 +330,9 @@ describe('which calendar changes a grant may cover', () => {
   });
 
   it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
-    'lets %s be answered once for this chat, never by a standing grant',
+    'never lets %s be covered by a grant',
     tier_reason => {
-      expect(allowsChatApproval(info(tier_reason))).toBe(true);
+      expect(allowsChatApproval(info(tier_reason))).toBe(false);
       expect(allowsToolGrant(info(tier_reason))).toBe(false);
     },
   );

@@ -4,6 +4,7 @@
  * must run on the host's own word that they are reads, while its sends still ask.
  */
 import { AgentSpecSchema, TurnResourceResolver } from '@truefoundry/trueforge-core/agent-session';
+import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import type { IToolSet } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { createLogger } from 'winston';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -104,6 +105,8 @@ describe('the Email connector on the real tool route', () => {
       true,
     );
     expect(send.is_approval_required).toBe(true);
+    // A send asks every time: its card never offers "Always allow this here".
+    expect(allowsChatApproval(send)).toBe(false);
   }
 
   it('reads, lists and searches mail with no card right after boot, and sending still asks', async () => {

@@ -57,7 +57,7 @@ export function holdSay(assistant: string) {
     secret: SECRET_SAY,
     card_number: 'This sends something that looks like a payment card number.',
     encoded: 'This sends a long block of coded text.',
-    long: 'This sends a search service detail that is too long to check.',
+    long: `This is a long search, so ${assistant} is checking with you first.`,
     unreadable: `This has more text than ${assistant} can check.`,
     generic: `${assistant} is checking with you first.`,
     maps_always: `Maps are set to ask, so ${assistant} is checking with you first.`,

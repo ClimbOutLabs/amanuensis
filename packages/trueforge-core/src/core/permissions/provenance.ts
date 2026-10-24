@@ -1,7 +1,7 @@
 /**
- * Where the links, sites and email addresses of an outbound call came from. The person, their own stores and a
- * search's results are theirs to use; text the assistant read (pages, mail bodies, files, tool output) is data.
- * A call is steered when a destination it names was put there by that data and nowhere else.
+ * Where the links, sites and email addresses of an outbound call came from. The person and a search's results are
+ * theirs to use; text the assistant read (pages, mail, files, tool output) is data. A call is steered when a
+ * destination it names was put there by that data and nowhere else.
  */
 
 /** Links, sites and addresses from one side, each folded so two spellings of one value match. */
@@ -9,23 +9,29 @@ interface ProvenanceValues {
   urls: Set<string>;
   hosts: Set<string>;
   addresses: Set<string>;
+  /** A set on this side filled up, so some values were never kept. */
+  overflowed: boolean;
 }
 
 export interface ChatProvenance {
-  /** From the person's messages, profile and memory, their own mail headers and guests, and search results. */
+  /** From the person's messages, profile and memory, and search results. */
   trusted: ProvenanceValues;
-  /** Seen in content the assistant read: web pages, mail bodies, attached files, tool output, earlier summaries. */
+  /** Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries. */
   untrusted: ProvenanceValues;
 }
 
-/** Each set stays bounded, so a huge result cannot grow server memory. Past it, nothing more is kept on that side. */
+/**
+ * Each set stays bounded, so a huge result cannot grow server memory. Past it, nothing more is kept on that side,
+ * and once the read side overflows every value the person did not give counts as read content: it fails toward asking.
+ */
 const MAX_VALUES_PER_SET = 5_000;
 
+function emptyValues(): ProvenanceValues {
+  return { urls: new Set(), hosts: new Set(), addresses: new Set(), overflowed: false };
+}
+
 export function emptyChatProvenance(): ChatProvenance {
-  return {
-    trusted: { urls: new Set(), hosts: new Set(), addresses: new Set() },
-    untrusted: { urls: new Set(), hosts: new Set(), addresses: new Set() },
-  };
+  return { trusted: emptyValues(), untrusted: emptyValues() };
 }
 
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
@@ -90,10 +96,22 @@ function urlKey(value: string): string | undefined {
   return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
-function add(set: Set<string>, value: string): void {
-  if (set.size < MAX_VALUES_PER_SET) {
-    set.add(value);
+function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
+  const set = input.side[input.kind];
+  if (set.has(input.value)) {
+    return;
   }
+  if (set.size < MAX_VALUES_PER_SET) {
+    set.add(input.value);
+  } else {
+    input.side.overflowed = true;
+  }
+}
+
+/** Whether read content may have named the value: it did, or the read side overflowed and cannot say it did not. */
+function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts' | 'addresses'; value: string }) {
+  const side = input.provenance.untrusted;
+  return side.overflowed || side[input.kind].has(input.value);
 }
 
 function recordUrl(side: ProvenanceValues, value: string): void {
@@ -102,8 +120,8 @@ function recordUrl(side: ProvenanceValues, value: string): void {
   if (key === undefined || host === undefined) {
     return;
   }
-  add(side.urls, key);
-  add(side.hosts, hostKey(host));
+  add({ side, kind: 'urls', value: key });
+  add({ side, kind: 'hosts', value: hostKey(host) });
 }
 
 function recordText(side: ProvenanceValues, text: string): void {
@@ -111,10 +129,10 @@ function recordText(side: ProvenanceValues, text: string): void {
     recordUrl(side, url);
   }
   for (const match of text.matchAll(BARE_HOST)) {
-    add(side.hosts, hostKey(match[0]));
+    add({ side, kind: 'hosts', value: hostKey(match[0]) });
   }
   for (const match of text.matchAll(EMAIL)) {
-    add(side.addresses, match[0].toLowerCase());
+    add({ side, kind: 'addresses', value: match[0].toLowerCase() });
   }
 }
 
@@ -172,115 +190,76 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
   }
 }
 
-/** Fields of the person's own mail and calendar that name who they deal with, not what a message says. */
-const PEOPLE_KEYS = new Set(['from', 'to', 'cc', 'bcc', 'reply_to', 'sender', 'email', 'organizer', 'attendees']);
-const MAX_STORE_DEPTH = 8;
-
-function collectPeople(input: { node: unknown; into: string[]; depth: number; inPeople: boolean }): void {
-  const { node, into, depth, inPeople } = input;
-  if (depth > MAX_STORE_DEPTH) {
-    return;
-  }
-  if (typeof node === 'string') {
-    if (inPeople) {
-      into.push(node);
-    }
-  } else if (Array.isArray(node)) {
-    for (const child of node) {
-      collectPeople({ node: child, into, depth: depth + 1, inPeople });
-    }
-  } else if (typeof node === 'object' && node !== null) {
-    for (const [key, child] of Object.entries(node)) {
-      collectPeople({ node: child, into, depth: depth + 1, inPeople: inPeople || PEOPLE_KEYS.has(key.toLowerCase()) });
-    }
-  }
+/** Whether a link names only a site, with no path or query: it adds nothing to the site, so the site's trust holds. */
+function isBareSite(url: string): boolean {
+  const parsed = parsedUrl(url);
+  return parsed !== undefined && (parsed.pathname === '' || parsed.pathname === '/') && parsed.search === '';
 }
 
 /**
- * A read of the person's own mail, calendar or spaces. Who a message is from or to, and an event's guests, are the
- * person's own contacts; what a message or an event says is someone else's text, so it is data.
+ * Whether read content steered a link. A bare site is steered when only read content named it. A link that adds a
+ * path or a query is trusted only as the exact link the person gave or a search returned, once read content named
+ * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
+ * does not vouch for a page on it that read content chose.
  */
-export function recordOwnStoreResult(input: { provenance: ChatProvenance; texts: readonly string[] }): void {
-  for (const text of input.texts) {
-    recordUntrustedText({ provenance: input.provenance, text });
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      continue;
-    }
-    const people: string[] = [];
-    collectPeople({ node: parsed, into: people, depth: 0, inPeople: false });
-    for (const value of people) {
-      for (const match of value.matchAll(EMAIL)) {
-        add(input.provenance.trusted.addresses, match[0].toLowerCase());
-      }
-    }
+function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+  const { provenance } = input;
+  const key = urlKey(input.url);
+  const host = parsedUrl(input.url)?.hostname;
+  if (key === undefined || host === undefined) {
+    return false;
   }
-}
-
-/** Whether a site came only from content the assistant read: no message of the person, no search result named it. */
-function steeredHost(provenance: ChatProvenance, host: string): boolean {
-  const key = hostKey(host);
-  return provenance.untrusted.hosts.has(key) && !provenance.trusted.hosts.has(key);
+  const site = hostKey(host);
+  if (!untrustedHas({ provenance, kind: 'hosts', value: site })) {
+    return false;
+  }
+  return isBareSite(input.url) ? !provenance.trusted.hosts.has(site) : !provenance.trusted.urls.has(key);
 }
 
 /**
- * Links a lookup names that read content steered and that carry something that content did not give: the site
- * came only from what the assistant read, and the link is not the one written there. Opening a link exactly as a
- * page or a mail wrote it sends nothing of the person's, so it is not steered; adding to it is.
+ * Links a lookup names that read content steered and that carry something that content did not give. Opening a
+ * link exactly as a page or a mail wrote it sends nothing of the person's, so it is not steered; adding to it is.
  */
 export function steeredLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const { provenance } = input;
-  const steered: string[] = [];
-  for (const value of input.values) {
-    for (const url of urlsOf(value)) {
+  return input.values.flatMap(value =>
+    urlsOf(value).filter(url => {
       const key = urlKey(url);
-      const host = parsedUrl(url)?.hostname;
-      if (key === undefined || host === undefined) {
-        continue;
-      }
-      if (provenance.trusted.urls.has(key) || provenance.untrusted.urls.has(key)) {
-        continue;
-      }
-      if (steeredHost(provenance, host)) {
-        steered.push(url);
-      }
-    }
-  }
-  return steered;
+      return key !== undefined && !provenance.untrusted.urls.has(key) && steeredUrl({ provenance, url });
+    }),
+  );
+}
+
+/** Whether only read content named an address: the person never gave it, and it is not the reply's own sender. */
+function steeredAddress(input: { provenance: ChatProvenance; address: string; reply_sender: string | null }): boolean {
+  const address = input.address.trim().toLowerCase();
+  return (
+    address !== input.reply_sender?.trim().toLowerCase() &&
+    !input.provenance.trusted.addresses.has(address) &&
+    untrustedHas({ provenance: input.provenance, kind: 'addresses', value: address })
+  );
 }
 
 /**
- * Recipients and sites of a consequential action that only read content named: an address or a site no message of
- * the person, none of their own contacts and no search result gave.
+ * Recipients and sites of a consequential action that only read content named. `reply_sender` is the From of the
+ * one message this action replies to, as the host read it; it is trusted for this reply and nothing else, so a
+ * Reply-To, a Cc or a guest that read content named still counts as steered.
  */
 export function steeredDestinations(input: {
   provenance: ChatProvenance;
   addresses: readonly string[];
   values: readonly string[];
+  reply_sender: string | null;
 }): string[] {
-  const { provenance } = input;
-  const steered: string[] = [];
-  for (const raw of input.addresses) {
-    const address = raw.trim().toLowerCase();
-    if (provenance.untrusted.addresses.has(address) && !provenance.trusted.addresses.has(address)) {
-      steered.push(raw);
-    }
-  }
+  const { provenance, reply_sender } = input;
+  const steered = input.addresses.filter(address => steeredAddress({ provenance, address, reply_sender }));
   for (const value of input.values) {
     for (const match of value.matchAll(EMAIL)) {
-      const address = match[0].toLowerCase();
-      if (provenance.untrusted.addresses.has(address) && !provenance.trusted.addresses.has(address)) {
+      if (steeredAddress({ provenance, address: match[0], reply_sender })) {
         steered.push(match[0]);
       }
     }
-    for (const url of urlsOf(value.replace(EMAIL, ' '))) {
-      const host = parsedUrl(url)?.hostname;
-      if (host !== undefined && steeredHost(provenance, host)) {
-        steered.push(url);
-      }
-    }
+    steered.push(...urlsOf(value.replace(EMAIL, ' ')).filter(url => steeredUrl({ provenance, url })));
   }
   return steered;
 }

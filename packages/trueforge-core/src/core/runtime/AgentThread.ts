@@ -79,6 +79,7 @@ import {
   allowsToolGrant,
   approvalGrantKey,
   awaitsApproval,
+  chatGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
 } from '../mcp/approvalGrant';
@@ -2042,7 +2043,7 @@ export class AgentThread {
             pending.tool_info.implementation_plan_grant === undefined &&
             allowsChatApproval(pending.tool_info)
           ) {
-            this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+            this.chatApprovalGrants.add(chatGrantKey(pending.tool_info));
           }
           if (
             approval.approval.scope === 'always' &&

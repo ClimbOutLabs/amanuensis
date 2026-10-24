@@ -789,11 +789,13 @@ describe('HindsightMemoryProcessor and where links come from', () => {
 
     await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'how is my cousin' }])));
 
-    // A page that also names the site does not make it steered: the person's memory named it first.
+    // The person's memory named the site, so a page on it the assistant chose runs.
+    const album = 'https://photos.thrupp.example/album?u=1';
+    expect(steeredLinks({ provenance: webSearch.provenance, values: [album] })).toEqual([]);
+    // Once something it read names the same site, only the bare site stays trusted: a page on it read content chose is held.
     webSearch.provenance.untrusted.hosts.add('photos.thrupp.example');
-    expect(
-      steeredLinks({ provenance: webSearch.provenance, values: ['https://photos.thrupp.example/album?u=1'] }),
-    ).toEqual([]);
+    expect(steeredLinks({ provenance: webSearch.provenance, values: ['https://photos.thrupp.example'] })).toEqual([]);
+    expect(steeredLinks({ provenance: webSearch.provenance, values: [album] })).toEqual([album]);
   });
 });
 

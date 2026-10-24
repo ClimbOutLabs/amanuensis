@@ -278,7 +278,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               <ul className="aman-runtime-rail__rules">
                 <li>{settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first'}</li>
                 <li>
-                  {settings.sandbox_without_asking ? 'Sandbox code runs without asking' : 'Sandbox code asks first'}
+                  {settings.sandbox_without_asking
+                    ? `${assistantDisplayName(profile?.assistant_name)}'s own sandbox code runs without asking`
+                    : 'Sandbox code asks first'}
                 </li>
                 <li>{settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off'}</li>
               </ul>
