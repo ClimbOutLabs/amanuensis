@@ -1,8 +1,11 @@
-import { PermissionApprovalCard, ThemeProvider, type SentinelApprovalCard } from '@truefoundry/trueforge-ui';
+import {
+  EmailApprovalCard,
+  PermissionApprovalCard,
+  ThemeProvider,
+  type SentinelApprovalCard,
+} from '@truefoundry/trueforge-ui';
 import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
-
-import { EmailApprovalCard } from '../../../trueforge-ui/src/sentinel/EmailApprovalCard.tsx';
 
 /** One approval card of every kind, for the type size checks. Every value is invented. */
 const blank: SentinelApprovalCard = {

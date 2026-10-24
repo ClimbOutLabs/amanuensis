@@ -386,6 +386,8 @@ export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
+export { EmailApprovalCard } from './sentinel/EmailApprovalCard.js';
+export type { EmailApprovalCardProps } from './sentinel/EmailApprovalCard.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
 export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
 export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
