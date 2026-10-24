@@ -1,0 +1,129 @@
+import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
+import type { ChatImageInputType } from '@truefoundry/trueforge-core/core/chatImages';
+import { CHAT_IMAGE_INPUT_MIME_TYPES } from '@truefoundry/trueforge-core/core/chatImages';
+
+import type { ChatImageRefusal } from '../../schemas/chatImages';
+import { sniffImageType } from '../chatImages/imageSniff';
+import { fetchRemoteImage, type RemoteImageFetchDeps } from '../chatImages/remoteImageFetch';
+import { isPlaceholder } from '../spaceLinks';
+import { isChatSeenLink } from './chatSeenLinks';
+
+/** A picture a person's browser may show is kept this long in memory, and at most this many at once. */
+export const CHAT_PICTURE_CACHE_TTL_MS = 5 * 60 * 1000;
+export const CHAT_PICTURE_CACHE_MAX_ENTRIES = 16;
+/** Sent to the picture host. It names neither this instance nor the person asking. */
+export const CHAT_PICTURE_USER_AGENT = 'Mozilla/5.0 (compatible; image-fetch/1.0)';
+
+export type ChatPictureOutcome =
+  | { status: 'shown'; bytes: Buffer; mime: string }
+  | { status: 'not_in_chat' }
+  | { status: 'refused'; reason: ChatImageRefusal };
+
+export interface ChatPictureServiceDeps {
+  sessionStore: Pick<ISessionStore, 'listSessionEvents'>;
+  fetchDeps: RemoteImageFetchDeps;
+  now: () => number;
+}
+
+export interface ChatPictureService {
+  get(input: { session_id: string; url: string }): Promise<ChatPictureOutcome>;
+}
+
+interface CachedPicture {
+  bytes: Buffer;
+  mime: string;
+  expires_at: number;
+}
+
+function isHttpsUrl(url: string): URL | undefined {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mimeOf(type: ChatImageInputType): string | undefined {
+  return [...CHAT_IMAGE_INPUT_MIME_TYPES].find(([, value]) => value === type)?.[0];
+}
+
+/**
+ * Serves a chat-page picture to the chat's owner. The URL must be one the chat's stored turns
+ * show as seen (a search result, a picture on a page the chat opened, or a picture the reply
+ * showed), read back from the stored events, never from the client. Anything else is refused, so
+ * the frame never contacts an outside site itself and the proxy can never be used to fetch an
+ * arbitrary URL. The fetch itself reuses the chat image fetcher (public addresses only, every
+ * redirect and DNS answer checked, no cookies or Referer, byte cap, magic-number type check).
+ */
+export function createChatPictureService(deps: ChatPictureServiceDeps): ChatPictureService {
+  const cache = new Map<string, CachedPicture>();
+
+  // Each chat gets its own entries, so a cached picture never serves another chat.
+  function cacheKey(input: { session_id: string; url: string }): string {
+    return JSON.stringify([input.session_id, input.url]);
+  }
+
+  function cached(key: string): CachedPicture | undefined {
+    const hit = cache.get(key);
+    if (hit === undefined) {
+      return undefined;
+    }
+    if (hit.expires_at <= deps.now()) {
+      cache.delete(key);
+      return undefined;
+    }
+    return hit;
+  }
+
+  function remember(key: string, picture: CachedPicture): void {
+    cache.delete(key);
+    cache.set(key, picture);
+    while (cache.size > CHAT_PICTURE_CACHE_MAX_ENTRIES) {
+      const oldest = cache.keys().next();
+      if (oldest.done === true) {
+        break;
+      }
+      cache.delete(oldest.value);
+    }
+  }
+
+  return {
+    async get(input) {
+      const parsed = isHttpsUrl(input.url);
+      if (parsed === undefined || isPlaceholder(parsed.hostname)) {
+        return { status: 'refused', reason: 'blocked' };
+      }
+      if (
+        !(await isChatSeenLink({
+          sessionStore: deps.sessionStore,
+          session_id: input.session_id,
+          url: input.url,
+        }))
+      ) {
+        return { status: 'not_in_chat' };
+      }
+      const key = cacheKey(input);
+      const hit = cached(key);
+      if (hit !== undefined) {
+        return { status: 'shown', bytes: hit.bytes, mime: hit.mime };
+      }
+      const fetched = await fetchRemoteImage({
+        url: input.url,
+        allowUrl: url => url.protocol === 'https:',
+        userAgent: CHAT_PICTURE_USER_AGENT,
+        deps: deps.fetchDeps,
+      });
+      if (!fetched.ok) {
+        return { status: 'refused', reason: fetched.reason };
+      }
+      const type = sniffImageType(fetched.bytes);
+      const mime = type === null ? undefined : mimeOf(type);
+      if (mime === undefined) {
+        return { status: 'refused', reason: 'unsupported_type' };
+      }
+      remember(key, { bytes: fetched.bytes, mime, expires_at: deps.now() + CHAT_PICTURE_CACHE_TTL_MS });
+      return { status: 'shown', bytes: fetched.bytes, mime };
+    },
+  };
+}

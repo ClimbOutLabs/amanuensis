@@ -254,7 +254,38 @@ function buildSpaceInstruction(builder: InstructionBuilder): void {
 const SPACE_BODY_INPUT_SCHEMA = z
   .union([z.string(), z.array(z.string())])
   .transform(value => (Array.isArray(value) ? value.join('\n') : value))
-  .pipe(SpaceContentSchema.shape.body);
+  .pipe(SpaceContentSchema.shape.body)
+  .refine(value => value.trim().length > 0, {
+    message: 'The space body is empty. Send the page content again.',
+  });
+
+/**
+ * One plain line naming each bad field of a space call, so the model gets the exact field error
+ * instead of a bare "Validation failed". Zod's jargon is translated where it is short; a refine
+ * message, already written in plain words, passes through unchanged.
+ */
+function spaceInvalidInput(error: z.ZodError): string {
+  const plain = (message: string): string => {
+    if (message === 'Required') {
+      return 'is missing';
+    }
+    if (message.includes('must contain at least') || message.startsWith('Too small:')) {
+      return 'is too short';
+    }
+    if (message.includes('must contain at most') || message.startsWith('Too big:')) {
+      return 'is too long';
+    }
+    return message;
+  };
+  const parts = error.issues.map(issue => {
+    const field = issue.path.map(part => String(part)).join('.');
+    const message = plain(issue.message);
+    return field === '' ? message : `${field}: ${message}`;
+  });
+  return JSON.stringify({
+    error: parts.length === 0 ? 'Invalid space call.' : `Invalid space call: ${parts.join('; ')}.`,
+  });
+}
 
 const LIST_SPACES_INPUT_SCHEMA = z.object({}).strict();
 /**
@@ -702,6 +733,7 @@ class SpaceTool extends LocalToolMCP {
         "List the user's spaces without bodies: id, name, purpose, status, revision, and updated_at, plus the aggregate_revision. Call before create_space to check for an existing space on the same subject.",
       schema: LIST_SPACES_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
+      invalidInput: spaceInvalidInput,
       handler: async () => this.read(() => this.list()),
     }),
     defineTool({
@@ -710,24 +742,28 @@ class SpaceTool extends LocalToolMCP {
         'Read one space by space_id, or by space_name when the id is not at hand (the name must be exact and unique). Returns metadata, the aggregate_revision, and the body unless include_body is false. Call before update_space to get the current body and revision. Pass revision to read a retained older revision. Use include_body false only when a recent get_space already returned the body.',
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
+      invalidInput: spaceInvalidInput,
       handler: async input => this.read(() => this.get(input)),
     }),
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and update_space, never by editing files in the sandbox. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and update_space, never by editing files in the sandbox. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Pictures come from a page you opened or a search result. Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
+      invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
     }),
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
         'Update one space by space_id or exact space_name. Provide exactly one of body, edits or block_edits. ' +
+        'Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Pictures come from a page you opened or a search result. ' +
         'body replaces the whole space: name, purpose and status are required; pass it as lines. ' +
         'edits: up to 50 search/replace pairs applied in order; copy each search verbatim from a recent get_space. A search that matches nothing fails the whole update. Check each replacement count; call revert_space if wrong. Combine interacting changes into one edit. ' +
         'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; empty new_content deletes. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: UPDATE_SPACE_INPUT_SCHEMA,
+      invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.update(input)),
     }),
     defineTool({
@@ -735,6 +771,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'Restore an older revision of a space as a new current revision, to undo a bad update_space. The name, purpose, status, format, and body return to that revision; the bad content stays recoverable. expected_revision and expected_aggregate_revision are optional.',
       schema: REVERT_SPACE_INPUT_SCHEMA,
+      invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.revert(input)),
     }),
     defineTool({
@@ -743,6 +780,7 @@ class SpaceTool extends LocalToolMCP {
         "List one space's block anchors with an 80-character preview of each, without the body. Use it after a context compaction or before block_edits. The preamble (text before the first marker) is reported separately and changes only through a full-body update_space.",
       schema: LIST_BLOCKS_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
+      invalidInput: spaceInvalidInput,
       handler: async input => this.read(() => this.listBlocks(input)),
     }),
   ];

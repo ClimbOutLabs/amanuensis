@@ -20,6 +20,8 @@ import type { SpaceFormatSchema } from '../schemas/space';
 export interface BodyLink {
   kind: 'picture' | 'link';
   value: string;
+  /** The element the URL came from, when the check needs it: only `script` changes the refusal. */
+  tag?: string;
 }
 
 type HtmlNode = DefaultTreeAdapterMap['node'];
@@ -165,7 +167,11 @@ function collectHtmlLinks(node: HtmlNode, links: BodyLink[]): void {
   if ('attrs' in node) {
     const tag = node.tagName.toLowerCase();
     for (const attribute of node.attrs) {
-      links.push(...attributeLinks({ tag, name: attributeName(attribute), value: attribute.value }));
+      links.push(
+        ...attributeLinks({ tag, name: attributeName(attribute), value: attribute.value }).map(link =>
+          tag === 'script' ? { ...link, tag } : link,
+        ),
+      );
     }
     if (tag === 'style') {
       links.push(...cssLinks(textOf(node)));
