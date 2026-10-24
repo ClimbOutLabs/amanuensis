@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import {
   auiButtonClass,
   railMenuRowClassName,
@@ -217,7 +218,6 @@ export function SidebarLayout({ className }: { className?: string }) {
   const AgentDetailsPage = useSlot('AgentDetailsPage');
   const AgentsLibrary = useSlot('AgentsLibrary');
   const SessionsPage = useSlot('SessionsPage');
-  const ClearChatButton = useSlot('ClearChatButton');
   const SaveAgentButton = useSlot('SaveAgentButton');
   const SelectAgentEmptyState = useSlot('SelectAgentEmptyState');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -328,6 +328,8 @@ export function SidebarLayout({ className }: { className?: string }) {
             Mobile reaches theme/settings via the nav drawer rail. */}
         <PageHeader
           helpAction={!overlayOpen}
+          singleLine
+          menu={!overlayOpen ? <ChatHeaderMenu /> : null}
           className={cn(
             'bg-topbar-bg',
             // An open overlay (Settings, Library, Sessions, ...) brings its own header and this bar
@@ -360,7 +362,6 @@ export function SidebarLayout({ className }: { className?: string }) {
           end={
             !overlayOpen ? (
               <>
-                <ClearChatButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
               </>

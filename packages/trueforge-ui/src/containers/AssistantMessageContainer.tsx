@@ -384,7 +384,7 @@ export function AssistantMessageContainer() {
       ) : null}
       {showNotFinished && (
         <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
-          This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.
+          This reply did not finish. Ask again, or turn on Agent details to see what went wrong.
         </p>
       )}
       {showStepNotFinished && (

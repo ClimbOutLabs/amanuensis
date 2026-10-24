@@ -155,7 +155,7 @@ function delay(ms: number, abortSignal: AbortSignal | undefined): Promise<void> 
 /** UI session with create-agent intent for resume chrome and the chat-level agent-details preference. */
 export type HarnessUiSession = Session<HarnessAgentSpec> & {
   isCreateAgent: boolean;
-  /** "Show agent details" preference (session metadata `agent_details`); undefined = unset. */
+  /** "Agent details" preference (session metadata `agent_details`); undefined = unset. */
   agentDetails?: AgentDetailsVisibility;
 };
 

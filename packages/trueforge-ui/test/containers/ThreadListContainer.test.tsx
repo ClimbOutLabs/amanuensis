@@ -498,9 +498,9 @@ describe('ThreadListContainer', () => {
       throw new Error('Expected session actions button');
     }
     fireEvent.click(actionButton);
-    // "Show agent details" moved out of this menu to a header button next to Clear chat: it must
-    // not appear here (desktop dropdown or mobile sheet) any more.
-    expect(screen.queryByText('Show agent details')).not.toBeInTheDocument();
+    // The Agent details switch lives in the chat header: it must not appear in this menu
+    // (desktop dropdown or mobile sheet).
+    expect(screen.queryByText('Agent details')).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitemcheckbox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
     expect(onDelete).not.toHaveBeenCalled();

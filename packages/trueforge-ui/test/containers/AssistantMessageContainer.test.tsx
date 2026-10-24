@@ -732,7 +732,7 @@ describe('AssistantMessageContainer with agent details off', () => {
     renderAssistantMessage([erroredToolCallMessage()]);
 
     expect(screen.getByTestId('assistant-message-not-finished')).toHaveTextContent(
-      'This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.',
+      'This reply did not finish. Ask again, or turn on Agent details to see what went wrong.',
     );
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     for (const element of screen.queryAllByText(/lookup failed|lookup_notes/)) expect(element).not.toBeVisible();

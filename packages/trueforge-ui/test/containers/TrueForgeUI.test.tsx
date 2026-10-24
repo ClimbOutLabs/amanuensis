@@ -852,24 +852,7 @@ describe('layout slot overrides', () => {
     ['dock/widget', StackChatPanel],
   ] as const;
 
-  it.each(hosts)('%s honors overrides.ClearChatButton', (_name, Layout) => {
-    render(
-      <SlotsProvider overrides={{ ClearChatButton: CustomClearChat }}>
-        <ShellModeProvider agentConfig={{ mode: 'SingleAgent', name: 'a' }}>
-          <RuntimeHarness messages={[]}>
-            <div className="h-96">
-              <Layout />
-            </div>
-          </RuntimeHarness>
-        </ShellModeProvider>
-      </SlotsProvider>,
-    );
-
-    expect(screen.getByRole('button', { name: 'custom clear' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Clear chat' })).not.toBeInTheDocument();
-  });
-
-  it.each(hosts)('%s places Clear Chat immediately before Save Agent', (_name, Layout) => {
+  it.each(hosts)('%s keeps Clear chat out of the header row, beside Save Agent', (_name, Layout) => {
     render(
       <SlotsProvider overrides={{ ClearChatButton: CustomClearChat, SaveAgentButton: CustomSaveAgent }}>
         <ShellModeProvider agentConfig={{ mode: 'SingleAgent', name: 'a' }}>
@@ -882,9 +865,9 @@ describe('layout slot overrides', () => {
       </SlotsProvider>,
     );
 
-    const clearChat = screen.getByRole('button', { name: 'custom clear' });
-    const saveAgent = screen.getByRole('button', { name: 'custom save' });
-    expect(clearChat.nextElementSibling).toBe(saveAgent);
+    // Clear chat is rarely used, so it lives in the header's three-dots menu (see ChatHeaderActions).
+    expect(screen.getByRole('button', { name: 'custom save' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'custom clear' })).not.toBeInTheDocument();
   });
 
   it.each(hosts)('%s honors overrides.ShellActionsActionSlot to the right of shell actions', (_name, Layout) => {

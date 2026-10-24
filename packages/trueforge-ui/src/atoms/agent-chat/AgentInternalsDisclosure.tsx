@@ -15,7 +15,7 @@ export type AgentInternalsDisclosureProps = {
   attention?: boolean;
   /** When true, always renders the content (e.g. a pending approval needs its action buttons visible). */
   lockOpen?: boolean;
-  /** The chat-level "Show agent details" switch, the starting state of the per-answer toggle. Content also renders when `lockOpen` is set, or when `attention` is set while the turn is running. */
+  /** The chat-level "Agent details" switch, the starting state of the per-answer toggle. Content also renders when `lockOpen` is set, or when `attention` is set while the turn is running. */
   expanded: boolean;
   /** Prefix for data-testid attributes (tests). */
   dataTestPrefix?: string;
@@ -25,7 +25,7 @@ export type AgentInternalsDisclosureProps = {
 
 /**
  * Agent internals (tool calls, reasoning steps, intermediate text, model usage) for one turn. The
- * summary row is a show/hide toggle that starts from the chat-level "Show agent details" switch
+ * summary row is a show/hide toggle that starts from the chat-level "Agent details" switch
  * (`expanded`) and follows it again whenever the switch changes. Two live-turn exceptions keep the
  * content visible with no toggle: `lockOpen` (a pending approval needs its action buttons visible)
  * and `attention` while the turn is running (an error on the active turn stays in view). Once the
