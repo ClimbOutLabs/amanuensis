@@ -1538,18 +1538,29 @@
   background-color: var(--gold-soft);
 }
 
-/* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
-.aui-ticket__title {
-  font-family: var(--font-display);
-  font-size: 1.25rem;
-  line-height: 1.2;
+/*
+ * Every approval card (email, calendar, shell, space, connector) reads like the chat around it: body
+ * font at the chat's body size, the question a little larger in semibold, and only a command or a
+ * message's own content in its own font. A card must never look louder than the chat.
+ */
+.aui-approval-card {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  letter-spacing: normal;
 }
 
+.aui-approval-card__title {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+
+/* The badge and the stub's lines: plain body text, no capitals or spacing. */
 .aui-ticket__label {
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
 }
 
 /* A stub holds a short line: a long recipient list is cut to three lines, the full text stays in Details. */
@@ -1989,12 +2000,4 @@
   font-family: var(--font-display);
   font-style: italic;
   color: var(--text-primary);
-}
-
-.aui-ticket__title {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 400;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
 }
