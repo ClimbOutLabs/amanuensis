@@ -23,26 +23,49 @@ function stubStatus(overrides: Partial<ReturnType<typeof useCompactionStatus>>):
 }
 
 describe('CompactionStatusLine', () => {
-  it('stays hidden while the chat is at or under 80% of its context', () => {
-    stubStatus({ contextLimit: 100_000, liveTokens: 80_000 });
-    const { container } = render(<CompactionStatusLine />);
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('shows one short line once the chat is over 80% of its context', () => {
-    stubStatus({ contextLimit: 100_000, liveTokens: 85_400 });
+  it('says how much of the model memory the chat uses, small and in the muted colour', () => {
+    stubStatus({ contextLimit: 128_000, liveTokens: 12_500 });
     render(<CompactionStatusLine />);
 
-    expect(screen.getByText('This chat is 85% full.')).toBeInTheDocument();
+    const line = screen.getByText("This chat uses 10% of the model's memory (13K of 128K tokens).");
+    expect(line).toHaveAttribute('data-slot', 'aui_compaction-status');
+    expect(line).toHaveClass('text-text-muted', 'text-[0.75rem]', 'font-normal');
+    expect(line).toHaveAttribute('title', expect.stringContaining("model's memory"));
   });
 
-  it('stays hidden while the status loads or when the limit is unknown', () => {
+  it('shows the line however little the chat uses', () => {
+    stubStatus({ contextLimit: 200_000, liveTokens: 900 });
+    render(<CompactionStatusLine />);
+
+    expect(screen.getByText("This chat uses 0% of the model's memory (900 of 200K tokens).")).toBeInTheDocument();
+  });
+
+  it('gives the size alone when the model limit is unknown', () => {
+    stubStatus({ liveTokens: 4_000 });
+    render(<CompactionStatusLine />);
+
+    expect(screen.getByText("This chat uses 4K tokens of the model's memory.")).toBeInTheDocument();
+  });
+
+  it('adds when older messages were last shortened', () => {
+    stubStatus({
+      contextLimit: 100_000,
+      liveTokens: 50_000,
+      lastCompaction: { outcome: 'applied', createdAt: new Date().toISOString() },
+    });
+    render(<CompactionStatusLine />);
+
+    expect(
+      screen.getByText(/50% of the model's memory .* Older messages were shortened just now\./),
+    ).toBeInTheDocument();
+  });
+
+  it('stays hidden while the status loads or before the chat has a size', () => {
     stubStatus({ contextLimit: 100_000, liveTokens: 95_000, loading: true });
     const { container, rerender } = render(<CompactionStatusLine />);
     expect(container).toBeEmptyDOMElement();
 
-    stubStatus({ contextLimit: null, liveTokens: 95_000 });
+    stubStatus({ contextLimit: 100_000 });
     rerender(<CompactionStatusLine />);
     expect(container).toBeEmptyDOMElement();
   });
