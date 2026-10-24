@@ -511,7 +511,8 @@ describe('connector card wording precedence', () => {
       }),
       makeCtx(),
     );
-    expect(decision.reason).toBe('mcp_open_world_hint');
+    // A send keeps its own reason under the hint, so no chat-wide answer covers it.
+    expect(decision.reason).toBe('connector_send');
     expect(cardOf(decision).plain_what).toBe('Forward an email to a@x.example.');
   });
 

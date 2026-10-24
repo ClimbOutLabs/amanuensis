@@ -29,7 +29,9 @@ function servicesWithAllowlist(binDir: string): SentinelServices {
   writeFileSync(join(binDir, 'ls'), '#!/bin/sh\n');
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: binDir,
-    commands: { ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null } },
+    commands: {
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+    },
   };
   const services = defaultSentinelServices({ pinned_path: binDir });
   services.shell_allowlist = shell_allowlist;

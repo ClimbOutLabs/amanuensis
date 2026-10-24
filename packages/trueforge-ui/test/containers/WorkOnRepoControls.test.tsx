@@ -292,7 +292,8 @@ describe('WorkOnRepoControls', () => {
     const api = fakeApi(state);
     renderControls(api, { sessionId: 'session-1', sandboxOff: true });
 
-    expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeDisabled();
+    // The line now waits for the person to use the control, so the button stays clickable.
+    fireEvent.click(await screen.findByRole('button', { name: /Work on a repo/ }));
     expect(
       screen.getByText(
         'Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.',

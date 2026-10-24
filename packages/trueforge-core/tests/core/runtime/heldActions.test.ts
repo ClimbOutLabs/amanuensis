@@ -858,7 +858,7 @@ describe('audit rows for a held web search', () => {
       await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
       expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(descriptions(h))).not.toContain(query);
-      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This search contains /);
+      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This sends something that looks like /);
     }
   });
 

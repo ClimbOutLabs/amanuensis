@@ -1469,7 +1469,6 @@ async function abandonTurnThatCouldNotStart(input: {
   logger: Logger;
 }): Promise<void> {
   input.abortController.abort(CancellationReason.CouldNotStart);
-  input.turn.forgetUnstarted();
   await input.resolver.close().catch((closeError: unknown) => {
     input.logger.warn('Failed to close turn resources for a turn that could not start', {
       sessionId: input.session.session_id,
@@ -2646,7 +2645,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.CouldNotStart);
-      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,

@@ -7,6 +7,7 @@ import {
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
+import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -343,5 +344,35 @@ describe('the chat after a switch', () => {
       persona: undefined,
     });
     expect(await resolveNext()).toBeUndefined();
+  });
+});
+
+describe('specialist tools through the route a chat classifies them on', () => {
+  /** What the turn does with a built-in's info before the call can run: the host classifies it. */
+  async function classified(built: Setup, call: { name: string; arguments: Record<string, unknown> }) {
+    return classifyUnstampedToolCall({
+      sentinel: built.sentinel,
+      canonical_params: call.arguments,
+      info: await built.tools.toolCallInfo(call, true),
+    });
+  }
+
+  it('switches who answers this chat with no card, and lists specialists with no card', async () => {
+    const built = await setup({ existing: ['Zara'] });
+
+    const switched = await classified(built, { name: 'use_persona', arguments: { name: 'Zara' } });
+    expect(switched).toMatchObject({ tier: 1, tier_reason: 'persona_switch' });
+    expect(switched.is_approval_required).not.toBe(true);
+    expect(switched.tier3_card ?? null).toBeNull();
+
+    const listed = await classified(built, { name: 'list_personas', arguments: {} });
+    expect(listed).toMatchObject({ tier: 1, tier_reason: 'persona_read' });
+    expect(listed.is_approval_required).not.toBe(true);
+  });
+
+  it('still asks before adding a specialist', async () => {
+    const built = await setup();
+    const created = await classified(built, { name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(created).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
   });
 });

@@ -470,9 +470,7 @@ describe('argument checking', () => {
   });
 
   it("runs the search provider's web_fetch once with an unusable full_content left out", async () => {
-    const { source, toolSet, sentinel } = makeSearchProviderToolSet();
-    // An earlier search in this turn returned the page, so reading it runs without asking.
-    sentinel.web_search.resultUrls.add(SEARCH_RESULT_URL);
+    const { source, toolSet } = makeSearchProviderToolSet();
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
@@ -896,7 +894,7 @@ function makeResearchToolSet() {
           read_only_hint: true,
           open_world_hint: true,
           search_provider_call: true as const,
-          tier_reason: 'mcp_search_unreturned_url',
+          tier_reason: 'mcp_search_steered',
         });
       case 'render_map':
         return Promise.resolve({ ...base, read_only_hint: true, open_world_hint: true, tier_reason: 'maps_tool' });

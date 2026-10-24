@@ -33,7 +33,7 @@ export const SentinelSettings: FC = () => {
 
   const offline = sentinel.settings?.offline_mode ?? false;
   const searchWithoutAsking = sentinel.settings?.search_without_asking ?? true;
-  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? false;
+  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? true;
   const sandboxWithoutAsking = sentinel.settings?.sandbox_without_asking ?? true;
 
   const handleChange = async (next: boolean) => {
@@ -175,7 +175,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Maps</p>
           <p className="mt-1 text-sm text-text-secondary">
             {mapsWithoutAsking
-              ? 'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.'
+              ? 'Maps run without asking. A map asks first only if it would send a password or key.'
               : 'Maps ask before each one.'}
           </p>
           {mapsError !== null && (

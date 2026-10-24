@@ -5,7 +5,7 @@ import {
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
-import { createWebSearchTurnState, hasReadPrivateData } from '../../../src/core/permissions/webSearch';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(
   services: SentinelServices = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -44,7 +44,6 @@ describe('Calendar read classification', () => {
       card: null,
       auto_deny: null,
     });
-    expect(hasReadPrivateData(ctx.web_search)).toBe(false);
   });
 
   it('reads in a scheduled run too', async () => {
@@ -62,7 +61,6 @@ describe('Calendar read classification', () => {
       const decision = await classifyTier(calendarAction(name), ctx);
       expect(decision.reason_detail).toBe('Unknown calendar tool.');
       expect(decision.tier).not.toBe(1);
-      expect(hasReadPrivateData(ctx.web_search)).toBe(false);
     },
   );
 
@@ -70,7 +68,6 @@ describe('Calendar read classification', () => {
     const ctx = makeCtx();
     const decision = await classifyTier({ ...calendarAction('list_events', 'some_connector'), tool_type: 'mcp' }, ctx);
     expect(decision.reason).not.toBe('calendar_read');
-    expect(hasReadPrivateData(ctx.web_search)).toBe(false);
   });
 
   it('is refused while offline', async () => {
@@ -118,7 +115,6 @@ describe('Calendar write classification', () => {
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write', auto_deny: null, sensitive_read: false });
     expect(decision.card?.calendar_event?.title).toBe('Dentist');
     expect(decision.approval_token_id).not.toBeNull();
-    expect(hasReadPrivateData(ctx.web_search)).toBe(false);
   });
 
   it('asks in a scheduled run too, so the run holds it for the owner instead of dropping it', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RepositoryWorkProvider, type RepositoryWorkApi } from '@/components/RepositoryWorkContext.js';
@@ -97,14 +97,25 @@ describe('ThreadWorkOnRepoControls sandbox state', () => {
     expectButtonReady();
   });
 
-  it('says how to turn the sandbox on when this chat has it off', () => {
+  it('says nothing about the sandbox in a chat with it off that never used the control', () => {
     renderThreadControls({
       agentSpec: { model: { name: 'm' }, config: { sandbox: { enabled: false } } },
       isSpecLoading: false,
       specError: null,
     });
-    expect(screen.getByRole('button', { name: /work on a repo/i })).toBeDisabled();
+    expect(screen.queryByText(SANDBOX_OFF_LINE)).not.toBeInTheDocument();
+  });
+
+  it('says how to turn the sandbox on once the person uses the control in a chat with it off', () => {
+    renderThreadControls({
+      agentSpec: { model: { name: 'm' }, config: { sandbox: { enabled: false } } },
+      isSpecLoading: false,
+      specError: null,
+    });
+    // The line now waits for the person to use the control, so the button stays clickable.
+    fireEvent.click(screen.getByRole('button', { name: /work on a repo/i }));
     expect(screen.getByText(SANDBOX_OFF_LINE)).toBeInTheDocument();
+    expect(screen.queryByText('Your GitHub repos')).not.toBeInTheDocument();
   });
 
   it('is left out when the server has no sandbox', () => {

@@ -50,7 +50,12 @@ import {
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { gitHardeningEnv } from '../permissions/gitHardening';
-import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
+import {
+  gitLocalConfigIsSafe,
+  pinAllowlistedExec,
+  pinReadOnlyList,
+  type PinnedReadOnlyList,
+} from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -4999,7 +5004,18 @@ export class Sandbox extends LocalToolMCP {
         ? undefined
         : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (pinned === undefined) {
-      return { exec: input.exec, env: {}, preflight: undefined };
+      const list =
+        allowlist === undefined
+          ? undefined
+          : pinReadOnlyList({
+              command: input.exec.command,
+              config: allowlist,
+              workspace_root: workspaceRoot,
+              cwd: input.exec.cwd ?? workspaceRoot ?? '/',
+            });
+      return list === undefined
+        ? { exec: input.exec, env: {}, preflight: undefined }
+        : this.preparePinnedList({ sandboxId: input.sandboxId, exec: input.exec, list });
     }
     if (pinned.git_needs_workspace_root) {
       return {
@@ -5036,6 +5052,57 @@ export class Sandbox extends LocalToolMCP {
       env: pinned.env,
       preflight,
     };
+  }
+
+  /**
+   * A list of reads runs as the pinned form of each of its commands, joined by the list's own separators, so no
+   * command in it is looked up on the sandbox PATH. Each directory a git step runs in gets the same config probe as a
+   * single git command, under the same workspace lock.
+   */
+  private preparePinnedList(input: { sandboxId: string; exec: SandboxRuntimeExecInput; list: PinnedReadOnlyList }): {
+    exec: SandboxRuntimeExecInput;
+    env: Record<string, string>;
+    preflight: ExecPreflight | undefined;
+  } {
+    const { list } = input;
+    if (list.git_needs_workspace_root) {
+      return { exec: input.exec, env: {}, preflight: () => Promise.resolve(GIT_CONFIG_UNREADABLE_REFUSAL) };
+    }
+    const pinnedCommand = (argv: readonly string[]): string =>
+      [ENV_BINARY, `PATH=${list.pinned_path}`, ...argv].map(shellEscape).join(' ');
+    const command = list.steps
+      .map((step, index) => {
+        const text = step.kind === 'cd' ? `cd ${shellEscape(step.dir)}` : pinnedCommand(step.argv);
+        const separator = list.separators[index];
+        return separator === undefined ? text : `${text} ${separator}`;
+      })
+      .join(' ');
+    const preflight: ExecPreflight | undefined =
+      list.probes.length === 0
+        ? undefined
+        : async () => {
+            for (const probeStep of list.probes) {
+              const probe = await this.hostExec({
+                sandboxId: input.sandboxId,
+                command: pinnedCommand(probeStep.argv),
+                cwd: probeStep.cwd,
+                env: { ...list.env, LC_ALL: 'C' },
+              });
+              if (!probe.success) {
+                return GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (probe.response.exitCode !== 0) {
+                return /git repository/iu.test(probe.response.result)
+                  ? 'This directory is not a git repository, so this git command cannot run.'
+                  : GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (!gitLocalConfigIsSafe(probe.response.result)) {
+                return GIT_CONFIG_UNSAFE_REFUSAL;
+              }
+            }
+            return undefined;
+          };
+    return { exec: { ...input.exec, command }, env: list.env, preflight };
   }
 
   /**
@@ -6251,7 +6318,7 @@ export class Sandbox extends LocalToolMCP {
         status: persisted ? 'active' : 'submission_approved_once',
         message: persisted
           ? 'The implementation plan grant is active for this chat until revoked or repository state drifts.'
-          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Approve for this chat to create one.',
+          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Always allow this here to create one.',
       }),
     });
   }
