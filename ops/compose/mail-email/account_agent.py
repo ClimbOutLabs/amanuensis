@@ -3,9 +3,10 @@
 
 It listens on the instance's private network only (the port is exposed inside the compose
 network, never published). It holds no state of its own except a short-lived sign-in result;
-the account itself lives in the one account file the installer also writes (.env.mail-email,
-bind-mounted into this container). The wrapper watches that file and restarts the mail server
-with the file's account whenever it changes, so this agent never touches Docker.
+the account itself lives in the one account file in the sidecar's own volume, which the
+installer writes through this agent's command line and the Settings card writes through this
+agent's HTTP port. The wrapper watches that file and restarts the mail server with the file's
+account whenever it changes, so this agent never touches Docker.
 
 Security rules, enforced here:
 - The password is accepted only in a save request's body, is checked before anything is
@@ -129,7 +130,8 @@ def read_account():
 
 
 def write_file_text(text):
-    """Writes in place (a bind-mounted single file cannot be replaced), mode 600, flushed to disk."""
+    """Writes in place, mode 600, flushed to disk. In place keeps the wrapper's watch on the
+    same file, and mode 600 keeps the password readable only by this sidecar's user."""
     fd = os.open(ACCOUNT_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -226,7 +228,7 @@ def save_account(payload):
 
 def remove_account():
     """Empties the account file: the password is gone, and the wrapper restarts the mail server
-    with no account. The file itself stays (it is mounted into this container and must exist)."""
+    with no account. The file itself stays in the volume; empty means no account is connected."""
     with LOCK:
         write_file_text("")
         LAST_CHECK.update({"fingerprint": None, "at": 0.0, "result": None})
@@ -318,8 +320,8 @@ def print_child_env():
     mail server: exports of the saved account, or unsets when no account is saved. The account
     file is the one record: the mail server is always started from it, never from the
     container's starting environment, which can hold an older account from before a Settings
-    change (a restart does not reload the env file; only a recreate does, and the installer
-    recreates this container whenever it writes the file itself)."""
+    change (a restart does not reload the env file; the installer writes the file through this
+    agent instead, and the wrapper restarts the server when the file changes)."""
     account = read_account()
     if account is None:
         sys.stdout.write("unset %s\n" % " ".join(ACCOUNT_KEYS))
@@ -342,10 +344,50 @@ def print_child_env():
         sys.stdout.write("export %s=%s\n" % (key, shlex.quote(value)))
 
 
+def write_account_stdin():
+    """The installer's write path: the account file's exact text arrives on stdin and is
+    stored as-is. The installer already checked the sign-in before calling, so this only
+    refuses text that is empty, too large, or not a complete account. Prints one fixed word."""
+    raw = sys.stdin.buffer.read(MAX_BODY_BYTES + 1)
+    if len(raw) > MAX_BODY_BYTES:
+        sys.stderr.write("mail account agent: refused oversized account text\n")
+        return 2
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        sys.stderr.write("mail account agent: refused unreadable account text\n")
+        return 2
+    if text == "" or parse_account(text) is None:
+        sys.stderr.write("mail account agent: refused incomplete account text\n")
+        return 2
+    try:
+        write_file_text(text)
+    except OSError:
+        sys.stderr.write("mail account agent: account write failed (OSError)\n")
+        return 1
+    sys.stdout.write("saved\n")
+    return 0
+
+
+def remove_account_cli():
+    """The installer's remove path: empties the account file the same way the HTTP remove does."""
+    try:
+        remove_account()
+    except OSError:
+        sys.stderr.write("mail account agent: account remove failed (OSError)\n")
+        return 1
+    sys.stdout.write("removed\n")
+    return 0
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--print-child-env":
         print_child_env()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "--write-stdin":
+        sys.exit(write_account_stdin())
+    if len(sys.argv) > 1 and sys.argv[1] == "--remove":
+        sys.exit(remove_account_cli())
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.serve_forever()
 

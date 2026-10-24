@@ -12,6 +12,9 @@ MAIL_LINE="sentinel-order-mail-pw-94"
 
 file_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/main/$1" 2>/dev/null | head -n 1; }
 
+# The email account as the connector's account agent saved it, in the named volume the stub models.
+account_value() { sed -n "s/^$1=//p" "$STUB_STATE/mail-account-aman-main" 2>/dev/null | head -n 1; }
+
 # Runs install.sh with the stdin options in $1 (letters p, t, c, m), the matching lines in the fixed order, and the
 # account options each of them needs.
 run_with_lines() { # letters [more args]
@@ -55,10 +58,10 @@ assert_lines_landed() { # letters first|again
   esac
   case "$letters" in
     *m*)
-      assert_eq "$(file_value .env.mail-email MCP_EMAIL_SERVER_PASSWORD)" "'$MAIL_LINE'" "$label email app password"
+      assert_eq "$(account_value MCP_EMAIL_SERVER_PASSWORD)" "'$MAIL_LINE'" "$label email app password"
       assert_eq "$(sed -n 5p "$SB_STATE/imap_stdin")" "$MAIL_LINE" "$label the sign-in check got the email app password"
       ;;
-    *) assert_eq "$(file_value .env.mail-email MCP_EMAIL_SERVER_PASSWORD)" "" "$label no email app password saved" ;;
+    *) assert_eq "$(account_value MCP_EMAIL_SERVER_PASSWORD)" "" "$label no email app password saved" ;;
   esac
   if [ "$2" = first ]; then
     assert_eq "$(cat "$SB_STATE/hash_stdin")" "$SIGNIN_PW" "$label sign-in password"
@@ -80,7 +83,7 @@ EMAIL-PW-abc
   run_install --yes --password-stdin --email-provider gmail --email-address a@gmail.com --email-password-stdin
   clear_input
   assert_rc 0
-  assert_eq "$(file_value .env.mail-email MCP_EMAIL_SERVER_PASSWORD)" "'EMAIL-PW-abc'"
+  assert_eq "$(account_value MCP_EMAIL_SERVER_PASSWORD)" "'EMAIL-PW-abc'"
   assert_eq "$(sed -n 5p "$SB_STATE/imap_stdin")" "EMAIL-PW-abc" "the mail server gets the email line"
   assert_tree_lacks "$AMAN_HOME" "SIGNIN-PW-xyz"
   assert_not_contains "$(cat "$SB_STATE/imap_stdin")" "SIGNIN-PW-xyz" "the sign-in password never reaches the mail server"

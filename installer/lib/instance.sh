@@ -186,13 +186,8 @@ instance_render() {
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
     write_if_changed "$dir/mail-account-agent.py" 644 <"$REPO_ROOT/ops/compose/mail-email/account_agent.py" || true
     write_if_changed "$dir/mail-email-check.py" 644 <"$REPO_ROOT/ops/compose/mail-email/email_check.py" || true
-    # The sidecar mounts the account file itself, so it must exist before the sidecar first starts:
-    # a missing bind-mount source would be created as a folder and break the account file for good.
-    # Empty means no account is connected; the file is private either way.
-    if [ ! -f "$dir/.env.mail-email" ]; then
-      : >"$dir/.env.mail-email"
-      chmod 600 "$dir/.env.mail-email"
-    fi
+    # No account file is written here: the account lives in the connector's volume, and the
+    # installer writes it through the connector's account agent (see email_agent_write).
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \

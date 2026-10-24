@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -21,6 +21,7 @@ const ServiceSchema = z
 
 const ComposeSchema = z.object({
   services: z.record(z.string(), ServiceSchema),
+  volumes: z.record(z.string(), z.unknown()).optional(),
 });
 
 const compose = ComposeSchema.parse(parse(readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf8')));
@@ -53,7 +54,7 @@ describe('mail and calendar sidecars', () => {
   it('mail-email runs the account agent on the private network, holding the one account file', () => {
     const service = serviceNamed('mail-email');
     expect(service.environment?.['AMAN_MAIL_ACCOUNT_PORT']).toBe('9559');
-    expect(service.volumes).toContain('./.env.mail-email:/account/.env.mail-email');
+    expect(service.volumes).toContain('mail-account:/account');
     expect(service.volumes).toContain(
       './ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro',
     );
@@ -105,7 +106,21 @@ describe('mail and calendar sidecars', () => {
     expect(service.environment?.['MAIL_POLICY_FILE']).toBe('/data/mail-policy/allowed_recipients.toml');
   });
 
-  it('mail-email reads account secrets from an optional git-ignored file only', () => {
-    expect(serviceNamed('mail-email').env_file).toEqual([{ path: './.env.mail-email', required: false }]);
+  it('the dev stack declares the account volume the connector owns', () => {
+    expect(Object.keys(compose.volumes ?? {})).toContain('mail-account');
+  });
+
+  it('mail-email binds no host file a fresh checkout lacks', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.env_file).toBeUndefined();
+    const hostPaths = [
+      ...(service.volumes ?? []),
+      ...(service.env_file ?? []).map(entry => (typeof entry === 'string' ? entry : entry.path)),
+    ]
+      .filter(entry => entry.startsWith('./'))
+      .map(entry => entry.replace(/:.*$/, ''));
+    for (const hostPath of hostPaths) {
+      expect(existsSync(resolve(REPO_ROOT, hostPath))).toBe(true);
+    }
   });
 });

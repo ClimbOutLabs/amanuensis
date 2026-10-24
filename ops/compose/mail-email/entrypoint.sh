@@ -3,10 +3,11 @@
 # The sidecar reads its list when it first uses its settings, so a new list needs a restart. After each start
 # this records the hash of the list it started with. The server waits for that hash before it sends.
 # A stale hash only makes the server wait or refuse, never let a send through.
-# The mail account comes from the account file the installer writes and the Settings Email card changes
-# through the account agent (started below, on this container's private network port). The sidecar always
-# starts from the account file, never from the environment Docker loaded at container start, which can
-# hold an older account; when the account file changes, the sidecar restarts on the new account.
+# The mail account comes from the account file in this sidecar's own volume. The installer writes it
+# through the account agent's command line and the Settings Email card changes it through the account
+# agent (started below, on this container's private network port). The sidecar always starts from the
+# account file, never from the environment Docker loaded at container start, which can hold an older
+# account; when the account file changes, the sidecar restarts on the new account.
 set -eu
 
 # The list file is the only source of recipients. An env list would let the sidecar send to addresses the file lacks.
@@ -22,7 +23,7 @@ list_hash() {
   sha256sum "$policy" 2>/dev/null | cut -d' ' -f1 || true
 }
 
-# An absent account file hashes to nothing; the file is created with the instance and emptied on remove.
+# An absent account file hashes to nothing; the file lives in the sidecar's volume and is emptied on remove.
 account_hash() {
   sha256sum "$account" 2>/dev/null | cut -d' ' -f1 || true
 }

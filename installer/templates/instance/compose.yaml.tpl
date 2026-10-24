@@ -162,17 +162,15 @@ services:
 @@IF_CALENDAR@@    restart: unless-stopped
 
 # Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
-# private network. Nothing is published. The account lives in .env.mail-email, which the installer writes and the
-# Settings Email card changes through the sidecar's account agent on port 9559, also private-network only.
+# private network. Nothing is published. The account lives in a volume this sidecar owns, which the installer writes
+# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559,
+# also private-network only.
 @@IF_EMAIL@@  mail-email:
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
 @@IF_EMAIL@@    # The wrapper starts the connector on the send list the app writes, and restarts it when that list changes.
 @@IF_EMAIL@@    entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
 @@IF_EMAIL@@    command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
-@@IF_EMAIL@@    env_file:
-@@IF_EMAIL@@      - path: ./.env.mail-email
-@@IF_EMAIL@@        required: false
 @@IF_EMAIL@@    environment:
 @@IF_EMAIL@@      # Only requests addressed to this service name pass the DNS-rebinding check.
 @@IF_EMAIL@@      MCP_ALLOWED_HOSTS: mail-email
@@ -190,7 +188,7 @@ services:
 @@IF_EMAIL@@      - ./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
 @@IF_EMAIL@@      - ./mail-account-agent.py:/usr/local/bin/aman-mail-account-agent:ro
 @@IF_EMAIL@@      - ./mail-email-check.py:/usr/local/bin/aman-mail-email-check:ro
-@@IF_EMAIL@@      - ./.env.mail-email:/account/.env.mail-email
+@@IF_EMAIL@@      - mail-account:/account
 @@IF_EMAIL@@      - mail-policy:/policy:ro
 @@IF_EMAIL@@      - mail-policy-status:/mail-status
 @@IF_EMAIL@@      - mail-email-data:/data
@@ -253,6 +251,11 @@ volumes:
 @@IF_EMAIL@@  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
 @@IF_EMAIL@@  mail-email-data:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_email_data
+@@IF_EMAIL@@    labels:
+@@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_EMAIL@@  mail-account:
+@@IF_EMAIL@@    name: aman_@@NAME@@_mail_account
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.

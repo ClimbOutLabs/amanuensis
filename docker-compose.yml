@@ -206,11 +206,6 @@ services:
     # The wrapper starts the sidecar on the send list the server writes, and restarts it when that list changes.
     entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
     command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
-    # Account credentials come only from this optional file, which the installer writes.
-    # Its `.env.*` name is git-ignored.
-    env_file:
-      - path: ./.env.mail-email
-        required: false
     environment:
       # Only requests addressed to this service name pass the DNS-rebinding check.
       MCP_ALLOWED_HOSTS: mail-email
@@ -232,10 +227,10 @@ services:
       - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
       - ./ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro
       - ./ops/compose/mail-email/email_check.py:/usr/local/bin/aman-mail-email-check:ro
-      # The account file itself, so the agent can save accounts the Settings card sends. In this dev
-      # stack the file must exist before the sidecar starts (an empty file means no account):
-      # create it once with: touch .env.mail-email
-      - ./.env.mail-email:/account/.env.mail-email
+      # The account file itself, in a volume this sidecar owns, so the agent can save accounts the
+      # Settings card sends. No host file is bound here: a missing bind source would be created as a
+      # folder and break the account file, and a host-owned file is unreadable to this sidecar.
+      - mail-account:/account
       - mail-policy:/policy:ro
       - mail-policy-status:/mail-status
       - mail-email-data:/data
@@ -344,6 +339,8 @@ volumes:
   mail-policy-status:
   # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
   mail-email-data:
+  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+  mail-account:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).
