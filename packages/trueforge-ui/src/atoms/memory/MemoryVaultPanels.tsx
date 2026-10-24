@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
@@ -298,8 +298,13 @@ export function MemoryVaultFactsPanel({
   );
 }
 
-/** The sharing panel: which memories each specialist may see. */
+/** The sharing panel: which other personas' notes each persona can read. */
 export function MemoryVaultSharingPanel({ state }: { state: MemoryVaultState }) {
+  const assistant = useAssistantDisplayName();
+  const personasWithNotes = useMemo(
+    () => new Set(state.entries.flatMap(entry => (entry.persona === null ? [] : [entry.persona]))),
+    [state.entries],
+  );
   if (state.sharingError !== null) {
     return (
       <p role="alert" className="text-sm text-error-text">
@@ -318,6 +323,8 @@ export function MemoryVaultSharingPanel({ state }: { state: MemoryVaultState }) 
   return (
     <MemorySharing
       personas={state.personas}
+      assistant={assistant}
+      personasWithNotes={personasWithNotes}
       namespaces={state.sharingNamespaces}
       sharing={state.sharing}
       onSave={state.handleSharingSave}

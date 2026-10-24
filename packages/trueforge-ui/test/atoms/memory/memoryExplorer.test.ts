@@ -146,15 +146,15 @@ describe('groupMemoriesByDate', () => {
 });
 
 describe('plain-words copy', () => {
-  it('counts memories about you and those that belong to specialists, by the display name', () => {
+  it('counts memories about you and those that belong to personas, by the display name', () => {
     expect(memoryCountCopy({ total: 1240, personas: 86, assistant: 'Juniper' })).toBe(
-      'Juniper remembers 1,240 things about you. 86 belong to specialists.',
+      'Juniper remembers 1,240 things about you. 86 belong to personas.',
     );
     expect(memoryCountCopy({ total: 1, personas: 0, assistant: 'Juniper' })).toBe(
-      'Juniper remembers 1 thing about you. None belong to specialists.',
+      'Juniper remembers 1 thing about you. None belong to personas.',
     );
     expect(memoryCountCopy({ total: 5, personas: 1, assistant: 'Juniper' })).toBe(
-      'Juniper remembers 5 things about you. 1 belongs to a specialist.',
+      'Juniper remembers 5 things about you. 1 belongs to a persona.',
     );
   });
 
@@ -179,7 +179,7 @@ describe('plain-words copy', () => {
       forgottenCopy(2),
     ];
     for (const text of strings) {
-      expect(text).not.toMatch(/vault|namespace|entry|persona/i);
+      expect(text).not.toMatch(/vault|namespace|entry|specialist|\bagents?\b/i);
     }
   });
 });
