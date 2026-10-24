@@ -15,9 +15,9 @@ type Baseline = { total: number; rows: Record<string, number> };
  */
 const BASELINE: Record<PersonalInstanceName, Baseline> = {
   personal: {
-    total: 8288,
+    total: 8375,
     rows: {
-      'agent-identity': 97,
+      'agent-identity': 184,
       'model-identity': 79,
       'agent-capabilities': 793,
       'agent-capabilities/internal-messages': 59,
