@@ -27,11 +27,9 @@ import {
   isHostWrappedText,
   isUntrustedDocumentText,
   newEventId,
-} from '@truefoundry/trueforge-core/core';
-import {
-  recordPrivateContextText,
+  recordPersonText,
   type WebSearchTurnState,
-} from '@truefoundry/trueforge-core/core/permissions/webSearch';
+} from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 import type {
@@ -1628,7 +1626,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
     if (this.webSearch !== undefined) {
-      recordPrivateContextText({ state: this.webSearch, text: formatted.block, source: 'each_turn' });
+      // What the assistant remembers of the person is theirs: a link or address in it is theirs to use.
+      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.block });
     }
     // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.

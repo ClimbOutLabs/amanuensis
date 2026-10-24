@@ -21,7 +21,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -101,7 +101,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
     expect(
@@ -110,7 +110,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: false,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -122,7 +122,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -140,7 +140,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
-      maps_without_asking: true,
+      maps_without_asking: false,
       sandbox_without_asking: false,
     });
 
@@ -148,7 +148,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     };
     expect(await store.get({ tenant_id: 't1', created_by: 'bob' })).toEqual(untouched);

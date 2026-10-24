@@ -111,14 +111,16 @@ describe('ThreadWorkOnRepoControls sandbox state', () => {
     expectPanelReady();
   });
 
-  it('says how to turn the sandbox on when this chat has it off', () => {
+  it('says how to turn the sandbox on only once the person uses the control in a chat with it off', () => {
     renderThreadControls({
       agentSpec: { model: { name: 'm' }, config: { sandbox: { enabled: false } } },
       isSpecLoading: false,
       specError: null,
     });
+    expect(screen.queryByText(SANDBOX_OFF_LINE)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /work on a repo/i }));
     expect(screen.getByText(SANDBOX_OFF_LINE)).toBeInTheDocument();
+    expect(screen.queryByText('Your GitHub repos')).not.toBeInTheDocument();
   });
 
   it('is left out when the server has no sandbox', () => {

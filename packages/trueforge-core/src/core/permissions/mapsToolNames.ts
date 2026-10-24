@@ -14,9 +14,6 @@ export const MAPS_ASK_REASON = 'maps_tool';
 /** Reason code for an embedded maps call the user let run without asking. */
 export const MAPS_SILENT_REASON = 'maps_silent';
 
-/** Reason code for a maps call that ran without asking after a mail or calendar read, because its place was checked. */
-export const MAPS_AFTER_READ_SILENT_REASON = 'maps_after_read_checked';
-
 export function isMapsToolName(tool_name: string): boolean {
   return MAPS_TOOL_NAMES.some(name => name === tool_name);
 }

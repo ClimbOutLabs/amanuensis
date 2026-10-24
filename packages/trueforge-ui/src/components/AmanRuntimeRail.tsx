@@ -137,11 +137,19 @@ const FoldedRow: FC<{ section: string; title: string; children: ReactNode }> = (
 );
 
 /** The Rules fold's sentences, one per rule; none until the settings have loaded. */
-function ruleSentences(settings: SentinelUserSettings | null): string[] {
+function ruleSentences({
+  settings,
+  assistant,
+}: {
+  settings: SentinelUserSettings | null;
+  assistant: string;
+}): string[] {
   if (settings === null) return [];
   return [
     settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first',
-    settings.sandbox_without_asking ? 'Sandbox code runs without asking' : 'Sandbox code asks first',
+    settings.sandbox_without_asking
+      ? `Read-only commands and ${assistant}'s own code in the workspace run without asking. Other commands ask first.`
+      : 'Read-only commands in the workspace run without asking. Other commands ask first.',
     settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off',
   ];
 }
@@ -159,7 +167,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const assistantName = assistantDisplayName(profile?.assistant_name);
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
-  const rules = ruleSentences(settings);
+  const rules = ruleSentences({ settings, assistant: assistantName });
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;

@@ -1,6 +1,5 @@
 'use client';
 
-import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { useRef, useState, type FC } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
@@ -180,10 +179,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
-  // A held search's chat choice only lifts its private-read check, so it says what it lets through.
-  const chatChoice = isSearchHoldCardText(card.plain_what)
-    ? APPROVAL_CHOICES.allowSearchesForChat
-    : APPROVAL_CHOICES.approveForChat;
   const plumbingText = card.outbound_plumbing_text ?? null;
   const outboundShown =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
@@ -315,12 +310,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="secondary"
             size="small"
-            title={chatChoice.hint}
+            title={APPROVAL_CHOICES.approveForChat.hint}
             onClick={markSent(onApproveForChat)}
             disabled={disabled || sentAt !== null}
             className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
           >
-            {chatChoice.label}
+            {APPROVAL_CHOICES.approveForChat.label}
           </Button>
         )}
         {changing && onChangeRequest !== undefined && (

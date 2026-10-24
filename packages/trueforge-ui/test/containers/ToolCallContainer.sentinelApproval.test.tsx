@@ -165,7 +165,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
   it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
     const chatFirst: ApprovalOptions = [
-      { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
+      { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'deny', kind: 'reject-once', confirm: {} },
     ];
@@ -267,7 +267,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
           id: 'a',
           tier,
           options: [
-            { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
+            { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
             { id: 'allow-once', kind: 'allow-once' },
             { id: 'deny', kind: 'reject-once', confirm: {} },
           ],
@@ -299,7 +299,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
     expect(response).not.toHaveProperty('optionId');
     expect(respondToApproval).not.toHaveBeenCalled();
   });
-  describe('Approve for this chat', () => {
+  describe('Always allow this here', () => {
     const declaredChat: ApprovalOptions = [
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'allow-chat', kind: 'allow-always' },
@@ -308,17 +308,17 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
     it('is hidden when the server refuses chat scope, even if the option is declared', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: false }]);
-      expect(screen.queryByRole('button', { name: 'Approve for this chat' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Always allow this here' })).not.toBeInTheDocument();
     });
 
     it('is shown when the server offers it', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true }]);
-      expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     });
 
     it('follows the declared options when an older server says nothing', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
-      expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     });
   });
 });

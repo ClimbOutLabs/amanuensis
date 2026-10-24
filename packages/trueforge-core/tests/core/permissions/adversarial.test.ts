@@ -31,8 +31,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -48,8 +48,8 @@ function servicesWithCatAllowlist(): { services: SentinelServices; cleanup: () =
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -469,6 +469,52 @@ describe('Suite B - workspace containment escapes', () => {
       );
       expect(decision.tier).toBe(3);
       expect(decision.reason).toBe('cwd_outside_workspace');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  test('B9 GUARD: a read-only list whose cd follows a link out of the workspace is Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
+    const { services, cleanup } = servicesWithCatAllowlist();
+    try {
+      writeFileSync(join(outside, 'secret.txt'), 'x');
+      symlinkSync(outside, join(ws, 'linkdir'));
+      const decision = await classifyTier(
+        action('exec', { command: 'cd linkdir && cat secret.txt', cwd: ws }),
+        makeCtx({ services, workspace_cwd: ws }),
+      );
+      expect(decision.tier).toBe(3);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  test('B10 GAP: a read-only list whose directory is repointed out of the workspace after classification is refused at dispatch', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
+    const { services, cleanup } = servicesWithCatAllowlist();
+    try {
+      mkdirSync(join(ws, 'repo'));
+      writeFileSync(join(ws, 'repo', 'notes.txt'), 'x');
+      writeFileSync(join(outside, 'notes.txt'), 'x');
+      const params = { command: 'cd repo && cat notes.txt', cwd: ws };
+      const ctx = makeCtx({ services, workspace_cwd: ws });
+      const decision = await classifyTier(action('exec', params), ctx);
+      expect(decision).toMatchObject({ tier: 1, reason: 'shell_read_only_list' });
+
+      rmSync(join(ws, 'repo'), { recursive: true, force: true });
+      symlinkSync(outside, join(ws, 'repo'));
+      const result = await verifyPreDispatch({
+        call: verifiableCall({ canonical_params: params, tier: 1 }),
+        ctx: { ...ctx, offline: false },
+      });
+      expect(result).toContain('outside the workspace');
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
