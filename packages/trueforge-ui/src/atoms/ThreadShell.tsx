@@ -68,10 +68,10 @@ export const ThreadComposerAreaShell = forwardRef<HTMLDivElement, ThreadComposer
       ref={ref}
       data-slot="aui_thread-composer"
       className={cn(
-        // Desktop: square top edge and a short fade above the composer, so messages scroll
-        // into the fade instead of ending at a hard edge. The fade sits in the viewport's
-        // pb-24 gap, so the last message stays clear of it when scrolled to the bottom.
-        'aui-thread-composer bg-primary-bg relative mx-auto flex w-full min-w-0 max-w-(--thread-max-width) motion-safe:transition-[max-width] motion-safe:duration-300 motion-safe:ease-out shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] md:before:pointer-events-none md:before:absolute md:before:inset-x-0 md:before:bottom-full md:before:h-6 md:before:content-[""] md:before:bg-linear-to-t md:before:from-primary-bg md:before:to-transparent',
+        // Desktop: square top edge, and nothing overlays the messages above the composer. A
+        // gradient fade there washed over the bottom of a waiting approval card while it was
+        // scrolled into view, so its buttons looked faded, as if the card were disabled.
+        'aui-thread-composer bg-primary-bg mx-auto flex w-full min-w-0 max-w-(--thread-max-width) motion-safe:transition-[max-width] motion-safe:duration-300 motion-safe:ease-out shrink-0 flex-col gap-3 px-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:gap-4 sm:px-4 md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
         !isEmpty && 'rounded-t-(--composer-radius) md:rounded-t-none',
         className,
       )}

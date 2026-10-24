@@ -22,6 +22,17 @@ describe('ScrollToBottomButton', () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
+  it('sits in the composer flow, not floating over the message list', () => {
+    render(<ScrollToBottomButton onClick={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: 'Scroll to bottom' });
+    const wrapper = button.parentElement;
+    // A floating wrapper (absolute, raised above the composer) lands on the bottom of the
+    // message list, over a waiting approval card's buttons. In flow it can cover nothing.
+    expect(wrapper).not.toHaveClass('absolute');
+    expect(wrapper).toHaveClass('flex', 'justify-end');
+  });
+
   it('does not render while disabled', () => {
     const onClick = vi.fn();
     const { container } = render(<ScrollToBottomButton disabled onClick={onClick} />);

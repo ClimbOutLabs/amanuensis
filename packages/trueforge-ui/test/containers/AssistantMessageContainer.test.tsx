@@ -123,6 +123,20 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('does not render the error banner while the thread is still running', () => {
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: 'partial',
+          status: { type: 'incomplete', reason: 'error', error: 'boom' },
+        },
+      ],
+      { isRunning: true },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('hides the action bar while the thread is running (streaming state)', () => {
     renderAssistantMessage([{ role: 'assistant', content: 'typing...' }], { isRunning: true });
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();

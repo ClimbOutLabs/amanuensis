@@ -399,7 +399,11 @@ export function AssistantMessageContainer() {
   return (
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
-        error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
+        // An error line belongs to a finished reply. While the thread is still running the
+        // message can carry an earlier attempt's error (a resumed or retried run), and showing
+        // it would tell the person the reply failed while it is still being written; it clears
+        // when the run settles, and only then may the line show.
+        error={error !== undefined && !isThreadRunning ? <MessageErrorBanner message={String(error)} /> : undefined}
         actionBar={
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }

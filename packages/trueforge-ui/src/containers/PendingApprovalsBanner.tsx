@@ -57,7 +57,12 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
         });
       }
     } catch (error) {
-      if (isStaleApprovalError(error)) reload();
+      if (isStaleApprovalError(error)) {
+        // The requests ended or the chat moved on while dismissing: nothing is left to deny, so
+        // reload to the current state instead of showing the server's error.
+        reload();
+        return;
+      }
       toaster?.showError(error instanceof Error ? error : new Error('Could not dismiss the pending approvals.'));
     } finally {
       setDismissing(false);

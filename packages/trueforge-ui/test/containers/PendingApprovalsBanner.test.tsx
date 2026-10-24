@@ -164,7 +164,7 @@ describe('PendingApprovalsBanner journeys', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Action needed');
   });
 
-  it('reloads the chat when the dismissal is refused as stale', async () => {
+  it('reloads the chat when the dismissal is refused as stale, without raising the error', async () => {
     setPending({ id: 'a1', onNewest: true });
     const stale = Object.assign(new Error('Status code: 409'), {
       statusCode: 409,
@@ -180,6 +180,31 @@ describe('PendingApprovalsBanner journeys', () => {
     });
 
     expect(reload).toHaveBeenCalledTimes(1);
-    expect(showError).toHaveBeenCalledWith(stale);
+    expect(showError).not.toHaveBeenCalled();
+  });
+
+  it('reloads without raising the error when the approvals ended while dismissing', async () => {
+    setPending({ id: 'a1', onNewest: true });
+    const ended = Object.assign(new Error('Status code: 409'), {
+      statusCode: 409,
+      body: {
+        error: {
+          message: 'This request ended. Ask again if you still need it.',
+          type: 'conflict',
+          code: 'approval_request_ended',
+        },
+      },
+    });
+    dismissPendingApprovals = vi.fn(async () => {
+      throw ended;
+    });
+    renderBanner({ dismissPendingApprovals });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /dismiss pending approvals/i }));
+    });
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(showError).not.toHaveBeenCalled();
   });
 });
