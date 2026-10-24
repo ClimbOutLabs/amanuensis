@@ -148,7 +148,7 @@ test(
         },
         { timeout: RENDER_TIMEOUT_MS },
       );
-      const result = await states.evaluate();
+      const result = await states.jsonValue();
       assert.ok(result !== null, 'both frame pictures should finish loading');
       assert.ok(result.proxyWidth > 0, 'the proxied picture in the space frame should load');
       assert.equal(result.directWidth, 0, 'the direct outside link in the same frame should stay blank');
