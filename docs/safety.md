@@ -25,7 +25,7 @@ Aman sorts every action before it runs.
 
 The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**. Sending mail or a message, and a calendar change that invites or emails guests, asks every time: those cards offer only **Approve** and **Deny**. Deletes and other actions with real effects also offer **Always allow this here**: Aman stops asking for that kind of action for the rest of this chat, and asks again in any other chat. **Always allow**, which covers every chat, is never offered for sends, deletes, installs or outside services. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
 
-In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Answering **Always allow this here** on a sandbox command covers the later commands in the same workspace for the rest of the chat. A push, a clone, a download, a network tool, custom settings for a program, or a command that touches a key file still asks every time.
+In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Every other command asks first. Answering **Always allow this here** on a command covers running that same command again in this chat, and nothing else.
 
 ### When Aman holds something it would normally do
 

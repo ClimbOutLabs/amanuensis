@@ -54,7 +54,7 @@ export function effectiveToolAdmissions(input: {
     if (
       call.tool_info.is_approval_required === true &&
       allowsChatApproval(call.tool_info) &&
-      input.chatApprovalGrants.has(chatGrantKey(call.tool_info))
+      input.chatApprovalGrants.has(approvalGrantKey(call.tool_info))
     ) {
       effective.set(call.id, {
         decision: { status: 'allow', scope: 'chat' },
@@ -77,16 +77,15 @@ export function effectiveToolAdmissions(input: {
 
 /**
  * Server-owned eligibility for "Always allow this here", the one chat-scoped grant. This only gates which calls may
- * *receive* chat scope; the scope's binding lives in chatGrantKey: the tool and its destination, and for a sandbox
- * command that stays in its workspace, that workspace. Other sandbox commands keep an invocation digest over
- * (purpose, command, cwd, env). A grant never reaches another chat. A consequential action qualifies; a send and a
- * steered call never do.
+ * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
+ * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
+ * different one or reaches another chat. A consequential action qualifies; a send and a steered call never do.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
     return false;
   }
-  if (info.implementation_plan_grant !== undefined || info.sandbox_workspace_grant !== undefined) {
+  if (info.implementation_plan_grant !== undefined) {
     return true;
   }
   if (isOwnCalendarChange(info)) {
@@ -169,16 +168,6 @@ export function approvalGrantKey(info: InternalToolCallInfo): string {
     card?.recipient ?? null,
     card?.destination_host ?? null,
   ]);
-}
-
-/**
- * The key "Always allow this here" is stored under. A sandbox command the host found to stay in its workspace is keyed
- * to that workspace, so one answer covers the later commands there; every other call keeps its own grant key.
- */
-export function chatGrantKey(info: InternalToolCallInfo): string {
-  return info.sandbox_workspace_grant === undefined
-    ? approvalGrantKey(info)
-    : JSON.stringify([APPROVAL_GRANT_VERSION, 'sandbox_workspace', info.mcp_server_id, info.sandbox_workspace_grant]);
 }
 
 export function implementationPlanScopeForCall(

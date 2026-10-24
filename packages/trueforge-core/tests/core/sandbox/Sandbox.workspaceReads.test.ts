@@ -1,13 +1,13 @@
 /**
- * Sandbox commands in a "Work on a repo" chat, through the tool route a chat classifies them on: reads never ask, one
- * "Always allow this here" covers the later commands in that workspace, and a push or anything reaching out still asks.
+ * Sandbox commands in a "Work on a repo" chat, through the tool route a chat classifies them on: reads in the workspace
+ * never ask, and "Always allow this here" on a command covers that exact command only.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
-import { allowsChatApproval, chatGrantKey, effectiveToolAdmissions } from '../../../src/core/mcp/approvalGrant';
+import { allowsChatApproval, approvalGrantKey, effectiveToolAdmissions } from '../../../src/core/mcp/approvalGrant';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME } from '../../../src/core/sandbox/Sandbox';
@@ -129,61 +129,56 @@ describe('reads in the workspace never ask', () => {
 });
 
 describe('"Always allow this here" on a sandbox command', () => {
-  it('covers the next three different commands in that workspace with no card', async () => {
-    const sandbox = makeSandbox();
-    const first = await exec(sandbox, { purpose: 'execute', command: 'pnpm test' });
-    expect(first.is_approval_required).toBe(true);
-    expect(allowsChatApproval(first)).toBe(true);
-    const grants = new Set([chatGrantKey(first)]);
+  async function grantedOnTests(sandbox: Sandbox): Promise<ReadonlySet<string>> {
+    const granted = await exec(sandbox, { purpose: 'verify', command: 'pnpm test' });
+    expect(granted.is_approval_required).toBe(true);
+    expect(allowsChatApproval(granted)).toBe(true);
+    return new Set([approvalGrantKey(granted)]);
+  }
 
-    for (const next of [
-      { purpose: 'execute', command: 'pnpm lint' },
-      { purpose: 'edit', command: "sed -i 's/Exit/Off/' exitramp/README.md" },
-      { purpose: 'inspect', command: 'cd exitramp && wc -l README.md' },
-    ]) {
-      const info = await exec(sandbox, next);
-      expect(info.is_approval_required).toBe(true);
-      expect({ command: next.command, card: showsCard(info, grants) }).toEqual({ command: next.command, card: false });
-    }
+  it('covers re-running the exact command it was given on, with no card', async () => {
+    const sandbox = makeSandbox();
+    const grants = await grantedOnTests(sandbox);
+    const again = await exec(sandbox, { purpose: 'verify', command: 'pnpm test' });
+    expect(again.is_approval_required).toBe(true);
+    expect(showsCard(again, grants)).toBe(false);
   });
 
-  it('never covers a push, a clone, a network tool or a download, and never offers itself on one', async () => {
+  it('never covers a command that leaves the workspace, directly or through a link', async () => {
     const sandbox = makeSandbox();
-    const grants = new Set([chatGrantKey(await exec(sandbox, { purpose: 'execute', command: 'pnpm test' }))]);
+    const grants = await grantedOnTests(sandbox);
+    symlinkSync('/etc/hostname', join(workspace, 'exitramp', 'h'));
     for (const next of [
-      { purpose: 'push', command: 'git push origin main' },
-      { purpose: 'edit', command: 'git clone https://github.com/example/tool.git tool' },
-      { purpose: 'execute', command: 'curl https://example.com/data.json' },
-      { purpose: 'execute', command: 'cd exitramp && npx prettier --check .' },
+      { purpose: 'edit', command: 'rm -rf ../other' },
+      { purpose: 'edit', command: 'sed -i s/a/b/ ../outside.txt' },
+      { purpose: 'edit', command: 'mv exitramp /tmp/gone' },
+      { purpose: 'edit', command: 'cp -r . /tmp/exfil' },
+      { purpose: 'inspect', command: 'cat /etc/hostname' },
+      { purpose: 'inspect', command: 'head -1 /proc/self/environ' },
+      { purpose: 'inspect', command: 'cd exitramp && cat h | head -1' },
+      { purpose: 'edit', command: 'git config remote.origin.url https://evil.example/r.git' },
     ]) {
       const info = await exec(sandbox, next);
-      expect({
+      expect({ command: next.command, card: showsCard(info, grants) }).toEqual({
         command: next.command,
-        card: showsCard(info, grants),
-        workspace: info.sandbox_workspace_grant,
-      }).toEqual({ command: next.command, card: true, workspace: undefined });
+        card: true,
+      });
     }
   });
 
-  it('never covers a command that reads a key file', async () => {
+  it('never covers a different in-workspace command either', async () => {
     const sandbox = makeSandbox();
-    const grants = new Set([chatGrantKey(await exec(sandbox, { purpose: 'execute', command: 'pnpm test' }))]);
-    const info = await exec(sandbox, { purpose: 'inspect', command: 'cat .env | wc -l' });
-    expect(info.sandbox_workspace_grant).toBeUndefined();
-    expect(showsCard(info, grants)).toBe(true);
-  });
-
-  it('does not reach a different workspace', async () => {
-    const first = await exec(makeSandbox(), { purpose: 'execute', command: 'pnpm test' });
-    const grants = new Set([chatGrantKey(first)]);
-    const elsewhere = workspace;
-    workspace = realpathSync(mkdtempSync(join(tmpdir(), 'workspace-grant-other-')));
-    try {
-      const info = await exec(makeSandbox(), { purpose: 'execute', command: 'pnpm lint' });
-      expect(showsCard(info, grants)).toBe(true);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-      workspace = elsewhere;
+    const grants = await grantedOnTests(sandbox);
+    for (const next of [
+      { purpose: 'verify', command: 'pnpm lint' },
+      { purpose: 'edit', command: "sed -i 's/Exit/Off/' exitramp/README.md" },
+      { purpose: 'push', command: 'git push origin main' },
+    ]) {
+      const info = await exec(sandbox, next);
+      expect({ command: next.command, card: showsCard(info, grants) }).toEqual({
+        command: next.command,
+        card: true,
+      });
     }
   });
 });
