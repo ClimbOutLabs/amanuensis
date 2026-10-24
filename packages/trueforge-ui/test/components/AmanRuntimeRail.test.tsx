@@ -642,18 +642,16 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
-          <AmanRuntimeRail
-            pendingApprovalIds={['approval-1']}
-            auditFeed={<p>Recent actions body</p>}
-            status="ready"
-          />
+          <AmanRuntimeRail pendingApprovalIds={['approval-1']} auditFeed={<p>Recent actions body</p>} status="ready" />
         </RuntimeHarness>
       </SentinelApiProvider>,
     );
     const region = screen.getByRole('region', { name: 'Recent actions' });
     const line = screen.getByText('Waiting for you');
     expect(region).toContainElement(line);
-    expect(line.compareDocumentPosition(screen.getByText('Recent actions body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      line.compareDocumentPosition(screen.getByText('Recent actions body')) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('drops the Waiting for you line as soon as nothing waits', () => {
