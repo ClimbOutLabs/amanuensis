@@ -124,6 +124,8 @@ describe('ToolCallContainer', () => {
     expect(props?.status).not.toBe('success');
     expect(props?.status).toBe('muted');
     expect(props?.outcomeText).toBe('Not done: you said no');
+    // Its title says what it was, not "Searched the web".
+    expect(props?.toolName).toBe('A web search');
   });
 
   it('renders a running tool call without a result', () => {
@@ -313,6 +315,8 @@ describe('ToolCallContainer', () => {
 
     const outcomes = ToolCallCard.mock.calls.map(call => call[0]?.outcomeText);
     expect(outcomes).toEqual(['Not sent: you said no', 'Not done: you said no']);
+    const titles = ToolCallCard.mock.calls.map(call => call[0]?.toolName);
+    expect(titles).toEqual(['An email', 'A calendar change']);
   });
 
   it('routes sandbox calls with parsed command and result details', () => {

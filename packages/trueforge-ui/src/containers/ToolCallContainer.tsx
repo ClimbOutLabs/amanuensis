@@ -708,7 +708,10 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
   return (
     <ToolCallCard
-      toolName={toolStepTitle({ toolName: part.toolName, running: status === 'running' })}
+      toolName={toolStepTitle({
+        toolName: part.toolName,
+        state: status === 'running' ? 'running' : notDoneReason !== undefined ? 'not_done' : 'done',
+      })}
       expanded={expanded}
       onToggle={onToggle}
       awaiting={status === 'running'}

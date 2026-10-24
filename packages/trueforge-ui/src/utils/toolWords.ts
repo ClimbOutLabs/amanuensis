@@ -1,16 +1,21 @@
 /**
- * The one owner of the plain words for a tool: what it reads as while it runs ("Reading your email")
- * and once it is done ("Read your email"). Keyed by the tool name the runtime and the server record;
+ * The one owner of the plain words for a tool: what it reads as while it runs ("Reading your email"),
+ * once it is done ("Read your email"), and when it did not run ("Your email"). Keyed by the tool name the runtime and the server record;
  * the older action kinds stay so earlier audit rows still read well. A raw tool name is never shown.
  */
-type ToolWords = { doing: string; done: string };
+type ToolWords = {
+  doing: string;
+  done: string;
+  /** What the step is, for one that did not run: never reads as underway or finished. */
+  thing: string;
+};
 
-function words(doing: string, done: string, toolNames: readonly string[]): [string, ToolWords][] {
-  return toolNames.map(toolName => [toolName, { doing, done }]);
+function words(toolWords: ToolWords, toolNames: readonly string[]): [string, ToolWords][] {
+  return toolNames.map(toolName => [toolName, toolWords]);
 }
 
 const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
-  ...words('Reading your email', 'Read your email', [
+  ...words({ doing: 'Reading your email', done: 'Read your email', thing: 'Your email' }, [
     'read_email',
     'get_thread',
     'list_inbox_threads',
@@ -22,24 +27,36 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'get_draft',
     'gmail_read',
   ]),
-  ...words('Searching your email', 'Read your email', ['search_emails']),
-  ...words('Drafting an email', 'Saved a draft', ['draft_email', 'update_draft', 'gmail_draft']),
-  ...words('Sending an email', 'Sent an email', ['send_draft', 'gmail_send']),
-  ...words('Checking your calendar', 'Read your calendar', ['list_events', 'get_event', 'calendar_read']),
-  ...words('Changing your calendar', 'Changed your calendar', ['create_event', 'update_event', 'calendar_write']),
-  ...words('Searching the web', 'Searched the web', [
+  ...words({ doing: 'Searching your email', done: 'Read your email', thing: 'An email search' }, ['search_emails']),
+  ...words({ doing: 'Drafting an email', done: 'Saved a draft', thing: 'An email draft' }, [
+    'draft_email',
+    'update_draft',
+    'gmail_draft',
+  ]),
+  ...words({ doing: 'Sending an email', done: 'Sent an email', thing: 'An email' }, ['send_draft', 'gmail_send']),
+  ...words({ doing: 'Checking your calendar', done: 'Read your calendar', thing: 'Your calendar' }, [
+    'list_events',
+    'get_event',
+    'calendar_read',
+  ]),
+  ...words({ doing: 'Changing your calendar', done: 'Changed your calendar', thing: 'A calendar change' }, [
+    'create_event',
+    'update_event',
+    'calendar_write',
+  ]),
+  ...words({ doing: 'Searching the web', done: 'Searched the web', thing: 'A web search' }, [
     'tavily_search',
     'web_search',
     'search',
     'google_search',
     'brave_search',
   ]),
-  ...words('Reading a web page', 'Read a web page', ['tavily_extract']),
-  ...words('Looking up a map', 'Looked up a map', ['render_map']),
-  ...words('Planning a route', 'Planned a route', ['render_route']),
-  ...words('Looking up places', 'Looked up places', ['render_places']),
-  ...words('Checking the weather', 'Checked the weather', ['get_weather']),
-  ...words('Running a command', 'Ran a command', [
+  ...words({ doing: 'Reading a web page', done: 'Read a web page', thing: 'A web page' }, ['tavily_extract']),
+  ...words({ doing: 'Looking up a map', done: 'Looked up a map', thing: 'A map' }, ['render_map']),
+  ...words({ doing: 'Planning a route', done: 'Planned a route', thing: 'A route' }, ['render_route']),
+  ...words({ doing: 'Looking up places', done: 'Looked up places', thing: 'A places search' }, ['render_places']),
+  ...words({ doing: 'Checking the weather', done: 'Checked the weather', thing: 'The weather' }, ['get_weather']),
+  ...words({ doing: 'Running a command', done: 'Ran a command', thing: 'A command' }, [
     'exec',
     'sandbox_exec',
     'sandbox_command',
@@ -47,28 +64,51 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'shell',
     'run_registered_command',
   ]),
-  ...words('Running code', 'Ran code', ['run_code']),
-  ...words('Reading', 'Read files', ['read_file', 'read', 'open_file', 'cat']),
-  ...words('Editing files', 'Changed files', ['write_file', 'apply_patch', 'edit_file']),
-  ...words('Reading a space', 'Read a space', ['get_space', 'list_spaces', 'list_blocks', 'space_read']),
-  ...words('Making a space', 'Changed a space', ['create_space']),
-  ...words('Updating the space', 'Changed a space', ['update_space', 'replace_text', 'revert_space', 'space_write']),
-  ...words('Checking your schedules', 'Checked a schedule', ['list_schedules', 'schedule_read']),
-  ...words('Changing a schedule', 'Changed a schedule', [
+  ...words({ doing: 'Running code', done: 'Ran code', thing: 'Some code' }, ['run_code']),
+  ...words({ doing: 'Reading', done: 'Read files', thing: 'Some files' }, ['read_file', 'read', 'open_file', 'cat']),
+  ...words({ doing: 'Editing files', done: 'Changed files', thing: 'A file change' }, [
+    'write_file',
+    'apply_patch',
+    'edit_file',
+  ]),
+  ...words({ doing: 'Reading a space', done: 'Read a space', thing: 'A space' }, [
+    'get_space',
+    'list_spaces',
+    'list_blocks',
+    'space_read',
+  ]),
+  ...words({ doing: 'Making a space', done: 'Changed a space', thing: 'A new space' }, ['create_space']),
+  ...words({ doing: 'Updating the space', done: 'Changed a space', thing: 'A space change' }, [
+    'update_space',
+    'replace_text',
+    'revert_space',
+    'space_write',
+  ]),
+  ...words({ doing: 'Checking your schedules', done: 'Checked a schedule', thing: 'Your schedules' }, [
+    'list_schedules',
+    'schedule_read',
+  ]),
+  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
     'create_schedule',
     'delete_schedule',
     'pause_schedule',
     'resume_schedule',
     'schedule_write',
   ]),
-  ...words('Checking the specialists', 'Checked a specialist', ['list_personas', 'persona_read']),
-  ...words('Switching specialist', 'Switched specialist', ['use_persona', 'persona_switch']),
-  ...words('Making a specialist', 'Made a specialist', ['create_persona']),
-  ...words('Showing a picture', 'Showed a picture', ['show_image']),
-  ...words('Making a report', 'Made a report', ['create_document_report']),
-  ...words('Making a plan', 'Made a plan', ['submit_implementation_plan']),
-  ...words('Consulting a helper', 'Consulted a helper', ['create_sub_agent']),
-  ...words('Asking a question', 'Asked a question', ['ask_user_question']),
+  ...words({ doing: 'Checking the specialists', done: 'Checked a specialist', thing: 'The specialists' }, [
+    'list_personas',
+    'persona_read',
+  ]),
+  ...words({ doing: 'Switching specialist', done: 'Switched specialist', thing: 'A specialist switch' }, [
+    'use_persona',
+    'persona_switch',
+  ]),
+  ...words({ doing: 'Making a specialist', done: 'Made a specialist', thing: 'A new specialist' }, ['create_persona']),
+  ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
+  ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),
+  ...words({ doing: 'Making a plan', done: 'Made a plan', thing: 'A plan' }, ['submit_implementation_plan']),
+  ...words({ doing: 'Consulting a helper', done: 'Consulted a helper', thing: 'A helper' }, ['create_sub_agent']),
+  ...words({ doing: 'Asking a question', done: 'Asked a question', thing: 'A question' }, ['ask_user_question']),
 ]);
 
 /** Used for a tool the table does not know yet, so a new tool never shows its raw name. */
@@ -96,9 +136,15 @@ export function humanizeToolName(toolName: string): string {
   return titled.length > MAX_TOOL_LABEL_CHARS ? `${titled.slice(0, MAX_TOOL_LABEL_CHARS - 1).trimEnd()}…` : titled;
 }
 
-/** A step's title in plain words: what it is doing while it runs, what it did once done. */
-export function toolStepTitle({ toolName, running }: { toolName: string; running: boolean }): string {
+export type ToolStepState = 'running' | 'done' | 'not_done';
+
+/**
+ * A step's title in plain words: what it is doing while it runs, what it did once done, and only what
+ * it is when it did not run, so a refused step never reads as done.
+ */
+export function toolStepTitle({ toolName, state }: { toolName: string; state: ToolStepState }): string {
   const known = TOOL_WORDS.get(toolName);
   if (known === undefined) return humanizeToolName(toolName);
-  return running ? known.doing : known.done;
+  if (state === 'running') return known.doing;
+  return state === 'done' ? known.done : known.thing;
 }
