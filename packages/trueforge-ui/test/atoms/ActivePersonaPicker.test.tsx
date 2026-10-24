@@ -72,7 +72,7 @@ function renderPicker(overrides: Partial<PersonaApi>, personas: Persona[] = [ZAR
 }
 
 async function openMenu() {
-  const trigger = await screen.findByTitle('Choose an agent');
+  const trigger = await screen.findByTitle('Choose a persona');
   expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
   expect(trigger).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(trigger);
@@ -109,7 +109,7 @@ describe('ActivePersonaPicker', () => {
     expect(screen.getByRole('menuitem', { name: 'Aman' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Zara' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Nova' })).toBeInTheDocument();
-    // No specialist answers, so the control names the assistant itself.
+    // No persona answers, so the control names the assistant itself.
     expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument();
   });
 

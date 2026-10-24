@@ -49,7 +49,7 @@ const PERSONAS = [
 
 /** Goes back to the assistant through the control's menu, as a person does. */
 async function returnToDefault() {
-  fireEvent.click(await screen.findByTitle('Choose an agent'));
+  fireEvent.click(await screen.findByTitle('Choose a persona'));
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Aman' }));
 }
 
@@ -94,7 +94,7 @@ describe('ActivePersonaIndicator', () => {
     const getSessionPersona = vi.fn(async () => null);
     renderIndicator({ setSessionPersona, getSessionPersona });
 
-    fireEvent.click(await screen.findByTitle('Choose an agent'));
+    fireEvent.click(await screen.findByTitle('Choose a persona'));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Nova' }));
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Nova');
     // Nothing is sent before the chat exists; the session lookup never ran for a chat without one.
@@ -113,7 +113,7 @@ describe('ActivePersonaIndicator', () => {
     renderIndicator({ getSessionPersona: async () => ZARA });
 
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Zara');
-    fireEvent.click(screen.getByTitle('Choose an agent'));
+    fireEvent.click(screen.getByTitle('Choose a persona'));
     const menu = screen.getByRole('menu', { name: 'Who answers this chat' });
     expect(menu).toHaveTextContent('Who answers this chat');
     expect(menu).toHaveTextContent('haiku');
@@ -122,7 +122,7 @@ describe('ActivePersonaIndicator', () => {
   it("shows the assistant's own display name while the chat is on the default assistant", async () => {
     renderIndicator({ getSessionPersona: async () => null });
 
-    expect(await screen.findByTitle('Choose an agent')).toHaveTextContent('Aman');
+    expect(await screen.findByTitle('Choose a persona')).toHaveTextContent('Aman');
     expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument();
   });
 
@@ -132,26 +132,28 @@ describe('ActivePersonaIndicator', () => {
       finishLoading = resolve;
     });
     renderIndicator({ listPersonas: () => pending });
-    expect(screen.queryByTitle('Choose an agent')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Choose a persona')).not.toBeInTheDocument();
     await act(async () => {
       finishLoading([]);
       await pending;
     });
-    expect(screen.queryByTitle('Choose an agent')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Choose a persona')).not.toBeInTheDocument();
   });
 
-  it('is a labelled control, never a bare arrow, and says nothing about personas', async () => {
+  it('is a labelled control, never a bare arrow, titled for personas and never for agents or specialists', async () => {
     renderIndicator({ getSessionPersona: async () => null });
 
-    const control = await screen.findByTitle('Choose an agent');
+    const control = await screen.findByTitle('Choose a persona');
     expect(control.textContent?.trim()).not.toBe('');
     fireEvent.click(control);
-    expect(document.body.textContent).not.toMatch(/persona/i);
+    expect(screen.getByRole('menu', { name: 'Who answers this chat' })).toBeInTheDocument();
+    const words = [document.body.textContent ?? '', control.getAttribute('title') ?? ''].join(' ');
+    expect(words).not.toMatch(/\bagents?\b|specialist/i);
   });
 
   it('opens its menu fully inside the screen, even from a button near the bottom left', async () => {
     renderIndicator({ getSessionPersona: async () => null });
-    const control = await screen.findByTitle('Choose an agent');
+    const control = await screen.findByTitle('Choose a persona');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     control.getBoundingClientRect = () => new DOMRect(2, 800, 80, 32);

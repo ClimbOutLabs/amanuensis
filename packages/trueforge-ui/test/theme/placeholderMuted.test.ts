@@ -1,34 +1,14 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { PRESETS } from '@/theme/presets/index.js';
 import { THEME_PRESET_IDS } from '@/theme/types.js';
 
+import { packageRoot, sourceFiles } from '../packageSources.js';
+
 import { contrastRatio } from './wcagContrast.js';
-
-/** The package root, found from wherever the runner started. */
-function packageRoot(): string {
-  let dir = process.cwd();
-  for (;;) {
-    for (const relative of ['.', 'packages/trueforge-ui']) {
-      const candidate = resolve(dir, relative);
-      if (existsSync(join(candidate, 'src/styles.css')) && existsSync(join(candidate, 'src/theme'))) return candidate;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) throw new Error('could not locate the trueforge-ui package');
-    dir = parent;
-  }
-}
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap(name => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return sourceFiles(path);
-    return /\.(ts|tsx)$/.test(name) ? [path] : [];
-  });
-}
 
 describe('placeholders', () => {
   const root = packageRoot();

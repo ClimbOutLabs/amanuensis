@@ -13,15 +13,14 @@ export type TourCapabilities = {
   email: boolean;
   sandbox: boolean;
 };
-export const MORNING_BRIEF: TourPrompt = { key: 'brief', label: 'Your morning brief', prompt: BRIEF_PROMPT };
-const ADD_NUMBERS: TourPrompt = { key: 'code', label: 'Run code', prompt: 'Add numbers.', needs: ['sandbox'] };
-export const GENERAL_DAY_PROMPTS: readonly TourPrompt[] = [];
-export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly TourPrompt[] }> = {
-  focus: { label: 'Focus', cards: [ADD_NUMBERS] },
-};
-export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
-  { key: 'email', label: 'Handle your email', prompt: 'Read my mail.', needs: ['email'] },
+const ADD_NUMBERS: TourPrompt = { key: 'code', title: 'Run code', prompt: 'Add numbers.', needs: ['sandbox'] };
+export const GENERAL_CARDS: readonly TourPrompt[] = [
+  { key: 'brief', title: 'Your morning brief', prompt: BRIEF_PROMPT },
+  { key: 'email', title: 'Handle your email', prompt: 'Read my mail.', needs: ['email'] },
 ];
+export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly TourPrompt[] }> = {
+  productivity: { label: 'Productivity', cards: [ADD_NUMBERS] },
+};
 `;
 
 async function fixture({ tour = TOUR_FIXTURE, topics, requiredCards = [] }) {
@@ -76,11 +75,11 @@ test('the real repo build writes the pack and every required card has a page', a
   }
 });
 
-test('reads Tour cards through the constants and help areas that hold them', async () => {
+test('reads Tour cards through the constants and topics that hold them', async () => {
   const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
   try {
     const result = await buildAmanGuide(fx.options);
-    assert.deepEqual(result.tourKeys, ['brief', 'code', 'email']);
+    assert.deepEqual(result.tourKeys, ['brief', 'email', 'code']);
     assert.deepEqual(result.uncoveredKeys, []);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
@@ -91,7 +90,7 @@ test('a Tour card with no guide page is a warning, not a failure', async () => {
   const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief' }) } });
   try {
     const result = await buildAmanGuide(fx.options);
-    assert.deepEqual(result.uncoveredKeys, ['code', 'email']);
+    assert.deepEqual(result.uncoveredKeys, ['email', 'code']);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
   }
@@ -146,10 +145,10 @@ test('the build fails when a Tour card needs a capability the type does not decl
 });
 
 test('the build fails when a card constant is not exported from tourPrompts.ts', async () => {
-  const tour = TOUR_FIXTURE.replace('export const GENERAL_DAY_PROMPTS', 'const GENERAL_DAY_PROMPTS');
+  const tour = TOUR_FIXTURE.replace('export const GENERAL_CARDS', 'const GENERAL_CARDS');
   const fx = await fixture({ tour, topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
   try {
-    await assert.rejects(buildAmanGuide(fx.options), /must export GENERAL_DAY_PROMPTS/);
+    await assert.rejects(buildAmanGuide(fx.options), /must export GENERAL_CARDS/);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
   }

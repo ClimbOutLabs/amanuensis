@@ -4,7 +4,7 @@ import type { Persona, PersonaActivation } from './persona';
 
 /**
  * The one place a chat's persona is switched by hand. `persona: undefined` switches back to the default
- * assistant. Both the per-chat API and the chat's own specialist tools write through here.
+ * assistant. Both the per-chat API and the chat's own persona tools write through here.
  */
 export async function activateSessionPersona(input: {
   store: IPersonaStore;

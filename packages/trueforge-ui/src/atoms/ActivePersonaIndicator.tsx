@@ -33,7 +33,7 @@ export type ActivePersonaIndicatorProps = {
 };
 
 /**
- * Says who is answering this chat, by name, and offers the configured specialists in a menu that
+ * Says who is answering this chat, by name, and offers the configured personas in a menu that
  * always fits on screen.
  *
  * The server decides the persona when a turn is created, so the chip re-reads
@@ -264,7 +264,7 @@ function ActivePersonaChip({
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? menuId : undefined}
-        title="Choose an agent"
+        title="Choose a persona"
         disabled={triggerDisabled}
         className={cn(
           auiButtonClass({ variant: 'ghost', size: 'small' }),

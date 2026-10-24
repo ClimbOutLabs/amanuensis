@@ -16,7 +16,7 @@ import ts from 'typescript';
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // The exported constants that hold every Tour card, in the order they are read.
-const TOUR_CARD_EXPORTS = ['MORNING_BRIEF', 'GENERAL_DAY_PROMPTS', 'HELP_AREAS', 'CAPABILITY_PROMPTS'];
+const TOUR_CARD_EXPORTS = ['GENERAL_CARDS', 'HOME_TOPICS'];
 
 export class AmanGuideBuildError extends Error {
   constructor(message, options) {
@@ -87,7 +87,8 @@ function readTour(source, fileName) {
   function addCard(node) {
     const props = propertyMap(node);
     const key = literalText(props.get('key'), 'A Tour card key');
-    const label = literalText(props.get('label'), `Tour card "${key}" label`);
+    // A home card names itself with `title`; older card lists used `label`.
+    const label = literalText(props.get('title') ?? props.get('label'), `Tour card "${key}" title`);
     const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
     const existing = cards.get(key);
     if (existing !== undefined) {

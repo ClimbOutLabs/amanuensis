@@ -143,7 +143,7 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 }
 
 /**
- * Approval ticket for calendar, schedule, specialist and other non-mail actions. The question is the
+ * Approval ticket for calendar, schedule, persona and other non-mail actions. The question is the
  * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
  * raw request and the connector's arguments fold into Details unless `outboundOpen` is set. Mail uses EmailApprovalCard
  * instead.

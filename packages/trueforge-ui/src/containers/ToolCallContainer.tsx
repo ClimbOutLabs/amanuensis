@@ -473,12 +473,12 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
-  // A specialist added in this chat shows in the persona list without a page reload.
+  // A persona added in this chat shows in the persona list without a page reload.
   const reloadPersonas = useOptionalPersonas()?.reload;
-  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  const personaAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
   useEffect(() => {
-    if (specialistAdded) void reloadPersonas?.();
-  }, [specialistAdded, reloadPersonas]);
+    if (personaAdded) void reloadPersonas?.();
+  }, [personaAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;

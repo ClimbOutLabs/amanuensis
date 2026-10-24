@@ -194,7 +194,7 @@ test(
       const pickContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const pickPage = await pickContext.newPage();
       await pickPage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-      const picker = pickPage.getByTitle('Choose an agent');
+      const picker = pickPage.getByTitle('Choose a persona');
       await picker.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await picker.click();
       await pickPage.getByRole('menuitem', { name: 'Nova' }).click();
@@ -213,7 +213,7 @@ test(
         .getByRole('complementary', { name: 'Recent chats' })
         .getByRole('button', { name: 'New chat' })
         .click();
-      await pickPage.getByTitle('Choose an agent').waitFor({ timeout: RENDER_TIMEOUT_MS });
+      await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
     } finally {
       await browser?.close();

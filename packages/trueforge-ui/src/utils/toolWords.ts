@@ -95,15 +95,15 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'resume_schedule',
     'schedule_write',
   ]),
-  ...words({ doing: 'Checking the specialists', done: 'Checked a specialist', thing: 'The specialists' }, [
+  ...words({ doing: 'Checking the personas', done: 'Checked a persona', thing: 'The personas' }, [
     'list_personas',
     'persona_read',
   ]),
-  ...words({ doing: 'Switching specialist', done: 'Switched specialist', thing: 'A specialist switch' }, [
+  ...words({ doing: 'Switching persona', done: 'Switched persona', thing: 'A persona switch' }, [
     'use_persona',
     'persona_switch',
   ]),
-  ...words({ doing: 'Making a specialist', done: 'Made a specialist', thing: 'A new specialist' }, ['create_persona']),
+  ...words({ doing: 'Making a persona', done: 'Made a persona', thing: 'A new persona' }, ['create_persona']),
   ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
   ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),
   ...words({ doing: 'Making a plan', done: 'Made a plan', thing: 'A plan' }, ['submit_implementation_plan']),
