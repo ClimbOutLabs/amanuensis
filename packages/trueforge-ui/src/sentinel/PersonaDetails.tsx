@@ -28,7 +28,7 @@ export const PersonaDetails: FC<{ persona: SentinelApprovalPersona }> = ({ perso
       <summary className="cursor-pointer text-sm text-text-secondary">Details</summary>
       <div
         role="region"
-        aria-label="Specialist instructions"
+        aria-label="Persona instructions"
         tabIndex={0}
         className="mt-2 max-h-60 overflow-auto rounded border border-border bg-card-bg px-3 py-2"
       >

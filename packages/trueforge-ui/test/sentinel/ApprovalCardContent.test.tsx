@@ -159,7 +159,7 @@ describe('approval card content', () => {
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
   });
 
-  it('asks a specialist add as a question, with its description open and one status line', () => {
+  it('asks a persona add as a question, with its description open and one status line', () => {
     renderTicket(
       baseCard({
         persona: {
@@ -170,7 +170,7 @@ describe('approval card content', () => {
         },
       }),
     );
-    expect(screen.getByRole('heading', { name: 'Add the specialist "Tax helper"?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Add the persona "Tax helper"?' })).toBeInTheDocument();
     expect(screen.getByText('Files receipts.')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
   });

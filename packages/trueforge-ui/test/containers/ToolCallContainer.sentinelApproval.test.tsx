@@ -423,7 +423,7 @@ describe('ToolCallContainer "Change it"', () => {
 
   describe('add a specialist card', () => {
     const personaCard: SentinelApprovalCard = {
-      ...card('Add a specialist: Tutor. Helps with maths.'),
+      ...card('Add a persona: Tutor? Helps with maths.'),
       persona: { name: 'Tutor', description: 'Helps with maths.', instructions: 'Be patient.', model_name: 'model-a' },
     };
 

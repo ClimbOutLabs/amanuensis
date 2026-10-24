@@ -35,7 +35,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
       ? `Create the schedule "${schedule.name}"?`
       : `Delete the schedule "${schedule.name}"?`;
   }
-  if (persona !== null) return `Add the specialist "${persona.name}"?`;
+  if (persona !== null) return `Add the persona "${persona.name}"?`;
   return card.plain_what;
 }
 
@@ -83,7 +83,7 @@ function stubWhat(card: SentinelApprovalCard): string {
   const { calendar_event: event, schedule, persona } = card;
   if (event !== null) return event.action === 'create' ? 'New event' : 'Changed event';
   if (schedule !== null) return schedule.action === 'create' ? 'New schedule' : 'Delete schedule';
-  if (persona !== null) return 'New specialist';
+  if (persona !== null) return 'New persona';
   return 'Action';
 }
 
@@ -109,6 +109,6 @@ export function approvalKindNoun(card: SentinelApprovalCard): string {
   if (email !== null) return 'email';
   if (event !== null) return 'calendar change';
   if (schedule !== null) return 'schedule change';
-  if (persona !== null) return 'specialist';
+  if (persona !== null) return 'persona';
   return 'action';
 }

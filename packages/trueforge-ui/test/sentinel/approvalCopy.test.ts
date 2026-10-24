@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  approvalKindNoun,
   approvalQuestion,
   approvalSentLine,
   approvalStub,
@@ -102,6 +103,20 @@ describe('approval copy', () => {
     });
     expect(approvalQuestion(card)).toBe('Add "Dentist" to your calendar?');
     expect(approveVerb(card)).toBe('Allow');
+  });
+
+  it('calls a persona add a persona in the title, the stub, and the banner noun', () => {
+    const card = cardWith({
+      persona: {
+        name: 'Tax helper',
+        description: 'Files receipts.',
+        instructions: 'Keep every receipt.',
+        model_name: 'fast',
+      },
+    });
+    expect(approvalQuestion(card)).toBe('Add the persona "Tax helper"?');
+    expect(approvalStub(card)).toEqual({ what: 'New persona', detail: 'Tax helper' });
+    expect(approvalKindNoun(card)).toBe('persona');
   });
 
   it('asks a new schedule to be created', () => {

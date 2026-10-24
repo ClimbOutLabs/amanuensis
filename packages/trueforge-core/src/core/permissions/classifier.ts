@@ -2525,7 +2525,7 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
   // The description is shown as one sentence, so a trailing full stop is not doubled.
   const sentence = show(review.description).replace(/[.!?]+$/, '');
   return {
-    plain_what: `Add a specialist: ${show(review.name)}? ${sentence}.`,
+    plain_what: `Add a persona: ${show(review.name)}? ${sentence}.`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
