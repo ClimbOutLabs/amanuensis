@@ -312,6 +312,6 @@ describe('call_tool naming a configured connector still matches the direct call'
     expect(wrapped.tier).toBe(direct.tier);
     expect(wrapped.tier_reason).toBe(direct.tier_reason);
     expect(wrapped.tier3_card).toEqual(direct.tier3_card);
-    expect(wrapped.tier3_card?.plain_what).toBe('Send an email to alice@example.com.');
+    expect(wrapped.tier3_card?.plain_what).toBe('Send an email to alice@example.com?');
   });
 });

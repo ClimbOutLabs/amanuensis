@@ -42,10 +42,10 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Always allow this here']);
+    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
     // A choice the server offers is never folded into the closed Details block.
     expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
       'title',
       "Don't ask again for this kind of action in this chat.",

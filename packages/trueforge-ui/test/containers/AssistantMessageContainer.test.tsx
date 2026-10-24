@@ -245,7 +245,7 @@ describe('AssistantMessageContainer', () => {
 
     expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
@@ -362,9 +362,9 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
     const card = within(internals);
-    expect(card.getByRole('button', { name: 'Allow it' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'Allow' })).toBeVisible();
     expect(card.getByRole('button', { name: 'Not now' })).toBeVisible();
-    fireEvent.click(card.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(card.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -727,7 +727,7 @@ describe('AssistantMessageContainer with agent details off', () => {
 
     expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeVisible();
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );

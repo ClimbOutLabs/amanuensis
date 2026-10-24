@@ -643,8 +643,8 @@ describe('ToolCallContainer', () => {
 
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'nested-approval-1', approved: true, optionId: 'allow-once' }),
     );
@@ -662,7 +662,7 @@ describe('ToolCallContainer', () => {
       },
     ]);
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /in this chat/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
@@ -692,7 +692,7 @@ describe('ToolCallContainer', () => {
       screen.queryByRole('button', { name: /Expand agent details|Collapse agent details/ }),
     ).not.toBeInTheDocument();
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -711,7 +711,7 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -770,9 +770,11 @@ describe('ToolCallContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('pnpm test')).toBeInTheDocument();
+    // The command shows once, on the card as an argument line, not in the execution details above it.
+    expect(screen.getByText(/command: pnpm test/)).toBeInTheDocument();
+    expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
@@ -820,7 +822,7 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenLastCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'opt-allow' }),
     );
@@ -935,7 +937,7 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getAllByText('This request ended. Ask again if you still need it.')).toHaveLength(1);
-      expect(screen.getAllByRole('button', { name: 'Allow it' })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Allow' })).toHaveLength(1);
       expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     });
 

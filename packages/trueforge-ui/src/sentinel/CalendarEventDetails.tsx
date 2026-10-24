@@ -23,7 +23,7 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
     <div className="space-y-3 rounded border border-border bg-primary-bg px-3 py-2" data-role="calendar-event">
       {before !== null && (
         <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Now</p>
+          <p className="mb-1 text-xs font-medium text-text-secondary">Now</p>
           <Line label="Title" value={before.title} />
           <Line label="When" value={before.when} />
           {before.duration !== '' && <Line label="Length" value={before.duration} />}
@@ -31,7 +31,7 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
         </div>
       )}
       <div>
-        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        <p className="mb-1 text-xs font-medium text-text-secondary">
           {before === null ? 'Exactly what will be saved' : 'After the change'}
         </p>
         <Line label="Calendar" value={`Main calendar of ${event.calendar}`} />
@@ -52,7 +52,7 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
       </div>
       {event.description !== '' && (
         <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Description</p>
+          <p className="mb-1 text-xs font-medium text-text-secondary">Description</p>
           <div
             role="region"
             aria-label="Event description"

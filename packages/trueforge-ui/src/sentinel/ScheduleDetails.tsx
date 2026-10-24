@@ -28,7 +28,7 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
     </div>
     {schedule.next_runs.length > 0 && (
       <div>
-        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Next runs</p>
+        <p className="mb-1 text-xs font-medium text-text-secondary">Next runs</p>
         <ul className="list-disc pl-5 text-sm text-text-primary">
           {schedule.next_runs.map(run => (
             <li key={run}>{run}</li>
@@ -37,7 +37,7 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
       </div>
     )}
     <div>
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">What it will do each time</p>
+      <p className="mb-1 text-xs font-medium text-text-secondary">What it will do each time</p>
       <div
         role="region"
         aria-label="Schedule instruction"

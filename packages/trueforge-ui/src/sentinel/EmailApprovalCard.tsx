@@ -9,7 +9,12 @@ import { APPROVAL_CHOICES, EMAIL_CHOICES, isNewRecipientCard } from './approvalC
 import { approvalTime, approveVerb, declineVerb, emailQuestion } from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
+import {
+  WAITING_FOR_YOU_LABEL,
+  type SentinelApprovalCard,
+  type SentinelApprovalEmail,
+  type SentinelApprovalMailbox,
+} from './types.js';
 
 export type EmailApprovalCardProps = {
   /** Id of the approval this card answers; the composer banner finds the card by it. */
@@ -135,6 +140,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
         <h3 className="min-w-0 flex-1 text-base font-medium text-text-primary">{emailQuestion(email)}</h3>
         <span className="shrink-0 text-text-secondary">Gmail</span>
+        {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
       </header>
 
       <div className="border-t border-border px-4 py-3">

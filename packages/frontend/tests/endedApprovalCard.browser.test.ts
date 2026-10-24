@@ -14,7 +14,7 @@ import { screenshotDir } from './support/screenshotDir.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const ENDED_NOTE = 'This request ended. Ask again if you still need it.';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const DENY = 'Not now';
 
 /**
