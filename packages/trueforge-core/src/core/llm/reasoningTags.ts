@@ -186,6 +186,13 @@ export function reasoningTagMiddleware({ bareClose }: { bareClose: boolean }): L
         stream: stream.pipeThrough(
           new TransformStream<LanguageModelV4StreamPart, LanguageModelV4StreamPart>({
             transform(part, controller) {
+              // Raw parts only observe the provider's chunks (the adapter asks for them so its
+              // stream deadlines can count progress the parser drops). They carry no model
+              // output, so they pass through without flushing the splitter's held text.
+              if (part.type === 'raw') {
+                controller.enqueue(part);
+                return;
+              }
               if (part.type === 'text-delta') {
                 textId = part.id;
                 writer.write({ controller, segments: splitter.push(part.delta), textId });
