@@ -4,7 +4,6 @@ import {
   validateImplementationPlanGrant,
   type ImplementationPlanGrant,
 } from '../../core/mcp/implementationPlanGrant';
-import { mergeChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type { AgentThreadSnapshot } from '../../core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../core/runtime/contextUsage';
 import type { SessionFolderRecord } from '../models/SessionFolderRecord';
@@ -62,7 +61,6 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
-  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -300,7 +298,6 @@ export class InMemorySessionStore<
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
       approval_grants: [],
-      private_fingerprints: null,
       task_checklist: emptyTaskChecklist(),
       metrics: {
         total_duration_ms: 0,
@@ -333,17 +330,6 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
-  }
-
-  async setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
-    const stored = this.sessions.get(sessionKey(input.session_id));
-    if (stored === undefined) {
-      return;
-    }
-    stored.record.private_fingerprints = mergeChatPrivateFingerprints({
-      stored: stored.record.private_fingerprints,
-      saved: deepCopy(input.fingerprints),
-    });
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {

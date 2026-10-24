@@ -49,6 +49,8 @@ export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 export const INERT_WEB_SEARCH_TOOL = 'web_search';
 /** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
+/** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
+export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -225,6 +227,7 @@ function buildMcpServer({
   searchResults,
   webSearch,
   searchProvider,
+  mail,
 }: {
   counters: Counters;
   gates: WriteGate[];
@@ -232,6 +235,7 @@ function buildMcpServer({
   searchResults: SearchResults;
   webSearch: boolean;
   searchProvider: boolean;
+  mail: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -393,6 +397,16 @@ function buildMcpServer({
     );
   }
 
+  if (mail) {
+    for (const name of INERT_MAIL_TOOLS) {
+      server.registerTool(
+        name,
+        { description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`, inputSchema: {} },
+        () => textResult('[]'),
+      );
+    }
+  }
+
   return server;
 }
 
@@ -446,9 +460,11 @@ export async function startInertMcpServer(options?: {
   webSearch?: boolean;
   /** Adds `web_search` and `web_fetch` in the search provider's argument shape; excludes `webSearch`. */
   searchProvider?: boolean;
+  mail?: boolean;
 }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
   const searchProvider = options?.searchProvider === true;
+  const mail = options?.mail === true;
   if (webSearch && searchProvider) {
     throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
   }
@@ -528,7 +544,7 @@ export async function startInertMcpServer(options?: {
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider }).connect(
+    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider, mail }).connect(
       asTransport(transport),
     );
     await transport.handleRequest(req, res, body);

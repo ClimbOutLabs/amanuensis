@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 const SEARCH_CARD: SentinelApprovalCard = {
-  plain_what: searchHoldCardText({ summary: 'Find quiet coffee shops in San Francisco', say: HOLD_SAY.private_read }),
+  plain_what: searchHoldCardText({
+    summary: 'Find quiet coffee shops in San Francisco',
+    say: holdSay('Aman').search_setting,
+    page: false,
+  }),
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -41,25 +45,10 @@ function renderSearch(onApproveForChat = vi.fn()) {
 }
 
 describe('PermissionApprovalCard for a held search', () => {
-  it('offers "Allow searches in this chat" in place of the generic chat choice', () => {
+  it('offers the one chat-wide choice, "Always allow this here", when the server allows it', () => {
     const { onApproveForChat } = renderSearch();
-    expect(screen.queryByRole('button', { name: 'Approve for this chat' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow searches in this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
     expect(onApproveForChat).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the generic chat choice for a card that is not a search', () => {
-    render(
-      <PermissionApprovalCard
-        approvalId="approval-search"
-        card={{ ...SEARCH_CARD, plain_what: 'Send $250 to Acme Corp' }}
-        othersWaiting={0}
-        onApprove={vi.fn()}
-        onApproveForChat={vi.fn()}
-        onDeny={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
   });
 
   it('shows the query in the Details block, with the service fields folded below it', () => {

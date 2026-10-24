@@ -626,7 +626,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
         </RuntimeHarness>
       </SentinelApiProvider>,
     );
-    await screen.findByText('Sandbox code asks first');
+    await screen.findByText('Read-only commands in the workspace run without asking. Other commands ask first.');
     const order = Array.from(document.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
@@ -694,10 +694,28 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </SentinelApiProvider>,
     );
     expect(await screen.findByText('Web searches run without asking')).toBeInTheDocument();
-    expect(screen.getByText('Sandbox code asks first')).toBeInTheDocument();
+    expect(
+      screen.getByText('Read-only commands in the workspace run without asking. Other commands ask first.'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Offline mode is on')).toBeInTheDocument();
     // Read-only: the rules offer no switch.
     expect(screen.queryByRole('switch', { name: /offline/i })).not.toBeInTheDocument();
+  });
+
+  it('says only what the sandbox switch really lets run without asking', async () => {
+    render(
+      <SentinelApiProvider api={sentinelWith({ ...settingsStub, sandbox_without_asking: true })}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    expect(
+      await screen.findByText(
+        "Read-only commands and Aman's own code in the workspace run without asking. Other commands ask first.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Sandbox code runs without asking')).not.toBeInTheDocument();
   });
 
   it('keeps the model in Details and out of the visible rail', () => {
