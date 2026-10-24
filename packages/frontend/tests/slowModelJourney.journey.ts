@@ -1133,3 +1133,68 @@ journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () =
     'the Dog breeds space exists',
   );
 });
+
+journey(
+  '22. agent details off: earlier turns stay folded while a long turn runs, and after a reload',
+  SCENARIO_LIMIT_MS,
+  async () => {
+    const page = await personalPage();
+    api.model.setPlanner(exchange => {
+      if (exchange.message.includes('harbour lights')) {
+        if (exchange.toolResults.length === 0) return search('harbour lights');
+        if (exchange.toolResults.length === 1) return readPage(firstResultUrl(exchange.toolResults[0]));
+      }
+      if (exchange.message.includes('lighthouse keepers')) {
+        if (exchange.toolResults.length < 5) return search(`lighthouse keepers ${String(exchange.toolResults.length)}`);
+      }
+      return undefined;
+    });
+    api.mcp.setSearchResults(searchResults);
+    try {
+      await openHome(page);
+      await send(page, 'Tell me about harbour lights');
+      await page.waitForURL(/\/sessions\//, { timeout: UI_LIMIT_MS });
+      const sessionId = sessionIdOf(page);
+      await waitForReplyText(page, 'the first reply', 1);
+      await waitForIdle(page, 'the first reply');
+
+      const toggle = page.getByRole('button', { name: 'Show agent details' });
+      assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'agent details are off in this chat');
+      const folded = async (label: string): Promise<void> => {
+        assert.equal(
+          await page.getByTestId('assistant-message-agent-internals').count(),
+          0,
+          `${label}: a turn shows its steps while agent details are off`,
+        );
+        assert.ok(
+          (await assistantReplies(page).getByText(FINAL_TEXT).count()) >= 1,
+          `${label}: the first reply's answer is still showing`,
+        );
+      };
+      await folded('after the first turn');
+
+      // A second, long turn: several slow searches, so it is still running minutes in.
+      api.model.setPacing(SLOW);
+      await send(page, 'Now tell me about lighthouse keepers');
+      await until('the second turn running (Cancel showing)', UI_LIMIT_MS, async () =>
+        page.getByRole('button', { name: CANCEL, exact: true }).isVisible(),
+      );
+      await pause(3_000);
+      await folded('while the second turn runs');
+
+      // A reload mid-turn re-reads the chat from the server; every turn must stay folded.
+      await openChat(page, sessionId);
+      await until('the second turn still running after the reload', UI_LIMIT_MS, async () =>
+        page.getByRole('button', { name: CANCEL, exact: true }).isVisible(),
+      );
+      await folded('after a reload mid-turn');
+
+      await page.getByRole('button', { name: CANCEL, exact: true }).click();
+      await waitForIdle(page, 'the second reply stopped');
+    } finally {
+      api.model.setPlanner(undefined);
+      api.mcp.setSearchResults(undefined);
+      api.model.setPacing(undefined);
+    }
+  },
+);
