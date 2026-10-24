@@ -20,6 +20,9 @@ import { MEMORY_PAGE_SIZE, type MemoryVaultState } from './useMemoryVaultState.j
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
+/** Shown in place of a summary that failed: the one line a person sees until a later chat makes the summary. */
+export const SUMMARY_PENDING_LINE = "Couldn't make this summary yet. It will try again after the next chat.";
+
 /** The undo bar: forgotten memories wait here for the undo window before the server call. */
 function ForgetUndoBar({ state }: { state: MemoryVaultState }) {
   return (
@@ -288,6 +291,18 @@ export function MemoryVaultFactsPanel({
           {state.actionError}
         </p>
       ) : null}
+      {state.loadWarning !== null ? (
+        <p role="alert" className="text-sm text-error-text">
+          {state.loadWarning}
+        </p>
+      ) : null}
+      {state.error === null && !state.loading
+        ? state.summaryPending.map(pending => (
+            <div key={pending.namespace} className="rounded-xl border border-border bg-card-bg p-4">
+              <p className="text-sm text-text-primary">{SUMMARY_PENDING_LINE}</p>
+            </div>
+          ))
+        : null}
       {body}
       <ManageCollections state={state} />
     </div>

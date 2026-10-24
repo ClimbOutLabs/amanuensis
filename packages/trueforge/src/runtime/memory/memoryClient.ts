@@ -69,6 +69,21 @@ export interface MemoryClient {
    * deleting an already-deleted id succeeds.
    */
   deleteEntry(params: { entryId: string; timeoutMs: number }): Promise<DeleteMemoryVaultEntryOutcome>;
+
+  /**
+   * Optional: note the outcome of one turn-summary attempt for this client's vault, so a
+   * failed summary stays visible on the Memories page until a later summary succeeds.
+   * Only the markdown client implements it, matching the markdown-only gate on turn
+   * summarization itself. Never throws.
+   */
+  noteSummaryOutcome?(params: SummaryOutcomeNote): Promise<void>;
+}
+
+/** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */
+export interface SummaryOutcomeNote {
+  outcome: 'summarized' | 'failed';
+  /** The log's reason code when the attempt failed; omitted when a summary was made. */
+  reason?: string | undefined;
 }
 
 /** One memory fact as the vault presents it. */
