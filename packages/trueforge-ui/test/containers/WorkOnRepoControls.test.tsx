@@ -97,7 +97,7 @@ function fakeApi(state: FakeState): RepositoryWorkApi {
 
 function renderControls(
   api: RepositoryWorkApi,
-  props: { sessionId: string | null; isRunning?: boolean; sandboxOn?: boolean },
+  props: { sessionId: string | null; isRunning?: boolean; sandboxOff?: boolean },
 ) {
   const sendMessage = vi.fn();
   const view = render(
@@ -105,7 +105,7 @@ function renderControls(
       <WorkOnRepoControls
         sessionId={props.sessionId}
         isRunning={props.isRunning ?? false}
-        sandboxOn={props.sandboxOn ?? true}
+        sandboxOff={props.sandboxOff ?? false}
         sendMessage={sendMessage}
       />
     </RepositoryWorkProvider>,
@@ -131,14 +131,14 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -164,12 +164,18 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} turnFailed sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls
+          sessionId="session-1"
+          isRunning={false}
+          turnFailed
+          sandboxOff={false}
+          sendMessage={sendMessage}
+        />
       </RepositoryWorkProvider>,
     );
 
@@ -186,12 +192,12 @@ describe('WorkOnRepoControls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start work' }));
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {
@@ -284,7 +290,7 @@ describe('WorkOnRepoControls', () => {
   it('explains the sandbox switch instead of opening the picker when the sandbox is off', async () => {
     const state: FakeState = { bound: false, proposals: [] };
     const api = fakeApi(state);
-    renderControls(api, { sessionId: 'session-1', sandboxOn: false });
+    renderControls(api, { sessionId: 'session-1', sandboxOff: true });
 
     expect(await screen.findByRole('button', { name: /Work on a repo/ })).toBeDisabled();
     expect(
@@ -329,14 +335,14 @@ describe('WorkOnRepoControls', () => {
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
     view.rerender(
       <RepositoryWorkProvider api={api}>
-        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOn sendMessage={sendMessage} />
+        <WorkOnRepoControls sessionId="session-1" isRunning={false} sandboxOff={false} sendMessage={sendMessage} />
       </RepositoryWorkProvider>,
     );
     await waitFor(() => {

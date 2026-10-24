@@ -9,10 +9,12 @@ IMAGE=${AMAN_TEST_IMAGE:-}
 WAIT_SECONDS=${AMAN_TEST_WAIT_SECONDS:-90}
 NAME=aman-image-runtime-$$
 VOLUME=$NAME-data
+POLICY_VOLUME=$NAME-mail-policy
 
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+  docker volume rm "$POLICY_VOLUME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -28,8 +30,10 @@ if [ -z "$IMAGE" ]; then
 fi
 
 docker volume create "$VOLUME" >/dev/null
+docker volume create "$POLICY_VOLUME" >/dev/null
 # The login service is not part of this check: the app boots with an issuer it cannot reach and retries.
-docker run -d --name "$NAME" --read-only --tmpfs /tmp -v "$VOLUME:/data" \
+# The send list volume mounts the way the instance compose file mounts it for an instance with email.
+docker run -d --name "$NAME" --read-only --tmpfs /tmp -v "$VOLUME:/data" -v "$POLICY_VOLUME:/data/mail-policy" \
   -e NODE_ENV=production -e STANDALONE=true -e PORT=8790 \
   -e SQLITE_PATH=/data/db/db.sqlite -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
   -e OIDC_ISSUER_URL=http://127.0.0.1:9/dex -e OIDC_CLIENT_ID=image-runtime -e OIDC_CLIENT_SECRET=image-runtime \
@@ -48,4 +52,13 @@ until docker exec "$NAME" node -e "$health" >/dev/null 2>&1; do
 done
 
 [ "$(docker inspect -f '{{.RestartCount}}' "$NAME")" = 0 ] || fail "the app container restarted"
+
+# A fresh send list volume takes the ownership of the image dir it mounts over. The app is the only
+# writer of the list, so the dir must belong to the app user and the first write must succeed.
+policy_uid=$(docker exec "$NAME" stat -c %u /data/mail-policy) || fail "the send list dir is missing"
+[ "$policy_uid" = 10001 ] || fail "the send list dir is owned by uid $policy_uid, expected 10001"
+docker exec "$NAME" node -e "require('node:fs').writeFileSync('/data/mail-policy/allowed_recipients.toml', 'allowed_recipients = []\n')" \
+  || fail "the app could not write the send list into a fresh volume"
+
 printf 'ok: %s runs as uid 10001 with only /data and /tmp writable and became healthy\n' "$IMAGE"
+printf 'ok: a fresh send list volume is owned by uid 10001 and the app writes its send list into it\n'

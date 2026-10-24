@@ -1,4 +1,5 @@
 import { extractErrorLogFields, RemoteMCP } from '@truefoundry/trueforge-core/core';
+import { emailsOfResult } from '@truefoundry/trueforge-core/core/email/mailConnector/mailToolResults';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { Logger } from 'winston';
 
@@ -14,37 +15,6 @@ const PAGE_SIZE = 100;
 
 /** Calls one tool on the Email sidecar and returns its result as the MCP client gives it. */
 export type CallMailTool = (name: string, args: Record<string, unknown>) => Promise<unknown>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** The metadata page's emails, read from the tool's structured result or its JSON text. Anything else reads as none. */
-function emailsOfResult(result: unknown): unknown[] {
-  if (!isRecord(result)) {
-    return [];
-  }
-  const structured = emailsOf(result['structuredContent']);
-  if (structured !== undefined) {
-    return structured;
-  }
-  const content = result['content'];
-  const first: unknown = Array.isArray(content) ? content[0] : undefined;
-  const text = isRecord(first) ? first['text'] : undefined;
-  if (typeof text !== 'string') {
-    return [];
-  }
-  try {
-    return emailsOf(JSON.parse(text)) ?? [];
-  } catch {
-    return [];
-  }
-}
-
-function emailsOf(value: unknown): unknown[] | undefined {
-  const emails = isRecord(value) ? value['emails'] : undefined;
-  return Array.isArray(emails) ? emails : undefined;
-}
 
 /** The recipients of each message on a page. Each address is checked, so a malformed one is never kept. */
 export function recipientsOfEmails(emails: readonly unknown[]): string[] {

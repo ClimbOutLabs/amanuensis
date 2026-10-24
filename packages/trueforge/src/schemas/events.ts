@@ -12,6 +12,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   MCPAuthRequiredEventSchema,
   MCPInitializeEventSchema,
@@ -109,6 +110,8 @@ export const TurnStreamingEventSchema = z
     // persisted log; omitting it here breaks SDK deserialization of the turn stream the
     // moment compaction fires (see AgentThread.ts / ContextCompaction.ts).
     ContextCompactionEventSchema,
+    // Yielded live before the summary call so a client can say what the slow wait is.
+    ContextCompactionStartedEventSchema,
     // Document-ingestion progress is likewise yielded live, one event per file, from the turn
     // loop's pre-model extraction step (see AgentThread.extractStagedDocuments); omitting it here
     // breaks SDK deserialization of the turn stream the moment an upload's extraction reports

@@ -170,9 +170,10 @@ export interface CancelTurnDeps {
  * Cancels the turn wherever it runs: locally or on the owning peer over Redis
  * request-reply. Callers state the motive; default is a plain client cancel.
  *
- * A confirmed abort (this process, or peer HTTP 200) lets TurnHandle persist
- * the terminal state. If abort cannot be confirmed, this replica freezes the
- * turn in the store so the session is not stuck `running`.
+ * On this process the run is aborted and the turn is then frozen, so a step
+ * that ignores the abort cannot keep it `running`. A peer's confirmed abort
+ * (HTTP 200) lets that peer's TurnHandle persist the terminal state. If the
+ * abort cannot be confirmed, this replica freezes the turn in the store.
  *
  * Redis timeout and Redis/transport failures are not a clean cancellation —
  * the owning replica may still be executing — but the turn is still frozen.
@@ -231,10 +232,13 @@ export async function cancelSessionTurn(
     return;
   }
 
-  const aborted = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
-  if (!aborted) {
-    await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
-  }
+  const found = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  // A turn still marked running from before this process started lost its run to a restart.
+  // It is recorded as such, so the chat can say why the reply stopped when it is opened again.
+  const endReason = !found && deps.activeTurns.predates(turn.created_at) ? CancellationReason.Abandoned : reason;
+  // Also when the run was found: a step that ignores the abort must not keep the turn running.
+  // The freeze waits briefly for the run to settle and is a no-op once it has ended itself.
+  await freezeTurnIgnoringMissing(deps.session, { turnId, reason: endReason });
 }
 
 /** Freeze a running turn; missing turns are a no-op (already gone). */
@@ -565,6 +569,8 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
           });
       const { data, pagination } = await deps.sessionStore.listSessions({
         agent_id: query.agent_id,
+        folder_id: query.folder_id,
+        no_folder: query.no_folder ?? false,
         created_by_or_agent_ids: {
           created_by_subject_id: requestContext.subject.id,
           agent_ids: managedAgentIds,
@@ -606,6 +612,8 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
+    // A turn still being set up is not the chat's last turn yet, so it is stopped here too.
+    deps.activeTurns.cancelAdmissions({ sessionId, abortReason: CancellationReason.ClientCancelled });
     const turnId = session.record.last_turn_id;
     if (!turnId) {
       return c.json({}, 200);

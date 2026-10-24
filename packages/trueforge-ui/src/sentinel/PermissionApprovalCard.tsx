@@ -54,6 +54,11 @@ export type PermissionApprovalCardProps = {
   /** How many Tier 2 calls "Approve all" covers, shown on its button. */
   batchSize?: number | undefined;
   disabled?: boolean;
+  /**
+   * Shows what will be sent open above the choices instead of behind Details. For a card built on this
+   * screen from the call alone, whose arguments are the only place the recipient or address appears.
+   */
+  outboundOpen?: boolean;
 };
 
 /** Text folded after a preview, cut on code points so a surrogate pair is never split. */
@@ -143,7 +148,8 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 /**
  * Approval ticket for calendar, schedule, specialist and other non-mail actions. The question is the
  * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
- * raw request and the connector's arguments fold into Details. Mail uses EmailApprovalCard instead.
+ * raw request and the connector's arguments fold into Details unless `outboundOpen` is set. Mail uses EmailApprovalCard
+ * instead.
  */
 export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   approvalId,
@@ -158,6 +164,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApproveAll,
   batchSize,
   disabled = false,
+  outboundOpen = false,
 }) => {
   const [changing, setChanging] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
@@ -253,6 +260,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {persona !== null && <PersonaDetails persona={persona} />}
 
+        {outboundOpen && outboundShown !== null && (
+          <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
+        )}
+
         <div
           className={cn(
             'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
@@ -297,6 +308,19 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {declineVerb(card)}
           </Button>
         </div>
+        {/* The server offers a chat-wide grant only where it is safe, so the card shows it, never folds it away. */}
+        {onApproveForChat !== undefined && !newRecipients && (
+          <Button
+            variant="secondary"
+            size="small"
+            title={chatChoice.hint}
+            onClick={markSent(onApproveForChat)}
+            disabled={disabled || sentAt !== null}
+            className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
+          >
+            {chatChoice.label}
+          </Button>
+        )}
         {changing && onChangeRequest !== undefined && (
           <ChangeRequestBox
             disabled={disabled}
@@ -319,19 +343,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         <details className="text-sm">
           <summary className="cursor-pointer text-text-secondary underline">Details</summary>
           <div className="mt-2 space-y-3">
-            {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
-            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
-            {onApproveForChat !== undefined && !newRecipients && (
-              <Button
-                variant="secondary"
-                size="small"
-                title={chatChoice.hint}
-                onClick={markSent(onApproveForChat)}
-                disabled={disabled || sentAt !== null}
-              >
-                {chatChoice.label}
-              </Button>
+            {!outboundOpen && outboundShown !== null && (
+              <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
             )}
+            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
             {onApproveAlways !== undefined && !newRecipients && (
               <AlwaysAllowToolControl
                 size="small"

@@ -78,7 +78,7 @@ Public override surface (primitives stay theme/CSS — not slots):
 - **Attachments / toasts:** `AttachmentCard`, `AttachmentPreviewDialog`,
   `AttachmentPickerButton`, `Toast`, `ToastStack`
 - **Tools / prompts:** `ToolCallCard`, `ToolCallContentBlock`,
-  `ToolApprovalBar`, `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`,
+  `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`,
   `AgentStepsCard`, `ReasoningCard`, `AskUserPrompt`, `McpAuthPrompt`,
   `ResumeUnavailable`
 

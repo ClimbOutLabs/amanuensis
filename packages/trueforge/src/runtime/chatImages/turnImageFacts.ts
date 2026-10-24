@@ -1,5 +1,5 @@
 import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
-import { CHAT_IMAGE_MAX_PER_EMAIL } from '@truefoundry/trueforge-core/core/chatImages';
+import { CHAT_IMAGE_MAX_PER_EMAIL, isTrackingImageLink } from '@truefoundry/trueforge-core/core/chatImages';
 import { htmlImageLinks } from '@truefoundry/trueforge-core/core/email/gmail/htmlText';
 import { READ_EMAIL_TOOL_NAME } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 
@@ -61,9 +61,15 @@ function emailImageLinks(payload: unknown): string[] {
   }
   if ('linked_images' in payload && Array.isArray(payload.linked_images)) {
     const values: unknown[] = payload.linked_images;
-    return values
-      .filter((value): value is string => typeof value === 'string' && /^https?:\/\//i.test(value))
-      .slice(0, CHAT_IMAGE_MAX_PER_EMAIL);
+    return (
+      values
+        // Results stored before tracking pixels were left out may still list them.
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && /^https?:\/\//i.test(value) && !isTrackingImageLink(value),
+        )
+        .slice(0, CHAT_IMAGE_MAX_PER_EMAIL)
+    );
   }
   if ('bodyHtml' in payload && typeof payload.bodyHtml === 'string') {
     return htmlImageLinks({ source: payload.bodyHtml, max: CHAT_IMAGE_MAX_PER_EMAIL });

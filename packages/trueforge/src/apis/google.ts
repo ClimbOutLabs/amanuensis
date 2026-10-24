@@ -15,7 +15,7 @@ import { parsePastedAddress, resolveGoogleSetup } from '@truefoundry/trueforge-c
 import type { MiddlewareHandler } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
-import configuration from '../config';
+import configuration, { getAllowedOrigins } from '../config';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import {
   beginGoogleConsentRoute,
@@ -67,14 +67,47 @@ function statusBody(input: { record: GoogleConnectionRecord | null; setup: Googl
 }
 
 /**
- * The address the browser used. A proxy in front of Aman may have rewritten it, so the forwarded host and
- * protocol count only when the host is the public address itself; any other forwarded value is ignored.
+ * The addresses the installer serves this instance on, as recorded origins: the public address plus the
+ * recorded origins. These are the only addresses a request may name as its own; anything else is not Aman's.
+ */
+function instanceOrigins(): string[] {
+  const origins = [...getAllowedOrigins()];
+  try {
+    const publicOrigin = new URL(configuration.PUBLIC_BASE_URL).origin;
+    if (!origins.includes(publicOrigin)) {
+      origins.unshift(publicOrigin);
+    }
+  } catch {
+    // No usable public address configured; the recorded origins are the whole list.
+  }
+  return origins;
+}
+
+/**
+ * The address the browser used. A proxy in front of Aman may have rewritten it, so the forwarded host counts
+ * only when it names an address the installer serves this instance on: the public address, or one of the
+ * recorded origins, whose own address is then the browser's. Any other forwarded value is ignored.
  */
 function browserUrlOf(c: Parameters<ResolveRequestContext>[0]): string {
   const url = new URL(c.req.url);
   const forwardedHost = c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
   if (forwardedHost === undefined || forwardedHost === '') {
     return url.toString();
+  }
+  for (const origin of getAllowedOrigins()) {
+    let recorded: URL;
+    try {
+      recorded = new URL(origin);
+    } catch {
+      continue;
+    }
+    if (recorded.host.toLowerCase() === forwardedHost.toLowerCase()) {
+      try {
+        return new URL(`${url.pathname}${url.search}`, recorded.origin).toString();
+      } catch {
+        return url.toString();
+      }
+    }
   }
   let publicHost: string;
   try {
@@ -107,12 +140,7 @@ function requireJsonOrSameOrigin(): MiddlewareHandler {
       return next();
     }
     const origin = c.req.header('origin');
-    const allowed = new Set([new URL(browserUrlOf(c)).origin]);
-    try {
-      allowed.add(new URL(configuration.PUBLIC_BASE_URL).origin);
-    } catch {
-      // No usable public address configured; the request's own address is the only one.
-    }
+    const allowed = new Set([new URL(browserUrlOf(c)).origin, ...instanceOrigins()]);
     if (origin !== undefined && allowed.has(origin)) {
       return next();
     }

@@ -2,7 +2,13 @@
  * DB-backed turns API (mounted at /api/v1/sessions).
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  ISessionStore,
+  Sessions,
+  TerminalTurnState,
+  Turn,
+  TurnStreamingEvent,
+} from '@truefoundry/trueforge-core/agent-session';
 import {
   ApprovalRequestEndedError,
   CancellationReason,
@@ -26,6 +32,7 @@ import {
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
+  newEventId,
   rawSandboxId,
   redisKey,
   SandboxError,
@@ -74,13 +81,14 @@ import {
   listTurnsRoute,
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { mailAccountDirectory } from '../runtime/mailConnector';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -93,6 +101,7 @@ import {
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import { resolveModelContextLength } from '../runtime/modelContextLength';
 import {
   flushModelUsage,
   modelIdentity,
@@ -136,6 +145,12 @@ import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import {
+  raceTurnSetup,
+  TURN_COULD_NOT_START_MESSAGE,
+  TurnCouldNotStartError,
+  TurnStartBound,
+} from '../runtime/turnStartBound';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
@@ -215,7 +230,12 @@ export const TurnConflictCode = {
   TURN_ALREADY_EXISTS: 'turn_already_exists',
   APPROVAL_CONFLICT: 'approval_conflict',
   APPROVAL_REQUEST_ENDED: 'approval_request_ended',
+  TURN_COULD_NOT_START: 'turn_could_not_start',
 } as const;
+
+/** What a person reads when the chat refuses a new message because its last reply is still running. */
+const PREVIOUS_TURN_RUNNING_MESSAGE =
+  'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.';
 
 /** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
 export type HeldActionConflictCode = `held_action_${HeldRefusalReason}`;
@@ -515,6 +535,15 @@ function createTurnResolver(deps: {
           modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
+          // Sizes compaction and the request guard; unknown leaves both on their fixed fallbacks.
+          // The configured limit belongs to the configured model, not to a forced Token Factory one.
+          modelProperties: {
+            contextLength: await resolveModelContextLength({
+              providerConfig: routed.providerConfig,
+              configuredContextLength:
+                routed.providerConfig === resolved.providerConfig ? resolved.modelProperties.context_length : undefined,
+            }),
+          },
         };
       },
       mcp: async name => {
@@ -544,6 +573,9 @@ function createTurnResolver(deps: {
               : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
+      setUpConnectorNames: async () =>
+        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+      mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
@@ -731,7 +763,9 @@ function createTurnResolver(deps: {
       // run_code's own provisioning-sized deadline, derived from the sandbox
       // bounds — the 21-minute bound is scoped to sandbox/run_code alone.
       runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
+      searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+      modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -1065,9 +1099,9 @@ async function logTurnPersonaSwitch(params: {
 }
 
 /**
- * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
- * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
- * of dropping them when a SIGTERM lands in the drain window.
+ * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait, up to the
+ * follow-up time limit, for the TURN_DONE submissions (artifact persistence, memory retain,
+ * profile learning) instead of dropping them when a SIGTERM lands in the drain window.
  */
 export interface DrainTurnEventsInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
@@ -1075,6 +1109,8 @@ export interface DrainTurnEventsInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  /** Released by the turn's first model work. */
+  startBound?: TurnStartBound | undefined;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
@@ -1116,26 +1152,42 @@ export interface DrainTurnEventsInput {
     | undefined;
 }
 
+/** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
+const MODEL_WORK_EVENT_TYPES: ReadonlySet<string> = new Set([
+  EventType.MODEL_MESSAGE_DELTA,
+  EventType.MODEL_MESSAGE,
+  EventType.TOOL_EXECUTION_STARTED,
+  EventType.TOOL_RESPONSE,
+  EventType.TOOL_RESPONSE_V2,
+]);
+
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
-  const drain = runTurnEventDrain(input);
+  // Registered before the stream runs so the chat's next turn, which freezes this one first,
+  // always finds it. Settles once this turn's files are saved, or when the drain of a turn that
+  // did not finish ends.
+  const artifactCapture = Promise.withResolvers<undefined>();
+  input.turnDrains.trackArtifactCapture({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    capture: artifactCapture.promise,
+  });
+  const drain = runTurnEventDrain({
+    input,
+    markArtifactsCaptured: () => {
+      artifactCapture.resolve(undefined);
+    },
+  });
   input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
   return drain;
 }
 
-async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
-  const {
-    trackedStream,
-    turnEventStream,
-    sessionId,
-    turnId,
-    executionDeadline,
-    logger,
-    onEvent,
-    memory,
-    artifacts,
-    profileLearning,
-    modelUsage,
-  } = input;
+async function runTurnEventDrain(params: {
+  input: DrainTurnEventsInput;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, markArtifactsCaptured } = params;
+  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
+    input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
@@ -1143,8 +1195,12 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // turn that attached one starts out tainted. A turn with neither is the user's own voice:
   // `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
+      if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
+        startBound?.markStarted();
+      }
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
         ingestedToolOutput = true;
       }
@@ -1154,61 +1210,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
-        // First, so the answer's usage is visible before the slower follow-up work below.
-        const flushUsage = async () => {
-          if (modelUsage !== undefined) {
-            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
-          }
-        };
-        await flushUsage();
-        if (memory !== undefined) {
-          // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
-          // it, and the verification pass inside retries a failed retain once.
-          const stored = await submitRetainWithVerification({
-            client: memory.client,
-            sessionId,
-            turnId,
-            userText: memory.userText,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            completedAt: event.state.completed_at,
-            sessionTitle: memory.sessionTitle,
-            origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
-            logger,
-            summarize: memory.summarize,
-            outcomeLog: memory.outcomeLog,
-          });
-          // Only a stored turn can have gone to the persona it started with; a skipped or failed
-          // retain is already explained by its own reason line.
-          if (stored && memory.outcomeLog !== undefined) {
-            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
-          }
-        }
-        if (profileLearning !== undefined) {
-          // The assistant's reply is deliberately not passed here: it is not a source of facts
-          // about the user, so the learning pass only ever sees the user's own turn text.
-          // Awaited so the tracked drain covers the pass; the pass writes its audit event to
-          // the turnEventStream (how an open tab sees it without reloading the turn).
-          await submitProfileLearning({
-            ...profileLearning,
-            sessionId,
-            turnId,
-            completedAt: event.state.completed_at,
-            turnEventStream,
-            logger,
-          });
-        }
-        // The summarization and profile learning calls above record after the first flush.
-        await flushUsage();
-        if (artifacts !== undefined) {
-          await resolveAndSubmitArtifactPersistence({
-            ...artifacts,
-            sessionId,
-            turnId,
-            assistantText: formatAssistantMessageText(event.state.output?.content),
-            logger,
-          });
-        }
+        // Not awaited here: the stream must finish now, so the chat's next turn waits only on
+        // the artifact step. The drain awaits the rest below, up to its time limit.
+        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
       }
+    }
+    if (followUp !== undefined) {
+      await waitForTurnFollowUp({ followUp, sessionId, turnId, logger });
     }
   } catch (error) {
     if (error instanceof SessionStoreNotFoundError) {
@@ -1225,8 +1233,244 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
     }
   } finally {
+    if (followUp === undefined) {
+      markArtifactsCaptured();
+    }
     executionDeadline.dispose();
+    startBound?.dispose();
   }
+}
+
+/**
+ * The work a finished turn does after its answer: artifacts, usage, memory, profile learning.
+ * Never throws; a failure is logged.
+ */
+async function runTurnFollowUp(params: {
+  input: DrainTurnEventsInput;
+  state: Extract<TerminalTurnState, { status: 'done' }>;
+  ingestedToolOutput: boolean;
+  markArtifactsCaptured: () => void;
+}): Promise<void> {
+  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
+  try {
+    // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
+    // on this step, so its tools cannot change a file before this turn has saved it.
+    try {
+      if (artifacts !== undefined) {
+        await resolveAndSubmitArtifactPersistence({
+          ...artifacts,
+          sessionId,
+          turnId,
+          assistantText: formatAssistantMessageText(state.output?.content),
+          logger,
+        });
+      }
+    } finally {
+      markArtifactsCaptured();
+    }
+    // Before the model calls below, so the answer's usage is visible before that slower work.
+    const flushUsage = async () => {
+      if (modelUsage !== undefined) {
+        await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+      }
+    };
+    await flushUsage();
+    if (memory !== undefined) {
+      // Awaited so the verification pass inside can retry a failed retain once.
+      const stored = await submitRetainWithVerification({
+        client: memory.client,
+        sessionId,
+        turnId,
+        userText: memory.userText,
+        assistantText: formatAssistantMessageText(state.output?.content),
+        completedAt: state.completed_at,
+        sessionTitle: memory.sessionTitle,
+        origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        logger,
+        summarize: memory.summarize,
+        outcomeLog: memory.outcomeLog,
+      });
+      // Only a stored turn can have gone to the persona it started with; a skipped or failed
+      // retain is already explained by its own reason line.
+      if (stored && memory.outcomeLog !== undefined) {
+        await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+      }
+    }
+    if (profileLearning !== undefined) {
+      // The assistant's reply is deliberately not passed here: it is not a source of facts
+      // about the user, so the learning pass only ever sees the user's own turn text.
+      // The pass writes its audit event to the turnEventStream (how an open tab sees it
+      // without reloading the turn).
+      await submitProfileLearning({
+        ...profileLearning,
+        sessionId,
+        turnId,
+        completedAt: state.completed_at,
+        turnEventStream,
+        logger,
+      });
+    }
+    // The summarization and profile learning calls above record after the first flush.
+    await flushUsage();
+  } catch (error) {
+    logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+}
+
+/** Waits for a turn's follow-up work up to its time limit; past it the work keeps running unwatched. */
+async function waitForTurnFollowUp(params: {
+  followUp: Promise<void>;
+  sessionId: string;
+  turnId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { followUp, sessionId, turnId, logger } = params;
+  const timeoutMs = configuration.TURN_FOLLOW_UP_TIMEOUT_MS;
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    followUp.then(() => false),
+    new Promise<boolean>(resolve => {
+      // Unref'd so a pending follow-up never keeps the process alive on its own.
+      timeout = setTimeout(() => {
+        resolve(true);
+      }, timeoutMs);
+      timeout.unref();
+    }),
+  ]).finally(() => {
+    clearTimeout(timeout);
+  });
+  if (timedOut) {
+    logger.warn('Turn follow-up work ran past its time limit; it keeps running in the background', {
+      sessionId,
+      turnId,
+      timeoutMs,
+    });
+  }
+}
+
+/** Longest a turn waits for the previous turn of its chat to save its sandbox files. */
+const PREVIOUS_TURN_ARTIFACTS_WAIT_MS = 10_000;
+
+/**
+ * Every path that runs a turn calls this after createTurn froze the previous turn and before any
+ * tool runs: it waits, up to a short limit, for the chat's previous turn to save its sandbox files,
+ * since this turn reuses that sandbox. The wait never covers that turn's model calls.
+ */
+export async function armTurnExecution(params: {
+  turnDrains: TurnDrainRegistry;
+  sessionId: string;
+  logger: Logger;
+}): Promise<void> {
+  const { turnDrains, sessionId, logger } = params;
+  const stillRunning = await turnDrains.waitForArtifactCapture({
+    sessionId,
+    timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+  });
+  if (stillRunning !== undefined) {
+    logger.warn('The previous turn was still saving its files, so this turn started without waiting longer', {
+      sessionId,
+      previousTurnId: stillRunning.turnId,
+      timeoutMs: PREVIOUS_TURN_ARTIFACTS_WAIT_MS,
+    });
+  }
+}
+
+/**
+ * A turn's clocks, started when its request is accepted: the execution deadline and the limit on
+ * reaching its first sign of work. Both run before the turn exists, so no setup wait is unbounded.
+ */
+interface TurnClocks {
+  abortController: AbortController;
+  executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
+}
+
+/** A chat request's turn from arrival: its clocks, its admission, and the hand-off of both clocks to the drain. */
+interface AcceptedTurn extends TurnClocks {
+  admission: TurnAdmission;
+  handOffToDrain: () => void;
+}
+
+function startTurnClocks(input: { sessionId: string; logger: Logger }): TurnClocks {
+  const abortController = new AbortController();
+  const executionDeadline = new TurnExecutionDeadline({
+    abortController,
+    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
+    finalization_buffer_ms: 30_000,
+  });
+  const startBound = new TurnStartBound({
+    abortController,
+    timeoutMs: configuration.TURN_START_TIMEOUT_MS,
+    logger: input.logger,
+    sessionId: input.sessionId,
+  });
+  executionDeadline.arm();
+  startBound.arm();
+  return { abortController, executionDeadline, startBound };
+}
+
+/**
+ * Ends a created turn that never showed work: records the plain error first, so the chat is free
+ * even if the step it is stuck on ignores the abort, then aborts it. When the run still has not
+ * settled, open views are told the turn is over.
+ */
+async function endTurnThatCouldNotStart(input: {
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  activeTurns: ActiveTurnRegistry;
+  turn: TurnHandle<TurnCustom>;
+  turnEventStream: EventSubscription<TurnStreamingEvent>;
+  sessionId: string;
+}): Promise<void> {
+  const { sessionStore, activeTurns, turn, turnEventStream, sessionId } = input;
+  const completedAt = new Date().toISOString();
+  const state: TerminalTurnState = {
+    status: 'error',
+    message: TURN_COULD_NOT_START_MESSAGE,
+    completed_at: completedAt,
+  };
+  const turnDone: TurnStreamingEvent = {
+    type: EventType.TURN_DONE,
+    id: newEventId(),
+    created_at: completedAt,
+    state,
+    thread_id: null,
+  };
+  try {
+    await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turn.id, state, turn_done_event: turnDone });
+  } catch (error) {
+    if (!(error instanceof SessionStoreConflictError)) {
+      throw error;
+    }
+    // It ended on its own in the meantime; nothing to record.
+    return;
+  }
+  await turn.cancelAndSettle(CancellationReason.ServerExecutionTimeout);
+  if (
+    activeTurns.cancelIfRunning({ sessionId, turnId: turn.id, abortReason: CancellationReason.ServerExecutionTimeout })
+  ) {
+    await turnEventStream.put(turnDone, { streamTTLSeconds: streamTTLSecondsFor(turnDone) });
+  }
+}
+
+/** Ends a turn whose setup finished only after the reply was refused as unable to start. */
+async function abandonTurnThatCouldNotStart(input: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  turn: TurnHandle<TurnCustom>;
+  resolver: { close(): Promise<void> };
+  abortController: AbortController;
+  logger: Logger;
+}): Promise<void> {
+  input.abortController.abort(CancellationReason.CouldNotStart);
+  input.turn.forgetUnstarted();
+  await input.resolver.close().catch((closeError: unknown) => {
+    input.logger.warn('Failed to close turn resources for a turn that could not start', {
+      sessionId: input.session.session_id,
+      turnId: input.turn.id,
+      ...extractErrorLogFields(closeError),
+    });
+  });
+  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.CouldNotStart });
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1236,6 +1480,7 @@ export interface TurnEventDrainInput {
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
+  startBound: TurnStartBound;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
@@ -1255,128 +1500,150 @@ export async function beginTurnExecution(params: {
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
+  const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
+  try {
+    return await beginAcceptedTurnExecution({ ...params, clocks });
+  } catch (error) {
+    clocks.executionDeadline.dispose();
+    clocks.startBound.dispose();
+    throw error;
+  }
+}
+
+async function beginAcceptedTurnExecution(
+  params: Parameters<typeof beginTurnExecution>[0] & { clocks: TurnClocks },
+): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
+  const { abortController, executionDeadline, startBound } = params.clocks;
   const sessionId = session.session_id;
   const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
 
-  const abortController = new AbortController();
-  const executionDeadline = new TurnExecutionDeadline({
-    abortController,
-    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-    finalization_buffer_ms: 30_000,
-  });
   const tenant_id = session.tenant_id;
   const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
-  // One read per turn: the persisted override (or env default) applies to the whole turn.
-  const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
-    globalSettingsStore: deps.globalSettingsStore,
-    logger: deps.logger,
-  });
-  // Same one-read-per-turn contract for turn summarization: resolved once here and shared
-  // with the drain hook, so an off flag costs nothing and every non-running outcome is
-  // logged instead of silently retaining verbatim.
-  const memorySummarize = await resolveTurnSummarizeContext({
-    globalSettingsStore: deps.globalSettingsStore,
+  const setup = await raceTurnSetup({
+    signal: abortController.signal,
+    setup: async () => {
+      // One read per turn: the persisted override (or env default) applies to the whole turn.
+      const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
+      // Same one-read-per-turn contract for turn summarization: resolved once here and shared
+      // with the drain hook, so an off flag costs nothing and every non-running outcome is
+      // logged instead of silently retaining verbatim.
+      const memorySummarize = await resolveTurnSummarizeContext({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+        sessionId,
+        tenantId: tenant_id,
+        modelProviderStore: deps.modelProviderStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+        agentStore: deps.agentStore,
+        personaModelName: deps.personaContext?.model_name,
+        sessionAgent: session.record.agent,
+        memoryClientPresent: deps.memoryClient !== undefined,
+        helperFqn: turnHelperModelFqn(),
+      });
+      // Same one-read-per-turn contract for the recall screen: the Settings toggle's
+      // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
+      const memoryScreenSetting = await readMemoryScreenSetting({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
+      const effectiveMemorySettings = applyMemoryScreenOverride(
+        deps.memorySettings,
+        memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
+      );
+      const internalSources = await resolveTurnInternalSources({
+        session,
+        previousTurnId,
+        persona:
+          deps.personaContext === undefined
+            ? undefined
+            : { id: deps.personaContext.persona_id, modelName: deps.personaContext.model_name },
+        turnInput: input,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+        modelProviderStore: deps.modelProviderStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+        helperFqn: turnHelperModelFqn(),
+        logger: deps.logger,
+      });
+      const resolver = createTurnResolver({
+        mcpCatalog: deps.mcpCatalog,
+        mcpServerStore: deps.mcpServerStore,
+        tokenStore: deps.tokenStore,
+        skillStore: deps.skillStore,
+        sandboxProviderStore: deps.sandboxProviderStore,
+        sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+        agentStore: deps.agentStore,
+        modelProviderStore: deps.modelProviderStore,
+        repositoryStore: deps.repositoryStore,
+        sessionStore: deps.sessionStore,
+        spaceStore: deps.spaceStore,
+        googleConnectionStore: deps.googleConnectionStore,
+        logger: deps.logger,
+        signal: abortController.signal,
+        userRef,
+        session,
+        turnId,
+        startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
+        boundRepository: deps.boundRepository,
+        serverSandboxAvailable: await readServerSandboxAvailable({
+          store: deps.sandboxProviderStore,
+          tenant_id: session.tenant_id,
+          logger: deps.logger,
+        }),
+        personalizationProfile: deps.personalizationProfile,
+        personaContext: deps.personaContext,
+        personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
+        personaKnowledgeHits: internalSources.personaKnowledgeHits,
+        internalSourceState: internalSources.internalSourceState,
+        memoryClient: deps.memoryClient,
+        memoryProviderServerName: deps.memoryProviderServerName,
+        memorySettings: effectiveMemorySettings,
+        previousTurnId: deps.previousTurnId ?? null,
+        sessionTitle: deps.sessionTitle,
+        clientTimezone: deps.clientTimezone,
+        toolOutputScreenEnabled,
+        turnArtifactStore: deps.turnArtifactStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
+        modelUsage,
+      });
+
+      // First turn only: derive the title from the first user message. The store
+      // never overwrites an existing title.
+      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+
+      const turn = await session.createTurn({
+        turn_id: turnId,
+        input,
+        previous_turn_id: previousTurnId,
+        signal: abortController.signal,
+        resolver,
+        custom: { library_near_miss: internalSources.libraryNearMiss },
+        update_session_title_if_not_exist: title,
+        on_command_execution_started: execution => {
+          executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
+        },
+        command_execution_owner_id: configuration.EXECUTOR_ID,
+        unattended: params.unattended,
+      });
+      return { turn, resolver, memorySummarize };
+    },
+    discard: ({ turn, resolver }) =>
+      abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
     logger: deps.logger,
     sessionId,
-    tenantId: tenant_id,
-    modelProviderStore: deps.modelProviderStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    agentStore: deps.agentStore,
-    personaModelName: deps.personaContext?.model_name,
-    sessionAgent: session.record.agent,
-    memoryClientPresent: deps.memoryClient !== undefined,
-    helperFqn: turnHelperModelFqn(),
   });
-  // Same one-read-per-turn contract for the recall screen: the Settings toggle's
-  // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
-  const memoryScreenSetting = await readMemoryScreenSetting({
-    globalSettingsStore: deps.globalSettingsStore,
-    logger: deps.logger,
-  });
-  const effectiveMemorySettings = applyMemoryScreenOverride(
-    deps.memorySettings,
-    memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-  );
-  const internalSources = await resolveTurnInternalSources({
-    session,
-    previousTurnId,
-    persona:
-      deps.personaContext === undefined
-        ? undefined
-        : { id: deps.personaContext.persona_id, modelName: deps.personaContext.model_name },
-    turnInput: input,
-    knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-    modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-    modelProviderStore: deps.modelProviderStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-    helperFqn: turnHelperModelFqn(),
-    logger: deps.logger,
-  });
-  const resolver = createTurnResolver({
-    mcpCatalog: deps.mcpCatalog,
-    mcpServerStore: deps.mcpServerStore,
-    tokenStore: deps.tokenStore,
-    skillStore: deps.skillStore,
-    sandboxProviderStore: deps.sandboxProviderStore,
-    sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
-    agentStore: deps.agentStore,
-    modelProviderStore: deps.modelProviderStore,
-    repositoryStore: deps.repositoryStore,
-    sessionStore: deps.sessionStore,
-    spaceStore: deps.spaceStore,
-    googleConnectionStore: deps.googleConnectionStore,
-    logger: deps.logger,
-    signal: abortController.signal,
-    userRef,
-    session,
-    turnId,
-    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
-    boundRepository: deps.boundRepository,
-    serverSandboxAvailable: await readServerSandboxAvailable({
-      store: deps.sandboxProviderStore,
-      tenant_id: session.tenant_id,
-      logger: deps.logger,
-    }),
-    personalizationProfile: deps.personalizationProfile,
-    personaContext: deps.personaContext,
-    personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
-    personaKnowledgeHits: internalSources.personaKnowledgeHits,
-    internalSourceState: internalSources.internalSourceState,
-    memoryClient: deps.memoryClient,
-    memoryProviderServerName: deps.memoryProviderServerName,
-    memorySettings: effectiveMemorySettings,
-    previousTurnId: deps.previousTurnId ?? null,
-    sessionTitle: deps.sessionTitle,
-    clientTimezone: deps.clientTimezone,
-    toolOutputScreenEnabled,
-    turnArtifactStore: deps.turnArtifactStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    modelUsage,
-  });
+  if (setup.status === 'could_not_start') {
+    throw new TurnCouldNotStartError();
+  }
+  const { turn, memorySummarize } = setup.value;
 
-  // First turn only: derive the title from the first user message. The store
-  // never overwrites an existing title.
-  const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
-
-  const turn = await session.createTurn({
-    turn_id: turnId,
-    input,
-    previous_turn_id: previousTurnId,
-    signal: abortController.signal,
-    resolver,
-    custom: { library_near_miss: internalSources.libraryNearMiss },
-    update_session_title_if_not_exist: title,
-    on_command_execution_started: execution => {
-      executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
-    },
-    command_execution_owner_id: configuration.EXECUTOR_ID,
-    unattended: params.unattended,
-  });
-
-  executionDeadline.arm();
+  await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
   const trackedStream = deps.activeTurns.track({
     sessionId,
@@ -1387,6 +1654,15 @@ export async function beginTurnExecution(params: {
 
   // Held for the whole turn; the stream's sequence counter dies with it.
   const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenant_id, sessionId, turn.id));
+  await startBound.whenExpired(() =>
+    endTurnThatCouldNotStart({
+      sessionStore: deps.sessionStore,
+      activeTurns: deps.activeTurns,
+      turn,
+      turnEventStream,
+      sessionId,
+    }),
+  );
 
   return {
     turn,
@@ -1396,6 +1672,7 @@ export async function beginTurnExecution(params: {
       sessionId,
       turnId: turn.id,
       executionDeadline,
+      startBound,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
@@ -1829,7 +2106,27 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
   };
 
-  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+  const couldNotStartResponse = (c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0]) =>
+    c.json(
+      {
+        error: {
+          message: TURN_COULD_NOT_START_MESSAGE,
+          type: 'conflict',
+          code: TurnConflictCode.TURN_COULD_NOT_START,
+        },
+      },
+      409,
+    );
+
+  /**
+   * Everything before the turn runs, its creation included. Resolves to an early answer, or to the
+   * created turn with the step that runs it.
+   */
+  const prepareChatTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    accepted: AcceptedTurn,
+  ) => {
+    const { abortController, executionDeadline, startBound, admission, handOffToDrain } = accepted;
     const { session_id: sessionId } = c.req.valid('param');
     const submitted = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
@@ -2133,12 +2430,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       helperFqn: turnHelperModelFqn(),
     });
 
-    const abortController = new AbortController();
-    const executionDeadline = new TurnExecutionDeadline({
-      abortController,
-      default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
-      finalization_buffer_ms: 30_000,
-    });
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
     const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
@@ -2244,6 +2535,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       input: body.input,
     });
 
+    // The reply was already refused as unable to start; do not create it now.
+    if (abortController.signal.aborted) {
+      await resolver.close().catch((closeError: unknown) => {
+        deps.logger.warn('Failed to close turn resources for a reply that could not start', {
+          sessionId,
+          ...extractErrorLogFields(closeError),
+        });
+      });
+      return couldNotStartResponse(c);
+    }
+
     let turn;
     try {
       turn = await session.createTurn({
@@ -2284,7 +2586,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             }
           }
         }
-        return c.json({ error: { message: error.message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
+        // The store's own text names turn ids; a person reads this one.
+        const message = error instanceof PreviousTurnRunningError ? PREVIOUS_TURN_RUNNING_MESSAGE : error.message;
+        return c.json({ error: { message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
       }
       if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
         switch (error.code) {
@@ -2334,7 +2638,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      * error so the chat never retains a turn that no executor owns.
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
-      abortController.abort(CancellationReason.Abandoned);
+      abortController.abort(CancellationReason.CouldNotStart);
       turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
@@ -2349,7 +2653,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         try {
           // Freezing is idempotent: a response can be lost after the store
           // committed, and retrying returns the existing terminal turn.
-          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.Abandoned });
+          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.CouldNotStart });
           return;
         } catch (freezeError) {
           freezeFailures.push(freezeError);
@@ -2491,90 +2795,158 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
     }
 
-    executionDeadline.arm();
+    const createdTurn = turn;
+    return {
+      abandon: () => abandonUnstartedTurn('the reply could not start in time'),
+      run: async () => {
+        await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
-    const trackedStream = deps.activeTurns.track({
-      sessionId,
-      turnId: turn.id,
-      abortController,
-      stream: turn.stream(),
-    });
+        const trackedStream = deps.activeTurns.track({
+          sessionId,
+          turnId: createdTurn.id,
+          abortController,
+          stream: createdTurn.stream(),
+          admission,
+        });
 
-    // Held for the whole turn; the stream's sequence counter dies with it.
-    const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turn.id));
-    const drainInput = {
-      trackedStream,
-      turnEventStream,
-      sessionId,
-      turnId: turn.id,
-      executionDeadline,
-      logger: deps.logger,
-      turnDrains: deps.turnDrains,
-      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-      memory:
-        memoryClient === undefined
-          ? undefined
-          : {
-              client: memoryClient,
-              userText: extractUserMessageText(body.input),
-              attachedFiles: inputAttachesFiles(body.input ?? []),
-              sessionTitle: sessionTitleForMemory,
-              // Resolved once on the create-turn path above; absent means verbatim.
-              summarize: memorySummarize,
-              outcomeLog: {
-                personaName: vaultScope?.personaName ?? 'shared',
-                personaStore: deps.personaStore,
-                tenantId: requestContext.tenant_id,
-              },
+        // Held for the whole turn; the stream's sequence counter dies with it.
+        const turnEventStream = deps.eventSubscriptions.get(
+          turnStreamId(requestContext.tenant_id, sessionId, createdTurn.id),
+        );
+        await startBound.whenExpired(() =>
+          endTurnThatCouldNotStart({
+            sessionStore: deps.sessionStore,
+            activeTurns: deps.activeTurns,
+            turn: createdTurn,
+            turnEventStream,
+            sessionId,
+          }),
+        );
+        const drainInput = {
+          trackedStream,
+          turnEventStream,
+          sessionId,
+          turnId: createdTurn.id,
+          executionDeadline,
+          startBound,
+          logger: deps.logger,
+          turnDrains: deps.turnDrains,
+          modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          memory:
+            memoryClient === undefined
+              ? undefined
+              : {
+                  client: memoryClient,
+                  userText: extractUserMessageText(body.input),
+                  attachedFiles: inputAttachesFiles(body.input ?? []),
+                  sessionTitle: sessionTitleForMemory,
+                  // Resolved once on the create-turn path above; absent means verbatim.
+                  summarize: memorySummarize,
+                  outcomeLog: {
+                    personaName: vaultScope?.personaName ?? 'shared',
+                    personaStore: deps.personaStore,
+                    tenantId: requestContext.tenant_id,
+                  },
+                },
+          profileLearning,
+          artifacts: {
+            turnArtifactStore: deps.turnArtifactStore,
+            sandboxProviderStore,
+            sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+            sessions: deps.sessions,
+            tenantId: requestContext.tenant_id,
+          },
+        };
+
+        // From here the drain ends both clocks.
+        handOffToDrain();
+
+        // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
+        // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
+        // cannot 412 before the resumable stream exists.
+        if (!body.stream) {
+          const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } =
+            Promise.withResolvers<undefined>();
+          void drainTurnEvents({
+            ...drainInput,
+            onEvent: () => {
+              markFirstEventDualWritten(undefined);
+              return Promise.resolve();
             },
-      profileLearning,
-      artifacts: {
-        turnArtifactStore: deps.turnArtifactStore,
-        sandboxProviderStore,
-        sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
-        sessions: deps.sessions,
-        tenantId: requestContext.tenant_id,
+          }).finally(() => {
+            markFirstEventDualWritten(undefined);
+          });
+          await firstEventDualWritten;
+          return c.json({ data: toWireTurn(createdTurn.record) }, 200);
+        }
+
+        let shouldWriteToSSEStream = true;
+        return streamSSE(c, async stream => {
+          stream.onAbort(() => {
+            shouldWriteToSSEStream = false;
+          });
+          await drainTurnEvents({
+            ...drainInput,
+            onEvent: async (event, sequenceNumber) => {
+              if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
+                try {
+                  await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
+                } catch (error) {
+                  deps.logger.error('SSE stream write error', extractErrorLogFields(error));
+                  shouldWriteToSSEStream = false;
+                }
+              }
+            },
+          });
+          await stream.close();
+        });
       },
     };
+  };
 
-    // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
-    // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
-    // cannot 412 before the resumable stream exists.
-    if (!body.stream) {
-      const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
-      void drainTurnEvents({
-        ...drainInput,
-        onEvent: () => {
-          markFirstEventDualWritten(undefined);
-          return Promise.resolve();
-        },
-      }).finally(() => {
-        markFirstEventDualWritten(undefined);
-      });
-      await firstEventDualWritten;
-      return c.json({ data: toWireTurn(turn.record) }, 200);
-    }
-
-    let shouldWriteToSSEStream = true;
-    return streamSSE(c, async stream => {
-      stream.onAbort(() => {
-        shouldWriteToSSEStream = false;
-      });
-      await drainTurnEvents({
-        ...drainInput,
-        onEvent: async (event, sequenceNumber) => {
-          if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
-            try {
-              await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
-            } catch (error) {
-              deps.logger.error('SSE stream write error', extractErrorLogFields(error));
-              shouldWriteToSSEStream = false;
-            }
-          }
-        },
-      });
-      await stream.close();
+  const executeAcceptedTurn = async (
+    c: Parameters<RouteHandler<typeof createAndExecuteTurnRoute>>[0],
+    accepted: AcceptedTurn,
+  ) => {
+    const setup = await raceTurnSetup({
+      signal: accepted.abortController.signal,
+      setup: () => prepareChatTurn(c, accepted),
+      discard: async prepared => {
+        if (!(prepared instanceof Response)) {
+          await prepared.abandon();
+        }
+      },
+      logger: deps.logger,
+      sessionId: c.req.valid('param').session_id,
     });
+    if (setup.status === 'could_not_start') {
+      return couldNotStartResponse(c);
+    }
+    return setup.value instanceof Response ? setup.value : setup.value.run();
+  };
+
+  // From arrival the turn is registered, so a Cancel that comes before it exists still stops it, and
+  // its clocks run, so it is bounded from the moment it is accepted.
+  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+    const sessionId = c.req.valid('param').session_id;
+    const admission = deps.activeTurns.admit({ sessionId });
+    const clocks = startTurnClocks({ sessionId, logger: deps.logger });
+    const ownership = { drainOwnsClocks: false };
+    try {
+      return await executeAcceptedTurn(c, {
+        ...clocks,
+        admission,
+        handOffToDrain: () => {
+          ownership.drainOwnsClocks = true;
+        },
+      });
+    } finally {
+      admission.release();
+      if (!ownership.drainOwnsClocks) {
+        clocks.executionDeadline.dispose();
+        clocks.startBound.dispose();
+      }
+    }
   };
 
   const subscribeTurnHandler: RouteHandler<typeof subscribeTurnRoute> = async c => {

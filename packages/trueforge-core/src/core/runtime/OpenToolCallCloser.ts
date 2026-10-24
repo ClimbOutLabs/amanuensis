@@ -26,7 +26,9 @@ import {
   type ToolResultRemediation,
 } from '../events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMessage } from '../llm/LLMTypes';
-import { deniedToolCallText } from '../mcp/ToolSet';
+import { awaitsApproval } from '../mcp/approvalGrant';
+import { isReadOnlyCall } from '../mcp/executeToolCalls';
+import { deniedToolCallRemediation, deniedToolCallText, REPEATED_DENIAL_REMEDIATION } from '../mcp/ToolSet';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
 import { mergeCurrentContextUsage } from './contextUsage';
@@ -52,16 +54,6 @@ const UNKNOWN_OUTCOME_TOOL_MESSAGE_CONTENT = JSON.stringify({
   error:
     'Tool call outcome unknown: it may have run without its result being recorded. Do not repeat it blindly. Establish whether it already took effect, then continue.',
 });
-
-/**
- * Whether repeating this call cannot cause harm, so the model can be told
- * plainly that it did not run. Read-only work qualifies; everything else is
- * treated as side-effecting, including calls whose metadata is missing, since
- * absent metadata must not resolve to the reassuring answer.
- */
-export function isSafeToRepeat(info: InternalToolCallInfo): boolean {
-  return info.effect === 'inspect' || (info.effect === undefined && info.read_only_hint === true);
-}
 
 export interface ClosableToolOutcome {
   rawContent: string;
@@ -98,7 +90,8 @@ function unresolvedCallOutcome(
   },
 ): ClosableToolOutcome {
   const { preparedToolCallIds, startedToolCallIds } = tracking;
-  if (isSafeToRepeat(info)) {
+  // Repeating a call that only reads cannot cause harm, so the model is told plainly it did not run.
+  if (isReadOnlyCall(info)) {
     return {
       rawContent: DUMMY_TOOL_MESSAGE_CONTENT,
       disposition: 'never_ran',
@@ -137,9 +130,13 @@ function unresolvedCallOutcome(
  * durable pending state — the approval card the user still has to answer — so nothing is
  * closed while one is open. A decided call that never ran is the opposite: no execution is
  * coming for it, and leaving it open blocks every later user message with nothing on screen
- * to explain why. Closing it states the outcome the user already chose.
+ * to explain why. Closing it states the outcome the user already chose. An undecided call that
+ * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
  */
-export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<string, ClosableToolOutcome> {
+export function getClosableOpenToolCallOutcomes(
+  context: ContextMessage[],
+  deniedApprovalIdentities: ReadonlySet<string>,
+): Map<string, ClosableToolOutcome> {
   const lastIdx = context.findLastIndex(
     (msg): msg is InternalEnrichedAssistantMessage =>
       isLLMContextMessage(msg) && msg.role === 'assistant' && !!msg.tool_calls?.length,
@@ -195,7 +192,16 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
     }
     const decision = decisions.get(toolCall.id);
     if (decision === undefined) {
-      return new Map();
+      if (awaitsApproval({ call: toolCall, decisions, deniedApprovalIdentities })) {
+        return new Map();
+      }
+      closable.set(toolCall.id, {
+        rawContent: deniedToolCallText(undefined),
+        disposition: 'denied',
+        remediation: REPEATED_DENIAL_REMEDIATION,
+        admissionProvenance: { source: 'automatic' },
+      });
+      continue;
     }
     closable.set(
       toolCall.id,
@@ -203,7 +209,7 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
         ? {
             rawContent: deniedToolCallText(decision.reason),
             disposition: 'denied',
-            remediation: undefined,
+            remediation: deniedToolCallRemediation(decision.reason),
             admissionProvenance: {
               source: 'user_approval',
               decision: 'deny',
@@ -231,18 +237,26 @@ export function getClosableOpenToolCallOutcomes(context: ContextMessage[]): Map<
   return closable;
 }
 
-export function getClosableOpenToolCalls(context: ContextMessage[]): Map<string, string> {
+export function getClosableOpenToolCalls(
+  context: ContextMessage[],
+  deniedApprovalIdentities: ReadonlySet<string>,
+): Map<string, string> {
   return new Map(
-    [...getClosableOpenToolCallOutcomes(context)].map(([toolCallId, outcome]) => [toolCallId, outcome.rawContent]),
+    [...getClosableOpenToolCallOutcomes(context, deniedApprovalIdentities)].map(([toolCallId, outcome]) => [
+      toolCallId,
+      outcome.rawContent,
+    ]),
   );
 }
 
 export class OpenToolCallCloser implements PreSendContextProcessor {
+  constructor(private readonly deniedApprovalIdentities: () => ReadonlySet<string>) {}
+
   // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
   async *processPreSend(
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorAppendContext, void, unknown> {
-    const closable = getClosableOpenToolCallOutcomes(execution.context);
+    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities());
     if (closable.size === 0) {
       return;
     }

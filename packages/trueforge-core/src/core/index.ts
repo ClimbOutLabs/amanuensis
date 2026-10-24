@@ -18,7 +18,7 @@ export type {
   HandoffRepositoryBinding,
 } from './runtime/AbnormalHandoff';
 export type { AgentDefinition, ConfiguredModelSummary, ModelParams } from './runtime/AgentDefinition';
-export { AgentThread } from './runtime/AgentThread';
+export { AgentThread, MODEL_STOPPED_ANSWERING_MESSAGE } from './runtime/AgentThread';
 export type {
   AgentInfo,
   AgentParent,
@@ -196,6 +196,7 @@ export {
   ActionRequiredEventSchema,
   AgentInputUserMessageSchema,
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   EventIdSchema,
   EventType,
@@ -221,6 +222,7 @@ export {
 export type {
   AgentOutputEvent,
   ContextCompactionEvent,
+  ContextCompactionStartedEvent,
   DocumentIngestionEvent,
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,

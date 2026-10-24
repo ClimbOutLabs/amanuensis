@@ -27,3 +27,18 @@ export const MAIL_CONNECTOR_TOOL_NAMES = [...MAIL_READ_TOOL_NAMES, ...MAIL_WRITE
 
 /** Returns one message's attachment as base64 bytes; the host places them in the sandbox. */
 export const MAIL_ATTACHMENT_TOOL_NAME = 'get_attachment_content';
+
+/** The sidecar's own account list. Hidden from the model; the host reads it to fill in the account name. */
+export const MAIL_ACCOUNT_LIST_TOOL_NAME = 'list_available_accounts';
+
+/** The argument every Email tool takes to pick the mail account. */
+export const MAIL_ACCOUNT_ARGUMENT = 'account_name';
+
+/** Lists and searches messages; the host keeps it to a recent window when the call sets no date. */
+export const MAIL_LIST_TOOL_NAME = 'list_emails_metadata';
+
+/** Names a model tends to guess when it looks for the Email connector under another name. */
+export function isMailConnectorGuess(name: string): boolean {
+  const lowered = name.toLowerCase();
+  return ['mail', 'inbox', 'outlook'].some(word => lowered.includes(word));
+}

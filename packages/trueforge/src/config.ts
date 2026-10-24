@@ -1134,13 +1134,26 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
+   * Bound in milliseconds on waiting for a model call's first output, on every
+   * step. A provider that accepts the request and then says nothing would
+   * otherwise hold the turn open. Also the default first-chunk deadline for a
+   * provider whose `stream_timeout` does not set one.
+   * Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default 90000 (90 seconds).
    */
   MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks once it has
+   * started answering. Also the default per-chunk deadline for a provider
+   * whose `stream_timeout` does not set one.
+   * Env: `MODEL_STREAM_IDLE_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  MODEL_STREAM_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -1312,6 +1325,19 @@ export interface SharedServerConfiguration {
    * Env: `TURN_DRAIN_SHUTDOWN_TIMEOUT_MS`. Default 30000.
    */
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds a turn's drain waits for its follow-up work (memory, turn summary, profile
+   * learning, artifacts) after the answer. Past it the work keeps running unwatched.
+   * Env: `TURN_FOLLOW_UP_TIMEOUT_MS`. Default 120000.
+   */
+  TURN_FOLLOW_UP_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds from accepting a turn to its first sign of work (a model chunk, a tool or
+   * connector starting). Past it the turn ends with an error asking the person to send again.
+   * Must stay above the pre-model step limit (300 s) plus `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
+   * Env: `TURN_START_TIMEOUT_MS`. Default 480000 (8 minutes).
+   */
+  TURN_START_TIMEOUT_MS: number;
   /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
@@ -1993,7 +2019,18 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
     // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
+    defaultValue: 90_000,
+  }),
+  MODEL_STREAM_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -2117,6 +2154,16 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_DRAIN_SHUTDOWN_TIMEOUT_MS',
     raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
     defaultValue: 30_000,
+  }),
+  TURN_FOLLOW_UP_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_FOLLOW_UP_TIMEOUT_MS',
+    raw: getEnv('TURN_FOLLOW_UP_TIMEOUT_MS'),
+    defaultValue: 120_000,
+  }),
+  TURN_START_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_START_TIMEOUT_MS',
+    raw: getEnv('TURN_START_TIMEOUT_MS'),
+    defaultValue: 480_000,
   }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({

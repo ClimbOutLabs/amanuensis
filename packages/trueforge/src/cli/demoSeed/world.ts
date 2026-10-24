@@ -27,7 +27,7 @@ export const DEFAULT_DEMO_USER = 'judge@example.com';
 export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
 
 export interface DemoWorldInput {
-  /** "Today" in the user's zone; dates her mail and calendar hold stay fixed, and only what is past moves. */
+  /** "Today" in the user's zone; every date in her world, and in her mail, is counted from it. */
   today: CalendarDay;
   timeZone: string;
   /** Fully qualified `provider/model` for the personas and the agent. */
@@ -49,9 +49,9 @@ function buildSpaces(today: CalendarDay): DemoSpace[] {
   ];
 }
 
-function buildNotes(): DemoNote[] {
+function buildNotes(today: CalendarDay): DemoNote[] {
   return [
-    ...mayaMemoryNotes(),
+    ...mayaMemoryNotes(today),
     {
       key: 'gp-search',
       body: `Maya needs a regular English-speaking GP. Shortlist: ${GP_CLINIC.name} (${GP_CLINIC.address}, open ${GP_CLINIC.hours}) is the first choice and ${BACKUP_CLINIC.name} (${BACKUP_CLINIC.address}) the backup. ${VISA_CLINIC.name} is already booked for her visa medical, so do not suggest it as a GP.`,
@@ -85,7 +85,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       { id: DEMO_THEO_ID, content: theoPersona(input.modelName), knowledge: photographyGuide() },
     ],
     profile,
-    notes: buildNotes(),
+    notes: buildNotes(input.today),
     spaces: buildSpaces(input.today),
     agentDescription: `Synthetic demo assistant (${DEMO_MARKER}).`,
     agentSpec: AgentSpecSchema.parse({

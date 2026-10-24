@@ -2,6 +2,11 @@ import type { Logger } from 'winston';
 import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
 import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
+import {
+  MailAccountDirectory,
+  MailConnectorSource,
+  readMailAccountNames,
+} from '../core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
 import type { ToolSource } from '../core/mcp/IMCPServer';
@@ -26,6 +31,7 @@ import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../cor
 import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
+import { extractErrorLogFields } from '../core/util/errorLogFields';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
@@ -48,7 +54,7 @@ export type TurnSandboxFactory = (input: {
   sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
 
-/** The bundle a host-provisioned connector's tools are sent with: search goes with web, the first-party mail and calendar accounts with google. */
+/** The guidance topic a host-provisioned connector's tools are grouped under: search under web, the first-party mail and calendar accounts under google. */
 function connectorBundle(input: {
   name: string;
   firstParty: boolean;
@@ -197,11 +203,15 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /** How long a web search or page read may take before the model gets a plain tool error instead. */
+      searchCallTimeoutMs?: number | undefined;
       /**
        * Host instance-wide bound in milliseconds on waiting for a model call's
        * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
        */
       modelFirstResponseTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelIdleTimeoutMs. */
+      modelIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
@@ -223,8 +233,35 @@ export class TurnResourceResolver<
        * catalog; the section then omits the list.
        */
       configuredModels?: (() => Promise<readonly ConfiguredModelSummary[]>) | undefined;
+      /**
+       * Names of every connector set up for this tenant, turned on for the chat or not. Lets a call to a
+       * connector the chat does not have say whether it is missing or only turned off. Called at most once.
+       */
+      setUpConnectorNames?: (() => Promise<readonly string[]>) | undefined;
+      /**
+       * Keeps the Email account names per chat across turns. Omit to keep them for one turn only.
+       */
+      mailAccounts?: MailAccountDirectory | undefined;
     },
-  ) {}
+  ) {
+    this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
+  }
+
+  readonly #mailAccounts: MailAccountDirectory;
+  #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the names unknown rather than failing the turn. */
+  #resolveSetUpConnectorNames(): Promise<readonly string[] | undefined> {
+    const read = this.deps.setUpConnectorNames;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#setUpConnectorNamesPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Connector names could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#setUpConnectorNamesPromise;
+  }
 
   #configuredModelsPromise?: Promise<readonly ConfiguredModelSummary[]> | undefined;
 
@@ -263,6 +300,10 @@ export class TurnResourceResolver<
 
   get modelFirstResponseTimeoutMs(): number | undefined {
     return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get modelIdleTimeoutMs(): number | undefined {
+    return this.deps.modelIdleTimeoutMs;
   }
 
   get toolCallPolicy(): HostToolCallPolicy | undefined {
@@ -420,7 +461,7 @@ export class TurnResourceResolver<
                 pageFixtures: this.deps.pageFixtures,
               });
             }
-            return new RemoteMCP({
+            const remote = new RemoteMCP({
               id: entry.name,
               name: entry.name,
               url,
@@ -433,6 +474,20 @@ export class TurnResourceResolver<
               logger: this.deps.logger,
               tracing,
               signal,
+            });
+            if (entry.name !== MAIL_CONNECTOR_NAME || first_party !== true) {
+              return remote;
+            }
+            return new MailConnectorSource({
+              inner: remote,
+              accounts: ({ fresh }) =>
+                this.#mailAccounts.accounts({
+                  chat_id: session_id,
+                  connector_url: url,
+                  fresh,
+                  read: () => readMailAccountNames(remote),
+                }),
+              now: () => new Date(),
             });
           },
         });
@@ -450,6 +505,8 @@ export class TurnResourceResolver<
           }),
           pages: fetchedPages,
           pagesScope: pageScope,
+          searchCallTimeoutMs: this.deps.searchCallTimeoutMs,
+          logger: this.deps.logger,
         });
       }),
     );
@@ -497,6 +554,7 @@ export class TurnResourceResolver<
     // shared unchanged across the root thread and every sub-agent thread;
     // see #resolveConfiguredModels.
     const configuredModels = await this.#resolveConfiguredModels();
+    const setUpConnectorNames = await this.#resolveSetUpConnectorNames();
 
     return {
       definition: {
@@ -535,6 +593,7 @@ export class TurnResourceResolver<
         toolCallBudget: spec.config.task_state.tool_call_budget,
         budgetedTools: spec.config.task_state.budgeted_tools,
         toolSets,
+        setUpConnectorNames,
       },
       compactionModel,
       // Only the root thread holds the chat's private-read state. A sub-agent's mail and calendar reads reach the

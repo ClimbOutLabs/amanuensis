@@ -104,6 +104,11 @@ export interface AgentDefinition {
 
   toolSets?: readonly IToolSet[] | undefined;
   /**
+   * Every connector set up for this tenant, whether or not this chat has it. Undefined when unknown; a
+   * call to a connector the chat lacks then cannot say whether it is only turned off.
+   */
+  setUpConnectorNames?: readonly string[] | undefined;
+  /**
    * Offers the model no tools at all, neither connector tools nor built-in ones such as
    * schedules, files or checklists. For an agent that may only answer from what it already knows.
    */

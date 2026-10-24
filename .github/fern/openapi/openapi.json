@@ -690,6 +690,42 @@
         ],
         "type": "object"
       },
+      "BriefItemCompletion": {
+        "description": "The item as marked done.",
+        "properties": {
+          "completed_at": {
+            "description": "When the item was marked done, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "completed_at"
+        ],
+        "type": "object"
+      },
       "BugReportBundle": {
         "properties": {
           "build": {
@@ -1820,6 +1856,51 @@
         ],
         "type": "object"
       },
+      "ContextCompactionStartedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Which host template is used for the summary.",
+            "enum": [
+              "coding",
+              "conversation"
+            ],
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Thread the compaction runs on.",
+            "type": "string"
+          },
+          "tokens_before": {
+            "description": "Estimated context tokens before this attempt.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "type": {
+            "description": "A context-compaction attempt started. It ends with agent.context.compaction or the turn ending.",
+            "enum": [
+              "agent.context.compaction_started"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "created_at",
+          "thread_id",
+          "mode",
+          "tokens_before"
+        ],
+        "type": "object"
+      },
       "ContextManagementConfig": {
         "default": {
           "compaction": {
@@ -2245,6 +2326,10 @@
         "type": "object"
       },
       "DeleteAgentResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteBriefItemDoneResponse": {
         "properties": {},
         "type": "object"
       },
@@ -4529,6 +4614,21 @@
         ],
         "type": "object"
       },
+      "ListBriefItemCompletionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Completed brief items, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/BriefItemCompletion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5477,6 +5577,53 @@
           "server_id",
           "server_name",
           "name"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneRequest": {
+        "properties": {
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat the brief was shown in.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BriefItemCompletion"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -6693,13 +6840,13 @@
         "description": "Optional per-provider override of the server-wide stream progress deadlines.",
         "properties": {
           "chunk_ms": {
-            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.",
+            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
           },
           "first_chunk_ms": {
-            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.",
+            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
@@ -8848,6 +8995,9 @@
             "$ref": "#/components/schemas/ContextCompactionEvent"
           },
           {
+            "$ref": "#/components/schemas/ContextCompactionStartedEvent"
+          },
+          {
             "$ref": "#/components/schemas/MemoryRecallPersistedEvent"
           },
           {
@@ -8897,6 +9047,7 @@
           "tool.approval_required",
           "tool.response_required",
           "agent.context.compaction",
+          "agent.context.compaction_started",
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
@@ -11926,7 +12077,8 @@
           "server-execution-timeout",
           "client-cancelled",
           "cancelled-for-next-turn",
-          "abandoned"
+          "abandoned",
+          "could-not-start"
         ],
         "type": "string"
       },
@@ -12195,6 +12347,7 @@
         "discriminator": {
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
+            "agent.context.compaction_started": "#/components/schemas/ContextCompactionStartedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
@@ -12278,6 +12431,9 @@
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ContextCompactionStartedEvent"
           },
           {
             "$ref": "#/components/schemas/DocumentIngestionEvent"
@@ -18179,6 +18335,27 @@
             }
           },
           {
+            "description": "When set, only sessions filed in this folder are returned.",
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "description": "When set, only sessions filed in this folder are returned.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "When true, only sessions with no folder are returned.",
+            "in": "query",
+            "name": "no_folder",
+            "required": false,
+            "schema": {
+              "description": "When true, only sessions with no folder are returned.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -18806,7 +18983,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 19,
+              "maxItems": 20,
               "minItems": 1,
               "type": "array"
             }
@@ -20112,7 +20289,7 @@
                 }
               }
             },
-            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
+            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the chat is still answering; wait or cancel, then send again), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done), or `turn_could_not_start` (the reply could not start in time; send again)."
           },
           "412": {
             "content": {
@@ -22746,6 +22923,189 @@
           "auditLog"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/brief-items/completions": {
+      "get": {
+        "description": "Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.",
+        "parameters": [
+          {
+            "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBriefItemCompletionsResponse"
+                }
+              }
+            },
+            "description": "Completed brief items."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List morning brief items marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "description": "Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkBriefItemDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item as marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          }
+        },
+        "summary": "Mark a morning brief item done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "markDone"
+      }
+    },
+    "/api/v1/user/brief-items/completions/{item_key}": {
+      "delete": {
+        "description": "Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.",
+        "parameters": [
+          {
+            "description": "Client key of the brief item.",
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "description": "Client key of the brief item.",
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item is no longer marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid item key."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Undo a morning brief item marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "undo"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

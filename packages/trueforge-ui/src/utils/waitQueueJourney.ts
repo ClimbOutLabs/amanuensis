@@ -20,7 +20,10 @@ export const WAIT_STATION_LABELS: Record<WaitStationId, string> = {
   writing: 'Writing',
 };
 
-/** Elapsed wait after which the queue adds an honest "still working" note. */
+/** The live line while the chat's history is being shortened, which can take minutes on a slow model. */
+export const COMPACTING_LINE = 'Tidying up the conversation so far so I can keep going.';
+
+/** Time with nothing new arriving after which the queue adds an honest "still working" note. */
 export const LONG_WAIT_MS = 15_000;
 
 /** Staged-reveal ticks stay paced: only the most recent few are shown. */
@@ -35,6 +38,10 @@ export type WaitQueuePart = {
   argsText?: string | undefined;
   /** Set when the call did not run; its progress line then says so instead of "Finished". */
   notDoneReason?: string | undefined;
+  /** Characters received for the part so far (text, reasoning, or call arguments); a change means something arrived. */
+  arrivedChars?: number | undefined;
+  /** Words of reasoning text a reasoning part has streamed so far; 0 when the stream carries none. */
+  reasoningWords?: number | undefined;
 };
 
 export type WaitQueueMemory = {
@@ -50,6 +57,8 @@ export type WaitQueueInput = {
   isRunning: boolean;
   parts: ReadonlyArray<WaitQueuePart>;
   memory: WaitQueueMemory;
+  /** True while the server says it is shortening the chat's history before it can answer. */
+  compacting?: boolean;
 };
 
 export type WaitStation = {
@@ -175,14 +184,29 @@ function memoryTick(memory: WaitQueueMemory): string | undefined {
   return undefined;
 }
 
+/** Counts words the way a person would, so the live count matches what they could read. */
+export function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+}
+
+/** "Reasoning… 1,240 words so far" while reasoning text streams; just "Reasoning…" when it carries none. */
+function reasoningLine(parts: ReadonlyArray<WaitQueuePart>): string {
+  const words = parts.reduce((total, part) => total + Math.max(0, Math.floor(part.reasoningWords ?? 0)), 0);
+  if (words === 0) return 'Reasoning…';
+  return `Reasoning… ${words.toLocaleString('en-US')} ${words === 1 ? 'word' : 'words'} so far`;
+}
+
 export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
-  const { isRunning, parts, memory } = input;
+  const { isRunning, parts, memory, compacting = false } = input;
   // The `indicator` pseudo-part is the queue's own mount point, not turn activity.
   const substantive = parts.filter(part => part.type !== 'indicator');
   const textParts = substantive.filter(part => part.type === 'text');
   const toolParts = substantive.filter(part => part.type === 'tool-call');
 
   const textStreaming = textParts.some(part => part.statusType === 'running');
+  const reasoningParts = substantive.filter(part => part.type === 'reasoning');
+  const reasoningStreaming = reasoningParts.some(part => part.statusType === 'running');
   const runningTools = toolParts.filter(part => part.statusType === 'running');
   const settledTools = toolParts.filter(part => part.statusType === 'complete' || part.statusType === 'incomplete');
 
@@ -246,6 +270,11 @@ export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
   } else if (runningTools.length > 1) {
     const first = runningTools[0];
     microcopy = first ? `${toolLabel(first)} · +${String(runningTools.length - 1)} more…` : 'Working…';
+  } else if (reasoningStreaming) {
+    // Live model output beats the tidying line: the line goes once the reply starts.
+    microcopy = reasoningLine(reasoningParts);
+  } else if (compacting && isRunning) {
+    microcopy = COMPACTING_LINE;
   } else if (listening === 'active') {
     microcopy = 'On it…';
   } else {
@@ -261,6 +290,20 @@ export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
   return { stations, activeStation, microcopy, ticks };
 }
 
+/** Changes whenever anything new arrives for the turn, so the queue can tell silence from slow, steady work. */
+export function arrivalSignature({
+  parts,
+  memory,
+}: {
+  parts: ReadonlyArray<WaitQueuePart>;
+  memory: WaitQueueMemory;
+}): string {
+  const partKeys = parts
+    .filter(part => part.type !== 'indicator')
+    .map(part => `${part.type}:${part.statusType}:${String(part.arrivedChars ?? 0)}`);
+  return [...partKeys, `memory:${String(memory.landed)}`].join('|');
+}
+
 export type LongWaitNoteInput = {
   elapsedMs: number;
   activeStation: WaitStationId | null;
@@ -273,6 +316,7 @@ export type LongWaitNoteInput = {
  */
 export function buildLongWaitNote({ elapsedMs, activeStation, microcopy }: LongWaitNoteInput): string {
   const elapsed = formatDuration(elapsedMs);
+  if (microcopy === COMPACTING_LINE) return `Still tidying up the conversation, ${elapsed} so far.`;
   if (activeStation === 'listening') {
     return `Still waiting for the first response — ${elapsed} so far.`;
   }
@@ -291,6 +335,7 @@ export type LongWaitAnnouncementInput = {
  * the long-wait show begins, instead of every second.
  */
 export function buildLongWaitAnnouncement({ activeStation, microcopy }: LongWaitAnnouncementInput): string {
+  if (microcopy === COMPACTING_LINE) return 'Still tidying up the conversation. This can take a few minutes.';
   if (activeStation === 'listening') {
     return 'Still waiting for the first response — this is taking longer than usual.';
   }

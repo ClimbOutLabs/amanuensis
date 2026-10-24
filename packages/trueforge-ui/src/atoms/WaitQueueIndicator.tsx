@@ -15,6 +15,8 @@ import { StateSprite, type StateSpriteState } from './StateSprite.js';
 export type WaitQueueIndicatorProps = {
   snapshot: WaitQueueSnapshot;
   elapsedMs: number;
+  /** Time since anything new arrived for the turn; the long-wait note shows only after a quiet spell. */
+  quietMs: number;
   reducedMotion: boolean;
   className?: string;
 };
@@ -43,8 +45,14 @@ function spriteStateFor(activeStation: WaitStationId | null): StateSpriteState {
  * React only mutates the live text when it actually changes — timer re-renders
  * are silent.
  */
-export function WaitQueueIndicator({ snapshot, elapsedMs, reducedMotion, className }: WaitQueueIndicatorProps) {
-  const longWait = elapsedMs >= LONG_WAIT_MS;
+export function WaitQueueIndicator({
+  snapshot,
+  elapsedMs,
+  quietMs,
+  reducedMotion,
+  className,
+}: WaitQueueIndicatorProps) {
+  const longWait = quietMs >= LONG_WAIT_MS;
   const announcement = longWait
     ? buildLongWaitAnnouncement({ activeStation: snapshot.activeStation, microcopy: snapshot.microcopy })
     : undefined;

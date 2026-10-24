@@ -31,6 +31,8 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
+import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
@@ -402,14 +404,36 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
- * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * Taps Sentinel approval events off a raw stream or history item before the vendor
+ * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
  * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
-function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
+}
+
+/**
+ * Taps the compaction start and end off a raw stream item, before the vendor conversion narrows
+ * them away. The chat stops being "compacting" when compaction ends, the reply starts, or the
+ * turn ends, so a cancelled compaction that never sends its end still clears.
+ */
+function tapContextCompactionStreamEvent(sessionId: string, data: TrueForgeApi.TurnStreamingEvent): void {
+  switch (data.type) {
+    case 'agent.context.compaction_started':
+      publishContextCompaction({ sessionId, active: true });
+      return;
+    case 'agent.context.compaction':
+    case 'model.message.delta':
+    case 'model.message':
+    case 'turn.created':
+    case 'turn.done':
+      publishContextCompaction({ sessionId, active: false });
+      return;
+    default:
+      return;
+  }
 }
 
 /**
@@ -498,6 +522,7 @@ async function* subscribeTurnOnce(
     if (item.data.type === 'document.ingestion') {
       publishDocumentIngestionEvent(turnId, item.data);
     }
+    tapContextCompactionStreamEvent(sessionId, item.data);
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
@@ -517,10 +542,9 @@ async function* subscribeTurnOnce(
  * `turn.done` carrying that state instead of surfacing the raw 412.
  *
  * When the record still says `running`, the turn's executor died with the
- * restart and will never complete on its own: that is reported as a plain,
- * actionable error (the user can cancel the turn and send again) rather than
- * a hung loading state or a synthesized terminal state the server would
- * contradict on the next send.
+ * restart and will never complete on its own. It is cancelled, as the person
+ * would, so the chat is free for the next send, and reported as a reply the
+ * restart stopped rather than a hung loading state.
  */
 async function* fallbackToTurnFinalState(input: {
   client: TrueForge;
@@ -534,11 +558,13 @@ async function* fallbackToTurnFinalState(input: {
   const response = await client.sessions.getTurn(sessionId, turnId);
   const state = response.data.state;
   if (state.status === 'running') {
-    throw new Error(
-      'The server restarted while this turn was running, so its live updates are gone. ' +
-        'Cancel this turn and send your message again, or reload the chat.',
-      { cause: streamGoneError },
-    );
+    try {
+      await client.sessions.cancel(sessionId);
+    } catch (cancelError) {
+      // A send that the server still refuses re-attaches here and tries the cancel again.
+      throw new ReplyStoppedByRestartError({ cause: cancelError });
+    }
+    throw new ReplyStoppedByRestartError({ cause: streamGoneError });
   }
   const sequenceNumber = (cursor.sequence ?? 0) + 1;
   cursor.sequence = sequenceNumber;
@@ -567,9 +593,9 @@ async function* fallbackToTurnFinalState(input: {
  * still running server-side never surfaces as a failed turn. Resumes from
  * `cursor` (exclusive), bounded by `TURN_STREAM_RECONNECT_MAX_ATTEMPTS` with
  * capped exponential backoff. Gives up only when the caller cancels
- * (`abortSignal`), the server reports the turn is gone, or retries are
- * exhausted — rethrowing the triggering error unchanged for the caller to
- * normalize.
+ * (`abortSignal`) or the server reports the turn is gone, rethrowing that
+ * error unchanged. Exhausted retries throw `LiveConnectionLostError` so the
+ * chat resyncs from the server rather than marking the turn failed.
  */
 async function* subscribeWithReconnect(
   client: TrueForge,
@@ -602,8 +628,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        const error = new Error('Turn stream ended without turn.done and retries exhausted');
-        throw error;
+        throw new LiveConnectionLostError();
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -629,7 +654,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        throw error;
+        throw new LiveConnectionLostError({ cause: error });
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -763,6 +788,7 @@ export function createHarnessChatServer(
           if (item.data.type === 'document.ingestion' && turnId !== undefined) {
             publishDocumentIngestionEvent(turnId, item.data);
           }
+          tapContextCompactionStreamEvent(sessionId, item.data);
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
@@ -834,6 +860,9 @@ export function createHarnessChatServer(
         ...(limit === undefined ? {} : { limit }),
       });
       const data = page.data.flatMap(item => {
+        // A chat that learns of a waiting call from history (opened mid-turn, or caught up after the
+        // live stream dropped) gets its card here; the chat's one saved-card read may predate the ask.
+        tapSentinelStreamEvent(item.event);
         const converted = toUiEventItem(item);
         return converted === undefined ? [] : [converted];
       });

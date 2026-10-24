@@ -1,6 +1,7 @@
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
+import { useContextCompactionActive } from '../hooks/useContextCompactionActive.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
@@ -44,6 +45,8 @@ export type AmanRuntimeRailProps = {
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
+  /** The chat the person is looking at, so the status line can say when its history is being shortened. */
+  sessionId?: string | undefined;
   /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
   pendingApprovalIds?: readonly string[];
   /**
@@ -84,13 +87,16 @@ function statusLineLabel({
   status,
   activity,
   waitingOnApproval,
+  compacting,
 }: {
   status: AmanRuntimeRailStatus;
   activity: AmanAvatarActivity;
   waitingOnApproval: boolean;
+  compacting: boolean;
 }): string {
   if (status !== 'ready') return STATUS_LABELS[status];
   if (waitingOnApproval) return 'Waiting on your approval';
+  if (compacting && activity === 'thinking') return 'Tidying up the conversation';
   switch (activity) {
     case 'idle':
       return 'Ready';
@@ -141,6 +147,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   version,
   buildRef,
   settingsHref,
+  sessionId,
   pendingApprovalIds = [],
   auditFeed,
 }) => {
@@ -157,7 +164,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const statusLabel = STATUS_LABELS[status];
   const pendingCount = pendingApprovalIds.length;
   // While an approval waits the panda keeps its writing clip, and the status line says why.
-  const statusLine = statusLineLabel({ status, activity, waitingOnApproval: pendingCount > 0 });
+  const compacting = useContextCompactionActive(sessionId);
+  const statusLine = statusLineLabel({ status, activity, waitingOnApproval: pendingCount > 0, compacting });
   const avatarActivity: AmanAvatarActivity = pendingCount > 0 ? 'writing' : activity;
   const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';

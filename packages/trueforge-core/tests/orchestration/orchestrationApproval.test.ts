@@ -1,9 +1,11 @@
 /** Pause on write_note approval, then resume after allow or deny. */
 import { createToolResponseV2, EventType } from '../../src/core/events/schema';
+import { deniedToolCallText } from '../../src/core/mcp/ToolSet';
 import { changeRequestReason } from '../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../src/core/runtime/AgentThreadOrchestrator';
+import { LOAD_BUNDLE_TOOL_NAME } from '../../src/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../core/harnessMocks';
 import {
@@ -21,7 +23,7 @@ import {
 const ROOT_ID = 'thread_root';
 const DENY_REASON = 'not allowed in this test';
 /** ToolSet deny → isError path surfaces the structured error payload for context. */
-const DENY_RAW_CONTENT = JSON.stringify({ error: `User denied tool call: ${DENY_REASON}` });
+const DENY_RAW_CONTENT = deniedToolCallText(DENY_REASON);
 const INSTRUCTION = 'You are running in a test setup.';
 
 // Every host-produced terminal tool result now carries the canonical wrapped shape
@@ -57,7 +59,8 @@ const DENY_TOOL_CONTENT = createToolResponseV2({
   remediation: undefined,
 }).model_message.content;
 
-const WRITE_NOTE_TOOLS = [{ function: { name: WRITE_NOTE_TOOL_NAME } }];
+// load_bundle comes first: the web guidance is always offered, so every chat can read it.
+const WRITE_NOTE_TOOLS = [{ function: { name: LOAD_BUNDLE_TOOL_NAME } }, { function: { name: WRITE_NOTE_TOOL_NAME } }];
 
 const EXPECTED_TURN_1_EVENTS = [
   { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
@@ -209,25 +212,18 @@ describe('orchestration: pause then resume on tool approval', () => {
         ],
       },
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
+      // The reply already says it in its own words, so the host adds no line of its own.
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
-      {
-        type: EventType.MODEL_MESSAGE_DELTA,
-        thread_id: ROOT_ID,
-        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
-      },
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
         thread_id: ROOT_ID,
-        context: [{ role: 'assistant', content: expect.stringContaining(ROOT_FINAL) }],
+        context: [{ role: 'assistant', content: ROOT_FINAL }],
       },
       { type: InternalEventType.AGENT_DONE, thread_id: ROOT_ID, status: 'done' },
     ];
 
     const TURN_2_OUTPUT = {
-      output: {
-        thread_id: ROOT_ID,
-        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
-      },
+      output: { thread_id: ROOT_ID, content: ROOT_FINAL },
       required_actions: [],
     };
 

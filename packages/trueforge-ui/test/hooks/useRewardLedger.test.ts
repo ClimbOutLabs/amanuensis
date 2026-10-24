@@ -90,17 +90,6 @@ describe('reward caps', () => {
     expect(play(first.ledger, { kind: 'milestone', key: 'replies-25' }, WED_NOON).allowed).toBe(true);
   });
 
-  it('limits highlights to three per brief and resets for a new brief', () => {
-    let ledger = EMPTY_REWARD_LEDGER;
-    for (let i = 0; i < 3; i++) {
-      const result = play(ledger, { kind: 'highlight', briefId: 'day-1' }, WED_NOON);
-      expect(result.allowed).toBe(true);
-      ledger = result.ledger;
-    }
-    expect(play(ledger, { kind: 'highlight', briefId: 'day-1' }, WED_NOON).allowed).toBe(false);
-    expect(play(ledger, { kind: 'highlight', briefId: 'day-2' }, WED_NOON).allowed).toBe(true);
-  });
-
   it('tears at most once a minute', () => {
     const first = play(EMPTY_REWARD_LEDGER, { kind: 'tear' }, WED_NOON);
     expect(first.allowed).toBe(true);

@@ -7,9 +7,21 @@ export type ChatFolder = {
   name: string;
 };
 
+/** One chat in a folder, as the sidebar needs it, loaded from the server by folder. */
+export type ChatFolderSession = {
+  sessionId: string;
+  title: string | null;
+  updatedAt: Date;
+  agentName: string | null;
+  isMutable: boolean;
+};
+
 export type ChatFolderSnapshot = {
   folders: ChatFolder[];
   assignments: Array<{ sessionId: string; folderId: string }>;
+  folderSessions: Array<{ folderId: string; sessions: ChatFolderSession[] }>;
+  /** Chats with no folder, loaded from the server like the folder chats. */
+  unfiledSessions: ChatFolderSession[];
 };
 
 /** Host-owned persistence for organizing remote chats. */
@@ -24,13 +36,29 @@ export interface ChatFolderStore {
 type ChatFolderContextValue = {
   folders: readonly ChatFolder[];
   assignments: ReadonlyMap<string, string>;
+  folderSessions: ReadonlyMap<string, readonly ChatFolderSession[]>;
+  unfiledSessions: readonly ChatFolderSession[];
+  loadError: string | null;
   createFolder(input: { name: string }): Promise<ChatFolder>;
   renameFolder(input: { folderId: string; name: string }): Promise<void>;
   deleteFolder(input: { folderId: string }): Promise<void>;
   moveChat(input: { sessionId: string; folderId: string | null }): Promise<void>;
+  /** Keeps a folder row's title in step after a rename saved through the server. */
+  updateFolderSessionTitle(input: { sessionId: string; title: string }): void;
+  /** Drops a folder row after its chat was deleted through the server. */
+  removeFolderSession(input: { sessionId: string }): void;
 };
 
 const ChatFolderContext = createContext<ChatFolderContextValue | null>(null);
+
+const CHAT_FOLDER_LOAD_ERROR = 'Could not load folder chats. Refresh the page to try again.';
+
+/**
+ * A folder load that has not finished within this bound counts as failed, so the
+ * folder area shows the plain error instead of staying blank while the rest of
+ * the page carries on. A load that finishes late still applies and clears it.
+ */
+export const CHAT_FOLDER_LOAD_TIMEOUT_MS = 30_000;
 
 function sortFolders(folders: readonly ChatFolder[]): ChatFolder[] {
   return [...folders].sort((a, b) => a.name.localeCompare(b.name));
@@ -39,27 +67,47 @@ function sortFolders(folders: readonly ChatFolder[]): ChatFolder[] {
 export function ChatFolderProvider({ store, children }: { store?: ChatFolderStore; children: ReactNode }) {
   const [folders, setFolders] = useState<readonly ChatFolder[]>([]);
   const [assignments, setAssignments] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [folderSessions, setFolderSessions] = useState<ReadonlyMap<string, readonly ChatFolderSession[]>>(
+    () => new Map(),
+  );
+  const [unfiledSessions, setUnfiledSessions] = useState<readonly ChatFolderSession[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (store === undefined) {
       setFolders([]);
       setAssignments(new Map());
+      setFolderSessions(new Map());
+      setUnfiledSessions([]);
+      setLoadError(null);
       return;
     }
 
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      if (cancelled) return;
+      setLoadError(CHAT_FOLDER_LOAD_ERROR);
+    }, CHAT_FOLDER_LOAD_TIMEOUT_MS);
     void store
       .load()
       .then(snapshot => {
         if (cancelled) return;
+        clearTimeout(timeout);
         setFolders(sortFolders(snapshot.folders));
         setAssignments(new Map(snapshot.assignments.map(row => [row.sessionId, row.folderId])));
+        setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions])));
+        setUnfiledSessions(snapshot.unfiledSessions);
+        setLoadError(null);
       })
       .catch(() => {
+        if (cancelled) return;
+        clearTimeout(timeout);
         // Folder organization is optional. Keep chat history usable if it cannot load.
+        setLoadError(CHAT_FOLDER_LOAD_ERROR);
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [store]);
 
@@ -88,9 +136,75 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       await store.deleteFolder({ folderId });
       setFolders(current => current.filter(folder => folder.id !== folderId));
       setAssignments(current => new Map([...current].filter(([, assignedFolderId]) => assignedFolderId !== folderId)));
+      // Deleting a folder keeps its chats: they land with the chats that have no
+      // folder instead of disappearing from the list.
+      setUnfiledSessions(current => {
+        const orphaned = folderSessions.get(folderId) ?? [];
+        if (orphaned.length === 0) return current;
+        const known = new Set(current.map(session => session.sessionId));
+        const additions = orphaned.filter(session => !known.has(session.sessionId));
+        return additions.length === 0 ? current : [...current, ...additions];
+      });
+      setFolderSessions(current => {
+        const next = new Map(current);
+        next.delete(folderId);
+        return next;
+      });
     },
-    [store],
+    [folderSessions, store],
   );
+
+  const updateFolderSessionTitle = useCallback(({ sessionId, title }: { sessionId: string; title: string }) => {
+    setFolderSessions(current => {
+      let changed = false;
+      const next = new Map<string, readonly ChatFolderSession[]>();
+      for (const [folderId, sessions] of current) {
+        if (sessions.some(session => session.sessionId === sessionId)) {
+          changed = true;
+          next.set(
+            folderId,
+            sessions.map(session => (session.sessionId === sessionId ? { ...session, title } : session)),
+          );
+        } else {
+          next.set(folderId, sessions);
+        }
+      }
+      return changed ? next : current;
+    });
+    setUnfiledSessions(current => {
+      if (!current.some(session => session.sessionId === sessionId)) return current;
+      return current.map(session => (session.sessionId === sessionId ? { ...session, title } : session));
+    });
+  }, []);
+
+  const removeFolderSession = useCallback(({ sessionId }: { sessionId: string }) => {
+    setFolderSessions(current => {
+      let changed = false;
+      const next = new Map<string, readonly ChatFolderSession[]>();
+      for (const [folderId, sessions] of current) {
+        if (sessions.some(session => session.sessionId === sessionId)) {
+          changed = true;
+          next.set(
+            folderId,
+            sessions.filter(session => session.sessionId !== sessionId),
+          );
+        } else {
+          next.set(folderId, sessions);
+        }
+      }
+      return changed ? next : current;
+    });
+    setUnfiledSessions(current => {
+      if (!current.some(session => session.sessionId === sessionId)) return current;
+      return current.filter(session => session.sessionId !== sessionId);
+    });
+    setAssignments(current => {
+      if (!current.has(sessionId)) return current;
+      const next = new Map(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
 
   const moveChat = useCallback(
     async ({ sessionId, folderId }: { sessionId: string; folderId: string | null }) => {
@@ -119,8 +233,33 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
 
   const value = useMemo<ChatFolderContextValue | null>(() => {
     if (store === undefined) return null;
-    return { folders, assignments, createFolder, renameFolder, deleteFolder, moveChat };
-  }, [assignments, createFolder, deleteFolder, folders, moveChat, renameFolder, store]);
+    return {
+      folders,
+      assignments,
+      folderSessions,
+      unfiledSessions,
+      loadError,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveChat,
+      updateFolderSessionTitle,
+      removeFolderSession,
+    };
+  }, [
+    assignments,
+    createFolder,
+    deleteFolder,
+    folderSessions,
+    folders,
+    loadError,
+    moveChat,
+    removeFolderSession,
+    renameFolder,
+    store,
+    unfiledSessions,
+    updateFolderSessionTitle,
+  ]);
 
   return <ChatFolderContext.Provider value={value}>{children}</ChatFolderContext.Provider>;
 }

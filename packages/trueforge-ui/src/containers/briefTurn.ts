@@ -25,3 +25,17 @@ export function answersBriefPrompt(
   const previous = messages[index - 1];
   return previous?.role === 'user' && isMorningBriefPrompt(messageText(previous.content));
 }
+
+/** The date a morning brief was requested on, from the first brief request in the thread; null for other chats. */
+export function briefRequestDate(
+  messages: readonly {
+    readonly role: string;
+    readonly content: readonly ContentPart[];
+    readonly createdAt: Date;
+  }[],
+): Date | null {
+  for (const message of messages) {
+    if (message.role === 'user' && isMorningBriefPrompt(messageText(message.content))) return message.createdAt;
+  }
+  return null;
+}
