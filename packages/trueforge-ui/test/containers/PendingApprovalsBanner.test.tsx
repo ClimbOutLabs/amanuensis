@@ -198,7 +198,7 @@ describe('PendingApprovalsBanner journeys', () => {
     dismissPendingApprovals = vi.fn(async () => {
       throw ended;
     });
-    renderBanner({ dismissPendingApprovals });
+    renderBlockedBanner({ dismissPendingApprovals });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /dismiss pending approvals/i }));
