@@ -567,6 +567,17 @@
   text-underline-offset: 2px;
 }
 
+/* The live wait line in Recent actions: it comes from the chat, not the receipt, so it sits
+ * above the history and never counts as an entry. */
+.aman-runtime-rail__waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
 /* One disclosure at the foot of the rail holds the diagnostics; `margin-top: auto`
  * keeps it and the release line at the bottom however few sections are shown. */
 .aman-runtime-rail__details {

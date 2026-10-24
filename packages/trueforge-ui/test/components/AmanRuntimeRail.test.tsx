@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 import { clearContextCompaction, publishContextCompaction } from '@/utils/contextCompactionLive.js';
 
@@ -635,6 +636,68 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       screen.getByText('Recent actions body'),
     );
     expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('shows a live Waiting for you line above the history while an approval waits', () => {
+    render(
+      <SentinelApiProvider api={sentinelWith(settingsStub)}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail
+            pendingApprovalIds={['approval-1']}
+            auditFeed={<p>Recent actions body</p>}
+            status="ready"
+          />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    const region = screen.getByRole('region', { name: 'Recent actions' });
+    const line = screen.getByText('Waiting for you');
+    expect(region).toContainElement(line);
+    expect(line.compareDocumentPosition(screen.getByText('Recent actions body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('drops the Waiting for you line as soon as nothing waits', () => {
+    const { rerender } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={['approval-1']} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    expect(screen.getByText('Waiting for you')).toBeInTheDocument();
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={[]} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument();
+    expect(screen.getByText('Recent actions body')).toBeInTheDocument();
+  });
+
+  it('shows no Waiting for you line when nothing waits', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={[]} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument();
+  });
+
+  it('shows the wait line beside an empty history, with no waiting entry in it', async () => {
+    render(
+      <SentinelApiProvider api={sentinelWith(settingsStub)}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail
+            pendingApprovalIds={['approval-1']}
+            auditFeed={<SentinelAuditFeed sessionId="session-1" />}
+            status="ready"
+          />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    // The carded action is not in the history yet: it is written only after it is answered.
+    expect(await screen.findByText('Nothing has happened in this chat yet.')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for you')).toBeInTheDocument();
+    expect(document.querySelector('.aui-receipt')).toBeNull();
   });
 
   it('shows one pending signal: no Needs you ticket, and the status line says the approval is waiting', () => {

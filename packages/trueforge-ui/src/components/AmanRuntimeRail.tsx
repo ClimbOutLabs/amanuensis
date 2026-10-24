@@ -6,6 +6,8 @@ import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
+import { WAITING_FOR_YOU_LABEL } from '../sentinel/types.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
@@ -47,7 +49,10 @@ export type AmanRuntimeRailProps = {
   personalizationApi?: PersonalizationApi;
   /** The chat the person is looking at, so the status line can say when its history is being shortened. */
   sessionId?: string | undefined;
-  /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
+  /**
+   * Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting
+   * state, and puts a live Waiting for you line above the Recent actions history.
+   */
   pendingApprovalIds?: readonly string[];
   /**
    * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
@@ -301,6 +306,18 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               <h3 id="aman-runtime-rail-recent-actions-label" className="aman-runtime-rail__section-label">
                 Recent actions
               </h3>
+              {/* The wait line comes straight from the chat, not the receipt: a carded action is
+              written to the history only after it is answered, so while it waits the history
+              holds nothing about it, and this line is the only sign of it in the panel. */}
+              {pendingCount > 0 && (
+                <p className="aman-runtime-rail__waiting">
+                  <span
+                    aria-hidden="true"
+                    className={`size-2 shrink-0 rounded-full ${ACTIVITY_STATE_DOT_CLASSES.waiting}`}
+                  />
+                  {WAITING_FOR_YOU_LABEL}
+                </p>
+              )}
               {auditFeed}
             </section>
           )}
