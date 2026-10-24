@@ -102,6 +102,23 @@ describe('ModelProviderManifestSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts a positive whole-number request limit and rejects anything else', () => {
+    const withLimit = (limit: unknown): boolean =>
+      ModelProviderManifestSchema.safeParse({
+        auth: { api_key: 'k' },
+        type: 'custom',
+        name: 'a-provider',
+        base_url: 'https://llm.test.example.com/v1',
+        models: [{ model_id: 'a-model', name: 'a-model', properties: { max_concurrent_requests: limit } }],
+      }).success;
+    expect(withLimit(1)).toBe(true);
+    expect(withLimit(4)).toBe(true);
+    expect(withLimit(0)).toBe(false);
+    expect(withLimit(-1)).toBe(false);
+    expect(withLimit(1.5)).toBe(false);
+    expect(withLimit('1')).toBe(false);
+  });
+
   // Reserving the whole context window for output leaves no room for input, so
   // every turn fails the token pre-flight guard. The schema rejects it up front.
   it('rejects max_output_tokens within the safety margin of context_length', () => {

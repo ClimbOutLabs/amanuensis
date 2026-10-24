@@ -4,6 +4,7 @@ import {
   DisabledDriver,
   DockerDriver,
   McpConnectionError,
+  ModelRequestGate,
   RunCodeService,
   Sandbox,
   SkillMounter,
@@ -253,6 +254,12 @@ export function parseModelFqn(name: string): { providerName: string; modelName: 
 }
 
 /**
+ * The one per-model request gate for this server process: every turn's steps take their model's
+ * place in it before sending, so replies on a model with a request limit wait instead of racing.
+ */
+export const modelRequestGate = new ModelRequestGate();
+
+/**
  * Load turn-ready model config and defaults for a configured FQN (`provider/model`).
  * Malformed FQN or missing provider/model → HTTPException(422).
  */
@@ -271,6 +278,12 @@ export async function getModelDetails({
   modelProperties: ModelProperties;
   /** Stream progress deadlines: the provider's own, else the server-wide ones. */
   streamTimeout: Required<StreamTimeout>;
+  /**
+   * How many requests may be in flight on this model at once: the model's own setting when it
+   * has one, else 1 for a custom provider (a self-hosted server that serves one request at a
+   * time), else no limit.
+   */
+  maxConcurrentRequests: number | undefined;
 }> {
   const parsed = parseModelFqn(name);
   if (parsed === undefined) {
@@ -309,6 +322,7 @@ export async function getModelDetails({
     defaultModelParams: model.properties.max_output_tokens ? { max_tokens: model.properties.max_output_tokens } : {},
     modelProperties: model.properties,
     streamTimeout: modelProviderStreamTimeout(stream_timeout),
+    maxConcurrentRequests: model.properties.max_concurrent_requests ?? (type === 'custom' ? 1 : undefined),
   };
 }
 
