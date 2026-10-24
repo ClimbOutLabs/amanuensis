@@ -6,7 +6,7 @@ import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
-import { WAITING_FOR_YOU_LABEL } from '../sentinel/types.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
@@ -138,6 +138,16 @@ const FoldedRow: FC<{ section: string; title: string; children: ReactNode }> = (
   </details>
 );
 
+/** The Rules fold's sentences, one per rule; none until the settings have loaded. */
+function ruleSentences(settings: SentinelUserSettings | null): string[] {
+  if (settings === null) return [];
+  return [
+    settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first',
+    settings.sandbox_without_asking ? 'Sandbox code runs without asking' : 'Sandbox code asks first',
+    settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off',
+  ];
+}
+
 const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   avatarSrc,
   avatarMotion,
@@ -152,6 +162,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const assistantName = assistantDisplayName(profile?.assistant_name);
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
+  const rules = ruleSentences(settings);
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
@@ -286,13 +297,13 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           )}
 
           <FoldedRow section="rules" title="Rules">
-            {settings === null ? null : (
+            {rules.length === 0 ? (
+              <p className="aman-runtime-rail__row-text">No rules to show yet.</p>
+            ) : (
               <ul className="aman-runtime-rail__rules">
-                <li>{settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first'}</li>
-                <li>
-                  {settings.sandbox_without_asking ? 'Sandbox code runs without asking' : 'Sandbox code asks first'}
-                </li>
-                <li>{settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off'}</li>
+                {rules.map(rule => (
+                  <li key={rule}>{rule}</li>
+                ))}
               </ul>
             )}
           </FoldedRow>

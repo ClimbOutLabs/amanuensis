@@ -121,6 +121,50 @@ describe('AmanRuntimeRail', () => {
     expect(await screen.findByRole('status', { name: 'Offline mode is on' })).toBeInTheDocument();
   });
 
+  it('lists each rule as its sentence once the settings load', async () => {
+    const settings: SentinelUserSettings = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: false,
+    };
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
+      getUserSettings: vi.fn(async () => settings),
+      updateUserSettings: vi.fn(async () => settings),
+      listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
+    };
+    const { container } = render(
+      <SentinelApiProvider api={api}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail modelName="local-model" status="ready" />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+
+    await screen.findByText('Web searches run without asking');
+    const rules = container.querySelector('[data-section="rules"]');
+    const items = Array.from(rules?.querySelectorAll('li') ?? []).map(item => item.textContent?.trim());
+    expect(items).toEqual(['Web searches run without asking', 'Sandbox code asks first', 'Offline mode is off']);
+  });
+
+  it('shows no bullets in Rules when there are no rules to show', () => {
+    const { container } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" status="ready" />
+      </RuntimeHarness>,
+    );
+
+    const rules = container.querySelector('[data-section="rules"]');
+    expect(rules?.querySelectorAll('ul, li')).toHaveLength(0);
+    expect(rules).toHaveTextContent('No rules to show yet.');
+  });
+
   it('keeps the model name out of the collapsed status dot', () => {
     window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
     render(
