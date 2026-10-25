@@ -1,11 +1,12 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Icon } from '@/icons/Icon.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { MemoryExplorerFilters } from './MemoryExplorerFilters.js';
 import { MemorySharing } from './MemorySharing.js';
 import { MemoryVaultEntryRow } from './MemoryVaultEntry.js';
@@ -41,9 +42,10 @@ function ForgetUndoBar({ state }: { state: MemoryVaultState }) {
 
 /** Plain confirm for forgetting several memories at once. */
 function ForgetConfirm({ state, count }: { state: MemoryVaultState; count: number }) {
+  const assistant = useAssistantDisplayName();
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card-bg p-3">
-      <p className="text-sm text-text-primary">{forgetConfirmCopy(count)}</p>
+      <p className="text-sm text-text-primary">{forgetConfirmCopy({ count, assistant })}</p>
       <button
         type="button"
         onClick={state.confirmForget}
@@ -140,10 +142,11 @@ function ManageCollections({ state }: { state: MemoryVaultState }) {
 
 /** Shown before any memory exists: what memory is, and where to turn it on or tune it. */
 function FirstRunNote({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const assistant = useAssistantDisplayName();
   return (
     <div className="rounded-xl border border-border bg-card-bg p-6 text-center">
       <p className="text-sm text-text-primary">
-        Aman remembers useful facts from your chats, so it can help you next time.
+        {assistant} remembers useful facts from your chats, so it can help you next time.
       </p>
       <p className="mt-1 text-sm text-text-secondary">You can read, edit, copy, or forget any of them here.</p>
       {onOpenSettings !== undefined ? (
@@ -171,6 +174,7 @@ export function MemoryVaultFactsPanel({
   /** Opens the Settings sub-tab where memory is turned on and tuned. Omitted where no such tab exists. */
   onOpenSettings?: () => void;
 }) {
+  const assistant = useAssistantDisplayName();
   const shownCount = state.shownGroups.reduce((total, group) => total + group.memories.length, 0);
   const selectedCount = state.selectedIds.size;
 
@@ -201,7 +205,7 @@ export function MemoryVaultFactsPanel({
     body = (
       <>
         <p className="text-base font-medium text-text-primary" aria-live="polite">
-          {memoryCountCopy({ total: state.entries.length, personas: state.personaCount })}
+          {memoryCountCopy({ total: state.entries.length, personas: state.personaCount, assistant })}
         </p>
         <MemoryExplorerFilters state={state} />
         {state.confirmForgetIds !== null ? <ForgetConfirm state={state} count={state.confirmForgetIds.length} /> : null}
@@ -294,8 +298,13 @@ export function MemoryVaultFactsPanel({
   );
 }
 
-/** The sharing panel: which memories each specialist may see. */
+/** The sharing panel: which other personas' notes each persona can read. */
 export function MemoryVaultSharingPanel({ state }: { state: MemoryVaultState }) {
+  const assistant = useAssistantDisplayName();
+  const personasWithNotes = useMemo(
+    () => new Set(state.entries.flatMap(entry => (entry.persona === null ? [] : [entry.persona]))),
+    [state.entries],
+  );
   if (state.sharingError !== null) {
     return (
       <p role="alert" className="text-sm text-error-text">
@@ -314,6 +323,8 @@ export function MemoryVaultSharingPanel({ state }: { state: MemoryVaultState }) 
   return (
     <MemorySharing
       personas={state.personas}
+      assistant={assistant}
+      personasWithNotes={personasWithNotes}
       namespaces={state.sharingNamespaces}
       sharing={state.sharing}
       onSave={state.handleSharingSave}

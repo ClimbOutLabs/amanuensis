@@ -1,89 +1,78 @@
 'use client';
 
-import { useState, type FC, type ReactNode } from 'react';
+import { type FC, type ReactNode } from 'react';
 
-import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
-import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode, type SettingsSection } from '../server/ShellModeContext.js';
-import { useOptionalAmanSetup, type AmanSetupState } from './AmanSetupContext.js';
-import { HelpAreaChoices } from './HelpAreaChoices.js';
-import {
-  EMPTY_PERSONALIZATION_PROFILE,
-  useOptionalPersonalization,
-  type PersonalizationProfile,
-} from './PersonalizationContext.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
+import { useOptionalAmanSetup } from './AmanSetupContext.js';
+import { useOptionalPersonalization } from './PersonalizationContext.js';
 
-/** Where a checklist line sends the user: a Settings section, or back to the chat. */
-export type FirstRunTarget = { kind: 'settings'; section: SettingsSection } | { kind: 'chat' };
+/** Where a setup line sends the person: a Settings section. */
+export type FirstRunTarget = { kind: 'settings'; section: SettingsSection };
 
-export type FirstRunItem = {
+export type SetupItem = {
   key: 'model' | 'about-you' | 'first-chat';
   label: string;
-  detail: string;
   done: boolean;
-  /** Left out when there is nothing to click: the line already says what to do. */
+  /** What a finished line says on its right. */
+  doneValue: string;
+  /** The one action an open line offers; a line without one only says what is left. */
   action?: { label: string; target: FirstRunTarget };
 };
-
-/** Where the card is showing; the chat already has the composer, so "try a chat" needs no link there. */
-export type FirstRunPlacement = 'chat' | 'settings';
 
 function hasText(value: string | null | undefined): value is string {
   return value !== null && value !== undefined && value.trim() !== '';
 }
 
 /**
- * The checklist, computed from real state so it ticks itself off. The first chat is listed only
- * when the host knows whether one happened. Memory is never listed: it works out of the box.
+ * The setup lines, computed from real state so they tick themselves off. The first-chat line is
+ * listed only when the host knows whether a chat has started.
  */
-export function amanFirstRunItems(input: {
-  modelName: string | null;
-  /** The personalization profile's user name; undefined while the profile is still loading. */
+export function setupTicketItems({
+  assistantName,
+  modelName,
+  userName,
+  hasChatted,
+}: {
+  assistantName: string;
+  modelName: string | null | undefined;
+  /** The profile's user name; undefined while the profile is still loading. */
   userName: string | null | undefined;
   hasChatted: boolean | undefined;
-  placement: FirstRunPlacement;
-}): FirstRunItem[] {
-  const items: FirstRunItem[] = [];
-  const { modelName, userName } = input;
-  const hasModel = hasText(modelName);
-  items.push({
-    key: 'model',
-    label: 'Add a model',
-    detail: hasModel ? `Using ${modelName.trim()}.` : 'Aman needs one model before it can answer.',
-    done: hasModel,
-    action: { label: 'Choose a model', target: { kind: 'settings', section: 'models' } },
-  });
-  const hasName = hasText(userName);
-  items.push({
-    key: 'about-you',
-    label: 'Tell Aman about you',
-    detail: hasName ? `Aman knows you as ${userName.trim()}.` : 'Your name, and how you would like to be addressed.',
-    done: hasName,
-    action: { label: 'Open Personalization', target: { kind: 'settings', section: 'personalization' } },
-  });
-  if (input.hasChatted !== undefined) {
-    items.push({
-      key: 'first-chat',
-      label: 'Try your first chat',
-      detail: input.hasChatted ? 'You have started one already.' : 'Ask anything, in your own words.',
-      done: input.hasChatted,
-      ...(input.placement === 'settings' ? { action: { label: 'Back to chat', target: { kind: 'chat' } } } : {}),
-    });
+}): SetupItem[] {
+  const items: SetupItem[] = [
+    {
+      key: 'model',
+      label: 'Add a model',
+      done: hasText(modelName),
+      doneValue: modelName?.trim() ?? '',
+      action: { label: 'Choose a model', target: { kind: 'settings', section: 'models' } },
+    },
+    {
+      key: 'about-you',
+      label: `Tell ${assistantName} about you`,
+      done: hasText(userName),
+      doneValue: userName?.trim() ?? '',
+      action: { label: 'Open Personalization', target: { kind: 'settings', section: 'personalization' } },
+    },
+  ];
+  if (hasChatted !== undefined) {
+    items.push({ key: 'first-chat', label: 'Try your first chat', done: hasChatted, doneValue: 'Started' });
   }
   return items;
 }
 
-/** Whether the card is on screen: the host either has not wired dismissal, or the owner has not used it. */
-export function isFirstRunGuideVisible(setup: AmanSetupState | null): boolean {
+/** Whether the setup ticket is on screen: the owner has not skipped it, and it still has a line to do. */
+export function isSetupTicketVisible(setup: { firstRunGuide?: { dismissed: boolean } } | null): boolean {
   return setup !== null && setup.firstRunGuide?.dismissed !== true;
 }
 
 /**
- * A checklist link. Inside the shell it opens the section in place; outside it falls back to the
- * host's settings URL, and with neither it is plain text, so the line still says where to go.
+ * A line's action. Inside the shell it opens the section in place; outside it falls back to the
+ * host's settings URL, and with neither it is plain text, so the line still says what to do.
  */
-export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | undefined; children: ReactNode }> = ({
+const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | undefined; children: ReactNode }> = ({
   target,
   settingsHref,
   children,
@@ -91,198 +80,95 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
   const shell = useOptionalShellMode();
   // A button takes the browser's own box and colour unless reset, which hides its text on dark paper.
   const className =
-    'cursor-pointer appearance-none border-0 bg-transparent p-0 font-[inherit] text-text-primary underline underline-offset-2 hover:text-primary-button-bg';
+    'cursor-pointer appearance-none border-0 bg-transparent p-0 font-[inherit] text-[0.8125rem] text-gold-ink underline underline-offset-2';
   if (shell !== null) {
     return (
-      <button
-        type="button"
-        className={className}
-        onClick={() => {
-          if (target.kind === 'settings') {
-            shell.setSettingsOpen(true, target.section);
-          } else {
-            shell.setSettingsOpen(false);
-          }
-        }}
-      >
+      <button type="button" className={className} onClick={() => shell.setSettingsOpen(true, target.section)}>
         {children}
       </button>
     );
   }
-  if (target.kind === 'settings' && settingsHref !== undefined) {
+  if (settingsHref !== undefined) {
     return (
       <a className={className} href={settingsHref}>
         {children}
       </a>
     );
   }
-  return <span className="text-text-primary">{children}</span>;
+  return <span className="text-[0.8125rem] text-gold-ink">{children}</span>;
 };
 
 /**
- * The compact setup line the first frame keeps under its quietly watching ticket: "2 of 3 set up →",
- * linking to the first unfinished line. Nothing shows once setup is done or the guide is put away.
+ * The setup ticket: three lines the person can finish in a minute, shown only on a first run. It
+ * hides once every line is done or the owner skips it; the skip lives on the server, not here.
  */
-export const AmanFirstRunSummary: FC<{ placement: FirstRunPlacement }> = ({ placement }) => {
+export const AmanSetupTicket: FC = () => {
   const setup = useOptionalAmanSetup();
   const personalization = useOptionalPersonalization();
-  if (setup === null || !isFirstRunGuideVisible(setup)) {
+  if (!isSetupTicketVisible(setup) || setup === null) {
     return null;
   }
+  // The profile is still on its way: a line that ticks a moment later would flicker.
   if (personalization !== null && personalization.loading) {
     return null;
   }
-  const items = amanFirstRunItems({
+  const assistant = assistantDisplayName(personalization?.profile?.assistant_name);
+  const items = setupTicketItems({
+    assistantName: assistant,
     modelName: setup.modelName,
     userName: personalization?.profile?.user_name,
     hasChatted: setup.hasChatted,
-    placement,
-  });
-  const next = items.find(item => !item.done);
-  if (next === undefined) {
-    return null;
-  }
-  const label = `${items.filter(item => item.done).length} of ${items.length} set up →`;
-  return (
-    <p className="text-sm text-text-secondary" data-testid="aman-first-run-summary">
-      {next.action === undefined ? (
-        label
-      ) : (
-        <FirstRunLink target={next.action.target} settingsHref={setup.settingsHref}>
-          {label}
-        </FirstRunLink>
-      )}
-    </p>
-  );
-};
-
-/**
- * "What would help you most?" under the checklist. Each change is saved to the profile at once, so
- * the Tour's cards follow it without a Save step.
- */
-const TourHelpQuestion: FC<{
-  profile: PersonalizationProfile | null;
-  save: (profile: PersonalizationProfile) => Promise<PersonalizationProfile>;
-}> = ({ profile, save }) => {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const change = async (next: HelpAreaId[]) => {
-    setSaving(true);
-    setError(null);
-    try {
-      await save({ ...(profile ?? EMPTY_PERSONALIZATION_PROFILE), help_areas: next });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save your choices. Try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <div className="mt-3 border-t border-border/70 pt-3">
-      <HelpAreaChoices
-        idPrefix="aman-first-run-help"
-        value={profile?.help_areas ?? []}
-        onChange={change}
-        disabled={saving}
-      />
-      {error ? (
-        <p className="mt-2 text-sm text-failure-bg" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-};
-
-/**
- * The first-run card: what to set up and where, ticking itself off from real state. It renders
- * only inside an `AmanSetupProvider`, hides once the owner dismisses it, and never nags again:
- * the dismissal lives on the server, not in this browser.
- */
-export const AmanFirstRunGuide: FC<{
-  placement: FirstRunPlacement;
-  className?: string;
-}> = ({ placement, className }) => {
-  const setup = useOptionalAmanSetup();
-  const personalization = useOptionalPersonalization();
-  if (!isFirstRunGuideVisible(setup) || setup === null) {
-    return null;
-  }
-  // The profile is still on its way: a card that ticks "about you" a moment later would flicker.
-  if (personalization !== null && personalization.loading) {
-    return null;
-  }
-  const items = amanFirstRunItems({
-    modelName: setup.modelName,
-    userName: personalization?.profile?.user_name,
-    hasChatted: setup.hasChatted,
-    placement,
   });
   const doneCount = items.filter(item => item.done).length;
-  const allDone = doneCount === items.length;
-  const dismiss = setup.firstRunGuide?.dismiss;
+  if (doneCount === items.length) {
+    return null;
+  }
   return (
     <section
-      aria-labelledby="aman-first-run-heading"
-      data-testid="aman-first-run-guide"
-      data-placement={placement}
-      className={`w-full max-w-xl rounded-xl border border-border bg-card-bg p-4 text-left text-text-primary ${className ?? ''}`}
+      aria-labelledby="aman-setup-ticket-heading"
+      data-testid="aman-setup-ticket"
+      className="aui-settle w-full overflow-hidden rounded-[0.75rem] border border-border bg-card-bg text-left"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id="aman-first-run-heading" className="text-base font-semibold tracking-tight">
-            {allDone ? 'You are all set' : placement === 'chat' ? 'Get set up' : 'Welcome to Aman'}
-          </h2>
-          <p className="mt-0.5 text-sm text-text-secondary" data-testid="aman-first-run-progress">
-            {allDone
-              ? 'Everything on this list is done. You can put it away.'
-              : `${doneCount} of ${items.length} done. A few minutes now makes every chat better.`}
-          </p>
-        </div>
-        {dismiss === undefined ? null : (
-          <Button type="button" variant="ghost" size="small" className="shrink-0" onClick={dismiss}>
-            Dismiss
-          </Button>
-        )}
-      </div>
-      <ol className="mt-3 flex list-none flex-col gap-2 p-0" aria-label="Setup checklist">
-        {items.map(item => (
+      <header className="flex items-center justify-between gap-3 border-0 border-b border-dashed border-border px-4 py-3">
+        <h2 id="aman-setup-ticket-heading" className="aui-face-serif m-0 text-[0.9375rem] font-normal">
+          Set up {assistant}
+        </h2>
+        <p className="m-0 text-[0.8125rem] text-text-secondary">
+          {doneCount} of {items.length} done
+        </p>
+      </header>
+      <ol className="m-0 flex list-none flex-col p-0">
+        {items.map((item, index) => (
           <li
             key={item.key}
             data-done={item.done}
-            className="flex items-start gap-3 rounded-lg border border-border/70 bg-secondary-bg px-3 py-2"
+            className={`flex min-h-11 items-center gap-3 px-4 py-[0.6875rem] text-sm ${index === 0 ? '' : 'border-t border-border'}`}
           >
             {item.done ? (
-              <Icon name="circle-check" className="mt-0.5 size-4 shrink-0 text-success-bg" aria-hidden="true" />
+              <>
+                <Icon name="circle-check" size={16} className="shrink-0 text-gold-ink" aria-hidden="true" />
+                <span className="text-text-secondary line-through">{item.label}</span>
+                <span className="ml-auto text-[0.8125rem] text-text-secondary">{item.doneValue}</span>
+              </>
             ) : (
-              <span
-                className="mt-0.5 inline-block size-4 shrink-0 rounded-full border-2 border-border"
-                aria-hidden="true"
-              />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">
-                <span className="sr-only">{item.done ? 'Done: ' : 'To do: '}</span>
-                {item.label}
-              </p>
-              <p className="text-sm text-text-secondary">
-                {item.detail}
-                {item.done || item.action === undefined ? null : (
-                  <>
-                    {' '}
+              <>
+                <span
+                  className="size-3.5 shrink-0 rounded-full border-[0.09375rem] border-gold-line"
+                  aria-hidden="true"
+                />
+                <span className="text-text-primary">{item.label}</span>
+                {item.action === undefined ? null : (
+                  <span className="ml-auto">
                     <FirstRunLink target={item.action.target} settingsHref={setup.settingsHref}>
                       {item.action.label}
                     </FirstRunLink>
-                  </>
+                  </span>
                 )}
-              </p>
-            </div>
+              </>
+            )}
           </li>
         ))}
       </ol>
-      {placement === 'chat' && personalization !== null ? (
-        <TourHelpQuestion profile={personalization.profile} save={personalization.updateProfile} />
-      ) : null}
     </section>
   );
 };

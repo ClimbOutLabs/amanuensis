@@ -1,6 +1,5 @@
 'use client';
 
-import { Icon } from '../../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { ActivePersonaIndicator } from '../ActivePersonaIndicator.js';
@@ -9,11 +8,8 @@ import {
   type ComposerLeftSectionProps,
   type ComposerRightSectionProps,
 } from '../ComposerSections.js';
-import { auiButtonClass } from '../lib/buttonClasses.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
-import { Tooltip } from '../primitives/Tooltip.js';
-import { DraftReasoningEffortSelector } from './DraftReasoningEffortSelector.js';
 
 export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: ComposerLeftSectionProps) {
   const shell = useOptionalShellMode();
@@ -23,23 +19,19 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
-  const compactActions = [
-    {
-      id: 'agent-config',
-      label: 'Agent config',
-      icon: 'sliders',
-      onSelect: () => shell?.setAgentConfigOpen(true),
-    },
-    ...(onAttach === undefined
-      ? []
-      : [
+  // The builder has no add-ons picker; its one `+` menu holds the agent settings on small screens.
+  const builderActions = [
+    ...(isBuilder && compact
+      ? [
           {
-            id: 'attach',
-            label: 'Attach a file',
-            icon: 'paperclip',
-            onSelect: onAttach,
+            id: 'agent-config',
+            label: 'Agent config',
+            icon: 'sliders',
+            onSelect: () => shell?.setAgentConfigOpen(true),
           },
-        ]),
+        ]
+      : []),
+    ...(onAttach === undefined ? [] : [{ id: 'attach', label: 'Attach files', icon: 'paperclip', onSelect: onAttach }]),
   ];
 
   return (
@@ -49,38 +41,24 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
           <DraftCompositeSelector disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
           <ActivePersonaIndicator disabled={disabled || isRunning} />
         </>
-      ) : null}
-      {isBuilder && compact ? (
-        <DraftComposerActionsMenu actions={compactActions} disabled={disabled || isRunning} />
-      ) : null}
+      ) : (
+        <DraftComposerActionsMenu actions={builderActions} disabled={disabled || isRunning} />
+      )}
       {isBuilder && !compact && isMobile ? <DraftAgentConfigTrigger disabled={disabled} isRunning={isRunning} /> : null}
-      {isBuilder && !compact && onAttach != null ? (
-        <Tooltip content="Attach a file">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label="Attach a file"
-            className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-            onClick={onAttach}
-          >
-            <Icon name="paperclip" />
-          </button>
-        </Tooltip>
-      ) : null}
     </div>
   );
 }
 
+/** The model control sits at the end of the bar, beside the mic; it is hidden while a turn runs. */
 export function DraftComposerRightSection({ disabled, isRunning }: ComposerRightSectionProps) {
   const shell = useOptionalShellMode();
   const DraftModelSelector = useSlot('DraftModelSelector');
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
+  if (isRunning) return null;
 
   return (
     <div className="flex min-w-0 items-center gap-1">
       {!isBuilder ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
-      <DraftReasoningEffortSelector disabled={disabled} isRunning={isRunning} />
-      {/* Default trailing controls (mic) go last, beside Send, as in the plain composer. */}
       <ComposerRightSection disabled={disabled} isRunning={isRunning} />
     </div>
   );

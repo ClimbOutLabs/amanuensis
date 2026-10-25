@@ -25,9 +25,11 @@ describe('ThreadRootShell', () => {
 
     const root = screen.getByTestId('thread-root');
     const width = root.style.getPropertyValue('--thread-max-width');
-    // Keeps the message list and composer column readable (roughly 880-960px) instead of
-    // leaving very large, disproportionate gutters on wide viewports.
-    expect(width).toBe('min(48rem, 100% - 2rem)');
+    // Keeps the message list and composer column readable (48rem) instead of leaving very large,
+    // disproportionate gutters on wide viewports; only a folded side panel lends it more.
+    expect(width).toBe(
+      'min(calc(48rem + var(--thread-extra-left, 0rem) + var(--thread-extra-right, 0rem)), 100% - 2rem)',
+    );
   });
 });
 

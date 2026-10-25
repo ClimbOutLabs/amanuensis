@@ -10,6 +10,8 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
 import {
   ensureWritableDataDir,
   isDataDirConfigurationError,
@@ -591,8 +593,8 @@ export function vaultWriteNamespace(options: { tenantNamespace: string; scope: V
 
 /**
  * Every vault a scope may recall from, in priority order: its own persona vault,
- * the shared vault, then vaults the sharing config grants to it. Without a scope
- * only the shared vault is readable. Grants are read-only and never add a write target.
+ * the shared vault, then vaults the sharing config grants to it. Without a scope the
+ * main assistant's grants apply. Grants are read-only and never add a write target.
  */
 export async function vaultReadNamespaces(options: {
   baseDir: string;
@@ -601,14 +603,14 @@ export async function vaultReadNamespaces(options: {
 }): Promise<string[]> {
   const { baseDir, tenantNamespace, scope } = options;
   const namespaces = [vaultWriteNamespace({ tenantNamespace, scope }), tenantNamespace];
-  if (scope !== undefined) {
-    const { shares } = await readVaultSharing({ baseDir, tenantNamespace });
-    for (const key of [scope.personaName, scope.personaId]) {
-      // Own-property check: a persona named like an Object.prototype member must not match.
-      const granted = Object.hasOwn(shares, key) ? shares[key] : undefined;
-      for (const wireNamespace of granted ?? []) {
-        namespaces.push(vaultFilesystemNamespace(tenantNamespace, wireNamespace));
-      }
+  const { shares } = await readVaultSharing({ baseDir, tenantNamespace });
+  // With no agent answering, the main assistant's grants apply.
+  const keys = scope === undefined ? [MAIN_ASSISTANT_SHARING_KEY] : [scope.personaName, scope.personaId];
+  for (const key of keys) {
+    // Own-property check: a persona named like an Object.prototype member must not match.
+    const granted = Object.hasOwn(shares, key) ? shares[key] : undefined;
+    for (const wireNamespace of granted ?? []) {
+      namespaces.push(vaultFilesystemNamespace(tenantNamespace, wireNamespace));
     }
   }
   const seen = new Set<string>();

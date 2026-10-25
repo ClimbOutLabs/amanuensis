@@ -1,196 +1,127 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
-import { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from '@/components/AmanFirstRunGuide.js';
+import { AmanSetupTicket, setupTicketItems } from '@/components/AmanFirstRunGuide.js';
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import {
-  EMPTY_PERSONALIZATION_PROFILE,
-  PersonalizationProvider,
-  type PersonalizationProfile,
-} from '@/components/PersonalizationContext.js';
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 
-function renderGuide(input: { setup: AmanSetupState; userName?: string | null; placement?: 'chat' | 'settings' }) {
+function renderTicket({
+  assistantName = null,
+  userName = null,
+  setup,
+}: {
+  assistantName?: string | null;
+  userName?: string | null;
+  setup: AmanSetupState;
+}) {
   const api = {
-    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, user_name: input.userName ?? null }),
+    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: assistantName, user_name: userName }),
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
   return render(
     <PersonalizationProvider api={api}>
-      <AmanSetupProvider value={input.setup}>
-        <AmanFirstRunGuide placement={input.placement ?? 'chat'} />
+      <AmanSetupProvider value={setup}>
+        <AmanSetupTicket />
       </AmanSetupProvider>
     </PersonalizationProvider>,
   );
 }
 
-describe('amanFirstRunItems', () => {
-  it('ticks each line from real state', () => {
-    const fresh = amanFirstRunItems({
+const open: AmanSetupState = {
+  modelName: null,
+  hasChatted: false,
+  firstRunGuide: { dismissed: false, dismiss: () => {} },
+  settingsHref: '/settings',
+};
+
+describe('setupTicketItems', () => {
+  it('lists the three steps in order, with the actions that open Settings', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
       modelName: null,
       userName: null,
       hasChatted: false,
-      placement: 'chat',
     });
-    expect(fresh.map(item => [item.key, item.done])).toEqual([
-      ['model', false],
-      ['about-you', false],
-      ['first-chat', false],
-    ]);
 
-    const halfDone = amanFirstRunItems({
-      modelName: 'local/llama',
-      userName: 'Sam Rivera',
-      hasChatted: false,
-      placement: 'chat',
+    expect(items.map(item => item.label)).toEqual(['Add a model', 'Tell Mannie about you', 'Try your first chat']);
+    expect(items[0]?.action).toEqual({ label: 'Choose a model', target: { kind: 'settings', section: 'models' } });
+    expect(items[1]?.action).toEqual({
+      label: 'Open Personalization',
+      target: { kind: 'settings', section: 'personalization' },
     });
-    expect(halfDone.map(item => item.done)).toEqual([true, true, false]);
-    expect(halfDone[0]?.detail).toBe('Using local/llama.');
-    expect(halfDone[1]?.detail).toBe('Aman knows you as Sam Rivera.');
-
-    const done = amanFirstRunItems({
-      modelName: 'local/llama',
-      userName: 'Sam',
-      hasChatted: true,
-      placement: 'chat',
-    });
-    expect(done.every(item => item.done)).toBe(true);
+    expect(items[2]?.action).toBeUndefined();
   });
 
-  it('leaves out what the host could not find out, and treats a blank name as unset', () => {
-    const items = amanFirstRunItems({
+  it('marks each step done from its own state', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
+      modelName: 'local/llama',
+      userName: 'Sidd',
+      hasChatted: true,
+    });
+
+    expect(items.map(item => item.done)).toEqual([true, true, true]);
+    expect(items[0]?.doneValue).toBe('local/llama');
+    expect(items[1]?.doneValue).toBe('Sidd');
+  });
+
+  it('counts a blank model or name as not set', () => {
+    const items = setupTicketItems({
+      assistantName: 'Mannie',
       modelName: '  ',
       userName: '   ',
-      hasChatted: undefined,
-      placement: 'chat',
+      hasChatted: false,
     });
+
+    expect(items.map(item => item.done)).toEqual([false, false, false]);
+  });
+
+  it('leaves out the first-chat step when the host does not know whether a chat started', () => {
+    const items = setupTicketItems({ assistantName: 'Mannie', modelName: null, userName: null, hasChatted: undefined });
+
     expect(items.map(item => item.key)).toEqual(['model', 'about-you']);
-    expect(items.every(item => !item.done)).toBe(true);
-  });
-
-  it('offers a way back to chat only from settings', () => {
-    const inChat = amanFirstRunItems({
-      modelName: 'm',
-      userName: null,
-      hasChatted: false,
-      placement: 'chat',
-    });
-    expect(inChat.find(item => item.key === 'first-chat')?.action).toBeUndefined();
-
-    const inSettings = amanFirstRunItems({
-      modelName: 'm',
-      userName: null,
-      hasChatted: false,
-      placement: 'settings',
-    });
-    expect(inSettings.find(item => item.key === 'first-chat')?.action).toEqual({
-      label: 'Back to chat',
-      target: { kind: 'chat' },
-    });
   });
 });
 
-describe('AmanFirstRunGuide', () => {
-  it('shows progress, links the open lines to settings, and dismisses through the host', async () => {
-    const dismiss = vi.fn();
-    renderGuide({
-      userName: 'Sam',
-      setup: {
-        modelName: 'local/llama',
-        hasChatted: false,
-        firstRunGuide: { dismissed: false, dismiss },
-        settingsHref: '/settings',
-      },
+describe('AmanSetupTicket', () => {
+  it('shows the count, the three steps and the open actions', async () => {
+    renderTicket({ assistantName: 'Mannie', userName: 'Sidd', setup: { ...open, modelName: 'local/llama' } });
+
+    expect(await screen.findByRole('heading', { name: 'Set up Mannie' })).toBeInTheDocument();
+    expect(screen.getByText('2 of 3 done')).toBeInTheDocument();
+    expect(screen.getByText('Add a model')).toBeInTheDocument();
+    expect(screen.getByText('Tell Mannie about you')).toBeInTheDocument();
+    expect(screen.getByText('Try your first chat')).toBeInTheDocument();
+    // Both finished lines show their value, and no action is left to offer.
+    expect(screen.getByText('Sidd')).toBeInTheDocument();
+    expect(screen.queryByText('Choose a model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open Personalization')).not.toBeInTheDocument();
+  });
+
+  it('names the assistant in the about-you step, never a fixed name', async () => {
+    renderTicket({ assistantName: 'Juniper', setup: open });
+
+    expect(await screen.findByText('Tell Juniper about you')).toBeInTheDocument();
+    expect(screen.queryByText(/Aman|Mannie/)).not.toBeInTheDocument();
+  });
+
+  it('hides once every step is done', async () => {
+    const { container } = renderTicket({
+      assistantName: 'Mannie',
+      userName: 'Sidd',
+      setup: { ...open, modelName: 'local/llama', hasChatted: true },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.getByTestId('aman-first-run-progress')).toHaveTextContent('2 of 3 done.');
-    const items = screen.getAllByRole('listitem');
-    expect(items.map(item => item.getAttribute('data-done'))).toEqual(['true', 'true', 'false']);
-    expect(items[1]).toHaveTextContent('Done: Tell Aman about you');
-    // Memory works out of the box, so the checklist never asks about it.
-    expect(screen.getByTestId('aman-first-run-guide')).not.toHaveTextContent(/memory/i);
-    // Done lines carry no link; there is nothing left to do there.
-    expect(screen.queryByRole('link', { name: 'Open Personalization' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it('says so when everything is done, and renders nothing once dismissed', async () => {
-    const { unmount } = renderGuide({
-      userName: 'Sam',
-      setup: {
-        modelName: 'local/llama',
-        hasChatted: true,
-        firstRunGuide: { dismissed: false, dismiss: () => {} },
-      },
-    });
-    expect(await screen.findByRole('heading', { name: 'You are all set' })).toBeInTheDocument();
-    unmount();
-
-    renderGuide({
-      setup: { modelName: null, firstRunGuide: { dismissed: true, dismiss: () => {} } },
-    });
-    expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
-  });
-
-  it('has no dismiss control when the host cannot remember one', async () => {
-    renderGuide({ setup: { modelName: null, settingsHref: '/settings' } });
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
-  });
-
-  it('is visible until the host reports a dismissal', () => {
-    expect(isFirstRunGuideVisible(null)).toBe(false);
-    expect(isFirstRunGuideVisible({ modelName: null })).toBe(true);
-    expect(
-      isFirstRunGuideVisible({
-        modelName: null,
-        firstRunGuide: { dismissed: false, dismiss() {} },
-      }),
-    ).toBe(true);
-    expect(
-      isFirstRunGuideVisible({
-        modelName: null,
-        firstRunGuide: { dismissed: true, dismiss() {} },
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('AmanFirstRunGuide help question', () => {
-  it('saves a changed help choice to the profile at once, keeping the rest of the profile', async () => {
-    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => profile);
-    const saved: PersonalizationProfile = { ...EMPTY_PERSONALIZATION_PROFILE, user_name: 'Sam', help_areas: ['focus'] };
-    const api = {
-      getProfile: async () => saved,
-      updateProfile,
-      deleteProfile: async () => {},
-    };
-    render(
-      <PersonalizationProvider api={api}>
-        <AmanSetupProvider value={{ modelName: 'local/llama', hasChatted: false }}>
-          <AmanFirstRunGuide placement="chat" />
-        </AmanSetupProvider>
-      </PersonalizationProvider>,
-    );
-
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Caring for someone' }));
-
-    expect(updateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ user_name: 'Sam', help_areas: ['focus', 'caring'] }),
-    );
-  });
-
-  it('leaves the help question out of the Settings placement', async () => {
-    renderGuide({
-      setup: { modelName: 'local/llama', hasChatted: false },
-      placement: 'settings',
+  it('renders nothing once the owner has skipped it', () => {
+    const { container } = renderTicket({
+      assistantName: 'Mannie',
+      setup: { ...open, firstRunGuide: { dismissed: true, dismiss: () => {} } },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'What would help you most?' })).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });

@@ -23,7 +23,7 @@ export function cancelledTurnRefusal(reason: string): SendRefusal | undefined {
 
 /** What the chat says when a new message or answer waits on a reply that is still running. */
 function stillWorkingText(assistantName: string): string {
-  return `${assistantName} is still working on your last message. Wait for it to finish, or press Cancel, then send again.`;
+  return `${assistantName} is still working on your last message. Wait for it to finish, or press Stop, then send again.`;
 }
 
 /** Plain words for a send that got no reply. The server's own text is never shown for these. */

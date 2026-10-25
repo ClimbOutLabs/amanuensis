@@ -153,7 +153,7 @@ describe('offersChangeIt', () => {
     ).toBe(true);
   });
 
-  it('offers Change it for a new specialist', () => {
+  it('offers Change it for a new persona', () => {
     expect(
       offersChangeIt({
         ...card,

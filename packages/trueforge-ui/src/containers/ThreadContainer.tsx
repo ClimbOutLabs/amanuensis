@@ -3,7 +3,6 @@
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
-import { RuntimeTourWaiting } from '../components/AmanTourWaiting.js';
 import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
 import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
@@ -28,6 +27,7 @@ import { TerminalErrorContainer } from './TerminalErrorContainer.js';
 import { UserEditComposerContainer } from './UserEditComposerContainer.js';
 import { UserMessageContainer } from './UserMessageContainer.js';
 import { ThreadWorkOnRepoControls } from './WorkOnRepoControls.js';
+import { WorkOnRepoPanelProvider } from './workOnRepoPanel.js';
 
 export { isNewChatView } from '../utils/isNewChatView.js';
 
@@ -118,7 +118,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
             <ComposerBusyProvider>
               <AvatarActivityBridge />
               <ApprovalFocusProvider>
-                <RuntimeTourWaiting>
+                <WorkOnRepoPanelProvider>
                   <ThreadPrimitive.Root asChild>
                     <ThreadRootShell>
                       {/* The empty chat opens at its top: the first frame is taller than the screen on purpose. */}
@@ -173,7 +173,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                       )}
                     </ThreadRootShell>
                   </ThreadPrimitive.Root>
-                </RuntimeTourWaiting>
+                </WorkOnRepoPanelProvider>
               </ApprovalFocusProvider>
             </ComposerBusyProvider>
           </SentinelStateProvider>

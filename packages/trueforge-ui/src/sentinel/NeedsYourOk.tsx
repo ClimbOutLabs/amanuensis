@@ -3,7 +3,9 @@
 import type { FC, ReactNode } from 'react';
 
 export const NEEDS_YOUR_OK_TITLE = 'Needs your OK';
-export const NEEDS_YOUR_OK_INTRO = 'Aman held these for you. Nothing has been done yet.';
+export function needsYourOkIntro(assistant: string): string {
+  return `${assistant} held these for you. Nothing has been done yet.`;
+}
 
 export function notSavedText(count: number): string {
   const actions = count === 1 ? "1 more action wasn't" : `${count} more actions weren't`;
@@ -21,7 +23,11 @@ export const NotSavedNote: FC<{ count: number }> = ({ count }) => (
  * The block a finished scheduled run ends with. The app writes it from the actions the run held, so
  * the model cannot leave one out or add one; its own words stay in the message above.
  */
-export const NeedsYourOk: FC<{ children: ReactNode; notSavedCount?: number }> = ({ children, notSavedCount = 0 }) => (
+export const NeedsYourOk: FC<{ children: ReactNode; notSavedCount?: number; assistant: string }> = ({
+  children,
+  notSavedCount = 0,
+  assistant,
+}) => (
   <section
     aria-labelledby="needs-your-ok-title"
     data-role="needs-your-ok"
@@ -30,7 +36,7 @@ export const NeedsYourOk: FC<{ children: ReactNode; notSavedCount?: number }> = 
     <h3 id="needs-your-ok-title" className="text-sm font-semibold text-text-primary">
       {NEEDS_YOUR_OK_TITLE}
     </h3>
-    <p className="mt-1 text-sm text-text-secondary">{NEEDS_YOUR_OK_INTRO}</p>
+    <p className="mt-1 text-sm text-text-secondary">{needsYourOkIntro(assistant)}</p>
     <ul className="mt-3 list-none space-y-3 p-0">{children}</ul>
     {notSavedCount > 0 && <NotSavedNote count={notSavedCount} />}
   </section>

@@ -102,7 +102,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
   };
 
   return (
-    <NeedsYourOk notSavedCount={notSavedCount}>
+    <NeedsYourOk notSavedCount={notSavedCount} assistant={assistantName}>
       {held.map(info => (
         <HeldActionCard
           key={info.toolCallId}

@@ -8,7 +8,6 @@ import { useAuiState } from '@/assistant-ui.js';
 import { chatSandboxKnownOff } from '@/atoms/draft/agentSandbox.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import {
-  useOptionalRepositoryWork,
   useRepositoryWork,
   type GithubRepositoryDetails,
   type GithubRepositoryOption,
@@ -16,8 +15,10 @@ import {
   type RepositorySummary,
   type SessionRepositoryBinding,
 } from '@/components/RepositoryWorkContext.js';
-import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
+import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from './workOnRepoPanel.js';
 
 export type WorkOnRepoControlsProps = {
   sessionId: string | null;
@@ -137,12 +138,17 @@ export function WorkOnRepoControls({
   sandboxOff,
   sendMessage,
 }: WorkOnRepoControlsProps) {
+  const assistant = useAssistantDisplayName();
   const api = useRepositoryWork();
   const [binding, setBinding] = useState<SessionRepositoryBinding | null>(null);
   const [repository, setRepository] = useState<RepositorySummary | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
   const [proposals, setProposals] = useState<RepositoryCommandProposal[]>([]);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // The panel opens from the composer's + menu through the shared context; alone, it keeps its own state.
+  const [localPanelOpen, setLocalPanelOpen] = useState(false);
+  const shared = useOptionalWorkOnRepoPanel();
+  const panelOpen = shared?.panelOpen ?? localPanelOpen;
+  const setPanelOpen = shared?.setPanelOpen ?? setLocalPanelOpen;
   const [repoOptions, setRepoOptions] = useState<GithubRepositoryOption[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [urlValue, setUrlValue] = useState('');
@@ -152,8 +158,6 @@ export function WorkOnRepoControls({
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // The sandbox line is said only once the person reaches for this control, never to a chat that did not.
-  const [askedWithoutSandbox, setAskedWithoutSandbox] = useState(false);
   const startingRef = useRef(false);
   const sawCloneTurnRef = useRef(false);
   const previousSessionRef = useRef(sessionId);
@@ -196,8 +200,7 @@ export function WorkOnRepoControls({
     setPendingStart(null);
     setStartError(null);
     setPanelOpen(false);
-    setAskedWithoutSandbox(false);
-  }, [sessionId]);
+  }, [sessionId, setPanelOpen]);
 
   useEffect(() => {
     void refreshBinding();
@@ -270,19 +273,19 @@ export function WorkOnRepoControls({
     })();
   }, [api, pendingStart, sessionId, isRunning, turnFailed, refreshBinding]);
 
-  const openPanel = useCallback(() => {
-    setPanelOpen(true);
-    if (sessionId && repoOptions === null) {
-      void (async () => {
-        try {
-          setRepoOptions(await api.listGithubRepositories(sessionId));
-          setListError(null);
-        } catch (error) {
-          setListError(getErrorMessage(error, 'Your repos could not be loaded. Try again.'));
-        }
-      })();
+  useEffect(() => {
+    if (!panelOpen || sandboxOff || !sessionId || repoOptions !== null) {
+      return;
     }
-  }, [api, sessionId, repoOptions]);
+    void (async () => {
+      try {
+        setRepoOptions(await api.listGithubRepositories(sessionId));
+        setListError(null);
+      } catch (error) {
+        setListError(getErrorMessage(error, 'Your repos could not be loaded. Try again.'));
+      }
+    })();
+  }, [api, panelOpen, sandboxOff, sessionId, repoOptions]);
 
   const pickDetails = useCallback((details: GithubRepositoryDetails) => {
     setSelected(details);
@@ -334,7 +337,7 @@ export function WorkOnRepoControls({
       branch: chosenBranch,
     });
     setPanelOpen(false);
-  }, [selected, chosenBranch, sendMessage]);
+  }, [selected, chosenBranch, sendMessage, setPanelOpen]);
 
   const confirmProposal = useCallback(
     async (proposal: RepositoryCommandProposal) => {
@@ -415,7 +418,7 @@ export function WorkOnRepoControls({
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-card-bg px-3 py-2.5 shadow-sm">
             <p className="text-[0.8125rem] font-medium text-text-primary">Commands found in this repo</p>
             <p className="text-[0.8125rem] text-text-secondary">
-              Aman found these commands in the repo files. Confirm the ones it may run.
+              {assistant} found these commands in the repo files. Confirm the ones it may run.
             </p>
             <ul className="flex flex-col gap-2">
               {proposals.map(proposal => (
@@ -454,24 +457,13 @@ export function WorkOnRepoControls({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="small"
-          onClick={sandboxOff ? () => setAskedWithoutSandbox(true) : panelOpen ? () => setPanelOpen(false) : openPanel}
-        >
-          <FolderGit2 aria-hidden className="mr-1.5 h-3.5 w-3.5" />
-          Work on a repo
-        </Button>
-        {pendingStart ? (
-          <p className="text-[0.8125rem] text-text-secondary">
-            Aman is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on the{' '}
-            {pendingStart.branch} branch.
-          </p>
-        ) : null}
-      </div>
-      {sandboxOff && askedWithoutSandbox ? (
+      {pendingStart ? (
+        <p className="text-[0.8125rem] text-text-secondary">
+          {assistant} is cloning {pendingStart.fullName} in this chat. When the clone finishes, this chat will work on
+          the {pendingStart.branch} branch.
+        </p>
+      ) : null}
+      {panelOpen && sandboxOff ? (
         <p className="text-[0.8125rem] text-text-secondary">
           Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.
         </p>
@@ -483,6 +475,12 @@ export function WorkOnRepoControls({
       ) : null}
       {panelOpen && !sandboxOff ? (
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-card-bg px-3 py-2.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[0.8125rem] font-medium text-text-primary">Work on a repo</p>
+            <Button type="button" variant="ghost" size="small" onClick={() => setPanelOpen(false)}>
+              Close
+            </Button>
+          </div>
           {sessionId ? (
             <div className="flex flex-col gap-1.5">
               <p className="text-[0.8125rem] font-medium text-text-primary">Your GitHub repos</p>
@@ -577,10 +575,8 @@ export function WorkOnRepoControls({
 }
 
 export function ThreadWorkOnRepoControls() {
-  const api = useOptionalRepositoryWork();
-  const capabilities = useServerCapabilities();
   // Without a sandbox on this server the clone can never run, so the control is left out.
-  if (api == null || capabilities?.sandbox.enabled === false) {
+  if (!useWorkOnRepoAvailable()) {
     return null;
   }
   return <ConnectedThreadWorkOnRepoControls />;
