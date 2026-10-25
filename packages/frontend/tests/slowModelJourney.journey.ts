@@ -57,7 +57,7 @@ const SCENARIO_LIMIT_MS = 240_000;
 const REPLY_LIMIT_MS = 60_000;
 const UI_LIMIT_MS = 30_000;
 const SEND = 'Send message';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const DENY = 'Not now';
 
 let api: ApprovalTestServer;
@@ -623,7 +623,7 @@ journey(
       await send(page, `${RUN_DIRECTIVE_PREFIX}${RESEARCH_DIRECTIVE} the history of Lantern Row`);
       let quietSince = Date.now();
       await until('the research reply finishing', SCENARIO_LIMIT_MS, async () => {
-        const allow = page.getByRole('button', { name: ALLOW }).first();
+        const allow = page.getByRole('button', { name: ALLOW, exact: true }).first();
         if (await allow.isVisible()) {
           await allow.click().catch(() => undefined);
           quietSince = Date.now();
