@@ -95,22 +95,28 @@ function readTour(source, fileName) {
 
   if (!exported.has(TOUR_CARDS_EXPORT)) {
     throw new AmanGuideBuildError(
-      `tourPrompts.ts must export ${TOUR_CARDS_EXPORT}. The guide build reads the Tour cards from it.`,
+      `tourPrompts.ts must export ${TOUR_CARDS_EXPORT}, the table the guide build reads the Tour cards from. Add export to its declaration.`,
     );
   }
   const table = withoutTypeWrappers(declarations.get(TOUR_CARDS_EXPORT));
   if (!ts.isObjectLiteralExpression(table)) {
-    throw new AmanGuideBuildError(`${TOUR_CARDS_EXPORT} in tourPrompts.ts must be a table of cards keyed by card id.`);
+    throw new AmanGuideBuildError(
+      `${TOUR_CARDS_EXPORT} in tourPrompts.ts must be a table of cards keyed by card id. Write it as { key: { title: ... }, ... }.`,
+    );
   }
   const cards = new Map();
   for (const property of table.properties) {
     if (!ts.isPropertyAssignment(property) || !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))) {
-      throw new AmanGuideBuildError(`Every entry in ${TOUR_CARDS_EXPORT} must be a card id and a card.`);
+      throw new AmanGuideBuildError(
+        `Every entry in ${TOUR_CARDS_EXPORT} must be a card id and a card. Write each one as key: { title: ... }, not a spread or a computed key.`,
+      );
     }
     const key = property.name.text;
     const card = withoutTypeWrappers(property.initializer);
     if (!ts.isObjectLiteralExpression(card)) {
-      throw new AmanGuideBuildError(`Tour card "${key}" must be written out in ${TOUR_CARDS_EXPORT}.`);
+      throw new AmanGuideBuildError(
+        `Tour card "${key}" must be written out in ${TOUR_CARDS_EXPORT}. Write the card as an object with a title in place of the name it points to.`,
+      );
     }
     const props = propertyMap(card);
     const label = literalText(props.get('title'), `Tour card "${key}" title`);
@@ -123,7 +129,9 @@ function readTour(source, fileName) {
     cards.set(key, { label, needs });
   }
   if (cards.size === 0) {
-    throw new AmanGuideBuildError('No Tour cards found in tourPrompts.ts.');
+    throw new AmanGuideBuildError(
+      `No Tour cards found in ${TOUR_CARDS_EXPORT} in tourPrompts.ts. Add at least one card with a title.`,
+    );
   }
   return { cards, capabilityKeys };
 }
