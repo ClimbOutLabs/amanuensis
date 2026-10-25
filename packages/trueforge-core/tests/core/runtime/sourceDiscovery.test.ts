@@ -76,5 +76,11 @@ describe('source discovery contract at the model request boundary', () => {
     expect(systemMessage?.content).toContain(
       'When the question names a period or is about the past, search that period instead',
     );
+    // A list is checked in several short searches, so no single search runs into the length hold.
+    expect(systemMessage?.content).toContain('Search for one topic at a time.');
+    expect(systemMessage?.content).toContain(
+      'run several short searches of a few items each instead of one long search',
+    );
+    expect(createSourceDiscoveryContract({ shellCanFetch: true })).toContain('Search for one topic at a time.');
   });
 });
