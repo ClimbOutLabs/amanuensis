@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 
 import { TENANT_ID } from '../../trueforge/src/apis/sessions.ts';
@@ -57,7 +57,6 @@ const SCENARIO_LIMIT_MS = 240_000;
 const REPLY_LIMIT_MS = 60_000;
 const UI_LIMIT_MS = 30_000;
 const SEND = 'Send message';
-const CANCEL = 'Cancel';
 const ALLOW = 'Allow it';
 const DENY = 'Not now';
 
@@ -182,6 +181,33 @@ function input(page: Page) {
   return page.getByRole('textbox', { name: 'Message input' });
 }
 
+/** The button that stops a running reply: Stop in the new chat, Cancel in the old one. */
+function stopButton(page: Page) {
+  return page.getByRole('button', { name: /^(Stop|Cancel)$/ });
+}
+
+/** The chat header's agent details control: a switch in the new chat, a toggle button in the old one. */
+function agentDetailsToggle(page: Page) {
+  return page
+    .getByRole('switch', { name: 'Agent details' })
+    .or(page.getByRole('button', { name: 'Show agent details' }));
+}
+
+async function agentDetailsAreOn(toggle: Locator): Promise<boolean> {
+  const state = (await toggle.getAttribute('aria-checked')) ?? (await toggle.getAttribute('aria-pressed'));
+  return state === 'true';
+}
+
+/** The chat list is always docked in the old chat; in the new one it opens from the rail's Chats entry. */
+async function openChatList(page: Page): Promise<void> {
+  const list = page.getByRole('complementary', { name: 'Recent chats' });
+  if (await list.isVisible()) return;
+  const chats = page.getByRole('navigation', { name: 'Sidebar' }).getByRole('button', { name: 'Chats' });
+  if ((await chats.count()) === 0) return;
+  await chats.click({ timeout: UI_LIMIT_MS });
+  await list.waitFor({ timeout: UI_LIMIT_MS });
+}
+
 async function openHome(page: Page): Promise<void> {
   await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
   await input(page).waitFor({ timeout: UI_LIMIT_MS });
@@ -221,7 +247,7 @@ function assistantReplies(page: Page) {
 async function waitForIdle(page: Page, what: string, ms: number = REPLY_LIMIT_MS): Promise<void> {
   await until(`${what} finishing (Send back, Cancel gone)`, ms, async () => {
     const sendShown = await page.getByRole('button', { name: SEND, exact: true }).isVisible();
-    const cancelShown = await page.getByRole('button', { name: CANCEL, exact: true }).isVisible();
+    const cancelShown = await stopButton(page).isVisible();
     return sendShown && !cancelShown;
   });
 }
@@ -250,6 +276,7 @@ async function waitForThinking({ what, since }: { what: string; since: number })
 
 /** Opens a chat from the chat list by its name, as a person clicks it. */
 async function clickChat(page: Page, title: string): Promise<void> {
+  await openChatList(page);
   await page.getByText(title, { exact: true }).first().click({ timeout: UI_LIMIT_MS });
   await input(page).waitFor({ timeout: UI_LIMIT_MS });
 }
@@ -257,18 +284,14 @@ async function clickChat(page: Page, title: string): Promise<void> {
 /** The chat is idle with no model call still being written. A waiting card also leaves the chat idle. */
 async function settled(page: Page): Promise<boolean> {
   const sendShown = await page.getByRole('button', { name: SEND, exact: true }).isVisible();
-  const cancelShown = await page.getByRole('button', { name: CANCEL, exact: true }).isVisible();
+  const cancelShown = await stopButton(page).isVisible();
   return sendShown && !cancelShown && openReplyCalls().length === 0;
 }
 
 async function turnOnAgentDetails(page: Page) {
-  const toggle = page.getByRole('button', { name: 'Show agent details' });
+  const toggle = agentDetailsToggle(page);
   await toggle.click({ timeout: UI_LIMIT_MS });
-  await until(
-    'agent details turning on',
-    UI_LIMIT_MS,
-    async () => (await toggle.getAttribute('aria-pressed')) === 'true',
-  );
+  await until('agent details turning on', UI_LIMIT_MS, () => agentDetailsAreOn(toggle));
   return toggle;
 }
 
@@ -381,7 +404,7 @@ async function leaveAndComeBack({
   await comeBack();
   assert.equal(call.outcome(), 'open', `${label}: the reply was still being written when the chat was opened again`);
   await until(`${label}: Cancel showing while the reply is still running`, UI_LIMIT_MS, async () => {
-    return await page.getByRole('button', { name: CANCEL, exact: true }).isVisible();
+    return await stopButton(page).isVisible();
   });
   await waitForReplyText(page, `${label}: the reply finishing live, without a reload`, repliesBefore + 1);
   await waitForIdle(page, label);
@@ -426,6 +449,7 @@ journey(
       label: 'through a chat inside a folder',
       leave: () => clickChat(page, other),
       comeBack: async () => {
+        await openChatList(page);
         if (!(await page.getByText(inFolder, { exact: true }).first().isVisible())) {
           await page.getByText('Journey folder', { exact: true }).first().click({ timeout: UI_LIMIT_MS });
         }
@@ -455,16 +479,16 @@ journey('3. Cancel in the first seconds, before the model is called: it stays st
   api.setAdmissionDelay(ADMISSION_MS);
   api.model.setPacing(SLOW);
   await send(page, 'Early cancel: tell me about Lantern Row');
-  await page.getByRole('button', { name: CANCEL, exact: true }).waitFor({ timeout: UI_LIMIT_MS });
+  await stopButton(page).waitFor({ timeout: UI_LIMIT_MS });
   await pause(1_500);
   assert.equal(replyCalls().length, callsBefore, 'the model was not called yet when Cancel was pressed');
-  await page.getByRole('button', { name: CANCEL, exact: true }).click();
+  await stopButton(page).click();
   await waitForIdle(page, 'the cancelled reply', UI_LIMIT_MS);
   // Long enough for the preparation to finish and the model to be reached, if anything still runs.
   await pause(ADMISSION_MS + 10_000);
   assert.equal(replyCalls().length, callsBefore, 'no model call happened after Cancel');
   assert.notEqual(await lastTurnStatus(sessionId), 'running', 'the server does not keep the reply running');
-  assert.equal(await page.getByRole('button', { name: CANCEL, exact: true }).count(), 0, 'the chat shows it stopped');
+  assert.equal(await stopButton(page).count(), 0, 'the chat shows it stopped');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await input(page).waitFor({ timeout: UI_LIMIT_MS });
   await pause(5_000);
@@ -484,7 +508,7 @@ journey(
     await send(page, 'Thinking cancel: tell me about Lantern Row');
     const call = await waitForThinking({ what: 'cancel mid-thought', since });
     const callsAtCancel = replyCalls().length;
-    await page.getByRole('button', { name: CANCEL, exact: true }).click();
+    await stopButton(page).click();
     await until('the model request being cut off after Cancel', 10_000, () => call.outcome() === 'aborted');
     await waitForIdle(page, 'the cancelled reply', UI_LIMIT_MS);
     await until('the server storing the reply as stopped', UI_LIMIT_MS, async () => {
@@ -691,8 +715,7 @@ journey(
         }
         const replyDone = (await assistantReplies(page).getByText(FINAL_TEXT).count()) > repliesBefore;
         if (!replyDone) {
-          detailsGone =
-            detailsGone || !(await details.isVisible()) || (await toggle.getAttribute('aria-pressed')) !== 'true';
+          detailsGone = detailsGone || !(await details.isVisible()) || !(await agentDetailsAreOn(toggle));
         }
         return replyDone;
       });
@@ -1128,10 +1151,7 @@ journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () =
   await waitForReplyText(page, '"Make a space about dog breeds"', 1);
   await waitForIdle(page, '"Make a space about dog breeds"');
   assert.equal(await lastTurnStatus(sessionId), 'done', 'the server stores the reply as done');
-  assert.ok(
-    api.mcp.webSearchInvocations() - searchesBefore >= 3,
-    'the searches ran before the space was made',
-  );
+  assert.ok(api.mcp.webSearchInvocations() - searchesBefore >= 3, 'the searches ran before the space was made');
   const spaces = readField(await apiJson('/api/v1/spaces'), 'data', 'spaces');
   assert.ok(
     Array.isArray(spaces) && spaces.some(space => readField(space, 'name') === 'Dog breeds'),
@@ -1163,8 +1183,8 @@ journey(
       await waitForReplyText(page, 'the first reply', 1);
       await waitForIdle(page, 'the first reply');
 
-      const toggle = page.getByRole('button', { name: 'Show agent details' });
-      assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'agent details are off in this chat');
+      const toggle = agentDetailsToggle(page);
+      assert.equal(await agentDetailsAreOn(toggle), false, 'agent details are off in this chat');
       const folded = async (label: string): Promise<void> => {
         assert.equal(
           await page.getByTestId('assistant-message-agent-internals').count(),
@@ -1181,20 +1201,18 @@ journey(
       // A second, long turn: several slow searches, so it is still running minutes in.
       api.model.setPacing(SLOW);
       await send(page, 'Now tell me about lighthouse keepers');
-      await until('the second turn running (Cancel showing)', UI_LIMIT_MS, async () =>
-        page.getByRole('button', { name: CANCEL, exact: true }).isVisible(),
-      );
+      await until('the second turn running (Cancel showing)', UI_LIMIT_MS, async () => stopButton(page).isVisible());
       await pause(3_000);
       await folded('while the second turn runs');
 
       // A reload mid-turn re-reads the chat from the server; every turn must stay folded.
       await openChat(page, sessionId);
       await until('the second turn still running after the reload', UI_LIMIT_MS, async () =>
-        page.getByRole('button', { name: CANCEL, exact: true }).isVisible(),
+        stopButton(page).isVisible(),
       );
       await folded('after a reload mid-turn');
 
-      await page.getByRole('button', { name: CANCEL, exact: true }).click();
+      await stopButton(page).click();
       await waitForIdle(page, 'the second reply stopped');
     } finally {
       api.model.setPlanner(undefined);
