@@ -88,6 +88,10 @@ export function useMemoryVaultState() {
   const [now, setNow] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Collections whose newest turn summary failed and is still owed, from the last load.
+  const [summaryPending, setSummaryPending] = useState<{ namespace: string; persona: string | null }[]>([]);
+  // Set when some collections loaded and others did not: the list is shown with this note.
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [sharing, setSharing] = useState<MemoryVaultSharing | null>(null);
   const [sharingError, setSharingError] = useState<string | null>(null);
@@ -114,26 +118,47 @@ export function useMemoryVaultState() {
     }
     setLoading(true);
     setError(null);
-    try {
-      const lists = await Promise.all(
-        collections.map(async collection => {
-          const listed = await vault.listEntries(
-            collection.namespace === SHARED_NAMESPACE ? undefined : collection.namespace,
-          );
-          return listed.map((entry): ExplorerMemory => ({
+    setLoadWarning(null);
+    // Each collection loads on its own: one collection's failed read must not hide the
+    // memories the others already returned, so the loads settle independently and only
+    // a load where every collection failed becomes the page error.
+    const results = await Promise.allSettled(
+      collections.map(async collection => {
+        const listed = await vault.listEntries(
+          collection.namespace === SHARED_NAMESPACE ? undefined : collection.namespace,
+        );
+        // A failed status read only loses the pending line for this collection; the
+        // entries it returned still count.
+        const status = await vault
+          .getSummaryStatus(collection.namespace === SHARED_NAMESPACE ? undefined : collection.namespace)
+          .catch(() => null);
+        return {
+          collection,
+          entries: listed.map((entry): ExplorerMemory => ({
             ...entry,
             persona: collection.persona ?? entry.persona,
             owner: collection.owner,
-          }));
-        }),
+          })),
+          summaryPending: status?.summaryPending ?? false,
+        };
+      }),
+    );
+    const loaded = results.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    setNow(new Date());
+    if (failure !== undefined && loaded.length === 0) {
+      setSummaryPending([]);
+      setError(memoryVaultErrorMessage(failure.reason));
+    } else {
+      setEntries(sortNewestFirst(loaded.flatMap(load => load.entries)));
+      setSummaryPending(
+        loaded
+          .filter(load => load.summaryPending)
+          .map(load => ({ namespace: load.collection.namespace, persona: load.collection.persona })),
       );
-      setNow(new Date());
-      setEntries(sortNewestFirst(lists.flat()));
-    } catch (loadError) {
-      setError(memoryVaultErrorMessage(loadError));
-    } finally {
-      setLoading(false);
+      setLoadWarning(failure === undefined ? null : 'Some memories could not be loaded. Try again.');
     }
+    setLoading(false);
   }, [vault, collections]);
 
   useEffect(() => {
@@ -327,6 +352,8 @@ export function useMemoryVaultState() {
     entries: liveEntries,
     loading,
     error,
+    loadWarning,
+    summaryPending,
     actionError,
     search,
     setSearch,

@@ -8,7 +8,7 @@
  * to the text recall returns — a mismatch would re-embed every entry on each pass.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
@@ -572,6 +572,64 @@ export async function writeVaultSharing(options: {
       throw new Error(USER_FACING_STORAGE_UNAVAILABLE_MESSAGE, { cause: error });
     }
     throw error;
+  }
+}
+
+/**
+ * Marker file inside a namespace directory: present while the vault's newest turn
+ * summary is still owed. It lives beside the sharing config, never inside `memory/`,
+ * so the vault scans never read it as a memory entry.
+ */
+export const SUMMARY_PENDING_FILE = '.summary-pending.json';
+
+/** What the summary-pending marker records: when the attempt failed, and the log's reason code for why. */
+export interface SummaryPendingMark {
+  failed_at: string;
+  reason: string;
+}
+
+function summaryPendingFileFor(baseDir: string, namespace: string): string {
+  return path.join(namespaceDirFor(baseDir, namespace), SUMMARY_PENDING_FILE);
+}
+
+function isSummaryPendingMark(value: unknown): value is SummaryPendingMark {
+  return isRecord(value) && typeof value['failed_at'] === 'string' && typeof value['reason'] === 'string';
+}
+
+/** Records that this vault's newest turn summary failed and is still owed. */
+export async function markSummaryFailed(options: {
+  baseDir: string;
+  namespace: string;
+  mark: SummaryPendingMark;
+}): Promise<void> {
+  try {
+    const dir = namespaceDirFor(options.baseDir, options.namespace);
+    await ensureWritableDataDir({ dir, envVar: 'MEMORY_MARKDOWN_DIR' });
+    await writeFile(summaryPendingFileFor(options.baseDir, options.namespace), JSON.stringify(options.mark), 'utf8');
+  } catch (error) {
+    if (isDataDirConfigurationError(error)) {
+      throw new Error(USER_FACING_STORAGE_UNAVAILABLE_MESSAGE, { cause: error });
+    }
+    throw error;
+  }
+}
+
+/** Removes the summary-pending marker: a later summary for this vault succeeded. */
+export async function clearSummaryPending(options: { baseDir: string; namespace: string }): Promise<void> {
+  await rm(summaryPendingFileFor(options.baseDir, options.namespace), { force: true });
+}
+
+/** Reads the summary-pending marker; a missing or unreadable marker reads as no summary owed. */
+export async function readSummaryPending(options: {
+  baseDir: string;
+  namespace: string;
+}): Promise<SummaryPendingMark | undefined> {
+  try {
+    const raw = await readFile(summaryPendingFileFor(options.baseDir, options.namespace), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    return isSummaryPendingMark(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
   }
 }
 

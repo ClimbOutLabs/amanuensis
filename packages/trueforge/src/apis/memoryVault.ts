@@ -17,6 +17,7 @@ import {
   deleteMemoryVaultEntryRoute,
   exportMemoryVaultRoute,
   getMemoryVaultSharingRoute,
+  getMemoryVaultSummaryStatusRoute,
   importMemoryVaultRoute,
   listMemoryVaultEntriesRoute,
   putMemoryVaultSharingRoute,
@@ -254,6 +255,17 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     return c.json({ data: { shares: sharing.shares } }, 200);
   };
 
+  const summaryStatusHandler: RouteHandler<typeof getMemoryVaultSummaryStatusRoute> = async c => {
+    const { namespace } = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const client = vaultClient(deps, requestContext.tenant_id);
+    if (client === undefined) {
+      return markdownBackendRequired(c);
+    }
+    const summaryPending = await client.summaryPending({ namespace: namespace ?? '' });
+    return c.json({ data: { summary_pending: summaryPending } }, 200);
+  };
+
   const router = new OpenAPIHono();
   // Static paths first: `/{entry_id}` would also match `/export`, `/import`, `/sharing`.
   router.openapi(listMemoryVaultEntriesRoute, listHandler);
@@ -261,6 +273,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   router.openapi(importMemoryVaultRoute, importHandler);
   router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
   router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
+  router.openapi(getMemoryVaultSummaryStatusRoute, summaryStatusHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);
   return router;
