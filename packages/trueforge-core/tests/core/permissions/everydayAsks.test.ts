@@ -474,7 +474,7 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     const decision = await classifyTier(search('dana@example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
     expect(decision.card?.plain_what).toBe(
-      'Web search: dana@example.org. This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
+      'Search the web for dana@example.org? This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
     );
   });
 
