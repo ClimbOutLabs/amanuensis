@@ -102,4 +102,3 @@ export function approvalStub(card: SentinelApprovalCard): ApprovalStub {
     detail: stubDetail(card),
   };
 }
-
