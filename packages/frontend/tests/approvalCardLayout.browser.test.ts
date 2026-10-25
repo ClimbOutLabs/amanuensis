@@ -21,7 +21,7 @@ import { screenshotDir } from './support/screenshotDir.ts';
  */
 
 const RENDER_TIMEOUT_MS = 45_000;
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const DENY = 'Not now';
 /** How far short of the bottom the thread is scrolled: the natural answering position. */
 const SCROLL_UP_PX = 110;

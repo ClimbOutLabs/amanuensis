@@ -334,13 +334,13 @@ function mapsPlainWhat(action: SentinelAction): string {
   if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
     return (
       `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
-      `${mapsRouteService({ mode: params['mode'], hosts })}, then load map tiles for that area from ${tile}.`
+      `${mapsRouteService({ mode: params['mode'], hosts })}, then load map tiles for that area from ${tile}?`
     );
   }
   if (action.tool_name === RENDER_PLACES_TOOL_NAME) {
     return (
       `Send the addresses ${joinedLabels(placeAddresses(params))} to ${geocoder} to find where they are, ` +
-      `then load map tiles for that area from ${tile}. The details on each pin come from pages Aman already read.`
+      `then load map tiles for that area from ${tile}? The details on each pin come from pages already read.`
     );
   }
   const placeName = mapsCardLabel(params['place_name']);
@@ -348,10 +348,10 @@ function mapsPlainWhat(action: SentinelAction): string {
     const poi = mapsCardLabel(params['poi']);
     return (
       `Send ${placeName} and ${poi} to ${geocoder} to find ${poi} near it, ` +
-      `then load map tiles for that area from ${tile}.`
+      `then load map tiles for that area from ${tile}?`
     );
   }
-  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
+  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}?`;
 }
 
 function stringParam(params: Record<string, unknown>, key: string): string | null {
@@ -371,11 +371,6 @@ function plainWhy(agentIntent: string | null): string | null {
     return null;
   }
   return firstSentence(agentIntent);
-}
-
-function basenameOf(p: string): string {
-  const base = p.split('/').pop() ?? p;
-  return base === '' ? p : base;
 }
 
 function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
@@ -1118,7 +1113,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   if (env !== null && Object.keys(env).length > 0) {
     return tier3Decision({
       card: {
-        plain_what: `Run \`${escapeDisplayText(command)}\` with custom environment variables.`,
+        plain_what: 'Run this command with custom environment variables?',
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
@@ -1182,7 +1177,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     if (identity === null) {
       return tier3Decision({
         card: {
-          plain_what: `Execute \`${escapeDisplayText(basenameOf(executedOperand))}\`, which the server cannot resolve to a workspace file.`,
+          plain_what: 'Run this program, even though it cannot be matched to a file in your workspace?',
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
@@ -1231,7 +1226,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             : await mintPlainToken({ ctx, tool_name: action.tool_name, params: grantParams });
         return tier3Decision({
           card: {
-            plain_what: `Execute \`${escapeDisplayText(basenameOf(identity))}\`, a script the agent wrote earlier.`,
+            plain_what: 'Run a script the assistant wrote earlier?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
@@ -1270,7 +1265,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         // Without a workspace there is nothing to contain the command in, so it must ask.
         return tier3Decision({
           card: {
-            plain_what: `Run \`${escapeDisplayText(command)}\` where no workspace is set.`,
+            plain_what: 'Run this command, even though no workspace is set?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
             why_asked_again: null,
@@ -1297,7 +1292,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       if (!cwdInside) {
         return tier3Decision({
           card: {
-            plain_what: `Run \`${escapeDisplayText(command)}\` from outside the workspace.`,
+            plain_what: 'Run this command from outside your workspace?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This runs outside your workspace and can reach system files.',
             why_asked_again: null,
@@ -1325,7 +1320,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       ) {
         return tier3Decision({
           card: {
-            plain_what: `Access a file outside the workspace with \`${escapeDisplayText(command)}\`.`,
+            plain_what: 'Run a command that reaches a file outside your workspace?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This file is outside your workspace.',
             why_asked_again: null,
@@ -1392,9 +1387,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   return tier3Decision({
     card: {
       plain_what:
-        form.kind === 'compound'
-          ? 'Run a compound shell command (pipes, chaining, or redirects).'
-          : `Run \`${escapeDisplayText(form.argv[0] ?? command)}\` with arguments the safe list does not allow.`,
+        form.kind === 'compound' ? 'Run this command with pipes, chaining, or redirects?' : 'Run this command?',
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
@@ -1522,7 +1515,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   // Fail closed on undeterminable targets or a missing workspace: treat as outside workspace.
   if (targets === null || ctx.workspace_cwd === null) {
     return outsideWorkspace({
-      plain_what: 'Write a file outside the workspace.',
+      plain_what: 'Write a file outside your workspace?',
       reason_detail: 'Write target is null or workspace is unknown.',
     });
   }
@@ -1553,7 +1546,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   const outside = targets.paths.filter((_, index) => !insideWorkspace(absolute[index] ?? ''));
   if (outside.length > 0) {
     return outsideWorkspace({
-      plain_what: `Write a file outside the workspace at ${namedWriteTargets(outside)}.`,
+      plain_what: `Write a file outside your workspace at ${namedWriteTargets(outside)}?`,
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
     });
   }
@@ -1565,7 +1558,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     return tier3Decision({
       card: writeCard({
         ctx,
-        plain_what: `Write Git control file ${namedWriteTargets(controlTargets)}.`,
+        plain_what: `Write Git control file ${namedWriteTargets(controlTargets)}?`,
         cannot_be_undone: 'Git settings can make Git run other programs.',
       }),
       reason: 'git_control_write',
@@ -1591,7 +1584,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     return tier3Decision({
       card: writeCard({
         ctx,
-        plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run.`,
+        plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run?`,
         cannot_be_undone:
           'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
       }),
@@ -1624,7 +1617,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     ctx,
     action,
     kind: 'file_write',
-    plain_what: `Change ${namedWriteTargets(targets.paths)} in your workspace.`,
+    plain_what: `Change ${namedWriteTargets(targets.paths)} in your workspace?`,
     parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to ${namedWriteTargets(targets.paths)}.`,
@@ -1639,9 +1632,9 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
   // which a Tier 2 relaxation must not be able to auto-run: always Tier 3.
   return tier3Decision({
     card: {
-      plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
+      plain_what: `Run the ${workflowName} workflow?`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'This workflow runs scripts Aman can edit.',
+      cannot_be_undone: `This workflow runs scripts ${ctx.web_search.assistantName} can edit.`,
       why_asked_again: null,
       destination: null,
       recipient: null,
@@ -1717,24 +1710,24 @@ function externalServiceWhat(input: {
   const where = input.recipient ?? input.destination ?? 'an external destination';
   if (name.includes('email') || name.includes('mail')) {
     if (name.includes('draft')) {
-      return `Save an email draft for ${where}.`;
+      return `Save an email draft for ${where}?`;
     }
     if (name.includes('forward')) {
-      return `Forward an email to ${where}.`;
+      return `Forward an email to ${where}?`;
     }
     if (name.includes('reply')) {
-      return `Reply to an email, sending it to ${where}.`;
+      return `Reply to an email, sending it to ${where}?`;
     }
-    return `Send an email to ${where}.`;
+    return `Send an email to ${where}?`;
   }
   if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
-    return `Send a message to ${where}.`;
+    return `Send a message to ${where}?`;
   }
   if (name.includes('post') || name.includes('publish') || name.includes('tweet')) {
-    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}.`;
+    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}?`;
   }
   if (name.includes('share') || name.includes('webhook')) {
-    return `Share data with ${where}.`;
+    return `Share data with ${where}?`;
   }
   if (
     name.includes('pay') ||
@@ -1743,9 +1736,9 @@ function externalServiceWhat(input: {
     name.includes('transfer') ||
     name.includes('invoice')
   ) {
-    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}.`;
+    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
   }
-  return `Perform an external action (${escapeDisplayText(input.tool_name)}) affecting ${where}.`;
+  return `Perform an external action affecting ${where}?`;
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -2179,10 +2172,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       : ` Reply in the thread: ${cardSubject(answered.subject)}, from ${cardText(answered.from)}.`;
   const plainWhat =
     (kind === 'send'
-      ? `Send ${subject} from your Gmail ${recipientsLine}.`
+      ? `Send ${subject} from your Gmail ${recipientsLine}?`
       : kind === 'change'
-        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) +
+        ? `Change a saved draft in your Gmail? It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}? It is not sent.`) +
     threadLine +
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   return {
@@ -2362,8 +2355,8 @@ function calendarWriteCard(input: {
     review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
   const plainWhat =
     review.action === 'create'
-      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
+      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`;
   // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
   const alwaysAsks =
     review.attendees.length === 0
@@ -2512,8 +2505,8 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
   return {
     plain_what:
       review.action === 'create'
-        ? `Create the schedule ${name}. It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
-        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}.`,
+        ? `Create the schedule ${name}? It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
+        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}?`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
     why_asked_again: null,
@@ -2543,7 +2536,7 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
   // The description is shown as one sentence, so a trailing full stop is not doubled.
   const sentence = show(review.description).replace(/[.!?]+$/, '');
   return {
-    plain_what: `Add a persona: ${show(review.name)}. ${sentence}.`,
+    plain_what: `Add a persona: ${show(review.name)}? ${sentence}.`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
@@ -2839,7 +2832,9 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               amount: fields.amount,
             })
           : destructiveHint || extraction.connector_what === null
-            ? `Run ${escapeDisplayText(action.tool_name)}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            ? destructiveHint
+              ? 'Run this action, even though it might change or delete something for good?'
+              : 'Run this action, even though it reaches outside this machine?'
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: destructiveHint
@@ -2881,8 +2876,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           amount: fields.amount,
         })
       : isInstall
-        ? 'Install software or dependencies.'
-        : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}.`;
+        ? 'Install software or dependencies?'
+        : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
     return tier3Decision({
       card: {
         plain_what: what,
@@ -2916,8 +2911,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier3Decision({
       card: {
         ...card,
-        plain_what: `A calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check every detail below before you allow it.`,
-        cannot_be_undone: 'Check the details before you go ahead.',
+        plain_what: `Make this calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
+        cannot_be_undone: 'Guests may be told about this change.',
       },
       reason: 'connector_calendar_write',
       reason_detail: 'A calendar change from a connector always asks.',
@@ -3021,11 +3016,11 @@ function connectorApprovalCard(input: {
     plain_what:
       spaceToolLine(action) ??
       extraction.connector_what ??
-      `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
+      `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone:
       extraction.connector_what === null
-        ? 'Check the details before you go ahead.'
+        ? 'This might change something for good.'
         : "Once this is sent, it can't be unsent.",
     why_asked_again: null,
     destination: fields.destination,
@@ -3120,8 +3115,8 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         card: {
           plain_what:
             name === 'run_code'
-              ? 'Run code the agent wrote in the sandbox.'
-              : 'Submit an implementation plan for review.',
+              ? 'Run code the assistant wrote in the sandbox?'
+              : 'Submit this implementation plan for review?',
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
@@ -3204,6 +3199,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,
+      assistant: ctx.web_search.assistantName,
       hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({

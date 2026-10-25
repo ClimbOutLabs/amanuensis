@@ -210,7 +210,7 @@ describe('create_schedule', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'schedule_write', is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(info.tier3_card?.schedule).toEqual({
       action: 'create',
@@ -547,7 +547,7 @@ describe.each([
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       [
         'create_schedule',
-        'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+        'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
         'approved',
       ],
       ['pause_schedule', 'Paused the schedule "morning-brief".', 'ran'],
@@ -566,7 +566,7 @@ describe.each([
     const info = await built.tools.toolCallInfo({ name: 'delete_schedule', arguments: { schedule: 'morning-brief' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York)?',
     );
     expect(info.tier3_card?.schedule?.runs_as).toBe(runsAs);
     await dispatch({

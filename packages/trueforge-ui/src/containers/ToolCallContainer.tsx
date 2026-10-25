@@ -622,7 +622,9 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         onToggle={onToggle}
         durationText={durationText}
         outcomeText={outcomeText}
-        command={command}
+        awaiting={status === 'running' && !showApproval}
+        // While the approval waits, the card's Command row is the one place the command shows.
+        command={showApproval ? undefined : command}
         summary={summary}
         exitCode={exitCode}
         argsJson={showApproval ? undefined : argsJson}
@@ -660,7 +662,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
           icon="mcp-server"
           expanded={expanded}
           onToggle={onToggle}
-          awaiting={status === 'running'}
+          awaiting={status === 'running' && !showApproval}
           awaitingText={durationText}
           outcomeText={outcomeText}
           status={status}
@@ -686,7 +688,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         icon="mcp-server"
         expanded={expanded}
         onToggle={onToggle}
-        awaiting={status === 'running'}
+        awaiting={status === 'running' && !showApproval}
         awaitingText={durationText}
         outcomeText={outcomeText}
         status={status}
@@ -715,7 +717,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       })}
       expanded={expanded}
       onToggle={onToggle}
-      awaiting={status === 'running'}
+      awaiting={status === 'running' && !showApproval}
       awaitingText={durationText}
       outcomeText={outcomeText}
       status={status}

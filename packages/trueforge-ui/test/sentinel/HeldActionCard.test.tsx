@@ -8,7 +8,7 @@ import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
-    plain_what: 'Send a note to Ana.',
+    plain_what: 'Send a note to Ana?',
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -134,7 +134,7 @@ describe('HeldActionCard', () => {
   ])('shows %j without hiding what was asked', (status, text) => {
     renderCard({ status });
     expect(screen.getByText(text)).toBeInTheDocument();
-    expect(screen.getByText('Send a note to Ana.')).toBeInTheDocument();
+    expect(screen.getByText('Send a note to Ana?')).toBeInTheDocument();
   });
 
   it('takes the buttons away once the action is answered or has expired', () => {
