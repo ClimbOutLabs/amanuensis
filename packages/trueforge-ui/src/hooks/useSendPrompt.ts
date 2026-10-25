@@ -20,3 +20,9 @@ export function useSendPrompt(): (prompt: string) => void {
     [aui, busy],
   );
 }
+
+/** Puts a prompt in the composer without sending it, so the person can change it first. */
+export function useFillPrompt(): (prompt: string) => void {
+  const aui = useAui();
+  return useCallback((prompt: string) => aui.composer().setText(prompt), [aui]);
+}

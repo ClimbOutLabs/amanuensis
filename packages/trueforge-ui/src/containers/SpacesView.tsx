@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { sanitizeSpaceHtml } from '@/atoms/lib/sanitizeSpaceHtml.js';
-import { Markdown } from '@/atoms/Markdown.js';
+import { Markdown, spacePictureRouteUrl } from '@/atoms/Markdown.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import { DropdownMenu, DropdownMenuItem } from '@/atoms/primitives/DropdownMenu.js';
@@ -16,6 +16,7 @@ import { resolvePresetTokens } from '@/theme/presets/index.js';
 import { useThemeMode } from '@/theme/SlotsProvider.js';
 import { TOKEN_CSS_VARS } from '@/theme/types.js';
 
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { setComposerPrefill } from '../hooks/useComposerDraft.js';
 import { SPACE_PAGE_BASE_STYLE, spaceThemeDeclarations } from './spacePageBase.js';
 
@@ -87,12 +88,13 @@ function SpacesListSkeleton() {
 
 /** Null when no composer can open here: the example is then left out, not shown as a button that does nothing. */
 function SpacesEmptyState({ onStartChat }: { onStartChat: ((text: string) => void) | null }) {
+  const assistant = useAssistantDisplayName();
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-16 text-center">
       <Icon name="cube" className="size-6 text-text-secondary" aria-hidden />
       <p className="text-base font-medium text-text-primary">No spaces yet</p>
       <p className="max-w-sm text-sm text-text-secondary">
-        A space is a page Aman keeps up to date for you, as a list, a table or a board.
+        A space is a page {assistant} keeps up to date for you, as a list, a table or a board.
       </p>
       {onStartChat != null ? (
         <>
@@ -179,10 +181,63 @@ export function measureFrameContentHeight(
 
 /**
  * Nothing a space page loads or submits may leave the frame, except pictures: an embedded `data:`
- * raster or an `https` link the server already checked against this chat's search results.
+ * raster or a picture served by the owner's own picture route. A srcdoc frame inherits the app
+ * shell's policy (`img-src 'self' data: blob:`), which no frame policy can widen, so the frame
+ * policy names only what the shell already allows: `data:` and same-origin pictures. Routing
+ * pictures through the same-origin proxy is what makes them load, and the shell policy is left
+ * exactly as it is.
  */
 const SPACE_FRAME_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data: https:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data: 'self'; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
+/** Shown as a picture's alt text when it fails to load and the author left no description. */
+const SPACE_PICTURE_FAILED_LINE = "This picture couldn't be shown";
+
+const SPACE_IMG_TAG_RE = /<img\s+[^>]*>/gi;
+const SPACE_SRC_ATTR_RE = /\ssrc=(["'])(https?:\/\/[^"']+)\1/i;
+const SPACE_SRCSET_ATTR_RE = /\ssrcset=(["'])([^"']+)\1/i;
+const SPACE_ALT_ATTR_RE = /\salt=(["'])/i;
+const SPACE_EMPTY_ALT_ATTR_RE = /\salt=(["'])\1/i;
+
+/**
+ * Routes a space page's web pictures through the owner's picture route, so the frame loads them
+ * same-origin under the shell policy instead of blanking on the inherited `img-src`. Stored
+ * pictures already passed the write-time seen check, and the route itself refuses any URL no
+ * stored space contains, so the rewrite widens nothing the route serves.
+ */
+export function rewriteSpacePictureUrls(html: string): string {
+  let out = '';
+  let copied = 0;
+  SPACE_IMG_TAG_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SPACE_IMG_TAG_RE.exec(html)) !== null) {
+    let tag = match[0];
+    tag = tag.replace(SPACE_SRC_ATTR_RE, (_whole, quote: string, url: string) => {
+      return ` src=${quote}${spacePictureRouteUrl(url)}${quote}`;
+    });
+    tag = tag.replace(SPACE_SRCSET_ATTR_RE, (_whole, quote: string, value: string) => {
+      const rewritten = value
+        .split(',')
+        .map(entry => {
+          const trimmed = entry.trim();
+          const space = trimmed.indexOf(' ');
+          const url = space === -1 ? trimmed : trimmed.slice(0, space);
+          const rest = space === -1 ? '' : trimmed.slice(space);
+          return /^https?:\/\//i.test(url) ? `${spacePictureRouteUrl(url)}${rest}` : entry;
+        })
+        .join(', ');
+      return ` srcset=${quote}${rewritten}${quote}`;
+    });
+    if (!SPACE_ALT_ATTR_RE.test(tag)) {
+      tag = tag.replace(/<img/i, `<img alt="${SPACE_PICTURE_FAILED_LINE}"`);
+    } else {
+      tag = tag.replace(SPACE_EMPTY_ALT_ATTR_RE, ` alt="${SPACE_PICTURE_FAILED_LINE}"`);
+    }
+    out += html.slice(copied, match.index) + tag;
+    copied = match.index + match[0].length;
+  }
+  return out + html.slice(copied);
+}
 
 /** Base styles injected into every space srcdoc, ahead of anything the model authored. */
 const SPACE_FRAME_BASE_STYLE = [
@@ -192,7 +247,9 @@ const SPACE_FRAME_BASE_STYLE = [
 ].join('');
 
 /**
- * Renders a `format: 'html'` space body in a sandboxed, sanitised iframe. `sandbox="allow-same-origin"`
+ * Renders a `format: 'html'` space body in a sandboxed, sanitised iframe. Web pictures are routed
+ * through the owner's picture route first (see `rewriteSpacePictureUrls`), because the inherited
+ * shell policy would otherwise blank them. `sandbox="allow-same-origin"`
  * only: no `allow-scripts` (so nothing in the srcdoc can execute), and `allow-same-origin` solely so
  * the parent can read `contentDocument` to size the frame to its content — that combination is safe
  * because the well-known sandbox escape needs `allow-scripts` *and* `allow-same-origin` together.
@@ -238,7 +295,7 @@ function SpaceHtmlFrame({ html }: { html: string }) {
       `<style>${SPACE_PAGE_BASE_STYLE}</style>`,
       `<style>:root{${themeVars}}</style>`,
       '</head>',
-      `<body>${sanitized}</body>`,
+      `<body>${rewriteSpacePictureUrls(sanitized)}</body>`,
       '</html>',
     ].join('');
   }, [sanitized, mode]);
@@ -409,10 +466,11 @@ function PurposeLine({ purpose }: { purpose: string }) {
 }
 
 function UpdatedLine({ updatedAt }: { updatedAt: string }) {
+  const assistant = useAssistantDisplayName();
   const exact = formatUpdated(updatedAt);
   return (
     <p className="text-sm text-text-secondary">
-      Kept up to date by Aman ·{' '}
+      Kept up to date by {assistant} ·{' '}
       <time dateTime={updatedAt} title={exact} aria-label={`updated ${exact}`}>
         updated {formatRelativeUpdated(updatedAt, Date.now())}
       </time>
@@ -431,6 +489,7 @@ function SpaceDetailPage({
   onAskChange: ((text: string) => void) | null;
 }) {
   const ctx = useOptionalSpaces();
+  const assistant = useAssistantDisplayName();
   const space = useMemo(() => ctx?.spaces.find(s => s.id === spaceId), [ctx, spaceId]);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -467,7 +526,7 @@ function SpaceDetailPage({
                 type="button"
                 onClick={() => onAskChange(`In the space “${space.name}”, `)}
               >
-                Ask Aman to change this
+                Ask {assistant} to change this
               </Button>
             ) : null}
             <SpaceOverflowMenu onRequestDelete={() => setDeleteOpen(true)} />

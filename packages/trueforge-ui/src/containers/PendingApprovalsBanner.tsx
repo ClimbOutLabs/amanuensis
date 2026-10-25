@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { useAnswerableApprovals } from '../hooks/useAnswerableApprovals.js';
-import { useApprovalCardPlacement } from '../hooks/useApprovalCardPlacement.js';
 import {
   subscribeToBlockedSend,
   type HarnessChatServerExtensions,
@@ -24,19 +23,13 @@ function hasDismissPort(server: object): server is Pick<HarnessChatServerExtensi
 const DISMISS_REASON = 'Dismissed from the action-needed banner.';
 
 /**
- * Prominent fallback for pending tool approvals. The approval card renders on
- * the assistant message, but when the stream died (or the send was rejected
- * with the pending-approvals 422) the card may never appear, so this banner
- * does not depend on it. Offers the fail-closed escape hatch: deny everything
- * pending so the chat can continue.
- *
- * It shows only when no card stands for the first pending approval, so the
- * person sees one pending signal. A blocked send always shows it.
+ * Prominent fallback for pending tool approvals, shown only when the thread is blocked: the
+ * send was rejected with the pending-approvals 422, or the stream died. Offers the fail-closed
+ * escape hatch: deny everything pending so the chat can continue. While a card is waiting the
+ * composer strip carries the signal instead.
  */
 export function PendingApprovalsBanner(): React.JSX.Element | null {
   const { pending } = useAnswerableApprovals();
-  // The composer banner follows the newest selection, which starts on the first pending approval.
-  const placement = useApprovalCardPlacement(pending[0]?.approvalId ?? null);
   const reload = useTrueFoundryReload();
   const toaster = useToasterOptional();
   const server = useOptionalServer();
@@ -77,8 +70,7 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
   }, [server, sessionId, dismissing, reload, toaster]);
 
   const count = pending.length;
-  const standsIn = count > 0 && placement === 'missing';
-  if (!standsIn && !blocked) return null;
+  if (!blocked) return null;
   const canDismiss = server != null && hasDismissPort(server) && sessionId != null;
 
   return (

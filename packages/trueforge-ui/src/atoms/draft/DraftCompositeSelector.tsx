@@ -3,27 +3,29 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
 import { useOptionalCatalogServer, useServerCapabilities } from '../../server/ServerContext.js';
 import { useOptionalShellMode, type SettingsSection } from '../../server/ShellModeContext.js';
 import type { AgentSkill, ConnectorState } from '../../server/types.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
-import { auiButtonClass } from '../lib/buttonClasses.js';
+import { connectorDisplayName } from '../../utils/connectorNames.js';
 import { cn } from '../lib/cn.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { auiInputClass } from '../lib/inputClasses.js';
+import { useFitOnScreen } from '../lib/useFitOnScreen.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { Button } from '../primitives/Button.js';
 import { CatalogLogo } from '../primitives/CatalogLogo.js';
 import { Switch } from '../primitives/Switch.js';
-import { Tooltip } from '../primitives/Tooltip.js';
 import { readAgentCapabilities, withAgentCapabilities } from './agentCapabilities.js';
 import { readSandboxEnabled, withSandboxEnabled } from './agentSandbox.js';
 import { DraftCapabilitiesPanel } from './DraftCapabilitiesPanel.js';
 import { DraftCatalogEmptyState } from './DraftCatalogEmptyState.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
+import type { DraftComposerAction } from './DraftComposerActionsMenu.js';
 import { connectorsWithSelectedStubs } from './mcpConnectorStubs.js';
 import { skillFamilyId, skillRepoName } from './SkillVersionSelector.js';
 
@@ -238,7 +240,7 @@ export function ConnectorConnectButton({
   return (
     <Button.Secondary
       type="button"
-      aria-label={`Connect ${connector.name}`}
+      aria-label={`Connect ${connectorDisplayName(connector.name)}`}
       disabled={isOAuthLoading}
       size="small"
       onKeyDown={event => {
@@ -288,9 +290,13 @@ export type DraftCompositeSelectorProps = {
   onAttach?: () => void;
 };
 
+/** The Add-ons picker's size before it is fitted to the screen, in CSS pixels. */
+const PICKER_WIDTH = 448;
+const PICKER_HEIGHT = 352;
+
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <div className="text-text-secondary px-3 pt-2 pb-1 text-[0.6875rem] font-medium tracking-wide uppercase">
+    <div className="text-text-secondary px-3 pt-2 pb-1 text-[0.75rem] font-normal">
       {label} ({count})
     </div>
   );
@@ -324,6 +330,12 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const menuId = useId();
   const isMobile = useIsMobile();
   const compactLayout = useCompactLayout();
+  const pickerStyle = useFitOnScreen({
+    open: open && !isMobile && !compactLayout,
+    anchorRef: containerRef,
+    width: PICKER_WIDTH,
+    height: PICKER_HEIGHT,
+  });
   const skillsDisabled = capabilities?.skill.enabled !== true;
   const skillsDisabledReason = capabilities?.skill.reason;
   const needsSandbox = capabilities?.sandbox.enabled === false;
@@ -339,25 +351,6 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const selectedSkills = open ? localSkills : specSkills;
   const selectedMcpIds = useMemo(() => new Set(selectedMcp.map(m => m.id)), [selectedMcp]);
   const hasValidModel = Boolean(agentSpec?.model?.name.trim());
-  const addOnsCount = selectedMcp.length + selectedSkills.length;
-  const selectionTooltip = useMemo(() => {
-    const formatNames = (items: Array<{ name: string }>) => {
-      const names = items.map(item => item.name);
-      if (names.length <= 4) return names.join(', ');
-      return `${names.slice(0, 4).join(', ')} +${names.length - 4}`;
-    };
-    const lines: string[] = [];
-    if (selectedMcp.length > 0) {
-      lines.push(`Connectors: ${formatNames(selectedMcp)}`);
-    }
-    if (selectedSkills.length > 0) {
-      lines.push(`Skills: ${formatNames(selectedSkills)}`);
-    }
-    return lines.length > 0
-      ? lines.join('\n')
-      : 'No add-ons selected. Host-provided capabilities are not included in this count.';
-  }, [selectedMcp, selectedSkills]);
-
   const clearFlushTimer = useCallback(() => {
     if (flushTimerRef.current != null) {
       window.clearTimeout(flushTimerRef.current);
@@ -410,11 +403,16 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
         setOpenAndFlush(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenAndFlush(false);
+    };
     document.addEventListener('mousedown', handler);
     document.addEventListener('focusin', handler);
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('focusin', handler);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, setOpenAndFlush]);
 
@@ -642,7 +640,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
                     {pinnedSelectedConnectors.map(c => (
                       <CatalogRow
                         key={c.id}
-                        title={c.name}
+                        title={connectorDisplayName(c.name)}
                         logo={connectorLogos[c.name]}
                         fallbackIcon="mcp-server"
                         checked={selectedMcpIds.has(c.id)}
@@ -662,7 +660,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
                     {pinnedAvailableConnectors.map(c => (
                       <CatalogRow
                         key={c.id}
-                        title={c.name}
+                        title={connectorDisplayName(c.name)}
                         logo={connectorLogos[c.name]}
                         fallbackIcon="mcp-server"
                         checked={selectedMcpIds.has(c.id)}
@@ -721,73 +719,26 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
       )}
     </>
   );
-  const compactActions = [
-    ...(hasValidModel
+  const workOnRepoPanel = useOptionalWorkOnRepoPanel();
+  const workOnRepoAvailable = useWorkOnRepoAvailable();
+  const menuActions: DraftComposerAction[] = [
+    ...(onAttach === undefined ? [] : [{ id: 'attach', label: 'Attach files', icon: 'paperclip', onSelect: onAttach }]),
+    ...(hasValidModel ? [{ id: 'add-ons', label: 'Add-ons', icon: 'wrench', onSelect: () => openPicker() }] : []),
+    ...(workOnRepoPanel != null && workOnRepoAvailable
       ? [
           {
-            id: 'tools',
-            label: `Add-ons (${addOnsCount})`,
-            icon: 'wrench',
-            onSelect: () => openPicker(),
+            id: 'work-on-repo',
+            label: 'Work on a repo',
+            icon: 'folder',
+            onSelect: () => workOnRepoPanel.setPanelOpen(true),
           },
         ]
       : []),
-    ...(onAttach === undefined
-      ? []
-      : [
-          {
-            id: 'attach',
-            label: 'Attach a file',
-            icon: 'paperclip',
-            onSelect: onAttach,
-          },
-        ]),
   ];
 
   return (
     <div ref={containerRef} className="relative flex flex-wrap items-center">
-      {compactLayout ? (
-        <DraftComposerActionsMenu actions={compactActions} disabled={disabled || isRunning} />
-      ) : hasValidModel ? (
-        <Tooltip content={selectionTooltip} className="max-w-xs whitespace-pre-line text-left" side="top">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label={`Add-ons (${addOnsCount})`}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-controls={open ? menuId : undefined}
-            className={auiButtonClass({ variant: 'ghost', size: 'large', className: 'gap-1.5 px-2 text-xs' })}
-            onClick={() => {
-              if (open) {
-                setOpenAndFlush(false);
-                return;
-              }
-              openPicker();
-            }}
-          >
-            <Icon name="wrench" />
-            <span>Add-ons</span>
-            <span className="rounded bg-primary-button-bg/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary-button-bg">
-              {addOnsCount}
-            </span>
-          </button>
-        </Tooltip>
-      ) : null}
-
-      {!compactLayout && onAttach ? (
-        <Tooltip content="Attach a file">
-          <button
-            type="button"
-            disabled={disabled || isRunning}
-            aria-label="Attach a file"
-            className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-            onClick={onAttach}
-          >
-            <Icon name="paperclip" />
-          </button>
-        </Tooltip>
-      ) : null}
+      <DraftComposerActionsMenu actions={menuActions} disabled={disabled || isRunning} />
 
       {open && hasValidModel ? (
         isMobile || compactLayout ? (
@@ -799,7 +750,13 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
             id={menuId}
             role="dialog"
             aria-label="Add to composer"
-            className="aui-popup-enter bg-card-bg text-text-primary absolute bottom-full left-0 z-50 mb-2 flex h-[22rem] w-[28rem] max-w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-border shadow-lg"
+            // Fitted to the screen: it opens on the side with more room and scrolls inside.
+            style={
+              pickerStyle === null
+                ? { visibility: 'hidden' }
+                : { ...pickerStyle, height: pickerStyle.maxHeight, overflowY: 'hidden' }
+            }
+            className="aui-popup-enter bg-card-bg text-text-primary z-50 flex flex-col overflow-hidden rounded-lg border border-border shadow-lg"
           >
             {content}
           </div>

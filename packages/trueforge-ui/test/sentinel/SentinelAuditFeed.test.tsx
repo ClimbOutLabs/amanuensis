@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
@@ -53,14 +53,38 @@ function renderFeed(entries: SentinelAuditEntry[]) {
 }
 
 describe('SentinelAuditFeed', () => {
-  it('groups entries by verb and state into one counted row', async () => {
+  it('groups entries by verb and state into one row, with no count after it', async () => {
     renderFeed([
-      makeEntry({ id: 'entry-1', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
-      makeEntry({ id: 'entry-2', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
+      makeEntry({ id: 'entry-1', action_type: 'read_email', outcome: 'logged', tier: 1 }),
+      makeEntry({ id: 'entry-2', action_type: 'search_emails', outcome: 'logged', tier: 1 }),
       makeEntry({ id: 'entry-3', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
     ]);
-    expect(await screen.findByText('Read your email · 3')).toBeInTheDocument();
-    expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
+    expect(await screen.findByText('Read your email')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
+    expect(screen.getByText('Allowed by your settings')).toBeInTheDocument();
+  });
+
+  it('names the app for the tool names the server records', async () => {
+    renderFeed([
+      makeEntry({ id: 'entry-1', action_type: 'list_events', outcome: 'ran', created_at: '2026-09-29T10:03:00.000Z' }),
+      makeEntry({
+        id: 'entry-2',
+        action_type: 'update_space',
+        outcome: 'approved',
+        created_at: '2026-09-29T10:02:00.000Z',
+      }),
+      makeEntry({
+        id: 'entry-3',
+        action_type: 'tavily_search',
+        outcome: 'ran',
+        created_at: '2026-09-29T10:01:00.000Z',
+      }),
+    ]);
+    expect(await screen.findByText('Read your calendar')).toBeInTheDocument();
+    expect(screen.getByText('Changed a space')).toBeInTheDocument();
+    expect(screen.getByText('Searched the web')).toBeInTheDocument();
+    expect(screen.queryByText('Used a connected app')).not.toBeInTheDocument();
   });
 
   it('shows the five state words, one per row, and never the raw tool name or the description', async () => {
@@ -72,10 +96,10 @@ describe('SentinelAuditFeed', () => {
       makeEntry({ id: 'entry-5', action_type: 'exec', outcome: 'logged', tier: 2 }),
     ]);
     expect(await screen.findByText('Sent an email')).toBeInTheDocument();
-    expect(screen.getByText('You approved')).toBeInTheDocument();
-    expect(screen.getByText('You declined')).toBeInTheDocument();
-    expect(screen.getByText('Turned down automatically')).toBeInTheDocument();
-    expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
+    expect(screen.getByText('Approved')).toBeInTheDocument();
+    expect(screen.getByText('Declined')).toBeInTheDocument();
+    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    expect(screen.getByText('Allowed by your settings')).toBeInTheDocument();
     expect(screen.getByText('Waiting for you')).toBeInTheDocument();
     expect(screen.queryByText('gmail_send')).not.toBeInTheDocument();
     expect(screen.queryByText('Sent to Rui')).not.toBeInTheDocument();
@@ -87,7 +111,7 @@ describe('SentinelAuditFeed', () => {
     expect(screen.queryByText('mystery_tool')).not.toBeInTheDocument();
   });
 
-  it('shows five rows and a Show all control with the entry count for the rest', async () => {
+  it('shows only the latest five rows and no Show all control', async () => {
     const entries = ['gmail_read', 'calendar_read', 'web_search', 'exec', 'write_file', 'space_read'].map(
       (action, index) =>
         makeEntry({
@@ -99,9 +123,10 @@ describe('SentinelAuditFeed', () => {
     );
     renderFeed(entries);
     expect(await screen.findByText('Read a space')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(5);
     expect(screen.queryByText('Read your email')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show all (6)' }));
-    expect(screen.getByText('Read your email')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
   });
 
   it('shows the empty line when the session has no permission activity', async () => {

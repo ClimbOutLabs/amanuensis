@@ -10,9 +10,10 @@ const INTER_TIGHT = `'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Se
 const GEIST = `"GeistSans", "GeistSans Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
 
 /**
- * Gold is the one highlight in every preset. Written as oklch() text because
- * ThemeProvider sets these as inline custom properties, which win over the
- * hex-then-oklch pairs in styles.css. Engines without oklch() get no gold.
+ * Each preset's one highlight, carried by the gold tokens: the current choice, links, the selected
+ * pill, the send button and focus rings. Paper, forest and high contrast use gold; midnight uses a
+ * cool ice blue below. Written as oklch() text because ThemeProvider sets these as inline custom
+ * properties, which win over the hex-then-oklch pairs in styles.css.
  */
 const GOLD_LIGHT = {
   gold: 'oklch(0.809 0.138 85.2)',
@@ -26,6 +27,21 @@ const GOLD_DARK = {
   goldInk: 'oklch(0.809 0.138 85.2)',
   goldSoft: 'oklch(0.328 0.044 91.4)',
   goldLine: 'oklch(0.544 0.091 81.9)',
+};
+
+/** Midnight's highlight: pale ice blue, with a deeper blue ink where it carries text on light paper. */
+const ICE_LIGHT = {
+  gold: 'oklch(0.824 0.072 245.6)',
+  goldInk: 'oklch(0.466 0.113 250.3)',
+  goldSoft: 'oklch(0.947 0.021 248.0)',
+  goldLine: 'oklch(0.718 0.083 248.0)',
+};
+
+const ICE_DARK = {
+  gold: 'oklch(0.881 0.054 246.7)',
+  goldInk: 'oklch(0.881 0.054 246.7)',
+  goldSoft: 'oklch(0.313 0.062 258.9)',
+  goldLine: 'oklch(0.563 0.088 253.2)',
 };
 
 /**
@@ -72,6 +88,7 @@ const paper: PresetTokens = {
     inputBorder: '#998d79',
     textPrimary: '#2c2a26',
     textSecondary: '#6a6055',
+    textMuted: '#7a7167',
     ...TYPE_SCALE,
     cardBg: '#fffdf8',
     surfaceElevated: '#fffdf8',
@@ -133,6 +150,7 @@ const paper: PresetTokens = {
     inputBorder: '#7c786f',
     textPrimary: '#f2ecdd',
     textSecondary: '#a89a7f',
+    textMuted: '#a09278',
     ...TYPE_SCALE,
     cardBg: '#2f2a21',
     surfaceElevated: '#38332a',
@@ -198,6 +216,7 @@ const highContrast: PresetTokens = {
     inputBorder: '#767676',
     textPrimary: '#0d0d0d',
     textSecondary: '#4d4d4d',
+    textMuted: '#4d4d4d',
     ...TYPE_SCALE,
     cardBg: '#ffffff',
     surfaceElevated: '#ffffff',
@@ -260,6 +279,7 @@ const highContrast: PresetTokens = {
     inputBorder: '#888888',
     textPrimary: '#ececec',
     textSecondary: '#cdcdcd',
+    textMuted: '#cdcdcd',
     ...TYPE_SCALE,
     cardBg: '#212121',
     surfaceElevated: '#2a2a2a',
@@ -326,6 +346,7 @@ const midnight: PresetTokens = {
     inputBorder: '#888f9a',
     textPrimary: '#1a2332',
     textSecondary: '#5a6a85',
+    textMuted: '#67768f',
     ...TYPE_SCALE,
     cardBg: '#ffffff',
     surfaceElevated: '#ffffff',
@@ -335,8 +356,8 @@ const midnight: PresetTokens = {
     userMessageText: '#f2f5fa',
     assistantMessageBg: 'transparent',
     assistantMessageText: '#1a2332',
-    primaryButtonBg: GOLD_LIGHT.gold,
-    primaryButtonHover: GOLD_LIGHT.goldLine,
+    primaryButtonBg: ICE_LIGHT.gold,
+    primaryButtonHover: ICE_LIGHT.goldLine,
     primaryButtonText: '#1a2332',
     secondaryButtonBg: '#dfe6f0',
     secondaryButtonHover: '#cfd9e8',
@@ -354,8 +375,8 @@ const midnight: PresetTokens = {
     warning: '#92400e',
     danger: '#dc2626',
     dangerBg: '#dc2626',
-    info: 'oklch(0.503 0.095 84.8)',
-    infoBg: 'oklch(0.503 0.095 84.8)',
+    info: ICE_LIGHT.goldInk,
+    infoBg: ICE_LIGHT.goldInk,
     recording: '#ef4444',
     chart1: '#b5894c',
     chart2: '#4b8060',
@@ -365,9 +386,9 @@ const midnight: PresetTokens = {
     chart6: '#f59e0b',
     chart7: '#10b981',
     chart8: '#ef4444',
-    ...GOLD_LIGHT,
+    ...ICE_LIGHT,
     ...PANDA_LIGHT,
-    focusRing: 'oklch(0.503 0.095 84.8)',
+    focusRing: ICE_LIGHT.goldInk,
     radius: '0.65rem',
     composerRadius: '1.25rem',
     overlay: 'rgb(26 35 50 / 0.45)',
@@ -387,6 +408,7 @@ const midnight: PresetTokens = {
     inputBorder: '#656f82',
     textPrimary: '#dbe4f0',
     textSecondary: '#8fa0bd',
+    textMuted: '#7989a4',
     ...TYPE_SCALE,
     cardBg: '#162033',
     surfaceElevated: '#1d2a42',
@@ -396,8 +418,8 @@ const midnight: PresetTokens = {
     userMessageText: '#ffffff',
     assistantMessageBg: 'transparent',
     assistantMessageText: '#dbe4f0',
-    primaryButtonBg: GOLD_DARK.gold,
-    primaryButtonHover: GOLD_LIGHT.goldLine,
+    primaryButtonBg: ICE_DARK.gold,
+    primaryButtonHover: ICE_DARK.goldLine,
     primaryButtonText: '#0d1420',
     secondaryButtonBg: '#162033',
     secondaryButtonHover: '#24334d',
@@ -415,8 +437,8 @@ const midnight: PresetTokens = {
     warning: '#fcd34d',
     danger: '#f87171',
     dangerBg: '#f87171',
-    info: 'oklch(0.809 0.138 85.2)',
-    infoBg: 'oklch(0.809 0.138 85.2)',
+    info: ICE_DARK.goldInk,
+    infoBg: ICE_DARK.goldInk,
     recording: '#ef4444',
     chart1: '#d9a85a',
     chart2: '#7fb493',
@@ -426,9 +448,9 @@ const midnight: PresetTokens = {
     chart6: '#fbbf24',
     chart7: '#34d399',
     chart8: '#f87171',
-    ...GOLD_DARK,
+    ...ICE_DARK,
     ...PANDA_DARK,
-    focusRing: 'oklch(0.809 0.138 85.2)',
+    focusRing: ICE_DARK.goldInk,
     radius: '0.65rem',
     composerRadius: '1.25rem',
     overlay: 'rgb(0 0 0 / 0.7)',
@@ -452,6 +474,7 @@ const forest: PresetTokens = {
     inputBorder: '#899382',
     textPrimary: '#1e2b1e',
     textSecondary: '#5d6f5d',
+    textMuted: '#687968',
     ...TYPE_SCALE,
     cardBg: '#ffffff',
     surfaceElevated: '#ffffff',
@@ -513,6 +536,7 @@ const forest: PresetTokens = {
     inputBorder: '#697869',
     textPrimary: '#d9e6d4',
     textSecondary: '#8aa383',
+    textMuted: '#7e9677',
     ...TYPE_SCALE,
     cardBg: '#1a2a1a',
     surfaceElevated: '#223522',

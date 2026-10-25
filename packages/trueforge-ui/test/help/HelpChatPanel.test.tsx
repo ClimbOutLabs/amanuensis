@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HelpChatPanel, HelpChoices } from '@/help/HelpChatPanel.js';
@@ -209,12 +210,12 @@ describe('HelpChatPanel', () => {
     expect(ensureGuide).toHaveBeenCalledTimes(1);
     expect(sent).toHaveLength(1);
     const message = sent[0] ?? '';
-    expect(message.startsWith('Iris, ')).toBe(true);
+    expect(message.startsWith(`${AMAN_GUIDE_NAME}, `)).toBe(true);
     expect(message).toContain('You were on: Settings, Connectors.');
     expect(message).toContain('Last error: Request failed (500).');
     expect(message).toContain('- Your model: ok. The model answered.');
     expect(await screen.findByTestId('help-choices')).toBeInTheDocument();
-    const disclosure = screen.getByText('What Iris was told').closest('details');
+    const disclosure = screen.getByText(`What ${AMAN_GUIDE_NAME} was told`).closest('details');
     expect(disclosure).toHaveTextContent('You were on: Settings, Connectors. Last error: Request failed (500).');
     const shownOutside = Array.from(screen.getByTestId('help-chat-results').querySelectorAll('p')).filter(
       paragraph => paragraph.closest('details') === null,
@@ -237,7 +238,9 @@ describe('HelpChatPanel', () => {
     renderHelp({ check: HEALTHY, guideReady: false });
 
     expect(
-      await screen.findByText('Iris could not join this chat. Check your connection, then press Check again.'),
+      await screen.findByText(
+        `${AMAN_GUIDE_NAME} could not join this chat. Check your connection, then press Check again.`,
+      ),
     ).toBeInTheDocument();
     expect(composerSend).not.toHaveBeenCalled();
     expect(screen.queryByTestId('help-choices')).toBeNull();
@@ -253,15 +256,11 @@ describe('HelpChatPanel', () => {
     expect(composerSend).toHaveBeenCalledTimes(2);
   });
 
-  it('sends typed text from the free text box', async () => {
+  it('adds no place to type of its own: the main composer is the only one', async () => {
     renderHelp({ check: HEALTHY });
     await screen.findByTestId('help-choices');
 
-    fireEvent.change(screen.getByPlaceholderText('Or tell Iris in your own words'), {
-      target: { value: '  my inbox is empty  ' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    expect(composerSetText).toHaveBeenLastCalledWith('my inbox is empty');
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
   });
 });

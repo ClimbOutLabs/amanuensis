@@ -169,15 +169,15 @@ export const Tier3ScheduleSchema = z
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
 
-/** A specialist that a chat call adds, shown in full. Existing personas are never changed by a call. */
+/** A persona that a chat call adds, shown in full. Existing personas are never changed by a call. */
 export const Tier3PersonaSchema = z
   .object({
-    name: z.string().describe('Specialist name in plain words.'),
-    description: z.string().describe('One line on what the specialist is for.'),
-    instructions: z.string().describe('The whole instruction text the specialist follows.'),
-    model_name: z.string().describe('The model the specialist answers with.'),
+    name: z.string().describe('Persona name in plain words.'),
+    description: z.string().describe('One line on what the persona is for.'),
+    instructions: z.string().describe('The whole instruction text the persona follows.'),
+    model_name: z.string().describe('The model the persona answers with.'),
   })
-  .describe('The specialist a chat call adds, shown in full.')
+  .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
 /**

@@ -354,7 +354,7 @@ describe('space capability', () => {
         name: 'Spain houses',
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
-        body: '',
+        body: 'Spain houses to review.',
         expected_aggregate_revision: 0,
       },
     });
@@ -655,7 +655,7 @@ describe('space capability', () => {
       name: 'Spain houses',
       purpose: 'Track candidate houses in Spain.',
       status: 'active',
-      body: '',
+      body: 'Spain houses to review.',
       expected_aggregate_revision: 0,
     });
 
@@ -681,7 +681,7 @@ describe('space capability', () => {
       name: 'Spain houses',
       purpose: 'Track candidate houses in Spain.',
       status: 'active',
-      body: '',
+      body: 'Spain houses to review.',
       expected_revision: 1,
       expected_aggregate_revision: 1,
     });
@@ -705,7 +705,7 @@ describe('space capability', () => {
       name: 'Spain houses',
       purpose: 'Track candidate houses in Spain.',
       status: 'active',
-      body: '',
+      body: 'Spain houses to review.',
       expected_revision: 1,
       expected_aggregate_revision: 1,
     });

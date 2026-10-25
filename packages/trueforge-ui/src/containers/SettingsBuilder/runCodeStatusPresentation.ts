@@ -42,7 +42,7 @@ const DOWNLOADED = download({ text: 'Downloaded', tone: 'success' });
 const VERIFIED = signature({ text: 'Verified', tone: 'success' });
 
 /** The one repair command, shown for every sandbox-slot problem. */
-const SLOTS_FIX = 'Run `aman doctor sandbox --fix` on the machine that runs Aman, then press Re-check.';
+const SLOTS_FIX = 'Run `aman doctor sandbox --fix` on the machine this app runs on, then press Re-check.';
 
 /** Wording for the isolated sandbox slots, which have no Docker, image or signature to talk about. */
 function presentSlotsStatus(status: RunCodeStatus): RunCodeStatusPresentation {

@@ -70,8 +70,8 @@ describe('AgentSteps grouping', () => {
       { type: 'tool-call', toolCallId: '2', toolName: 'second_tool', args: {}, result: 'b' },
     ]);
     expect(screen.queryByRole('region', { name: /steps?/ })).not.toBeInTheDocument();
-    expect(screen.getByText('first_tool')).not.toBeVisible();
-    expect(screen.getByText('second_tool')).not.toBeVisible();
+    expect(screen.getByText('First tool')).not.toBeVisible();
+    expect(screen.getByText('Second tool')).not.toBeVisible();
   });
 
   it('reveals the grouped tool calls when the chat-level switch is on', async () => {
@@ -82,8 +82,8 @@ describe('AgentSteps grouping', () => {
       ],
       { expanded: true },
     );
-    await waitFor(() => expect(screen.getByText('first_tool')).toBeVisible());
-    expect(screen.getByText('second_tool')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('First tool')).toBeVisible());
+    expect(screen.getByText('Second tool')).toBeVisible();
   });
 
   it('uses singular label for exactly one tool call in the group', async () => {

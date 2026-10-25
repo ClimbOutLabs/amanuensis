@@ -11,7 +11,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'calendar',
     title: 'Keeping your calendar',
-    covers: ['calendar'],
+    covers: [],
     body: 'Ask Aman what is on your calendar this week. It reads your events and tells you what is coming up.\n\nAman can also add or change events, but only after you approve each one. A card shows the event before anything is saved.\n\nThis needs Google Calendar connected. See "Connecting your email and calendar".',
   },
   {
@@ -23,7 +23,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'code',
     title: 'Reading files and running code',
-    covers: ['code'],
+    covers: [],
     body: 'Aman can read files and run code in a sandbox, a small separate space on your computer. For example, ask Aman to add up your expenses by category and draw a chart.\n\nThe sandbox must be set up first. Open Settings, then Sandbox. The "Read files and run code" card only appears once the sandbox is ready.\n\nCode runs only inside the sandbox. Anything Aman writes to a file there stays in the sandbox until you ask it to move the file.',
   },
   {
@@ -35,7 +35,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'costs',
     title: 'What Aman costs',
-    covers: ['cost'],
+    covers: [],
     body: 'Each chat uses the model you chose, and the company behind a hosted model may charge for the words used. A local model on your computer has no per-use charge.\n\nAsk Aman "Show me what my chats have cost so far this month" to see a summary. Settings also has a usage panel.',
   },
   {
@@ -59,7 +59,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'email',
     title: 'Handling your email',
-    covers: ['email', 'reply'],
+    covers: ['reply'],
     body: 'Once Aman can read your email, ask it to go through your unread mail. It tells you which messages need a reply first.\n\n**Reading and searching** is free. Aman can read and search your mail without asking you each time.\n\n**Replying** needs your OK. Aman writes a draft, and a card shows you exactly what will be sent to whom. Approve the card to save a draft or to send the email. Deny it and nothing is sent.\n\nIf Aman cannot read your mail, connect Gmail first. See "Connecting your email and calendar".',
   },
   {
@@ -83,13 +83,19 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'memory',
     title: 'Memory',
-    covers: ['memory'],
+    covers: [],
     body: 'Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.\n\nMemory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.\n\nMemory search uses a small model that runs on your computer. Nothing about it is sent away.',
+  },
+  {
+    id: 'personas',
+    title: 'Personas',
+    covers: [],
+    body: 'A persona is a helper with its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.\n\nTo make one, open Settings, then Roles and Personas, and add a name and instructions. To talk to a persona, use its name at the start of your message, such as "Zara, plan a long weekend". Aman then answers as that persona until you switch back.\n\nEach persona has its own knowledge library. You can add documents to it in Roles and Personas.',
   },
   {
     id: 'phone',
     title: 'Using Aman from your phone',
-    covers: ['move'],
+    covers: [],
     body: 'You can use Aman from your phone when the phone is on the same home network as your computer.\n\nThe first time, open the "Trust this computer" link that the installer printed, or scan the square code on the screen. The page shows the steps for your phone. You do this once for each device. After that, open the address that ends in 8443 from the list the installer printed.\n\nIf the page says the connection is not private, the phone does not trust your computer yet. Do the trust steps again on the phone.',
   },
   {
@@ -113,14 +119,8 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'skills',
     title: 'Learning new skills',
-    covers: ['skills'],
+    covers: [],
     body: 'Aman can learn a new skill. For example, ask it to learn how to turn a photo of a receipt into a line in your expense list.\n\nSkills run in the sandbox, so the sandbox must be set up first. Open Settings, then Skills to see the skills Aman has, to add one, or to turn one off.\n\nThe "Learn new skills" card only appears once the sandbox is ready.',
-  },
-  {
-    id: 'specialists',
-    title: 'Specialists',
-    covers: ['specialists'],
-    body: 'A specialist is a helper with its own name, its own instructions, and its own model. For example, a travel specialist can plan a trip for you.\n\nTo make one, open Settings, then Roles and Personas, and add a name and instructions. To talk to a specialist, use its name at the start of your message, such as "Zara, plan a long weekend". Aman then answers as that specialist until you switch back.\n\nEach specialist has its own knowledge library. You can add documents to it in Roles and Personas.',
   },
   {
     id: 'subscriptions',
@@ -131,13 +131,13 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'web',
     title: 'Searching the web',
-    covers: ['web'],
+    covers: [],
     body: 'Ask Aman for the latest news or anything that changes often, and it searches the live web for you. It can give you the five stories that matter, with two lines each.\n\nWeb search needs a search provider. Open Settings and pick a web search provider. Without one, Aman says it cannot search the web.\n\nWhen Aman searches, the search words and the pages it opens are sent to the search service.',
   },
   {
     id: 'what-is-aman',
     title: 'What Aman is',
-    covers: ['get-to-know'],
+    covers: [],
     body: 'Aman is your personal assistant. It keeps track of your life and helps you with it: your day, your email, your calendar, your tasks, and the things you want to remember.\n\nAman runs on your own computer. Your chats and your notes stay there.\n\nAman checks with you before it does anything that matters. Reading is free. Sending, saving or changing something needs your OK first.\n\nAman is a set of helpers, and you can ask for any of them in plain words. Start with a simple question or a task, and Aman will ask what it needs.',
   },
 ];

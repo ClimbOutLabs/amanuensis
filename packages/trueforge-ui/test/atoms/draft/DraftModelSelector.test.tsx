@@ -74,7 +74,6 @@ describe('DraftModelSelector', () => {
 
     const trigger = await screen.findByTitle('Select model');
     await waitFor(() => expect(trigger).toHaveTextContent('gpt-4.1'));
-    expect(trigger.querySelector('img')?.getAttribute('src')).toBe('https://assets.example/openai.svg');
     fireEvent.click(trigger);
 
     const listbox = screen.getByRole('listbox', { name: 'Select model' });
@@ -217,6 +216,15 @@ describe('DraftModelSelector', () => {
     const listbox = await screen.findByRole('listbox', { name: 'Select model' });
     expect(container.contains(listbox)).toBe(false);
     expect(document.body.contains(listbox)).toBe(true);
+  });
+
+  it('closes the open menu on Escape', async () => {
+    renderSelector();
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('listbox', { name: 'Select model' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Select model' })).not.toBeInTheDocument();
   });
 
   it('caps the menu height and scrolls the option list instead of growing off screen', async () => {

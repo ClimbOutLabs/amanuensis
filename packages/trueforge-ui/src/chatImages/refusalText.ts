@@ -2,7 +2,7 @@ import type { ChatImageRefusal } from '../plugins/trueforge-agent-server-adapter
 
 /** What went wrong and the one thing to do, in two short sentences. */
 export const CHAT_IMAGE_REFUSAL_TEXT: Record<ChatImageRefusal, string> = {
-  unsupported_type: "This isn't a picture type Aman can show. Ask for a PNG, JPEG, GIF or WebP copy.",
+  unsupported_type: "This picture type can't be shown here. Ask for a PNG, JPEG, GIF or WebP copy.",
   too_large: 'This image is too large to show. Ask for a smaller copy.',
   undecodable: 'This image looks damaged, so it is not shown. Ask for a fresh copy.',
   fetch_failed: "This image couldn't be downloaded. Try again later.",

@@ -25,18 +25,18 @@ function personaAction(tool_name: string): SentinelAction {
   };
 }
 
-describe('Specialist tool classification', () => {
-  it('reads the specialist list without asking', async () => {
+describe('Persona tool classification', () => {
+  it('reads the persona list without asking', async () => {
     const decision = await classifyTier(personaAction('list_personas'), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'persona_read', auto_deny: null });
   });
 
-  it('switches the chat to an existing specialist without asking', async () => {
+  it('switches the chat to an existing persona without asking', async () => {
     const decision = await classifyTier(personaAction('use_persona'), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'persona_switch', auto_deny: null });
   });
 
-  it('fails closed on a specialist tool it does not know', async () => {
+  it('fails closed on a persona tool it does not know', async () => {
     const decision = await classifyTier(personaAction('rename_persona'), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'unclassified' });
   });

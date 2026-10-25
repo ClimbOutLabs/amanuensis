@@ -1,114 +1,44 @@
-// @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApprovalNavBanner, approvalBannerLabel } from '@/atoms/ApprovalNavBanner.js';
 
 describe('ApprovalNavBanner', () => {
-  it('renders the count label and disables chevrons at the ends', () => {
-    const onPrev = vi.fn();
-    const onNext = vi.fn();
-    const onFocusCurrent = vi.fn();
+  it('names the assistant and the card title for one waiting approval', () => {
+    render(<ApprovalNavBanner total={1} assistantName="Mannie" title="Send this reply?" onFocusCurrent={() => {}} />);
 
-    const { rerender } = render(
-      <ApprovalNavBanner
-        total={4}
-        current={1}
-        canPrev={false}
-        canNext
-        onPrev={onPrev}
-        onNext={onNext}
-        onFocusCurrent={onFocusCurrent}
-      />,
-    );
-
-    expect(screen.getByText('4 items need your approval')).toBeTruthy();
-    expect(screen.getByText('(1/4)')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Previous approval' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Next approval' })).not.toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Next approval' }));
-    expect(onNext).toHaveBeenCalledOnce();
-
-    rerender(
-      <ApprovalNavBanner
-        total={4}
-        current={4}
-        canPrev
-        canNext={false}
-        onPrev={onPrev}
-        onNext={onNext}
-        onFocusCurrent={onFocusCurrent}
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'Next approval' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Previous approval' })).not.toBeDisabled();
+    const strip = screen.getByRole('status');
+    expect(strip).toHaveTextContent('Mannie is waiting for your OK: Send this reply?');
+    expect(strip).toHaveTextContent('Review ↑');
   });
 
-  it('uses singular copy for one pending approval', () => {
-    render(
-      <ApprovalNavBanner
-        total={1}
-        current={1}
-        canPrev={false}
-        canNext={false}
-        onPrev={() => {}}
-        onNext={() => {}}
-        onFocusCurrent={() => {}}
-      />,
-    );
-    expect(screen.getByText('1 item needs your approval')).toBeTruthy();
+  it('counts the items when more than one waits, with no counter or arrows', () => {
+    render(<ApprovalNavBanner total={3} assistantName="Mannie" title="Send this reply?" onFocusCurrent={() => {}} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('3 things are waiting for your OK');
+    expect(screen.queryByText(/\(\d+\/\d+\)/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /approval/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Send this reply?' })).toBeNull();
   });
 
-  it('focuses the current approval when the banner is clicked', () => {
+  it('scrolls to the first card when Review is pressed', () => {
     const onFocusCurrent = vi.fn();
     render(
-      <ApprovalNavBanner
-        total={3}
-        current={2}
-        canPrev
-        canNext
-        onPrev={() => {}}
-        onNext={() => {}}
-        onFocusCurrent={onFocusCurrent}
-      />,
+      <ApprovalNavBanner total={1} assistantName="Mannie" title="Send this reply?" onFocusCurrent={onFocusCurrent} />,
     );
 
-    fireEvent.click(screen.getByRole('status'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review ↑' }));
+
     expect(onFocusCurrent).toHaveBeenCalledOnce();
-  });
-
-  it('does not focus when chevrons are clicked', () => {
-    const onFocusCurrent = vi.fn();
-    const onNext = vi.fn();
-    render(
-      <ApprovalNavBanner
-        total={3}
-        current={1}
-        canPrev={false}
-        canNext
-        onPrev={() => {}}
-        onNext={onNext}
-        onFocusCurrent={onFocusCurrent}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Next approval' }));
-    expect(onNext).toHaveBeenCalledOnce();
-    expect(onFocusCurrent).not.toHaveBeenCalled();
   });
 });
 
 describe('approvalBannerLabel', () => {
-  it('names the kind when exactly one item waits', () => {
-    expect(approvalBannerLabel(1, 'email')).toBe('1 email waiting for your approval');
+  it('uses the assistant name for one item', () => {
+    expect(approvalBannerLabel({ total: 1, assistantName: 'Mannie' })).toBe('Mannie is waiting for your OK:');
   });
 
-  it('falls back to the plain count when the kind is not known', () => {
-    expect(approvalBannerLabel(1, undefined)).toBe('1 item needs your approval');
-  });
-
-  it('counts the items when more than one waits, whatever the kind', () => {
-    expect(approvalBannerLabel(2, 'email')).toBe('2 items need your approval');
+  it('counts the items when there are several', () => {
+    expect(approvalBannerLabel({ total: 2, assistantName: 'Mannie' })).toBe('2 things are waiting for your OK');
   });
 });

@@ -412,9 +412,9 @@ describe('ToolCallContainer "Change it"', () => {
     expect(document.querySelector('[data-slot="aui_user-message-content"]')).toBeNull();
   });
 
-  describe('add a specialist card', () => {
+  describe('add a persona card', () => {
     const personaCard: SentinelApprovalCard = {
-      ...card('Add a specialist: Tutor. Helps with maths.'),
+      ...card('Add a persona: Tutor. Helps with maths.'),
       persona: { name: 'Tutor', description: 'Helps with maths.', instructions: 'Be patient.', model_name: 'model-a' },
     };
 

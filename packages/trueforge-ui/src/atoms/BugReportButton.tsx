@@ -13,7 +13,7 @@ import {
 import { Icon } from '../icons/Icon.js';
 import { buildHandoffTitle, buildIssuePrefillUrl, summarizeBundleForIssue } from '../utils/bugReportHandoff.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
-import { auiButtonClass } from './lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName } from './lib/buttonClasses.js';
 import { auiInputClass } from './lib/inputClasses.js';
 import { Button } from './primitives/Button.js';
 import { CenteredModal } from './primitives/CenteredModal.js';
@@ -67,15 +67,20 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
  * (`useAuiState`) runs — `ConnectedBugReportButton` below is only mounted once a provider exists,
  * so a host that never wires one never pays for (or risks) that dependency.
  */
-export function BugReportButton() {
+export function BugReportButton({
+  row = false,
+}: {
+  /** Draws a labeled menu row, as in the rail's More menu, instead of an icon. */
+  row?: boolean;
+}) {
   const api = useOptionalBugReport();
   if (api == null) {
     return null;
   }
-  return <ConnectedBugReportButton api={api} />;
+  return <ConnectedBugReportButton api={api} row={row} />;
 }
 
-function ConnectedBugReportButton({ api }: { api: BugReportApi }) {
+function ConnectedBugReportButton({ api, row }: { api: BugReportApi; row: boolean }) {
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
@@ -218,10 +223,15 @@ function ConnectedBugReportButton({ api }: { api: BugReportApi }) {
         type="button"
         aria-label="Report a bug"
         title="Report a bug"
-        className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
+        className={
+          row
+            ? auiButtonClass({ variant: 'ghost', className: railMenuRowClassName })
+            : auiButtonClass({ variant: 'ghost', size: 'icon' })
+        }
         onClick={() => setOpen(true)}
       >
-        <Icon name="bug" />
+        <Icon name="bug" size={row ? 14 : undefined} />
+        {row ? 'Report a bug' : null}
       </button>
 
       <CenteredModal

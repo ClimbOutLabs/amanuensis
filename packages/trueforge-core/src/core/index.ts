@@ -481,7 +481,7 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
-export { isTrustedLink, recordPersonText } from './permissions/provenance';
+export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -504,9 +504,16 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { SILENT_SEARCH_LIMIT, createWebSearchTurnState } from './permissions/webSearch';
+export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
+export {
+  FETCHED_PAGE_TEXT_MAX_CHARS,
+  FetchedPageStore,
+  fetchedPages,
+  isPageReaderTool,
+  isSearchResultTool,
+  recordFetchedPages,
+} from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';
 export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';
