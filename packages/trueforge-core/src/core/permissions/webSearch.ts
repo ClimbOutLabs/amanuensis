@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
+import { htmlImageLinks } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
@@ -10,6 +11,7 @@ import {
   emptyChatProvenance,
   namesUrl,
   recordEmailText,
+  recordPageImageUrls,
   recordSearchResults,
   recordUntrustedText,
   type ChatProvenance,
@@ -107,6 +109,36 @@ export function resultTexts(result: CallToolResult): string[] {
   return texts;
 }
 
+/** A markdown picture: `![alt](url)` with an optional title after the link. */
+const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
+
+/** Cap on image links taken from one page read, so a gallery page cannot grow host memory without bound. */
+const MAX_PAGE_IMAGE_URLS = 200;
+
+/**
+ * The picture links a page read returned, from markdown pictures and raw `<img>` tags. Tracking
+ * pixels are left out by the HTML reader, and a data: picture is not a link out, so only web
+ * picture links are returned.
+ */
+export function pageImageUrls(text: string): string[] {
+  const urls: string[] = [];
+  const add = (raw: string): void => {
+    const url = raw.trim();
+    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !urls.includes(url)) {
+      urls.push(url);
+    }
+  };
+  for (const match of text.matchAll(MARKDOWN_IMAGE)) {
+    if (match[1] !== undefined) {
+      add(match[1]);
+    }
+  }
+  for (const url of htmlImageLinks({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
+    add(url);
+  }
+  return urls;
+}
+
 /** The kind of content a tool's result is, so a card can say where an address was read. */
 function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
   if (input.opensPage) {
@@ -138,12 +170,19 @@ export function recordToolResultProvenance(input: {
     return;
   }
   const mail = !searchTool && (isGmailReadToolName(baseName) || isMailReadToolName(baseName));
-  const source = readSourceOf({ baseName, opensPage: searchTool || isPageReaderTool(baseName) });
+  const pageReader = isPageReaderTool(baseName);
+  const source = readSourceOf({ baseName, opensPage: searchTool || pageReader });
   for (const text of input.texts) {
     if (mail) {
       recordEmailText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });
+    }
+    if (pageReader) {
+      // A page the chat opened is the exception to that rule for its pictures: opening the page
+      // saw them, so a space may use a picture file the search result never named. Only the
+      // page's own pictures count, and the page's text itself stays untrusted data.
+      recordPageImageUrls({ provenance, urls: pageImageUrls(text) });
     }
   }
 }
