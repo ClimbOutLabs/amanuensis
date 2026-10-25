@@ -4,7 +4,7 @@ title: Where your data lives and privacy
 covers:
 ---
 
-Aman runs on your computer. Your chats, your agents and your settings are kept in a database file on the same computer. Your memory is plain Markdown files on the same computer.
+Aman runs on your computer. Your chats, your personas, your agents and your settings are kept in a database file on the same computer. Your memory is plain Markdown files on the same computer.
 
 Some things leave your computer, and only when needed:
 
