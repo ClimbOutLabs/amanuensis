@@ -7,6 +7,7 @@ import {
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { DEFAULT_ON_SOURCE_CONNECTOR_NAMES } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
 import {
   MAIL_CONNECTOR_NAME,
@@ -36,6 +37,8 @@ export interface MemoryTurnContext {
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
+  /** Connector names the person turned off for this chat, from the chat's stored choice. Absent: nothing is off. */
+  turnedOffConnectorNames?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
   /**
@@ -107,13 +110,13 @@ function mailAttachmentCapabilities(spec: AgentSpec): AgentCapability[] {
   return [{ toolResponseProcessors: [new MailAttachmentProcessor()] }];
 }
 
-/** The designated search provider is offered to every root thread, so a chat that never opened Add-ons still searches. */
-function withSearchProviderAttached(spec: AgentSpec, searchProviderServerName: string): AgentSpec {
+/** A connector offered to every root thread, so a chat that never opened Add-ons still has it. */
+function withConnectorAttached(spec: AgentSpec, serverName: string): AgentSpec {
   const servers = spec.mcp_servers ?? [];
-  if (servers.some(entry => entry.name === searchProviderServerName)) {
+  if (servers.some(entry => entry.name === serverName)) {
     return spec;
   }
-  const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: searchProviderServerName }]);
+  const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: serverName }]);
   return attached === undefined ? spec : { ...spec, mcp_servers: [...servers, attached] };
 }
 
@@ -137,6 +140,25 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     this.#toolOutputScreen = toolOutputScreen;
   }
 
+  /**
+   * The spec with the set-up Email and Calendar connectors attached, unless the chat turned
+   * them off. A set-up list that could not be read attaches nothing: a turn must not gain a
+   * connector whose setup could not be confirmed.
+   */
+  async #withDefaultSourcesAttached(spec: AgentSpec, turnedOff: ReadonlySet<string>): Promise<AgentSpec> {
+    const setUpConnectorNames = await this.setUpConnectorNames;
+    if (setUpConnectorNames === undefined) {
+      return spec;
+    }
+    let next = spec;
+    for (const name of DEFAULT_ON_SOURCE_CONNECTOR_NAMES) {
+      if (setUpConnectorNames.includes(name) && !turnedOff.has(name)) {
+        next = withConnectorAttached(next, name);
+      }
+    }
+    return next;
+  }
+
   override async resolveAgentDefinition(
     input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0],
   ): Promise<ResolvedAgentDefinition> {
@@ -144,11 +166,18 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const providerServerName = this.#memory.providerServerName;
     // Root threads only, matching where the memory capability itself is attached: a sub-agent
     // is not the thread the host retains, so its mounts are left exactly as the spec states them.
-    const searchProviderServerName = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
+    const designatedSearchProvider = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
+    const turnedOff = new Set(this.#memory.turnedOffConnectorNames ?? []);
+    // A chat that turned search off keeps it off: the designated provider is not offered again.
+    const searchProviderServerName =
+      designatedSearchProvider !== undefined && turnedOff.has(designatedSearchProvider)
+        ? undefined
+        : designatedSearchProvider;
+    const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);
     const narrowedSpec =
       providerServerName === undefined || isSubAgent
-        ? input.spec
-        : withMemoryProviderNarrowedToReads(input.spec, providerServerName);
+        ? defaultedSpec
+        : withMemoryProviderNarrowedToReads(defaultedSpec, providerServerName);
     // The Email connector is offered only its eight tools on every thread, sub-agents included.
     const mailNarrowedSpec = narrowConnectorTools(narrowedSpec, {
       server_name: MAIL_CONNECTOR_NAME,
@@ -159,13 +188,11 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       server_name: CALDAV_SERVER_NAME,
       tools: CALDAV_TOOL_NAMES,
     });
-    const resolved = await super.resolveAgentDefinition({
-      ...input,
-      spec:
-        searchProviderServerName === undefined
-          ? calendarNarrowedSpec
-          : withSearchProviderAttached(calendarNarrowedSpec, searchProviderServerName),
-    });
+    const effectiveSpec =
+      searchProviderServerName === undefined
+        ? calendarNarrowedSpec
+        : withConnectorAttached(calendarNarrowedSpec, searchProviderServerName);
+    const resolved = await super.resolveAgentDefinition({ ...input, spec: effectiveSpec });
     // An explicit recallEnabled on the turn wins over the spec (defaults to true per schema):
     // unattended runs pass false so their own earlier tasks cannot fingerprint-block their searches.
     const recallEnabled = this.#memory.recallEnabled ?? input.spec.config.memory.recall_enabled;
@@ -179,7 +206,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const extraCapabilities = [
       ...memoryCapabilities,
       ...(outputScreen === undefined ? [] : [outputScreen]),
-      ...mailAttachmentCapabilities(input.spec),
+      ...mailAttachmentCapabilities(effectiveSpec),
     ];
     if (extraCapabilities.length === 0) {
       return resolved;

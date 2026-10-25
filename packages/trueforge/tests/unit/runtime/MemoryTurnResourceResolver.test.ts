@@ -10,7 +10,10 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import type { ILLM, IToolSet } from '@truefoundry/trueforge-core/core';
 import { isAuthRequired } from '@truefoundry/trueforge-core/core';
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { createLogger } from 'winston';
+import { PERSONA_CONTEXT_VERSION, type PersonaContext } from '../../../src/personas/persona';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import {
   MemoryTurnResourceResolver,
@@ -87,6 +90,7 @@ function stubModelClient(): ILLM {
 function memoryContext(
   providerServerName: string | undefined,
   searchProviderServerName?: () => Promise<string | undefined>,
+  chat: Pick<MemoryTurnContext, 'turnedOffConnectorNames' | 'recallEnabled'> = {},
 ): MemoryTurnContext {
   return {
     // No client: these scenarios are about tool exposure, not about recall or retain.
@@ -97,6 +101,7 @@ function memoryContext(
     sessionTitle: undefined,
     providerServerName,
     searchProviderServerName,
+    ...chat,
   };
 }
 
@@ -105,6 +110,9 @@ function makeResolver(input: {
   providerServerName: string | undefined;
   searchProviderServerName?: () => Promise<string | undefined>;
   toolOutputScreen?: ToolOutputScreenConfig;
+  setUpConnectorNames?: () => Promise<readonly string[]>;
+  chat?: Pick<MemoryTurnContext, 'turnedOffConnectorNames' | 'recallEnabled'>;
+  persona?: PersonaContext;
 }) {
   return new MemoryTurnResourceResolver(
     {
@@ -116,13 +124,14 @@ function makeResolver(input: {
           modelSupportsVision: false,
         }),
       mcp: () => Promise.resolve({ url: input.url, headers: {} }),
+      ...(input.setUpConnectorNames === undefined ? {} : { setUpConnectorNames: input.setUpConnectorNames }),
       mcpRequestTimeoutMs: 10_000,
       mcpConnectTimeoutMs: 10_000,
       logger: createLogger({ silent: true }),
     },
     undefined,
-    undefined,
-    memoryContext(input.providerServerName, input.searchProviderServerName),
+    input.persona,
+    memoryContext(input.providerServerName, input.searchProviderServerName, input.chat),
     input.toolOutputScreen ?? TOOL_OUTPUT_SCREEN_CONFIG,
   );
 }
@@ -313,5 +322,113 @@ describe('the designated web search provider on every turn', () => {
 
     const child = await resolve(withSearchProvider(SEARCH_SERVER), bareSpec(), true);
     expect(child.definition.toolSets ?? []).toHaveLength(0);
+  });
+});
+
+describe('web search, email and calendar on by default in every chat', () => {
+  const SEARCH_SERVER = 'parallel-web';
+  const EMAIL = MAIL_CONNECTOR_NAME;
+  const CALENDAR = CALDAV_SERVER_NAME;
+  let inert: InertMcpServer;
+
+  beforeAll(async () => {
+    inert = await startInertMcpServer();
+  });
+
+  afterAll(async () => {
+    await inert.close();
+  });
+
+  const bareSpec = () => AgentSpecSchema.parse({ model: { name: CHAT_MODEL }, instructions: 'Answer the user.' });
+
+  function chatResolver(input: {
+    setUp: readonly string[] | undefined;
+    turnedOff?: readonly string[];
+    unattended?: boolean;
+    persona?: PersonaContext;
+  }) {
+    const { setUp } = input;
+    return makeResolver({
+      url: inert.url,
+      providerServerName: undefined,
+      searchProviderServerName: () => Promise.resolve(SEARCH_SERVER),
+      ...(setUp === undefined ? {} : { setUpConnectorNames: () => Promise.resolve(setUp) }),
+      chat: {
+        turnedOffConnectorNames: input.turnedOff,
+        recallEnabled: input.unattended === true ? false : undefined,
+      },
+      ...(input.persona === undefined ? {} : { persona: input.persona }),
+    });
+  }
+
+  async function mounted(resolver: MemoryTurnResourceResolver, spec = bareSpec()) {
+    const resolved = await resolve(resolver, spec);
+    return (resolved.definition.toolSets ?? []).map(toolSet => toolSet.name).sort();
+  }
+
+  it('attaches search and every set-up source on the first turn of a new chat', async () => {
+    const names = await mounted(chatResolver({ setUp: [SEARCH_SERVER, EMAIL, CALENDAR] }));
+    expect(names).toEqual([CALENDAR, EMAIL, SEARCH_SERVER].sort());
+  });
+
+  it('gives a chat made before this change the same defaults', async () => {
+    const olderSpec = AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      instructions: 'Answer the user.',
+      mcp_servers: [{ name: OTHER_SERVER }],
+    });
+    const names = await mounted(chatResolver({ setUp: [OTHER_SERVER, EMAIL] }), olderSpec);
+    expect(names).toEqual([EMAIL, OTHER_SERVER, SEARCH_SERVER].sort());
+  });
+
+  it('keeps a source off for the chat that turned it off, and attaches it again once it is cleared', async () => {
+    const setUp = [SEARCH_SERVER, EMAIL, CALENDAR];
+    expect(await mounted(chatResolver({ setUp, turnedOff: [EMAIL] }))).toEqual([CALENDAR, SEARCH_SERVER].sort());
+    expect(await mounted(chatResolver({ setUp, turnedOff: [SEARCH_SERVER] }))).toEqual([CALENDAR, EMAIL].sort());
+    expect(await mounted(chatResolver({ setUp, turnedOff: [] }))).toEqual([CALENDAR, EMAIL, SEARCH_SERVER].sort());
+  });
+
+  it('never attaches a source that is not set up, or when the set-up list cannot be read', async () => {
+    expect(await mounted(chatResolver({ setUp: [SEARCH_SERVER] }))).toEqual([SEARCH_SERVER]);
+    expect(await mounted(chatResolver({ setUp: undefined }))).toEqual([SEARCH_SERVER]);
+  });
+
+  it('gives an unattended run and a persona chat the same defaults as any chat', async () => {
+    const persona: PersonaContext = {
+      version: PERSONA_CONTEXT_VERSION,
+      persona_id: 'persona-1',
+      persona_name: 'Invented Persona',
+      model_name: CHAT_MODEL,
+      injected_context: '',
+    };
+    const setUp = [SEARCH_SERVER, EMAIL, CALENDAR];
+    const expected = [CALENDAR, EMAIL, SEARCH_SERVER].sort();
+    expect(await mounted(chatResolver({ setUp, unattended: true }))).toEqual(expected);
+    expect(await mounted(chatResolver({ setUp, persona }))).toEqual(expected);
+    expect(await mounted(chatResolver({ setUp, persona, turnedOff: [EMAIL] }))).toEqual(
+      [CALENDAR, SEARCH_SERVER].sort(),
+    );
+  });
+
+  it('mounts Email the same way as a chat that listed it itself, so its approvals are unchanged', async () => {
+    const listed = AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      instructions: 'Answer the user.',
+      mcp_servers: [{ name: EMAIL }],
+    });
+    const byChoice = await resolve(chatResolver({ setUp: [EMAIL], turnedOff: [SEARCH_SERVER] }), bareSpec());
+    const byList = await resolve(chatResolver({ setUp: [EMAIL], turnedOff: [SEARCH_SERVER] }), listed);
+
+    // Approvals are decided per connector name and tool, so the same name on the same kind of mount is the same rule.
+    const chosen = mountFor(byChoice, EMAIL);
+    const mounted = mountFor(byList, EMAIL);
+    expect(chosen?.name).toBe(EMAIL);
+    expect(chosen?.constructor).toBe(mounted?.constructor);
+    expect(byChoice.definition.toolSets).toHaveLength(byList.definition.toolSets?.length ?? -1);
+  });
+
+  it('adds nothing to a sub-agent', async () => {
+    const resolved = await resolve(chatResolver({ setUp: [SEARCH_SERVER, EMAIL, CALENDAR] }), bareSpec(), true);
+    expect(resolved.definition.toolSets ?? []).toHaveLength(0);
   });
 });

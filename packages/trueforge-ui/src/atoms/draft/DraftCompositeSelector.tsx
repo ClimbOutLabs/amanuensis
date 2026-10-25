@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
+import { useChatConnectorChoice } from '../../server/ChatConnectorChoiceContext.js';
 import { useOptionalCatalogServer, useServerCapabilities } from '../../server/ServerContext.js';
 import { useOptionalShellMode, type SettingsSection } from '../../server/ShellModeContext.js';
 import type { AgentSkill, ConnectorState } from '../../server/types.js';
@@ -22,6 +23,7 @@ import { CatalogLogo } from '../primitives/CatalogLogo.js';
 import { Switch } from '../primitives/Switch.js';
 import { readAgentCapabilities, withAgentCapabilities } from './agentCapabilities.js';
 import { readSandboxEnabled, withSandboxEnabled } from './agentSandbox.js';
+import { isDefaultOnConnector } from './defaultOnConnectors.js';
 import { DraftCapabilitiesPanel } from './DraftCapabilitiesPanel.js';
 import { DraftCatalogEmptyState } from './DraftCatalogEmptyState.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
@@ -308,7 +310,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const capabilities = useServerCapabilities();
   const settingsCatalog = useOptionalCatalogServer();
   const shell = useOptionalShellMode();
-  const { agentSpec } = useTrueFoundryAgentSpec();
+  const { agentSpec, draftSessionId } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<AttachTab>('connectors');
@@ -344,10 +346,23 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const canConfigureConnectors = settingsEnabled && settingsCatalog?.connectorCatalog != null;
   const canConfigureSkills = settingsEnabled && settingsCatalog?.skillCatalog != null;
 
+  const { turnedOff, setTurnedOff } = useChatConnectorChoice(draftSessionId);
+  // Email, Calendar and the search provider are on in every chat until the person turns one off.
+  const defaultOnMounts = useMemo(
+    () =>
+      connectors
+        .filter(connector => isDefaultOnConnector(connector) && !turnedOff.includes(connector.name))
+        .map(connector => ({ id: connector.id, name: connector.name })),
+    [connectors, turnedOff],
+  );
   const specMcp = useMemo(() => draftMountsFromSpec(agentSpec?.mcpServers), [agentSpec?.mcpServers]);
   const specSkills = useMemo(() => draftMountsFromSpec(agentSpec?.skills), [agentSpec?.skills]);
 
-  const selectedMcp = open ? localMcp : specMcp;
+  const mountedMcp = open ? localMcp : specMcp;
+  const selectedMcp = useMemo(
+    () => [...mountedMcp, ...defaultOnMounts.filter(mount => !mountedMcp.some(item => item.id === mount.id))],
+    [mountedMcp, defaultOnMounts],
+  );
   const selectedSkills = open ? localSkills : specSkills;
   const selectedMcpIds = useMemo(() => new Set(selectedMcp.map(m => m.id)), [selectedMcp]);
   const hasValidModel = Boolean(agentSpec?.model?.name.trim());
@@ -464,6 +479,16 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   );
 
   const toggleConnector = (connector: ConnectorState) => {
+    const selected = selectedMcpIds.has(connector.id);
+    const isDefaultOn = isDefaultOnConnector(connector);
+    if (isDefaultOn) {
+      // Default-on sources are never stored as mounts: only the off choice is kept for the chat.
+      void setTurnedOff(
+        selected ? [...turnedOff, connector.name] : turnedOff.filter(name => name !== connector.name),
+      ).catch(() => undefined);
+      // A mount the chat already lists is dropped too, or it would keep the source on.
+      if (!selected || !localMcpRef.current.some(m => m.id === connector.id)) return;
+    }
     setLocalMcp(prev =>
       prev.some(m => m.id === connector.id)
         ? prev.filter(m => m.id !== connector.id)
@@ -548,7 +573,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     setLocalSkills(specSkills);
     dirtyRef.current = false;
     clearFlushTimer();
-    setPinnedMcpIds(new Set(specMcp.map(m => m.id)));
+    setPinnedMcpIds(new Set(selectedMcp.map(m => m.id)));
     setPinnedSkillIds(new Set(specSkills.map(skill => skillFamilyId(skill.id))));
     setOpen(true);
   };

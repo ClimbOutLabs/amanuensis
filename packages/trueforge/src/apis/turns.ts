@@ -42,6 +42,7 @@ import {
   type BoundRepository,
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
+import { readTurnedOffConnectors } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -839,6 +840,8 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
+      // The connectors the person turned off for this chat stay off on every turn of it.
+      turnedOffConnectorNames: readTurnedOffConnectors(session.record.metadata),
       // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
       recallEnabled: deps.unattended ? false : undefined,
       internalSourceState,

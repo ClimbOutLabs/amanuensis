@@ -7,6 +7,12 @@
  * turn setup reads it back on every turn of the chat.
  */
 
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract.js';
+import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract.js';
+
+/** The built-in sources on by default beside the search provider, each only when set up. */
+export const DEFAULT_ON_SOURCE_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME];
+
 /** Session metadata key for the connectors turned off for a chat. */
 export const CHAT_CONNECTORS_OFF_METADATA_KEY = 'connectors_off';
 
@@ -52,12 +58,9 @@ export function withTurnedOffConnectors(
   metadata: Record<string, string> | null | undefined,
   names: readonly string[],
 ): Record<string, string> {
-  const next: Record<string, string> = { ...(metadata ?? {}) };
+  const rest = Object.fromEntries(
+    Object.entries(metadata ?? {}).filter(([key]) => key !== CHAT_CONNECTORS_OFF_METADATA_KEY),
+  );
   const unique = [...new Set(names.filter(name => name.length > 0))];
-  if (unique.length === 0) {
-    delete next[CHAT_CONNECTORS_OFF_METADATA_KEY];
-  } else {
-    next[CHAT_CONNECTORS_OFF_METADATA_KEY] = JSON.stringify(unique);
-  }
-  return next;
+  return unique.length === 0 ? rest : { ...rest, [CHAT_CONNECTORS_OFF_METADATA_KEY]: JSON.stringify(unique) };
 }
