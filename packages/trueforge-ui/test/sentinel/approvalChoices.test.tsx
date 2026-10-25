@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { offersChangeIt } from '@/sentinel/approvalChoices.js';
@@ -31,7 +31,7 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Approve for this chat in plain view, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Always allow this here in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
         approvalId="approval-1"
@@ -42,13 +42,13 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
+    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Always allow this here']);
     // A choice the server offers is never folded into the closed Details block.
-    expect(screen.getByRole('button', { name: 'Approve for this chat' }).closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
       'title',
-      'Allow this kind of call for the rest of this chat.',
+      "Don't ask again for this kind of action in this chat.",
     );
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
@@ -96,7 +96,7 @@ describe('approval choices', () => {
       </SentinelApiProvider>,
     );
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
-    expect(terms).toEqual(['Approve', 'Approve for this chat', 'Always allow', 'Deny']);
+    expect(terms).toEqual(['Approve', 'Always allow this here', 'Always allow', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 });
@@ -143,9 +143,14 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, schedule })).toBe(true);
   });
 
-  it('offers Change it for a held web search, so its words can be edited before it is sent', () => {
-    const plain_what = searchHoldCardText({ summary: 'Example Person clinic hours', say: HOLD_SAY.private_detail });
-    expect(offersChangeIt({ ...card, plain_what })).toBe(true);
+  it('offers Change it for a held web search or page read, so its words can be edited before it is sent', () => {
+    const say = holdSay('Aman').search_setting;
+    expect(
+      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'clinic hours', say, page: false }) }),
+    ).toBe(true);
+    expect(
+      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'https://example.org', say, page: true }) }),
+    ).toBe(true);
   });
 
   it('offers Change it for a new specialist', () => {

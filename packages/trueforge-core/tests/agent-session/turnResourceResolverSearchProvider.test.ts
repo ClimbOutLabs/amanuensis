@@ -156,19 +156,11 @@ describe('TurnResourceResolver search provider', () => {
     const second = await resolveToolSets(resolver);
     await toolSetNamed(first, 'finder').callTool({ name: 'lookup', arguments: { query: 'oslo' } });
 
-    // A sub-agent thread of the same turn sees the link the root thread's search returned.
-    const sameTurn = await toolSetNamed(second, 'finder').toolCallInfo({
-      name: 'lookup',
-      arguments: { query: 'https://results.example.org/oslo' },
-    });
-    expect(sameTurn.tier).toBe(1);
+    // A sub-agent thread of the same turn counts against the same allowance as the root thread.
+    await toolSetNamed(second, 'finder').callTool({ name: 'lookup', arguments: { query: 'bergen' } });
+    expect(resolver.webSearchTurn.silentSearches).toBe(2);
 
-    const nextTurn = await resolveToolSets(makeResolver({ finder: [] }));
-    const fresh = await toolSetNamed(nextTurn, 'finder').toolCallInfo({
-      name: 'lookup',
-      arguments: { query: 'https://results.example.org/oslo' },
-    });
-    expect(fresh.tier).toBe(3);
+    expect(makeResolver({ finder: [] }).webSearchTurn.silentSearches).toBe(0);
   });
 
   it('gives a resumed turn a fresh allowance, so only a person’s approval of something else extends a run', async () => {

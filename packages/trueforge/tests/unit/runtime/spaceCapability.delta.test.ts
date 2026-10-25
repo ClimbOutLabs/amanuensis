@@ -478,11 +478,11 @@ describe('update_space delta edits: Madrid board journey', () => {
       body: MADRID_BOARD,
       edits: [{ search: 'a', replace: 'b' }],
     });
-    // Schema validation rejects the call before the handler runs.
+    // Schema validation rejects the call before the handler runs, naming the bad field.
     const parsed = resultJson(rejected);
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toBe('Validation failed');
-    expect(JSON.stringify(parsed.details)).toContain('Provide exactly one of body');
+    expect(parsed.error).toContain('Invalid space call');
+    expect(parsed.error).toContain('Provide exactly one of body');
   });
 
   it('more than 50 edits are rejected by schema validation', async () => {
@@ -497,7 +497,7 @@ describe('update_space delta edits: Madrid board journey', () => {
     });
     const parsed = resultJson(rejected);
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toBe('Validation failed');
+    expect(parsed.error).toContain('edits: is too long');
   });
 
   it('exactly 50 edits are accepted, and the result reports per-edit counts', async () => {
@@ -546,7 +546,7 @@ describe('update_space delta edits: Madrid board journey', () => {
     });
     const parsed = resultJson(rejected);
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toBe('Validation failed');
+    expect(parsed.error).toContain('edits: is too short');
   });
 
   it('a delta edit that would exceed the body size limit fails as a clean terminal error', async () => {

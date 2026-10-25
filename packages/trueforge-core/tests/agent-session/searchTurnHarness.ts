@@ -79,6 +79,8 @@ export async function setupSearchChat(
     reasoning_effort?: string;
     /** A sandbox for the chat, so files the person attaches are staged and read as they are in the app. */
     sandbox?: Sandbox;
+    /** The name the person gave the assistant, as the host sets it on the main thread. */
+    assistant_name?: string;
   } = {},
 ) {
   // Each test is its own chat: the record of unsaved turns lives for the whole process.
@@ -157,6 +159,10 @@ export async function setupSearchChat(
         });
         return {
           ...resolved,
+          definition:
+            options.assistant_name === undefined
+              ? resolved.definition
+              : { ...resolved.definition, identity: { assistantName: options.assistant_name } },
           extraCapabilities: [
             ...(resolved.extraCapabilities ?? []),
             {

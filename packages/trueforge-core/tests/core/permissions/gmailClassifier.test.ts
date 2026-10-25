@@ -51,12 +51,6 @@ describe('Gmail read classification', () => {
     expect(decision.reason_detail).not.toContain('wipe_everything');
   });
 
-  it('does not mark the turn on classification alone; the tool set marks a dispatched read', async () => {
-    const ctx = makeCtx();
-    await classifyTier(gmailAction('read_email', { messageId: 'm1' }), ctx);
-    expect(ctx.web_search.privateDataRead).toBe(false);
-  });
-
   it('is denied while offline, because Gmail needs the network', async () => {
     const services = {
       ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -77,7 +71,6 @@ describe('Gmail read classification', () => {
     const ctx = makeCtx();
     const decision = await classifyTier(connectorTool, ctx);
     expect(decision.tier).toBe(3);
-    expect(ctx.web_search.privateDataRead).toBe(false);
   });
 
   it.each(['list_inbox_threads', 'list_drafts'])(
@@ -106,8 +99,7 @@ describe('Gmail read classification', () => {
 
   it('does not let a built-in tool of another server take the Gmail path', async () => {
     const other: SentinelAction = { ...gmailAction('read_email'), mcp_server_name: 'notes' };
-    const ctx = makeCtx();
-    await classifyTier(other, ctx);
-    expect(ctx.web_search.privateDataRead).toBe(false);
+    const decision = await classifyTier(other, makeCtx());
+    expect(decision.reason).not.toBe('gmail_read');
   });
 });

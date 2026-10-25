@@ -3,7 +3,13 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { formatRelativeUpdated, measureFrameContentHeight, spaceKind, SpacesView } from '@/containers/SpacesView.js';
+import {
+  formatRelativeUpdated,
+  measureFrameContentHeight,
+  rewriteSpacePictureUrls,
+  spaceKind,
+  SpacesView,
+} from '@/containers/SpacesView.js';
 import { SPACE_PAGE_BASE_STYLE } from '@/containers/spacePageBase.js';
 import { takeComposerPrefill } from '@/hooks/useComposerDraft.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -311,9 +317,13 @@ describe('SpacesView space page', () => {
     expect(first?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
     const policy = first?.getAttribute('content') ?? '';
     expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain('img-src data: https:;');
+    // 'self' is the one addition: the frame loads its pictures from the owner's own picture
+    // route, never from an outside host, and the shell policy already allows same-origin pictures.
+    // No https: here: it could never apply under the shell policy, and keeping it would be a
+    // latent widening if the shell ever changed.
+    expect(policy).toContain("img-src data: 'self';");
     expect(policy).toContain("form-action 'none'");
-    expect(policy).not.toMatch(/\*|'self'|blob:/);
+    expect(policy).not.toMatch(/\*|blob:/);
     expect(policy).not.toMatch(/https?:\/\/|http:/);
   });
 
@@ -536,5 +546,34 @@ describe('spaceKind', () => {
 
   it('calls any other markdown body a list', () => {
     expect(spaceKind({ format: 'markdown', body: '- milk\n- eggs' })).toBe('list');
+  });
+});
+
+describe('rewriteSpacePictureUrls', () => {
+  const FOX = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+
+  it('routes a web picture through the owner picture route, so the inherited shell policy lets it load', () => {
+    const rewritten = rewriteSpacePictureUrls(`<img src="${FOX}" alt="Red fox">`);
+    expect(rewritten).toContain(`/api/space-pictures?url=${encodeURIComponent(FOX)}`);
+    expect(rewritten).not.toContain(FOX);
+    expect(rewritten).toContain('alt="Red fox"');
+  });
+
+  it('routes every srcset candidate through the proxy', () => {
+    const rewritten = rewriteSpacePictureUrls(
+      `<img src="${FOX}" srcset="${FOX} 1x, https://upload.wikimedia.org/other.jpg 2x" alt="Fox">`,
+    );
+    expect(rewritten).toContain(`/api/space-pictures?url=${encodeURIComponent(FOX)} 1x`);
+    expect(rewritten).toContain('/api/space-pictures?url=https%3A%2F%2Fupload.wikimedia.org%2Fother.jpg 2x');
+  });
+
+  it('leaves data: and relative pictures alone', () => {
+    const html = '<img src="data:image/png;base64,AAAA" alt="Dot"><img src="local.png" alt="Local">';
+    expect(rewriteSpacePictureUrls(html)).toBe(html);
+  });
+
+  it('gives a picture without a description the plain failure line as its alt text', () => {
+    expect(rewriteSpacePictureUrls(`<img src="${FOX}">`)).toContain('alt="This picture couldn\'t be shown"');
+    expect(rewriteSpacePictureUrls(`<img src="${FOX}" alt="">`)).toContain('alt="This picture couldn\'t be shown"');
   });
 });

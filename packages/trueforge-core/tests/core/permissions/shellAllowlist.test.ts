@@ -6,8 +6,10 @@ import {
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
+  parseReadOnlyList,
   parseSimpleCommand,
   pinAllowlistedExec,
+  pinReadOnlyList,
   resolveOnPinnedPath,
   seedShellAllowlist,
   validateOfflineSubset,
@@ -29,7 +31,7 @@ function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
   const config: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   return { config, cleanup };
@@ -488,5 +490,107 @@ describe('offline subset', () => {
     for (const name of OFFLINE_SHELL_COMMANDS) {
       expect(parseSimpleCommand(name)).toBeDefined();
     }
+  });
+});
+
+describe('reads the safe list adds: sed print ranges, grep and head', () => {
+  const config = seedShellAllowlist(PINNED);
+  const matches = (command: string): boolean => {
+    const parsed = parseSimpleCommand(command);
+    return parsed !== undefined && matchAllowlist(parsed, config) !== undefined;
+  };
+
+  test('allows printing a range of lines, and nothing else a sed script can do', () => {
+    expect(matches("sed -n '55,172p' README.md")).toBe(true);
+    expect(matches("sed -n '12p' README.md")).toBe(true);
+    expect(matches("sed -n '1e rm -rf x' README.md")).toBe(false);
+    expect(matches("sed -n '1w copy.txt' README.md")).toBe(false);
+    expect(matches("sed -i 's/a/b/' README.md")).toBe(false);
+    expect(matches('sed -n')).toBe(false);
+  });
+
+  test('allows a grep pattern of any shape, but never -R, which follows links out of the workspace', () => {
+    expect(matches("grep -rn 'TODO(.*)' src")).toBe(true);
+    expect(matches('grep -R TODO src')).toBe(false);
+    expect(matches('grep -f patterns.txt src')).toBe(false);
+  });
+
+  test('allows head with a count', () => {
+    expect(matches('head -n 20 README.md')).toBe(true);
+    expect(matches('head -20 README.md')).toBe(true);
+    expect(matches('head -7 README.md')).toBe(false);
+  });
+
+  test('keeps the offline subset in step with the list', () => {
+    expect(validateOfflineSubset(config)).toBe(true);
+  });
+});
+
+describe('parseReadOnlyList', () => {
+  const config = seedShellAllowlist(PINNED);
+  const parse = (command: string) => parseReadOnlyList({ command, config });
+
+  test('reads a cd followed by reads, and reads piped into reads', () => {
+    expect(parse("cd /workspace/exitramp && sed -n '55,172p' README.md")?.steps).toEqual([
+      { kind: 'cd', dir: '/workspace/exitramp' },
+      { kind: 'run', parsed: { wrapper: null, argv: ['sed', '-n', '55,172p', 'README.md'] } },
+    ]);
+    expect(parse('cd exitramp && git status && git log --oneline')?.separators).toEqual(['&&', '&&']);
+    expect(parse('grep -rn TODO src | head -20')?.separators).toEqual(['|']);
+    expect(parse('ls; pwd')?.separators).toEqual([';']);
+  });
+
+  test('is not a list for a single command, a redirect, a substitution, a background job or a command off the list', () => {
+    expect(parse('ls -la')).toBeUndefined();
+    expect(parse('cd x && cat a > b')).toBeUndefined();
+    expect(parse('cd x && cat $(echo a)')).toBeUndefined();
+    expect(parse('ls & pwd')).toBeUndefined();
+    expect(parse('cd x && rm -rf y')).toBeUndefined();
+    expect(parse('ls && ')).toBeUndefined();
+  });
+
+  test('never lets a later step run in the directory a failed cd left', () => {
+    expect(parse('cd x ; git status')).toBeUndefined();
+    expect(parse('cd x && cat a ; git status')).toBeUndefined();
+    expect(parse('cd x && cat a || git status')).toBeUndefined();
+    expect(parse('ls || cd x && cat a')).toBeUndefined();
+    expect(parse('ls | cd x && cat a')).toBeUndefined();
+    expect(parse('cd x | cat a')).toBeUndefined();
+    expect(parse('ls ; cd x && cat a | head -5')).toBeDefined();
+  });
+
+  test('keeps a quoted separator inside its argument', () => {
+    expect(parse("grep -n 'a && b' README.md && ls")?.steps).toHaveLength(2);
+  });
+});
+
+describe('pinReadOnlyList', () => {
+  test('pins every command in a list and probes git where it runs', () => {
+    const config = seedShellAllowlist(PINNED);
+    const pinned = pinReadOnlyList({
+      command: 'cd exitramp && git status && cat README.md',
+      config,
+      workspace_root: '/workspace',
+      cwd: '/workspace',
+    });
+    expect(pinned?.steps[0]).toEqual({ kind: 'cd', dir: 'exitramp' });
+    const git = pinned?.steps[1];
+    const cat = pinned?.steps[2];
+    expect(git?.kind === 'run' && git.argv[0]?.endsWith('/git')).toBe(true);
+    expect(git?.kind === 'run' && git.argv).toContain('core.fsmonitor=false');
+    expect(git?.kind === 'run' && git.cwd).toBe('/workspace/exitramp');
+    expect(cat?.kind === 'run' && cat.argv[0]?.endsWith('/cat')).toBe(true);
+    expect(pinned?.probes.map(probe => probe.cwd)).toEqual(['/workspace/exitramp']);
+    expect(pinned?.env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+  });
+
+  test('refuses git in a list without a workspace to harden it against', () => {
+    const pinned = pinReadOnlyList({
+      command: 'ls && git status',
+      config: seedShellAllowlist(PINNED),
+      workspace_root: undefined,
+      cwd: '/workspace',
+    });
+    expect(pinned?.git_needs_workspace_root).toBe(true);
   });
 });

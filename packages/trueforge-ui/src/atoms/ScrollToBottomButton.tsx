@@ -10,7 +10,9 @@ export const ScrollToBottomButton = forwardRef<HTMLSpanElement, ScrollToBottomBu
   ({ className, disabled, ...rest }, ref) => {
     if (disabled) return null;
     return (
-      <span ref={ref} className={cn('absolute right-4 -top-14 z-10 inline-flex')}>
+      // In the composer area's flow, not floating over the messages: a floating arrow sat over
+      // the bottom of the message list, where a waiting approval card's buttons come to rest.
+      <span ref={ref} className={cn('flex justify-end')}>
         <button
           type="button"
           aria-label="Scroll to bottom"

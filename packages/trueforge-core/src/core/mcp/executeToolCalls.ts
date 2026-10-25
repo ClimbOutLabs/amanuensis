@@ -36,7 +36,14 @@ import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/aud
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
-import { isSearchAskReason, isSilentSearchReason, recordPrivateToolResult } from '../permissions/webSearch';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import { parseToolCallArguments } from './toolArgumentCheck';
+import {
+  isSearchAskReason,
+  isSilentSearchReason,
+  recordToolResultProvenance,
+  resultTexts,
+} from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
@@ -2241,12 +2248,14 @@ export async function executeToolCalls({
     }
 
     const { result, wasInitialized } = response;
-    // Every result the model sees passes here, so a private read is recorded whichever tool it came from.
+    // Every result the model sees passes here, so where its links came from is known on every thread.
     if (sentinel !== undefined) {
-      recordPrivateToolResult({
+      const sent = collectOutboundStrings(parseToolCallArguments(toolCall) ?? {});
+      recordToolResultProvenance({
         state: sentinel.web_search,
         tool_name: toolCall.tool_info.original_tool_name,
-        result,
+        argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
+        texts: resultTexts(result),
       });
     }
 

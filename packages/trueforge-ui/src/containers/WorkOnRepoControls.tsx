@@ -152,6 +152,8 @@ export function WorkOnRepoControls({
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // The sandbox line is said only once the person reaches for this control, never to a chat that did not.
+  const [askedWithoutSandbox, setAskedWithoutSandbox] = useState(false);
   const startingRef = useRef(false);
   const sawCloneTurnRef = useRef(false);
   const previousSessionRef = useRef(sessionId);
@@ -194,6 +196,7 @@ export function WorkOnRepoControls({
     setPendingStart(null);
     setStartError(null);
     setPanelOpen(false);
+    setAskedWithoutSandbox(false);
   }, [sessionId]);
 
   useEffect(() => {
@@ -456,8 +459,7 @@ export function WorkOnRepoControls({
           type="button"
           variant="ghost"
           size="small"
-          disabled={sandboxOff}
-          onClick={panelOpen ? () => setPanelOpen(false) : openPanel}
+          onClick={sandboxOff ? () => setAskedWithoutSandbox(true) : panelOpen ? () => setPanelOpen(false) : openPanel}
         >
           <FolderGit2 aria-hidden className="mr-1.5 h-3.5 w-3.5" />
           Work on a repo
@@ -469,7 +471,7 @@ export function WorkOnRepoControls({
           </p>
         ) : null}
       </div>
-      {sandboxOff ? (
+      {sandboxOff && askedWithoutSandbox ? (
         <p className="text-[0.8125rem] text-text-secondary">
           Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.
         </p>
