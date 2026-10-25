@@ -236,11 +236,14 @@ const bugReportApi: BugReportApi = {
   getBugReportHandoff: () => Promise.reject(new Error('not used')),
 };
 
-function renderSidebarLayoutWithSpaces({ withBugReport = false }: { withBugReport?: boolean } = {}) {
+function renderSidebarLayoutWithSpaces({
+  withBugReport = false,
+  withLibrary = false,
+}: { withBugReport?: boolean; withLibrary?: boolean } = {}) {
   const layout = (
     <SlotsProvider>
       <ServerProvider server={mockServer()}>
-        <ShellModeProvider>
+        <ShellModeProvider {...(withLibrary ? { agentConfig: { mode: 'AgentLibraryWithComposer' as const } } : {})}>
           <SpaceProvider store={mockSpaceStore()}>
             <AgentConfigInstructionsProvider>
               <RuntimeHarness messages={[]}>
@@ -262,7 +265,7 @@ describe('SidebarLayout rail layout', () => {
     localStorage.clear();
   });
 
-  it('lists Chats, Spaces and Agents in order, with the avatar and More together at the bottom', () => {
+  it('lists Chats and Spaces in order, with the avatar and More together at the bottom', () => {
     renderSidebarLayoutWithSpaces();
 
     const nav = screen.getByRole('navigation', { name: 'Sidebar' });
@@ -320,13 +323,17 @@ describe('SidebarLayout rail highlight', () => {
       );
 
     expect(highlighted()).toEqual(['Chats']);
-    for (const entry of ['Spaces', 'Schedules', 'Agents']) {
+    for (const entry of ['Spaces', 'Schedules']) {
       fireEvent.click(within(nav).getByRole('button', { name: entry }));
       await waitFor(() => expect(highlighted()).toEqual([entry]));
     }
 
     fireEvent.click(within(nav).getByRole('button', { name: 'More' }));
     fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(highlighted()).toEqual(['More']));
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Agents' }));
     await waitFor(() => expect(highlighted()).toEqual(['More']));
 
     fireEvent.click(within(nav).getByRole('button', { name: 'Chats' }));
@@ -351,9 +358,26 @@ describe('SidebarLayout More menu', () => {
     // Report a bug renders only when the bug-report feature is wired, as it does on main.
     expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Settings']));
     expect(within(menu).getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
-    for (const railItem of ['Chats', 'New chat', 'Spaces', 'Agents']) {
+    for (const railItem of ['Chats', 'New chat', 'Spaces']) {
       expect(names).not.toContain(railItem);
     }
+  });
+
+  it('has no Agents entry in the rail, and More, Agents opens the agents list right under Build agent', async () => {
+    renderSidebarLayoutWithSpaces({ withLibrary: true });
+
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    expect(within(nav).queryByRole('button', { name: 'Agents' })).toBeNull();
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'More' }));
+    const menu = screen.getByRole('menu');
+    const names = within(menu)
+      .getAllByRole('button')
+      .map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '');
+    expect(names.indexOf('Agents')).toBe(names.indexOf('Start new agent') + 1);
+
+    fireEvent.click(within(menu).getByRole('button', { name: 'Agents' }));
+    await screen.findByRole('heading', { name: 'Agents' });
   });
 
   it('shows Report a bug in the More menu as a row with its words, like the other rows', () => {

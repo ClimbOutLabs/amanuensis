@@ -16,12 +16,12 @@ describe('railEntryFor', () => {
     expect(railEntryFor({ ...closed, mode: chat })).toBe('chats');
     expect(railEntryFor({ ...closed, spacesOpen: true, mode: chat })).toBe('spaces');
     expect(railEntryFor({ ...closed, schedulesOpen: true, mode: chat })).toBe('schedules');
-    expect(railEntryFor({ ...closed, libraryOpen: true, mode: chat })).toBe('agents');
   });
 
   it('lights the parent for pages reached through More', () => {
     expect(railEntryFor({ ...closed, settingsOpen: true, mode: chat })).toBe('more');
     expect(railEntryFor({ ...closed, sessionsOpen: true, mode: chat })).toBe('more');
+    expect(railEntryFor({ ...closed, libraryOpen: true, mode: chat })).toBe('more');
     expect(railEntryFor({ ...closed, mode: { ...chat, isCreateAgent: true } })).toBe('more');
   });
 
@@ -29,7 +29,7 @@ describe('railEntryFor', () => {
     expect(railEntryFor({ ...closed, spacesOpen: true, mode: { ...chat, isCreateAgent: true } })).toBe('spaces');
   });
 
-  it('lights Agents on the agent library landing page', () => {
-    expect(railEntryFor({ ...closed, mode: { status: 'idle' } })).toBe('agents');
+  it('lights More on the agent library landing page', () => {
+    expect(railEntryFor({ ...closed, mode: { status: 'idle' } })).toBe('more');
   });
 });

@@ -60,9 +60,9 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
 const CHAT_LIST_INSIDE_SELECTOR = '[data-chat-list-trigger], [role="menu"], [role="dialog"], [role="alertdialog"]';
 
 /**
- * Nav buttons only (Chats through Agents). Returned as plain siblings, not wrapped in their own
+ * Nav buttons only (Chats, Spaces and Schedules). Returned as plain siblings, not wrapped in their own
  * `<nav>`, so the caller lays them out in one scrolling flex column with the footer actions.
- * New chat lives at the top of the chat list; Build agent, Sessions and Settings live under More.
+ * New chat lives at the top of the chat list; Build agent, Agents, Sessions and Settings live under More.
  */
 function SidebarNavItems({
   selected,
@@ -73,7 +73,6 @@ function SidebarNavItems({
   chatListOpen: boolean;
   onChats: () => void;
 }): ReactNode {
-  const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const SchedulesButton = useSlot('SchedulesButton');
   const SpacesButton = useSlot('SpacesButton');
   const chatsSelected = selected === 'chats';
@@ -102,7 +101,6 @@ function SidebarNavItems({
       </button>
       <SpacesButton compact selected={selected === 'spaces'} />
       <SchedulesButton compact selected={selected === 'schedules'} />
-      <AgentsLibraryButton compact selected={selected === 'agents'} />
     </>
   );
 }
@@ -166,9 +164,10 @@ function SidebarRail({
 
 /**
  * The kebab at the bottom of the rail. Everything that is not a rail destination lives here: Build agent,
- * Sessions, Settings, the theme, Bug report and the host's log-out. It closes on an outside click or Escape.
+ * Agents, Sessions, Settings, the theme, Bug report and the host's log-out. It closes on an outside click or Escape.
  */
 function RailMoreMenu({ selected }: { selected: boolean }) {
+  const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const shell = useOptionalShellMode();
   const showNewActions = shell?.isNewChatEnabled !== false;
   const handleNewAgent = () => {
@@ -206,6 +205,7 @@ function RailMoreMenu({ selected }: { selected: boolean }) {
             Build agent
           </button>
         ) : null}
+        <AgentsLibraryButton row />
         <ShellActions labeled rows className="flex-col items-stretch gap-0.5" />
       </div>
     </DropdownMenu>

@@ -5,35 +5,28 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
-import {
-  auiButtonClass,
-  railSelectedClassName,
-  sidebarButtonRadiusClassName,
-  sidebarRailButtonClassName,
-} from './lib/buttonClasses.js';
+import { auiButtonClass, railMenuRowClassName, sidebarButtonRadiusClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { SEARCH_AGENTS_PAGE_SIZE } from './lib/useSearchAgentsList.js';
 
 export type AgentsLibraryButtonProps = {
   className?: string;
-  compact?: boolean;
-  /** Whether this is the current screen. The rail decides this in one place; on its own the button follows its page. */
-  selected?: boolean;
+  /** Draws a row of the rail's More menu, the same size as its other rows. */
+  row?: boolean;
 };
 
-export function AgentsLibraryButton({ className, compact = false, selected }: AgentsLibraryButtonProps) {
+export function AgentsLibraryButton({ className, row = false }: AgentsLibraryButtonProps) {
   const server = useOptionalServer();
   const shell = useOptionalShellMode();
   const [countLabel, setCountLabel] = useState<string | null>(null);
 
   const enabled = shell?.isLibraryEnabled === true && server != null;
   const libraryOpen = shell?.libraryOpen === true;
-  const highlighted = selected ?? libraryOpen;
   const agentsListEpoch = shell?.agentsListEpoch ?? 0;
 
   useEffect(() => {
-    // Compact rail has no count badge; skip the catalog request.
-    if (!enabled || !server || compact) return;
+    // A menu row has no count badge; skip the catalog request.
+    if (!enabled || !server || row) return;
     let cancelled = false;
     void server
       .searchAgents({ limit: SEARCH_AGENTS_PAGE_SIZE })
@@ -46,34 +39,33 @@ export function AgentsLibraryButton({ className, compact = false, selected }: Ag
     return () => {
       cancelled = true;
     };
-  }, [enabled, server, agentsListEpoch, compact]);
+  }, [enabled, server, agentsListEpoch, row]);
 
   if (!enabled) return null;
 
   return (
-    <div className={cn('relative min-w-0', compact ? 'flex justify-center' : 'w-full', className)}>
+    <div className={cn('relative min-w-0', !row && 'w-full', className)}>
       <button
         type="button"
-        aria-label={compact ? 'Agents' : undefined}
-        title={compact ? 'Agents' : undefined}
-        aria-current={highlighted ? 'page' : undefined}
+        aria-current={libraryOpen ? 'page' : undefined}
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
-            sidebarButtonRadiusClassName,
-            'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
-            compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
-            highlighted &&
-              (compact
-                ? railSelectedClassName
+            row && railMenuRowClassName,
+            !row && sidebarButtonRadiusClassName,
+            !row &&
+              'h-8 w-full !justify-start px-2.5 text-sm font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
+            libraryOpen &&
+              (row
+                ? 'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text'
                 : 'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text'),
           ),
         })}
         onClick={() => shell?.setLibraryOpen(true)}
       >
-        <Icon name="library-big" size={compact ? 14 : undefined} />
-        {compact ? (
-          <span className="text-center">Agents</span>
+        <Icon name="library-big" size={row ? 14 : undefined} />
+        {row ? (
+          'Agents'
         ) : (
           <>
             <span className="truncate">

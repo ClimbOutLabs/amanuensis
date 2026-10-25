@@ -505,11 +505,11 @@ describe('AgentsLibraryButton', () => {
     });
   });
 
-  it('does not fetch agent count when compact', () => {
+  it('does not fetch agent count as a menu row', () => {
     const searchAgents = vi.fn(async () => [{ name: 'alpha', agentId: 'alpha' }]);
     const server = createMockAgentUIServer({ searchAgents });
 
-    renderLibrary(<AgentsLibraryButton compact />, { server });
+    renderLibrary(<AgentsLibraryButton row />, { server });
 
     expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument();
     expect(searchAgents).not.toHaveBeenCalled();
