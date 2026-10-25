@@ -8,8 +8,8 @@ A space is a page that Aman keeps up to date for you. It can be a list, a table 
 
 ## Make a space
 
-1. Click **New Chat**.
-2. Ask for the page you want, such as "Make a space called Dog breeds that compares family dogs". Or click the **Keep pages in Spaces** card.
+1. Click **Chats**, then click **New chat**.
+2. Ask for the page you want, such as "Make a space called Dog breeds that compares family dogs".
 3. Aman builds the page and tells you where to find it.
 4. Click **Spaces** in the left bar. Click your space to open it.
 

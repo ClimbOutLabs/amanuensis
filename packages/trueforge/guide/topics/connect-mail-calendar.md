@@ -8,11 +8,11 @@ You connect email and calendar in one place, in Settings. You do not need the te
 
 You need a Google account. Aman uses a Google app that you make once in your own Google account. This takes about ten minutes.
 
-If Aman is in offline mode, turn it off first. Click **Settings**, click **Permissions**, and turn off **Offline mode**.
+If Aman is in offline mode, turn it off first. Click **More**, click **Settings**, click **Permissions**, and turn off **Offline mode**.
 
 ## Connect your email
 
-1. Click **Settings** in the left bar, then click **Connectors**.
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
 2. Find **Google** in the list and click **Connect**.
 3. A panel opens with a list of steps. Do them in order. Each step has a link you can copy.
 4. Make a Google Cloud project. Use one you already have if you like.
@@ -31,10 +31,10 @@ The panel then says it is connected and shows your Google address.
 
 ## Connect your calendar
 
-1. Click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
+1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
 2. Open the Calendar API link in the Calendar section. On Google's page, click Enable.
 3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
-4. To let Aman add events, click **Allow Aman to add events**. You still approve each event first. Aman cannot delete events.
+4. To let Aman add events, click the button that starts with "Allow" and ends with "to add events". It shows Aman's name in the middle. You still approve each event first. Aman cannot delete events.
 
 ## Later
 

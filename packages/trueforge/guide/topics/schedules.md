@@ -10,10 +10,10 @@ A schedule always repeats. There is no one-time reminder. If you ask for one, Am
 
 ## Make a schedule by asking
 
-1. Click **New Chat**.
+1. Click **Chats**, then click **New chat**.
 2. Type what you want and how often, such as "Every weekday at 7:30, send me my morning brief". Aman asks if the time is unclear.
 3. A card shows when it runs and what it does. Check it.
-4. Click **Create it**. To stop, click **Not now**. To reword it first, click **Change it**.
+4. Click **Allow**. To stop, click **Not now**. To reword it first, click **Change it**.
 
 ## Make a schedule on the Schedules page
 
