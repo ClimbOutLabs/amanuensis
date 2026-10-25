@@ -201,3 +201,34 @@ describe('createScheduleServer schedule runs', () => {
     expect(run.triggeredAt).toBe('2024-06-01T12:00:01.000Z');
   });
 });
+
+describe('createScheduleServer.listSchedules with one-time schedules and reminders', () => {
+  function row(id: string, manifest: Record<string, unknown>) {
+    return {
+      id,
+      name: id,
+      agentName: 'alpha',
+      runsAs: 'Bender',
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+      createdBySubject: { subjectId: 'user-1', subjectType: 'user', subjectDisplayName: 'alice@example.com' },
+      manifest: { task: 'do thing', timezone: 'UTC', status: 'active', ...manifest },
+    };
+  }
+
+  it('lists repeating tasks only: a one-time schedule or a reminder is not edited as a task', async () => {
+    const list = vi.fn(async () => ({
+      data: [
+        row('repeating', { cron: '0 9 * * *' }),
+        row('once', { cron: null, runAt: '2026-10-26T18:00:00-04:00' }),
+        row('repeating-reminder', { cron: '0 9 * * *', kind: 'reminder' }),
+      ],
+      response: { pagination: { limit: 25 } },
+      hasNextPage: () => false,
+      getNextPage: async () => undefined,
+    }));
+    const server = createScheduleServer({ client: mockClient({ list }) });
+    const result = await server.listSchedules();
+    expect(result.data.map(schedule => schedule.id)).toEqual(['repeating']);
+  });
+});
