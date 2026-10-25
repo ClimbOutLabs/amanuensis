@@ -42,17 +42,7 @@ import {
   SCHEDULE_SERVER_ID,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import {
-  CREATE_SPACE_TOOL_NAME,
-  GET_SPACE_TOOL_NAME,
-  isSpaceReadToolName,
-  isSpaceWriteToolName,
-  LIST_BLOCKS_TOOL_NAME,
-  LIST_SPACES_TOOL_NAME,
-  REVERT_SPACE_TOOL_NAME,
-  SPACE_SERVER_ID,
-  UPDATE_SPACE_TOOL_NAME,
-} from '../spaces/toolContract';
+import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -2657,31 +2647,20 @@ function spaceDisplayName(name: string | null): string | null {
 }
 
 /**
- * The plain line for a space tool, in the words the activity rail shows. A name is shown only when
- * the call carries one: get_space, list_blocks and revert_space name the space by id alone, so their
- * lines say "a space". Null for any tool that is not the host's own space tool.
+ * The plain line for a space tool, in the words the activity rail shows. The wording lives with the
+ * tool names in the space tool contract, so a space tool cannot exist without its line. The name shown
+ * is the one the call addresses the space by (space_name), or the name a create call gives it (name);
+ * a call that carries neither names no space, so the line says "a space". Null for any tool that is
+ * not the host's own space tool.
  */
 function spaceToolLine(action: SentinelAction): string | null {
   if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
     return null;
   }
-  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
-  switch (action.tool_name) {
-    case LIST_SPACES_TOOL_NAME:
-      return 'Looked at your spaces.';
-    case GET_SPACE_TOOL_NAME:
-      return 'Read a space.';
-    case LIST_BLOCKS_TOOL_NAME:
-      return 'Looked at the sections of a space.';
-    case CREATE_SPACE_TOOL_NAME:
-      return name === null ? 'Created a space.' : `Created the space ${name}.`;
-    case UPDATE_SPACE_TOOL_NAME:
-      return name === null ? 'Updated a space.' : `Updated the space ${name}.`;
-    case REVERT_SPACE_TOOL_NAME:
-      return 'Restored an earlier version of a space.';
-    default:
-      return null;
-  }
+  const name = spaceDisplayName(
+    stringParam(action.canonical_params, 'space_name') ?? stringParam(action.canonical_params, 'name'),
+  );
+  return spaceActivityLine({ tool_name: action.tool_name, space_name: name });
 }
 
 /**
