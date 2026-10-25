@@ -85,6 +85,12 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
               - '.github/workflows/ci.yml'
+            aman-installer:
+              - 'packages/aman-installer/**'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
             sandbox-slot-agent:
               - 'ops/sandbox-slot/agent/**'
               - 'package.json'
@@ -120,6 +126,7 @@ jobs:
           TRUEFORGE_SDK: ${{ steps.filter.outputs['trueforge-sdk'] }}
           FRONTEND: ${{ steps.filter.outputs.frontend }}
           TRUEFORGE_UI: ${{ steps.filter.outputs['trueforge-ui'] }}
+          AMAN_INSTALLER: ${{ steps.filter.outputs['aman-installer'] }}
           SANDBOX_SLOT_AGENT: ${{ steps.filter.outputs['sandbox-slot-agent'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
@@ -129,6 +136,7 @@ jobs:
           if (process.env.TRUEFORGE_SDK === 'true') changedPackages.push('trueforge-sdk');
           if (process.env.FRONTEND === 'true') changedPackages.push('frontend');
           if (process.env.TRUEFORGE_UI === 'true') changedPackages.push('trueforge-ui');
+          if (process.env.AMAN_INSTALLER === 'true') changedPackages.push('aman-installer');
           if (process.env.SANDBOX_SLOT_AGENT === 'true') changedPackages.push('sandbox-slot-agent');
           console.log(`list=${JSON.stringify(changedPackages)}`);
           EOF
@@ -274,6 +282,47 @@ jobs:
       - name: Test
         run: pnpm "test:${{ matrix.package }}"
 
+  # The universal installer ships one executable per system. Build it on all
+  # three systems and run it. Path-gated through the package matrix, like the
+  # package tests above.
+  aman-installer-exe:
+    name: Aman Installer (${{ matrix.os }})
+    needs: detect-changes
+    if: contains(fromJSON(needs.detect-changes.outputs.packages), 'aman-installer')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the executable
+        run: pnpm build:aman-installer
+
+      - name: Run the executable
+        if: runner.os != 'Windows'
+        run: packages/aman-installer/dist/aman --version
+
+      - name: Run the executable
+        if: runner.os == 'Windows'
+        run: packages/aman-installer/dist/aman.exe --version
+
   chart-checks:
     name: Helm Chart
     needs: detect-changes
@@ -411,6 +460,7 @@ jobs:
       - migration-order
       - typecheck-and-build
       - package-checks
+      - aman-installer-exe
       - chart-checks
       - store-tests
       - private-data-scan
@@ -424,6 +474,7 @@ jobs:
           MIGRATION_ORDER: ${{ needs.migration-order.result }}
           TYPECHECK_AND_BUILD: ${{ needs.typecheck-and-build.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
+          AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
@@ -435,6 +486,7 @@ jobs:
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
           ok "$PACKAGE_CHECKS" || exit 1
+          ok "$AMAN_INSTALLER_EXE" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1

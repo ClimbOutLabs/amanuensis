@@ -15,15 +15,8 @@ import ts from 'typescript';
 
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// The exports that hold every Tour card, in the order they are read. A function holds its cards in its return list.
-const TOUR_CARD_EXPORTS = [
-  'MORNING_BRIEF',
-  'KEEP_PAGES_IN_SPACES',
-  'WATCHING_PROMPT',
-  'WAITING_PROMPT',
-  'HELP_AREAS',
-  'capabilityPrompts',
-];
+// The exported table that holds every Tour card, keyed by card id. The pills only name these keys.
+const TOUR_CARDS_EXPORT = 'CARDS';
 
 export class AmanGuideBuildError extends Error {
   constructor(message, options) {
@@ -48,12 +41,16 @@ function literalText(node, where) {
   throw new AmanGuideBuildError(`${where} must be a plain string.`);
 }
 
-/** A label is plain text, or a template that fills in the assistant's name; only its presence is checked. */
-function labelText(node, where) {
-  if (node !== undefined && ts.isTemplateExpression(node)) {
-    return node.getText();
+/** The expression inside `satisfies`, `as const` and parentheses, which only add type information. */
+function withoutTypeWrappers(node) {
+  let current = node;
+  while (
+    current !== undefined &&
+    (ts.isSatisfiesExpression(current) || ts.isAsExpression(current) || ts.isParenthesizedExpression(current))
+  ) {
+    current = current.expression;
   }
-  return literalText(node, where);
+  return current;
 }
 
 function propertyMap(objectLiteral) {
@@ -66,7 +63,7 @@ function propertyMap(objectLiteral) {
   return values;
 }
 
-/** Reads the Tour cards from tourPrompts.ts source, following the constants that hold them, without running the UI. */
+/** Reads the Tour cards from the card table in tourPrompts.ts source, without running the UI. */
 function readTour(source, fileName) {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const capabilityKeys = new Set();
@@ -80,22 +77,10 @@ function readTour(source, fileName) {
         }
       }
     }
-    const isExported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
-    if (ts.isFunctionDeclaration(statement) && statement.name !== undefined && statement.body !== undefined) {
-      const returned = statement.body.statements.find(
-        item => ts.isReturnStatement(item) && item.expression !== undefined,
-      );
-      if (returned !== undefined && ts.isReturnStatement(returned) && returned.expression !== undefined) {
-        declarations.set(statement.name.text, returned.expression);
-        if (isExported) {
-          exported.add(statement.name.text);
-        }
-      }
-      continue;
-    }
     if (!ts.isVariableStatement(statement)) {
       continue;
     }
+    const isExported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
     for (const declaration of statement.declarationList.declarations) {
       if (declaration.initializer === undefined) {
         continue;
@@ -108,71 +93,34 @@ function readTour(source, fileName) {
     }
   }
 
+  if (!exported.has(TOUR_CARDS_EXPORT)) {
+    throw new AmanGuideBuildError(
+      `tourPrompts.ts must export ${TOUR_CARDS_EXPORT}. The guide build reads the Tour cards from it.`,
+    );
+  }
+  const table = withoutTypeWrappers(declarations.get(TOUR_CARDS_EXPORT));
+  if (!ts.isObjectLiteralExpression(table)) {
+    throw new AmanGuideBuildError(`${TOUR_CARDS_EXPORT} in tourPrompts.ts must be a table of cards keyed by card id.`);
+  }
   const cards = new Map();
-  const resolving = new Set();
-
-  function addCard(node) {
-    const props = propertyMap(node);
-    const key = literalText(props.get('key'), 'A Tour card key');
-    const label = labelText(props.get('label'), `Tour card "${key}" label`);
-    const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
-    const existing = cards.get(key);
-    if (existing !== undefined) {
-      if (existing.node === node) {
-        return;
-      }
-      throw new AmanGuideBuildError(`Duplicate Tour card "${key}".`);
+  for (const property of table.properties) {
+    if (!ts.isPropertyAssignment(property) || !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))) {
+      throw new AmanGuideBuildError(`Every entry in ${TOUR_CARDS_EXPORT} must be a card id and a card.`);
     }
+    const key = property.name.text;
+    const card = withoutTypeWrappers(property.initializer);
+    if (!ts.isObjectLiteralExpression(card)) {
+      throw new AmanGuideBuildError(`Tour card "${key}" must be written out in ${TOUR_CARDS_EXPORT}.`);
+    }
+    const props = propertyMap(card);
+    const label = literalText(props.get('title'), `Tour card "${key}" title`);
+    const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
     for (const name of needs) {
       if (!capabilityKeys.has(name)) {
         throw new AmanGuideBuildError(`Tour card "${key}" needs "${name}", which TourCapabilities does not declare.`);
       }
     }
-    cards.set(key, { node, label, needs });
-  }
-
-  // Walks a card list or help-area table, following names to the constants they point at.
-  function collect(node, where) {
-    if (ts.isIdentifier(node)) {
-      const name = node.text;
-      const target = declarations.get(name);
-      if (target === undefined) {
-        throw new AmanGuideBuildError(`${where} uses "${name}", which tourPrompts.ts does not declare.`);
-      }
-      if (resolving.has(name)) {
-        throw new AmanGuideBuildError(`"${name}" in tourPrompts.ts refers back to itself.`);
-      }
-      resolving.add(name);
-      collect(target, where);
-      resolving.delete(name);
-      return;
-    }
-    if (ts.isArrayLiteralExpression(node)) {
-      for (const element of node.elements) {
-        collect(element, where);
-      }
-      return;
-    }
-    if (ts.isObjectLiteralExpression(node)) {
-      if (propertyMap(node).has('key')) {
-        addCard(node);
-        return;
-      }
-      for (const value of propertyMap(node).values()) {
-        if (ts.isIdentifier(value) || ts.isArrayLiteralExpression(value) || ts.isObjectLiteralExpression(value)) {
-          collect(value, where);
-        }
-      }
-    }
-  }
-
-  for (const name of TOUR_CARD_EXPORTS) {
-    if (!exported.has(name)) {
-      throw new AmanGuideBuildError(
-        `tourPrompts.ts must export ${name}. The guide build reads the Tour cards from it.`,
-      );
-    }
-    collect(declarations.get(name), name);
+    cards.set(key, { label, needs });
   }
   if (cards.size === 0) {
     throw new AmanGuideBuildError('No Tour cards found in tourPrompts.ts.');

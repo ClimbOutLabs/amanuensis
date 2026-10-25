@@ -1,7 +1,7 @@
 ---
 id: email
 title: Handling your email
-covers: email, reply
+covers: waiting
 ---
 
 Once Aman can read your email, ask it to go through your unread mail. It tells you which messages need a reply first.

@@ -21,7 +21,7 @@ type AgentDetailsPreferenceContextValue = {
 const AgentDetailsPreferenceContext = createContext<AgentDetailsPreferenceContextValue | null>(null);
 
 /**
- * Chat-level "Show agent details" preference, persisted on session metadata
+ * Chat-level "Agent details" preference, persisted on session metadata
  * (`agent_details`, see `packages/trueforge/src/schemas/session.ts` `SessionMetadataSchema`
  * and its PATCH `/api/v1/sessions/{id}`). One provider instance shares the cache between the
  * sidebar's per-chat menu and the open thread, so toggling the active chat's own row updates
@@ -106,7 +106,7 @@ export function AgentDetailsPreferenceProvider({ children }: { children: ReactNo
 }
 
 /**
- * The chat-level "Show agent details" preference for one session, defaulting to `'collapsed'`
+ * The chat-level "Agent details" preference for one session, defaulting to `'collapsed'`
  * until the server value is loaded (or when there is no session yet, e.g. a draft chat).
  * `visible` is the one answer to "is agent detail shown"; every renderer reads it from here.
  */

@@ -232,10 +232,13 @@ export async function cancelSessionTurn(
     return;
   }
 
-  cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  const found = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  // A turn still marked running from before this process started lost its run to a restart.
+  // It is recorded as such, so the chat can say why the reply stopped when it is opened again.
+  const endReason = !found && deps.activeTurns.predates(turn.created_at) ? CancellationReason.Abandoned : reason;
   // Also when the run was found: a step that ignores the abort must not keep the turn running.
   // The freeze waits briefly for the run to settle and is a no-op once it has ended itself.
-  await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
+  await freezeTurnIgnoringMissing(deps.session, { turnId, reason: endReason });
 }
 
 /** Freeze a running turn; missing turns are a no-op (already gone). */

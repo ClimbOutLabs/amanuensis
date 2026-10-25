@@ -68,13 +68,15 @@ function appendTerminalText(content: ThreadMessageLike['content'], text: string)
 function stoppedTurnText(reason: string): string {
   switch (reason) {
     case 'client-cancelled':
-      return 'Stopped. You pressed Cancel.';
+      return 'Stopped. You pressed Stop.';
     case 'cancelled-for-next-turn':
       return 'Stopped. A new message started the next reply.';
     case 'server-execution-timeout':
       return 'Stopped. This reply ran past its time limit.';
     case 'abandoned':
       return 'Stopped. The app restarted while this reply was running.';
+    case 'could-not-start':
+      return 'Stopped. This reply could not start.';
     default:
       return 'Stopped.';
   }

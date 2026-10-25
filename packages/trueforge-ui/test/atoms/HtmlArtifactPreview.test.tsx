@@ -410,3 +410,67 @@ describe('HtmlArtifactPreview egress containment', () => {
     expect(screen.queryByText(/scripts/i)).not.toBeInTheDocument();
   });
 });
+
+describe('HtmlArtifactPreview external pictures', () => {
+  const FOX = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+  const PNG = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: 'image/png' });
+
+  async function renderedWithProxy(input: { html: string; fetchImpl: (url: string) => unknown; waitText: string }) {
+    const { html, fetchImpl, waitText } = input;
+    const seen: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        seen.push(url);
+        return fetchImpl(url);
+      }),
+    );
+    render(
+      <HtmlArtifactPreview
+        content={new Blob([html], { type: 'text/html' })}
+        filename="t.html"
+        pictureProxyUrl={url => `/api/chat-pictures?session_id=s1&url=${encodeURIComponent(url)}`}
+      />,
+    );
+    const iframe = await screen.findByTestId('aui-html-preview-iframe');
+    await waitFor(() => expect(innerSrcdoc(iframe)).toContain(waitText));
+    const srcdoc = innerSrcdoc(iframe);
+    vi.unstubAllGlobals();
+    return { srcdoc, seen };
+  }
+
+  it('renders a picture the reply showed through the proxy as a data: URI, never the outside link', async () => {
+    const { srcdoc, seen } = await renderedWithProxy({
+      html: `<html><body><div class="row"><img src="${FOX}" alt="Red fox"></div></body></html>`,
+      fetchImpl: () => ({ ok: true, blob: async () => PNG }),
+      waitText: 'data:image/png;base64,',
+    });
+    expect(seen).toEqual([`/api/chat-pictures?session_id=s1&url=${encodeURIComponent(FOX)}`]);
+    expect(srcdoc).toContain('data:image/png;base64,');
+    expect(srcdoc).not.toContain('upload.wikimedia.org');
+  });
+
+  it('shows the plain line when the proxy refuses an unseen picture', async () => {
+    const { srcdoc, seen } = await renderedWithProxy({
+      html: `<html><body><img src="${FOX}" alt="Red fox"></body></html>`,
+      fetchImpl: () => ({ ok: false, status: 404 }),
+      waitText: 'couldn',
+    });
+    expect(seen).toHaveLength(1);
+    expect(srcdoc).toContain('couldn');
+    expect(srcdoc).toContain('be shown');
+    expect(srcdoc).not.toContain('upload.wikimedia.org');
+  });
+
+  it('shows the space line where a web picture would be when no proxy is available', async () => {
+    render(
+      <HtmlArtifactPreview
+        content={new Blob([`<html><body><img src="${FOX}" alt="Red fox"></body></html>`], { type: 'text/html' })}
+        filename="t.html"
+      />,
+    );
+    const iframe = await screen.findByTestId('aui-html-preview-iframe');
+    await waitFor(() => expect(innerSrcdoc(iframe)).toContain('Pictures from the web show in a space'));
+    expect(innerSrcdoc(iframe)).not.toContain('upload.wikimedia.org');
+  });
+});

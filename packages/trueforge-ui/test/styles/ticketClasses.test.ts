@@ -18,14 +18,13 @@ describe('B2 look styles', () => {
       '.aui-ticket--stub {',
       '.aui-ticket--punch::before {',
       '.aui-ticket--selected {',
-      '.aui-ticket--mark {',
-      '.aui-ticket__tear {',
       '.aui-ticket__stub {',
       '.aui-row {',
       '.aui-row--2 {',
       '.aui-brief-card {',
       '.aui-brief-action {',
-      '.aui-underline::after {',
+      '.aui-name-underline {',
+      '.aui-face-serif {',
       '.aui-receipt {',
     ]) {
       expect(b2Section, selector).toContain(selector);
@@ -33,7 +32,7 @@ describe('B2 look styles', () => {
   });
 
   it('defines the motion keyframes and a reduced-motion block', () => {
-    for (const name of ['aui-settle', 'aui-lay', 'aui-press', 'aui-pulse', 'aui-tear', 'aui-fleck']) {
+    for (const name of ['aui-settle', 'aui-press', 'aui-pulse', 'aui-tear', 'aui-fleck']) {
       expect(b2Section).toContain(`@keyframes ${name}`);
     }
     expect(b2Section).toContain('@media (prefers-reduced-motion: reduce)');

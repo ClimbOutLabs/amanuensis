@@ -10,7 +10,7 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
@@ -48,9 +48,18 @@ import { answersBriefPrompt, messageText } from './briefTurn.js';
  * Dispatches a leaf message part to its renderer. "data" parts (generative
  * UI) are out of scope for this SDK entirely.
  */
-function AssistantReasoningProgress() {
+function AssistantReasoningProgress({ text }: { text: string }) {
   const ReasoningCard = useSlot('ReasoningCard');
-  return <ReasoningCard content="" isStreaming headingText="Thinking…" />;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ReasoningCard
+      content={text}
+      isStreaming
+      expanded={expanded}
+      onToggle={() => setExpanded(open => !open)}
+      headingText="Thinking…"
+    />
+  );
 }
 
 function AssistantLeafPartContainer({ part, stepHidden = false }: { part: EnrichedPartState; stepHidden?: boolean }) {
@@ -58,7 +67,7 @@ function AssistantLeafPartContainer({ part, stepHidden = false }: { part: Enrich
     case 'text':
       return <AssistantTextContainer />;
     case 'reasoning':
-      return part.status?.type === 'running' ? <AssistantReasoningProgress /> : null;
+      return part.status?.type === 'running' ? <AssistantReasoningProgress text={part.text} /> : null;
     case 'image':
       return <MessageImageContainer />;
     case 'tool-call':
@@ -131,19 +140,16 @@ function pluralize(count: number, singular: string): string {
 function buildInternalsSummary({
   toolCount,
   thinkingCount,
-  recalledItems,
   helperCalls,
 }: {
   toolCount: number;
   thinkingCount: number;
-  recalledItems: number;
   helperCalls: number;
 }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
-  if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
   if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   // An answer with nothing else to list still gets a toggle for its model usage.
   return segments.length > 0 ? segments.join(' · ') : 'Details';
@@ -155,12 +161,6 @@ type GroupKey = `group-agentSteps-${number}` | 'group-reasoning' | 'group-interi
 function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
   return `group-agentSteps-${runIndex}`;
 }
-
-const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
-  'waiting-for-model': 'Waiting for model',
-  'executing-tools': 'Executing tools',
-  'waiting-for-approval': 'Waiting for approval',
-};
 
 const BRIEF_WRITING_LINE = 'Putting your brief together…';
 
@@ -240,7 +240,6 @@ export function AssistantMessageContainer() {
   // thinking, no memory, no usage, and no errors renders no internals row at all.
   const recall = memoryContext?.recall;
   const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
-  const recalledItems = recall?.stats.items ?? 0;
   const hasMemory = recall != null || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
   const helperUsage = modelUsage !== undefined && modelUsage.helperCalls > 0 ? modelUsage : undefined;
@@ -279,25 +278,13 @@ export function AssistantMessageContainer() {
       !attention;
     if (trivial) return null;
 
-    // A paused-for-approval turn is not "running" but still needs a live label —
-    // it is the one state that requires the user to act.
-    const liveLabel = isLive
-      ? phase !== undefined
-        ? PHASE_LIVE_LABELS[phase]
-        : 'Thinking…'
-      : phase === 'waiting-for-approval'
-        ? PHASE_LIVE_LABELS['waiting-for-approval']
-        : undefined;
-
     return (
       <AgentInternalsDisclosure
         summary={buildInternalsSummary({
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
-          recalledItems: isHost ? recalledItems : 0,
           helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
-        liveLabel={liveLabel}
         isRunning={isLive}
         attention={attention}
         lockOpen={messageStatus === 'requires-action' && (isLast || phase === 'waiting-for-approval')}
@@ -397,7 +384,7 @@ export function AssistantMessageContainer() {
       ) : null}
       {showNotFinished && (
         <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
-          This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.
+          This reply did not finish. Ask again, or turn on Agent details to see what went wrong.
         </p>
       )}
       {showStepNotFinished && (
@@ -412,7 +399,11 @@ export function AssistantMessageContainer() {
   return (
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
-        error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
+        // An error line belongs to a finished reply. While the thread is still running the
+        // message can carry an earlier attempt's error (a resumed or retried run), and showing
+        // it would tell the person the reply failed while it is still being written; it clears
+        // when the run settles, and only then may the line show.
+        error={error !== undefined && !isThreadRunning ? <MessageErrorBanner message={String(error)} /> : undefined}
         actionBar={
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }

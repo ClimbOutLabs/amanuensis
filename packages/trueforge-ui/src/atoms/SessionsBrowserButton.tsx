@@ -6,15 +6,22 @@ import { useOptionalAgentSessionsServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { isSessionsChromeEnabled } from '../server/serverChrome.js';
 import { defaultSessionTimeRange, readSessionShareSearch } from '../utils/sessionShareUrl.js';
-import { auiButtonClass, sidebarButtonRadiusClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
+import {
+  auiButtonClass,
+  railMenuRowClassName,
+  sidebarButtonRadiusClassName,
+  sidebarRailButtonClassName,
+} from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
 export type SessionsBrowserButtonProps = {
   className?: string;
   compact?: boolean;
+  /** Draws a row of the rail's More menu, the same size as its other rows. */
+  row?: boolean;
 };
 
-export function SessionsBrowserButton({ className, compact = false }: SessionsBrowserButtonProps) {
+export function SessionsBrowserButton({ className, compact = false, row = false }: SessionsBrowserButtonProps) {
   const sessionsServer = useOptionalAgentSessionsServer();
   const shell = useOptionalShellMode();
   const { updateShareSearch } = useSessionShareSearch();
@@ -33,11 +40,13 @@ export function SessionsBrowserButton({ className, compact = false }: SessionsBr
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
-            sidebarButtonRadiusClassName,
-            'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
-            compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
+            row && railMenuRowClassName,
+            !row && sidebarButtonRadiusClassName,
+            !row &&
+              'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
+            !row && (compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm'),
             sessionsOpen &&
-              'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+              'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text',
           ),
         })}
         onClick={() => {
@@ -53,7 +62,7 @@ export function SessionsBrowserButton({ className, compact = false }: SessionsBr
           shell.setSessionsOpen(true);
         }}
       >
-        <Icon name="message-square-text" size={compact ? 14 : undefined} />
+        <Icon name="clock-rotate-left" size={compact || row ? 14 : undefined} />
         {compact ? (
           <span className="text-center">Sessions</span>
         ) : (

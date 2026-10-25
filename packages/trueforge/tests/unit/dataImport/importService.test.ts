@@ -515,6 +515,49 @@ describe('runDataImport', () => {
     }
   });
 
+  it('keeps why a reply stopped when an older export saved a turn the restart ended', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-restart-ended');
+    const ended = { status: 'cancelled', reason: 'abandoned', completed_at: '2026-09-03T18:30:00.000Z' };
+    try {
+      // Format 1 archives come from versions before the could-not-start reason; a restart was saved as abandoned.
+      const older = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        const main = sessions
+          .map(entry => recordAt(entry, 'chat'))
+          .find(entry => {
+            return recordAt(entry['session'], 'session')['session_id'] === SEED_IDS.sessionMain;
+          });
+        const lastTurn = recordAt(listAt(recordAt(main, 'main chat')['turns'], 'turns').at(-1), 'last turn');
+        recordAt(lastTurn['turn'], 'turn')['state'] = ended;
+        for (const event of listAt(lastTurn['events'], 'events')) {
+          const record = recordAt(event, 'event');
+          if (record['type'] === 'turn.done') record['state'] = ended;
+        }
+        setLegacySessions(entries, sessions);
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const turn = await target.stores.sessionStore.getTurn({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-3',
+      });
+      expect(turn?.state).toMatchObject({ status: 'cancelled', reason: 'abandoned' });
+      const events = await target.stores.sessionStore.listTurnEvents({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-3',
+        limit: 100,
+        page_token: undefined,
+        order: 'asc',
+      });
+      const done = events.data.filter(event => event.type === 'turn.done');
+      expect(done).toEqual([expect.objectContaining({ state: expect.objectContaining({ reason: 'abandoned' }) })]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an archive over the byte cap', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-cap');

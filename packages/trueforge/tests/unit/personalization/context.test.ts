@@ -86,27 +86,17 @@ describe('personalization context', () => {
     expect(personalizationCapabilitiesForTurn({ context, isSubAgent: true, webSearch })).toEqual([]);
   });
 
-  it("keeps the profile's details for the search check before each model call", async () => {
-    const named: PersonalizationProfile = { ...profile, user_name: 'Sam Rivera' };
-    const context = buildPersonalizationContext({ ...named, digest: personalizationDigest(named) });
+  it("counts a site and an address in the profile as the person's own to use", () => {
+    const learned: PersonalizationProfile = {
+      ...profile,
+      learned_profile: '- Reads news.example.org each morning.\n- Writes from sam.rivera@example.com.',
+    };
+    const context = buildPersonalizationContext({ ...learned, digest: personalizationDigest(learned) });
     const webSearch = createWebSearchTurnState();
-    const capability = personalizationContextCapability({ context, webSearch });
-    expect(webSearch.chatFingerprints.has_text).toBe(false);
+    personalizationContextCapability({ context, webSearch });
 
-    for (const processor of capability.preLLMProcessors ?? []) {
-      for await (const output of processor.processPreLLM({
-        threadId: 'main',
-        context: [],
-        currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
-      })) {
-        void output;
-      }
-    }
-
-    expect(webSearch.chatFingerprints.has_text).toBe(true);
-    expect(webSearch.privateContextKept).toBe(true);
-    // The profile is put before the model again each turn, so a later turn never distrusts the record over it.
-    expect(webSearch.onceOnlyContextKept).toBe(false);
+    expect(webSearch.provenance.trusted.hosts.has('news.example.org')).toBe(true);
+    expect(webSearch.provenance.trusted.addresses.has('sam.rivera@example.com')).toBe(true);
   });
 
   it('renders the learned profile last, with its provenance preamble', () => {

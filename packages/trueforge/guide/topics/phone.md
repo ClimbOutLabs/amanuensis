@@ -1,7 +1,7 @@
 ---
 id: phone
 title: Using Aman from your phone
-covers: move
+covers:
 ---
 
 You can use Aman from your phone when the phone is on the same home network as your computer.

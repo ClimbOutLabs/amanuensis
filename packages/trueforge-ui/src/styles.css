@@ -60,6 +60,8 @@
     --text-primary: oklch(0.286 0.008 84.6);
     --text-secondary: #746b5d;
     --text-secondary: oklch(0.532 0.024 79);
+    /* Hints such as placeholders: lighter than secondary text, still AA against the input background. */
+    --text-muted: #7b7265;
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -102,6 +104,8 @@
     --gold-soft: oklch(0.955 0.048 93);
     --gold-line: #c9a95a;
     --gold-line: oklch(0.747 0.105 87.7);
+    /* The lift under raised shell surfaces: the main column and the left rail. */
+    --shadow-raise: 0 0 1.125rem rgba(44, 42, 38, 0.08);
     /* The panda's frame, sampled from aman-avatar.png: parchment and wood in light. */
     --panda-glow-from: #e5c7a1;
     --panda-glow-from: oklch(0.846 0.061 73.2);
@@ -149,6 +153,7 @@
     --text-primary: oklch(0.944 0.021 88.7);
     --text-secondary: #a89a7f;
     --text-secondary: oklch(0.691 0.041 83.8);
+    --text-muted: #a09278;
     --sidebar-text: var(--text-primary);
     --text-xs: 0.75rem;
     --text-sm: 0.8125rem;
@@ -190,6 +195,8 @@
     --gold-soft: oklch(0.328 0.044 91.4);
     --gold-line: #8a6a2a;
     --gold-line: oklch(0.544 0.091 81.9);
+    /* The lift under raised shell surfaces: the main column and the left rail. */
+    --shadow-raise: 0 0 1.125rem rgba(0, 0, 0, 0.28);
     /* The panda's frame, sampled from aman-avatar.png: the wall's glow and its deep brown in dark. */
     --panda-glow-from: #824b25;
     --panda-glow-from: oklch(0.469 0.091 53);
@@ -308,24 +315,10 @@
     max-width: 7rem;
   }
 
-  [data-slot='aui_composer-shell'] .aui-composer-reasoning-button {
-    max-width: 6rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button,
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-  }
-
-  [data-slot='aui_composer-shell'] .aui-composer-send-button {
+  /* Send and its running-state Stop are 32px; give both the 44px touch target here. */
+  [data-slot='aui_composer-shell'] [data-slot='aui_composer-send'],
+  [data-slot='aui_composer-shell'] [data-slot='aui_composer-stop'] {
     width: 2.75rem;
-    height: 2.75rem;
-  }
-
-  /* The running-state Cancel replaces Send and inherits the 32px `sm` height; pin it to the same
-   * 44px touch target explicitly rather than relying on min-height alone. */
-  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
     height: 2.75rem;
   }
 }
@@ -336,23 +329,26 @@
   min-width: 15rem;
   width: 17.5rem;
   flex-direction: column;
-  gap: 1rem;
-  border-left: 1px solid var(--border);
+  gap: 0.75rem;
+  position: relative;
+  z-index: 1;
   background: var(--sidebar-bg);
-  padding: 1.25rem 0.75rem 0.75rem;
+  padding: 0.875rem 1rem;
   color: var(--text-primary);
+  /* One face for the whole panel; only the assistant's name takes the greeting's face. */
+  font-family: var(--font-sans);
+  letter-spacing: normal;
   /* Tall rail content (e.g. the permissions audit feed) scrolls inside the rail
    * instead of stretching the page and pushing the chat composer below the fold. */
   min-height: 0;
   overflow-y: auto;
 }
 
-/* Collapsed the rail keeps only its toggle, so the chat surface takes the freed grid width
- * and nothing inside the rail is clipped. */
+/* Collapsed, the rail is the 3rem poster frame and nothing else, so the chat takes the freed width. */
 .aman-runtime-rail--collapsed {
-  width: 2.75rem;
+  width: 3.5rem;
   min-width: 0;
-  padding: 1.25rem 0.375rem 0.75rem;
+  padding: 0.875rem 0.25rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -363,138 +359,164 @@
 
 .aman-runtime-rail__toolbar {
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
+.aman-runtime-rail--collapsed .aman-runtime-rail__toolbar {
+  justify-content: center;
+}
+
+/* Hide or show the panel: a clear 2rem button with a visible edge in both themes. */
 .aman-runtime-rail__collapse-toggle {
   display: inline-flex;
-  min-width: 2rem;
+  width: 2rem;
   height: 2rem;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  padding: 0 0.5rem;
-  color: var(--text-secondary);
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  background: var(--card-bg);
+  padding: 0;
+  color: var(--text-primary);
   cursor: pointer;
 }
 
 .aman-runtime-rail__collapse-toggle:hover {
-  background: color-mix(in oklab, var(--text-primary) 8%, transparent);
-  color: var(--text-primary);
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
 }
 
-/* Expanded, no control in the rail is icon-only: the chevron carries a word beside it. */
-.aman-runtime-rail__button-label {
-  font-size: 0.75rem;
-  line-height: 1.4;
-  white-space: nowrap;
+.aman-runtime-rail__collapse-toggle:focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
 }
 
-/* Collapsed the rail is a dot and a chevron, so the compact status is the only readout;
- * its aria-label and tooltip carry the connection state and the active model name. */
+/* Collapsed: the poster frame, with the status dot on its lower-right corner. */
 .aman-runtime-rail__compact-status {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 0.25rem 0;
+  position: relative;
+  width: 3rem;
+  height: 3rem;
+  flex: none;
 }
 
-.aman-runtime-rail--collapsed .aman-runtime-rail__compact-status {
-  display: flex;
-}
-
-/* The panda sits in a ticket frame at the top of the rail: the picture, then its caption. */
-.aman-runtime-rail__avatar-card {
+.aman-runtime-rail__compact-poster {
+  display: block;
   width: 100%;
+  height: 100%;
+  border-radius: 0.75rem;
+  object-fit: cover;
 }
 
-/* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
-   all four edges lets the frame's glow show through instead of a hard cut. In light, multiply
-   takes the picture's light areas into the glow, so its white backing disappears. The gradients
-   are alpha ramps, not rendered colour, so the rule names no colour of its own. */
+.aman-runtime-rail__compact-status .aman-runtime-rail__status-dot {
+  position: absolute;
+  right: -0.125rem;
+  bottom: -0.125rem;
+  box-shadow: 0 0 0 0.125rem var(--sidebar-bg);
+}
+
+/* The panda's picture is the only box in the rail: rounded corners, no border, no padding, and
+ * nothing drawn over it. */
 .aman-runtime-rail__avatar {
-  width: 100%;
-  max-width: 15rem;
-  height: auto;
-  object-fit: contain;
-  mix-blend-mode: multiply;
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  mask-image:
-    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
-    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  position: relative;
+  width: 15.5rem;
+  max-width: 100%;
+  height: 11.625rem;
+  overflow: hidden;
+  border-radius: 0.75rem;
 }
 
-/* Dark: multiply would darken the panda's blacks and whites, so the picture is drawn as it is
-   and only its edges fade into the glow through a radial mask. */
-.aui-theme-root.dark .aman-runtime-rail__avatar {
+.aman-runtime-rail__avatar-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+/* The art is drawn on a pale scene, so multiply takes its light areas into the rail. */
+.aman-runtime-rail__picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: multiply;
+}
+
+/* Dark: multiply would darken the picture's blacks and whites, so it is drawn as it is. */
+.aui-theme-root.dark .aman-runtime-rail__picture {
   mix-blend-mode: normal;
-  -webkit-mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
-  mask-image: radial-gradient(ellipse 52% 58% at 50% 48%, black 70%, transparent 100%);
 }
 
 .aman-runtime-rail__avatar-fallback {
-  width: 2.625rem;
-  height: 2.625rem;
-  object-fit: contain;
   display: grid;
+  width: 100%;
+  height: 100%;
   place-items: center;
   color: var(--text-primary);
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+/* The name block: the chosen name in the serif, its role in secondary text two pixels below. */
+.aman-runtime-rail__identity {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.aman-runtime-rail__identity h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.aui-panda__role {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
 .aman-runtime-rail__status {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
-/* Status colours come from the theme's semantic tokens so both palettes and both modes
- * stay in step; the halo is the same hue mixed down rather than a second literal. */
+/* Status colours come from the theme's semantic tokens, so both palettes and both modes stay in step. */
 .aman-runtime-rail__status-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
   border-radius: 999px;
   background: var(--success-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--success-bg) 14%, transparent);
 }
 
-.aman-runtime-rail__status[data-status='connecting'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='connecting'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__status[data-status='degraded'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='degraded'] .aman-runtime-rail__status-dot {
+.aman-runtime-rail__status[data-tone='busy'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='busy'] .aman-runtime-rail__status-dot {
+  background: var(--gold);
+}
+
+.aman-runtime-rail__status[data-tone='warning'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='warning'] .aman-runtime-rail__status-dot {
   background: var(--warning-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning-bg) 14%, transparent);
 }
 
-.aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot,
-.aman-runtime-rail__compact-status[data-status='offline'] .aman-runtime-rail__status-dot {
+.aman-runtime-rail__status[data-tone='error'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-tone='error'] .aman-runtime-rail__status-dot {
   background: var(--failure-bg);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--failure-bg) 14%, transparent);
-}
-
-.aman-runtime-rail__latency {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .aman-runtime-rail__retry {
   margin-left: auto;
   padding: 0.15rem 0.6rem;
-  border: 1px solid var(--border);
+  border: 0.0625rem solid var(--border);
   border-radius: 999px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
@@ -504,16 +526,68 @@
   background: color-mix(in oklab, var(--text-primary) 8%, transparent);
 }
 
-.aman-runtime-rail__identity {
-  padding: 0.25rem 0 1rem;
+/* Grouped rail sections: a secondary label over one value line. */
+.aman-runtime-rail__section {
+  display: grid;
+  gap: 0.375rem;
 }
 
-.aman-runtime-rail__identity h2 {
+.aman-runtime-rail__section-label {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.aman-runtime-rail__section-value {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The folded rows: a hairline above each, the chevron on the left of the label. */
+.aman-runtime-rail__details {
+  border-top: 0.0625rem solid var(--border);
+}
+
+.aman-runtime-rail__details:last-of-type {
+  border-bottom: 0.0625rem solid var(--border);
+}
+
+.aman-runtime-rail__details-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.aman-runtime-rail__details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.aman-runtime-rail__fold-chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.aman-runtime-rail__details[open] .aman-runtime-rail__fold-chevron {
+  transform: rotate(90deg);
+}
+
+/* Every folded section's rows share one size and color. */
+.aman-runtime-rail__details-body {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0 0.75rem 1.25rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
 }
 
 .aman-runtime-rail__rules {
@@ -521,96 +595,29 @@
   gap: 0.25rem;
   margin: 0;
   padding: 0;
-  color: var(--text-primary);
-  font-size: 0.85rem;
   list-style: none;
 }
 
-/* Grouped rail sections: small-caps label over one value line. The top border carries
- * the separation the old identity divider used to provide. */
-.aman-runtime-rail__section {
-  display: grid;
+.aman-runtime-rail__row-text {
+  margin: 0;
+}
+
+/* The live wait line in the Activity row: it comes from the chat, not the receipt, so it sits
+ * above the history and never counts as an entry. */
+.aman-runtime-rail__waiting {
+  display: flex;
+  align-items: center;
   gap: 0.375rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
-.aman-runtime-rail__section-label {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.aman-runtime-rail__section-value {
-  overflow: hidden;
   margin: 0;
   color: var(--text-primary);
-  font-size: 0.85rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.875rem;
 }
 
-.aman-runtime-rail__link {
-  justify-self: start;
-  color: var(--gold-ink);
-  font-size: 0.75rem;
-  text-decoration: underline;
-  text-underline-offset: 0.125rem;
-}
-
-.aman-runtime-rail__section-value a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* One disclosure at the foot of the rail holds the diagnostics; `margin-top: auto`
- * keeps it and the release line at the bottom however few sections are shown. */
-.aman-runtime-rail__details {
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
-.aman-runtime-rail__details-summary {
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.aman-runtime-rail__details-list {
-  display: grid;
-  margin: 0.5rem 0 0;
-  gap: 0.15rem;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-}
-
-.aman-runtime-rail__details-list dt {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.aman-runtime-rail__details-list dd {
-  overflow-wrap: anywhere;
-  margin: 0 0 0.35rem;
-  color: var(--text-primary);
-}
-
-/* The release line is the smallest thing in the rail, and the last. */
-.aman-runtime-rail__footer {
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
+::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+  opacity: 1;
 }
 
 /* Chat text: type-scale sizing with airy leading for reading rhythm. */
@@ -658,12 +665,14 @@
   --color-sidebar-bg: var(--sidebar-bg);
   --color-topbar-bg: var(--topbar-bg);
   --color-primary-bg: var(--primary-bg);
+  --color-paper: var(--paper);
   --color-secondary-bg: var(--secondary-bg);
   --color-border: var(--border);
   --color-input-box-bg: var(--input-box-bg);
   --color-input-border: var(--input-border);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
   --color-card-bg: var(--card-bg);
   --color-dropdown-selected-item-bg: var(--dropdown-selected-item-bg);
   --color-dropdown-selected-item-text: var(--dropdown-selected-item-text);
@@ -749,74 +758,12 @@
   }
 }
 
-/* ── Wait queue (Disneyland-style turn journey) ──────────────────────────
- * Station dots change ONLY on real turn events (see deriveWaitQueue): the
- * track shows where the turn has been and where it is headed, never fake
- * progress. Motion stays subtle by design; reduced-motion users and the
- * --static modifier get the still show. */
+/* ── A running reply's status line ──────────────────────────────────────
+ * One line: the state sprite and plain words for the actual work, which change only on real turn
+ * events (see deriveWaitQueue). Reduced-motion users and the --static modifier get the still sprite. */
 .aui-wait-queue {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.375rem;
-}
-
-.aui-wait-queue__track {
-  display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-}
-
-.aui-wait-queue__link {
-  width: 0.875rem;
-  height: 1px;
-  background: var(--border);
-  flex: none;
-}
-
-.aui-wait-queue__station {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.aui-wait-queue__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  flex: none;
-}
-
-.aui-wait-queue__label {
-  font-size: 0.6875rem;
-  line-height: 1rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.aui-wait-queue__station--active .aui-wait-queue__dot {
-  background: var(--brand-accent);
-  border-color: var(--brand-accent);
-}
-
-.aui-wait-queue__station--active .aui-wait-queue__label {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.aui-wait-queue__station--done .aui-wait-queue__dot {
-  background: var(--text-secondary);
-  border-color: var(--text-secondary);
-}
-
-.aui-wait-queue__station--pending {
-  opacity: 0.75;
-}
-
-.aui-wait-queue__station--skipped {
-  opacity: 0.45;
 }
 
 .aui-wait-queue__line {
@@ -830,58 +777,6 @@
   color: var(--text-secondary);
 }
 
-.aui-wait-queue__ticks {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-}
-
-.aui-wait-queue__tick {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  color: var(--text-secondary);
-  opacity: 0.85;
-}
-
-.aui-wait-queue__longwait {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  font-style: italic;
-  color: var(--text-secondary);
-}
-
-@keyframes aui-wait-queue-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.4);
-    opacity: 0.7;
-  }
-}
-
-/* The Weenie: when the first tokens arrive and Writing lights up, the dot
- * breathes a soft ring outward — the doors opening, not confetti. */
-@keyframes aui-wait-queue-arrive {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 50%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0.5rem transparent;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--active .aui-wait-queue__dot {
-    animation: aui-wait-queue-pulse 1.6s ease-in-out infinite;
-  }
-  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--arriving .aui-wait-queue__dot {
-    animation: aui-wait-queue-arrive 1.4s ease-out infinite;
-  }
-}
-
 /* ── State sprite: cute CSS-only assistant character ─────────────────────
  * A 1.25rem blob that mirrors the wait-queue station: Listening hops with
  * squash-and-stretch and sound waves, Remembering sways dreamily while
@@ -892,7 +787,7 @@
  * changes. Pure CSS shapes and keyframes, no assets. Body uses the theme
  * accent and eyes use the page background token, so contrast holds across
  * every preset and mode. Animations honor prefers-reduced-motion and the
- * --static modifier, matching the wait-queue track behavior. */
+ * --static modifier. */
 .aui-state-sprite {
   position: relative;
   display: inline-block;
@@ -1646,27 +1541,29 @@
   background-color: var(--gold-soft);
 }
 
-.aui-ticket--mark {
-  border-color: var(--gold-line);
-  background-color: var(--gold-soft);
+/*
+ * Every approval card (email, calendar, shell, space, connector) reads like the chat around it: body
+ * font at the chat's body size, the question a little larger in semibold, and only a command or a
+ * message's own content in its own font. A card must never look louder than the chat.
+ */
+.aui-approval-card {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  letter-spacing: normal;
 }
 
-.aui-ticket__tear {
-  border-top: 0.125rem dashed var(--border);
+.aui-approval-card__title {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: normal;
 }
 
-/* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
-.aui-ticket__title {
-  font-family: var(--font-display);
-  font-size: 1.25rem;
-  line-height: 1.2;
-}
-
+/* The badge and the stub's lines: plain body text, no capitals or spacing. */
 .aui-ticket__label {
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
 }
 
 /* A stub holds a short line: a long recipient list is cut to three lines, the full text stays in Details. */
@@ -1678,31 +1575,53 @@
   overflow-wrap: anywhere;
 }
 
+/* Memory sharing boxes draw as native checkboxes; in the dark theme they take the dark form colours. */
+.aui-theme-root.dark .aui-sharing-box {
+  color-scheme: dark;
+}
+
 /* Keyboard focus on a ticket is a solid ring in --focus-ring, not a faded one: it keeps 3:1 on the card and the gold fill. */
 .aui-theme-root .aui-ticket :focus-visible {
   outline: 0.125rem solid var(--focus-ring);
   outline-offset: 0.125rem;
 }
 
-/* Underline: a hand-drawn stroke under one phrase. Mask keeps the colour a theme token. */
-.aui-underline {
-  position: relative;
-  isolation: isolate;
+/* Home greeting: the first name carries a hand-drawn stroke. Fraunces is not bundled, so the serif is Newsreader. */
+.aui-face-serif {
+  font-family: var(--font-serif);
 }
 
-.aui-underline::after {
-  content: '';
+/* The new-chat home is one 40rem column: greeting, composer, pills, label and cards share both edges. */
+[data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+  max-width: 40rem;
+  padding-inline: 0;
+  gap: 1.25rem;
+}
+
+@media (max-width: 42rem) {
+  [data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+    max-width: 100%;
+    padding-inline: 1rem;
+  }
+}
+
+.aui-name-underline {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: -0.08em;
-  height: 0.45em;
-  z-index: -1;
-  background-color: var(--gold);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
-    0 0 / 100% 100% no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 C 25 1, 60 7, 99 3' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
-    0 0 / 100% 100% no-repeat;
+  top: 100%;
+  width: 100%;
+  height: 0.5rem;
+  margin-top: 0.25rem;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.aui-name-underline path {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 0.125rem;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Row grid shared by chapter lines, receipt rows and rail rows: mark · when · text · action. */
@@ -1811,6 +1730,21 @@
   border-top: 0.0625rem dotted var(--border);
 }
 
+/* Inside the Activity row the receipt is a plain list in the body face: no card, border or monospace. */
+.aman-runtime-rail .aui-receipt {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  letter-spacing: normal;
+}
+
+.aman-runtime-rail .aui-receipt .aui-row + .aui-row {
+  border-top: 0.0625rem solid var(--border);
+}
+
 /* The rail is too narrow for verb and state side by side: the state sits under its verb. */
 .aman-runtime-rail .aui-receipt .aui-row--2 {
   grid-template-columns: minmax(0, 1fr);
@@ -1819,36 +1753,9 @@
 
 .aman-runtime-rail .aui-receipt .aui-row--2 > .state {
   justify-self: start;
-}
-
-/* The panda's frame: a soft glow sampled from the picture, so its edge melts into the rail
-   instead of a white card. The hairline stays gold. */
-.aui-panda {
-  display: grid;
-  justify-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem;
-  border-color: var(--gold-line);
-  background-color: var(--panda-glow-to);
-  background-image: radial-gradient(ellipse at 50% 40%, var(--panda-glow-from), var(--panda-glow-to) 75%), var(--grain);
-  isolation: isolate;
-}
-
-.aui-panda__caption {
-  display: grid;
-  gap: 0.1rem;
-  width: 100%;
-  padding: 0 0.25rem 0.25rem;
-}
-
-/* The caption sits on the glow, not the card, so it takes the primary text colour: the glow's
-   worst point is too light for the secondary one in light mode. */
-.aui-panda__role {
-  margin: 0;
-  color: var(--text-primary);
-  font-family: var(--font-receipt);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: inherit;
 }
 
 /* An action in a row is a button; it keeps the look of the link it replaces. */
@@ -1882,13 +1789,9 @@
   }
 }
 
-/* Settle: anything that appears. Lay: stubs and tiles. */
+/* Settle: anything that appears. */
 .aui-settle {
   animation: aui-settle 300ms ease-out both;
-}
-
-.aui-lay {
-  animation: aui-lay 320ms ease-out both;
 }
 
 .aui-press:active {
@@ -1904,18 +1807,6 @@
   from {
     opacity: 0.001;
     transform: translateY(0.5rem);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes aui-lay {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
   }
 
   to {
@@ -2091,7 +1982,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .aui-settle,
-  .aui-lay,
   .aui-press:active,
   .aui-pulse,
   .aui-reward-tick[data-play='true'] path,
@@ -2132,46 +2022,4 @@
   font-family: var(--font-display);
   font-style: italic;
   color: var(--text-primary);
-}
-
-/* First frame: the day ticket's display title. */
-.aui-day-title {
-  font-family: var(--font-display);
-  font-size: 2.5rem;
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-}
-
-.aui-ticket__title {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 400;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
-
-/* Tour card titles: the display face at the theme's text-xl, so a title takes a line or two. */
-.aui-tour-title {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: 400;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-
-/* Every label on the Tour: the UI sans in secondary text. Monospace stays for code and data. */
-.aui-tour-label {
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: 0.01em;
-  color: var(--text-secondary);
-}
-
-@media (max-width: 40rem) {
-  .aui-day-title {
-    font-size: 1.9rem;
-  }
 }

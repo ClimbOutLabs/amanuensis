@@ -7,11 +7,13 @@ import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
 import { MemoryVaultFactsPanel } from '@/atoms/memory/MemoryVaultPanels.js';
 import { FORGET_UNDO_MS } from '@/atoms/memory/useForgetWithUndo.js';
 import { useMemoryVaultState } from '@/atoms/memory/useMemoryVaultState.js';
+import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
 import type {
   MemoryVaultCatalog,
   MemoryVaultEntry,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -40,6 +42,7 @@ function createCatalog(initial: MemoryVaultEntry[]) {
   });
   const catalog: MemoryVaultCatalog = {
     listEntries: async namespace => (namespace === undefined ? stored : []),
+    getSummaryStatus: async () => ({ summaryPending: false }),
     updateEntry: async () => {
       throw new Error('not used in these tests');
     },
@@ -234,5 +237,145 @@ describe('Memory explorer', () => {
     await screen.findByText('tea');
 
     expect(document.body.textContent ?? '').not.toMatch(/vault|namespace|entry/i);
+  });
+});
+
+describe('Memory explorer with several collections', () => {
+  const ZARA: Persona = {
+    id: 'p-zara',
+    display_name: 'Zara',
+    aliases: [],
+    instructions: 'Answer as a careful archivist.',
+    model_name: 'anthropic/haiku',
+  };
+
+  const SHARED_PENDING_LINE = "Couldn't make a summary of the latest chat. A later chat will make a new summary.";
+  const ZARA_PENDING_LINE =
+    "Couldn't make a summary of the latest chat with Zara. A later chat with Zara will make a new summary.";
+
+  function personaApi(): PersonaApi {
+    return {
+      listPersonas: async () => [ZARA],
+      createPersona: async () => {
+        throw new Error('not used in these tests');
+      },
+      updatePersona: async () => {
+        throw new Error('not used in these tests');
+      },
+      deletePersona: async () => {},
+      getSessionPersona: async () => null,
+      setSessionPersona: async () => null,
+      ...personaKnowledgeApiStubs,
+    };
+  }
+
+  function catalogWith(overrides: Partial<MemoryVaultCatalog>): MemoryVaultCatalog {
+    return {
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: false }),
+      updateEntry: async () => {
+        throw new Error('not used in these tests');
+      },
+      deleteEntry: async () => {},
+      exportEntries: async () => ({ namespace: '', exportedAt: daysAgo({ days: 0 }), entries: [] }),
+      importEntries: async () => ({ namespace: '', imported: 0 }),
+      getSharing: async () => ({ shares: {} }),
+      updateSharing: async sharing => sharing,
+      ...overrides,
+    };
+  }
+
+  function renderPersonaPanel(catalog: MemoryVaultCatalog) {
+    const server = { ...createMockAgentUIServer({ catalog: createMockCatalog() }), memoryVault: catalog };
+    render(
+      <ServerProvider server={server}>
+        <PersonaProvider api={personaApi()}>
+          <Harness />
+        </PersonaProvider>
+      </ServerProvider>,
+    );
+  }
+
+  it('still shows one persona’s stored summary when another collection fails to load', async () => {
+    const catalog = catalogWith({
+      listEntries: async namespace => {
+        if (namespace === undefined) {
+          throw new Error('The memory request failed');
+        }
+        return [
+          memory({
+            id: 'z1',
+            text: 'Turn summary: Zara filed the travel notes.',
+            timestamp: daysAgo({ days: 0, hour: 8 }),
+          }),
+        ];
+      },
+    });
+    renderPersonaPanel(catalog);
+
+    expect(await screen.findByText(/Turn summary: Zara filed the travel notes\./)).toBeInTheDocument();
+    expect(await screen.findByText('Some memories could not be loaded. Try again.')).toBeInTheDocument();
+  });
+
+  it('shows the plain line in place of a summary that failed, for that persona only', async () => {
+    const catalog = catalogWith({
+      listEntries: async namespace =>
+        namespace === undefined
+          ? [memory({ id: 's1', text: 'Turn summary: the shared notes.', timestamp: daysAgo({ days: 0, hour: 8 }) })]
+          : [
+              memory({
+                id: 'z1',
+                text: 'User: the full text of a long chat.\n\nAssistant: the full reply.',
+                timestamp: daysAgo({ days: 0, hour: 9 }),
+              }),
+            ],
+      getSummaryStatus: async namespace => ({ summaryPending: namespace === 'persona:Zara' }),
+    });
+    renderPersonaPanel(catalog);
+
+    expect(await screen.findByText(ZARA_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.queryByText(SHARED_PENDING_LINE)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(1);
+    expect(screen.getByText(/Turn summary: the shared notes\./)).toBeInTheDocument();
+  });
+
+  it('names the persona on its own line and keeps the plain line for the shared collection', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: true }),
+    });
+    renderPersonaPanel(catalog);
+
+    expect(await screen.findByText(ZARA_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(2);
+  });
+
+  it('does not promise that the failed chat itself is summarised again', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: true }),
+    });
+    renderPersonaPanel(catalog);
+
+    const line = await screen.findByText(SHARED_PENDING_LINE);
+    expect(line.textContent).not.toMatch(/try again|retry/i);
+    expect(line.textContent).toMatch(/new summary/);
+  });
+
+  it('shows no pending line when every summary was made', async () => {
+    const catalog = catalogWith({
+      listEntries: async namespace => [
+        memory({
+          id: namespace === undefined ? 's1' : 'z1',
+          text: 'Turn summary: the shared notes.',
+          timestamp: daysAgo({ days: 0, hour: 8 }),
+        }),
+      ],
+    });
+    renderPersonaPanel(catalog);
+
+    expect(await screen.findByText(/Turn summary: the shared notes\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't make a summary/)).toBeNull();
   });
 });

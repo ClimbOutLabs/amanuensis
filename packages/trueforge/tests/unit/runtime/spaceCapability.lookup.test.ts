@@ -8,6 +8,7 @@ import type {
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
@@ -137,19 +138,23 @@ function makeToolSet(store: SpaceToolStore) {
   return toolSet;
 }
 
-describe('space results lead with the id, name, and revision', () => {
-  it('create_space names the new id, name, and revision first', async () => {
+describe('space results lead with the name and link, not an id', () => {
+  it('create_space names the new space and link first, and never an id', async () => {
     const toolSet = makeToolSet(makeMemoryStore());
     const response = await toolSet.callTool({
       name: CREATE_SPACE_TOOL_NAME,
-      arguments: { name: 'Dog breeds', purpose: 'Compare dog breeds.', status: 'active', body: ['# Dog breeds'] },
+      arguments: { name: 'Dog breeds', purpose: 'Compare dog breeds.', status: 'active', body: '# Dog breeds' },
     });
-    const parsed = JSON.parse(resultText(response)) as { summary: string; space: { id: string } };
-    expect(parsed.summary).toBe(`Created space "Dog breeds" (id: ${parsed.space.id}, revision 1).`);
-    expect(Object.keys(parsed)[0]).toBe('summary');
+    const text = resultText(response);
+    expect(text.startsWith('{"summary":')).toBe(true);
+    expect(text).toContain('Created space \\"Dog breeds\\" (revision 1).');
+    expect(text).toMatch(/"name":"Dog breeds"/);
+    expect(text).toMatch(/"link":"\/spaces\/[^"]+"/);
+    expect(text).not.toContain('"id"');
+    expect(text).not.toContain('(id:');
   });
 
-  it('update_space and revert_space name the id and the new revision', async () => {
+  it('update_space and revert_space name the space and the new revision, never an id', async () => {
     const store = makeMemoryStore([makeRecord({ id: 'sp-1', name: 'Dog breeds' })]);
     const toolSet = makeToolSet(store);
     const updated = await toolSet.callTool({
@@ -159,19 +164,17 @@ describe('space results lead with the id, name, and revision', () => {
         name: 'Dog breeds',
         purpose: 'Compare dog breeds.',
         status: 'active',
-        body: ['# Dog breeds', 'Updated'],
+        body: '# Dog breeds\nUpdated',
       },
     });
-    expect((JSON.parse(resultText(updated)) as { summary: string }).summary).toBe(
-      'Updated space "Dog breeds" (id: sp-1, revision 2).',
-    );
+    expect(resultText(updated)).toContain('Updated space \\"Dog breeds\\" (revision 2).');
+    expect(resultText(updated)).not.toContain('"id"');
     const reverted = await toolSet.callTool({
       name: REVERT_SPACE_TOOL_NAME,
       arguments: { space_id: 'sp-1', revision: 1 },
     });
-    expect((JSON.parse(resultText(reverted)) as { summary: string }).summary).toBe(
-      'Restored space "Dog breeds" (id: sp-1, revision 3).',
-    );
+    expect(resultText(reverted)).toContain('Restored space \\"Dog breeds\\" (revision 3).');
+    expect(resultText(reverted)).not.toContain('"id"');
   });
 });
 
@@ -185,19 +188,19 @@ describe('spaces found by exact name', () => {
     expect((JSON.parse(resultText(response)) as { space: { id: string } }).space.id).toBe('sp-dogs');
   });
 
-  it('update_space applies its change to the space found by name', async () => {
+  it('edit_space applies its change to the space found by name', async () => {
     const store = makeMemoryStore([dogBreeds]);
     const toolSet = makeToolSet(store);
     const response = await toolSet.callTool({
-      name: UPDATE_SPACE_TOOL_NAME,
+      name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Dog breeds',
-        block_edits: [{ anchor: 'auto-body', new_content: '# Dog breeds\nTop ten by intelligence.' }],
+        edits: [{ type: 'block', anchor: 'auto-body', new_content: '# Dog breeds\nTop ten by intelligence.' }],
       },
     });
     expect(isErrorResponse(response)).toBe(false);
     expect((JSON.parse(resultText(response)) as { summary: string }).summary).toBe(
-      'Updated space "Dog breeds" (id: sp-dogs, revision 2).',
+      'Updated space "Dog breeds" (revision 2).',
     );
   });
 
@@ -239,7 +242,15 @@ describe('spaces found by exact name', () => {
       name: GET_SPACE_TOOL_NAME,
       arguments: { space_id: 'sp-dogs', space_name: 'Dog breeds' },
     });
-    const neither = await toolSet.callTool({ name: UPDATE_SPACE_TOOL_NAME, arguments: { body: ['x'] } });
+    const neither = await toolSet.callTool({
+      name: UPDATE_SPACE_TOOL_NAME,
+      arguments: {
+        name: 'Dog breeds',
+        purpose: 'Compare dog breeds.',
+        status: 'active',
+        body: '# Dog breeds',
+      },
+    });
     for (const response of [both, neither]) {
       expect(isErrorResponse(response)).toBe(true);
       expect(JSON.stringify(JSON.parse(resultText(response)))).toContain(

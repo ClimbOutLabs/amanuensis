@@ -131,6 +131,7 @@ import {
   getModelDetails,
   isGithubConnectorAttached,
   isWebConnectorAttached,
+  modelRequestGate,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -379,6 +380,8 @@ function createTurnResolver(deps: {
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
+  /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
+  unattended?: boolean | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
@@ -401,7 +404,7 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
-  /** Chat turns that have a model to answer with; absent, no specialist tool mounts. */
+  /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
@@ -529,6 +532,12 @@ function createTurnResolver(deps: {
                   build: buildClient,
                 }),
           defaultModelParams: resolved.defaultModelParams,
+          // The per-model request limit, keyed by the configured model whatever provider ends
+          // up serving it: a step on this model waits for a place before it sends.
+          modelRequestGate:
+            resolved.maxConcurrentRequests === undefined
+              ? undefined
+              : { gate: modelRequestGate, key: name, limit: resolved.maxConcurrentRequests },
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
           // prompt names what it really is.
@@ -830,8 +839,8 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
-      // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
-      recallEnabled: undefined,
+      // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
+      recallEnabled: deps.unattended ? false : undefined,
       internalSourceState,
     },
     {
@@ -1461,8 +1470,7 @@ async function abandonTurnThatCouldNotStart(input: {
   abortController: AbortController;
   logger: Logger;
 }): Promise<void> {
-  input.abortController.abort(CancellationReason.Abandoned);
-  input.turn.forgetUnstarted();
+  input.abortController.abort(CancellationReason.CouldNotStart);
   await input.resolver.close().catch((closeError: unknown) => {
     input.logger.warn('Failed to close turn resources for a turn that could not start', {
       sessionId: input.session.session_id,
@@ -1470,7 +1478,7 @@ async function abandonTurnThatCouldNotStart(input: {
       ...extractErrorLogFields(closeError),
     });
   });
-  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.Abandoned });
+  await input.session.freezeTurn({ turn_id: input.turn.id, reason: CancellationReason.CouldNotStart });
 }
 
 /** Inputs for drainTurnEvents, produced by beginTurnExecution. */
@@ -1604,6 +1612,7 @@ async function beginAcceptedTurnExecution(
         memoryClient: deps.memoryClient,
         memoryProviderServerName: deps.memoryProviderServerName,
         memorySettings: effectiveMemorySettings,
+        unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         sessionTitle: deps.sessionTitle,
         clientTimezone: deps.clientTimezone,
@@ -2638,8 +2647,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      * error so the chat never retains a turn that no executor owns.
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
-      abortController.abort(CancellationReason.Abandoned);
-      turn.forgetUnstarted();
+      abortController.abort(CancellationReason.CouldNotStart);
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,
@@ -2653,7 +2661,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         try {
           // Freezing is idempotent: a response can be lost after the store
           // committed, and retrying returns the existing terminal turn.
-          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.Abandoned });
+          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.CouldNotStart });
           return;
         } catch (freezeError) {
           freezeFailures.push(freezeError);

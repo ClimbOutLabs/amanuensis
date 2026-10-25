@@ -1,15 +1,16 @@
-import { CenteredModal, Icon } from '@truefoundry/trueforge-ui';
+import { CenteredModal, Icon, railMenuRowClassName, type ShellActionsActionSlotProps } from '@truefoundry/trueforge-ui';
 import { useEffect, useState } from 'react';
 import { getCachedIsOidcConnectedSession, isOidcConnectedSession, logout } from './authSession';
 import './LogoutButton.css';
 import { UI_BASE_PATH } from './publicPath';
 
 /**
- * Icon button next to Settings (via `ShellActionsActionSlot` override).
+ * Sign out, in the rail's More menu as a labeled row or elsewhere as an icon button (via the
+ * `ShellActionsActionSlot` override).
  * Shown only when `auth.me()` returns `data.type: "oidc-connected"`.
  * Uses a module cache so remounts of the action slot do not hide the control during refetches.
  */
-export function LogoutButton() {
+export function LogoutButton({ row = false }: ShellActionsActionSlotProps) {
   const [visible, setVisible] = useState(() => getCachedIsOidcConnectedSession() === true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,17 +55,30 @@ export function LogoutButton() {
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Log out"
-        title="Log out"
-        className="harness-logout"
-        onClick={() => {
-          setConfirmOpen(true);
-        }}
-      >
-        <Icon name="log-out" />
-      </button>
+      {row ? (
+        <button
+          type="button"
+          className={railMenuRowClassName}
+          onClick={() => {
+            setConfirmOpen(true);
+          }}
+        >
+          <Icon name="log-out" size={14} />
+          Sign out
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label="Sign out"
+          title="Sign out"
+          className="harness-logout"
+          onClick={() => {
+            setConfirmOpen(true);
+          }}
+        >
+          <Icon name="log-out" />
+        </button>
+      )}
 
       <CenteredModal
         open={confirmOpen}
@@ -73,7 +87,7 @@ export function LogoutButton() {
             setConfirmOpen(next);
           }
         }}
-        title="Log out?"
+        title="Sign out?"
         contentSized
       >
         <div className="harness-logout-confirm">
@@ -88,7 +102,7 @@ export function LogoutButton() {
             Stay
           </button>
           <button type="button" className="harness-logout-submit" disabled={busy} onClick={handleConfirm}>
-            {busy ? 'Logging out…' : 'Log out'}
+            {busy ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
       </CenteredModal>

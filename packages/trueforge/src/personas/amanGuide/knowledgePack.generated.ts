@@ -3,12 +3,6 @@ import type { AmanGuideTopic } from './topic';
 
 export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
-    id: 'agents',
-    title: 'Personas, agents, and choosing who answers',
-    covers: ['specialists'],
-    body: 'A persona is a helper that answers in your chats. It has its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.\n\nAn agent is different. It is a saved set of instructions you build and try, and it is what runs your schedules.\n\n## Make a persona that answers in your chats\n\n1. Click **Settings** in the left bar.\n2. Click **Roles and Personas**.\n3. Click **Add persona**.\n4. In **Name**, type the name you will use to call the persona, such as Zara.\n5. In **Also answers to**, type other names for it, with commas between them. You can skip this.\n6. In **Model**, pick the model the persona should use.\n7. In **Role**, write how the persona should answer.\n8. Click **Save persona**.\n\nEach persona in that list has a knowledge library. You can add documents to it there.\n\n## Choose who answers a chat\n\n- Start your message with the persona\'s name, such as "Zara, plan a long weekend". The persona answers the rest of that chat.\n- Or hover over the small button by the message box until you see **Choose who answers this chat**. Click it, then click a persona in the list.\n- This button shows only after you have made at least one persona.\n- A small tag shows who is answering. To go back, click the button again and click **Default assistant**.\n\n## Build an agent to save and try\n\n1. Click **Build Agent** in the left bar.\n2. The **Agent Config** panel opens.\n3. Click **Edit Model** and choose a model.\n4. Click **Edit Instructions** and write what the agent should do.\n5. Click **Save Agent**.\n6. Type an **Agent name** and a **Description**. You need both.\n7. Click **Save changes**.\n\nTo use it, click **Agents** in the left bar. Click **Try** on the row of your agent. You can also pick it when you make a schedule.',
-  },
-  {
     id: 'appearance',
     title: 'Changing how Aman looks',
     covers: [],
@@ -23,19 +17,19 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'calendar',
     title: 'Keeping your calendar',
-    covers: ['calendar'],
+    covers: [],
     body: 'Ask Aman what is on your calendar this week. It reads your events and tells you what is coming up.\n\nAman can also add or change events, but only after you approve each one. A card shows the event before anything is saved.\n\nThis needs Google Calendar connected. See "Connecting your email and calendar".',
   },
   {
     id: 'clear-head',
     title: 'Clearing your head and breaking tasks into steps',
-    covers: ['clear-head', 'break-task'],
+    covers: ['head', 'start', 'steps'],
     body: 'Clearing your head. Tell Aman what is on your mind. It asks you questions, then sorts the list into three groups: today, this week, and later. Aman keeps that list, so you can come back to it.\n\nBreaking a task into steps. Tell Aman the task. It splits the task into small steps that each take about 10 minutes, and keeps the list so you can tick the steps off as you go.\n\nBoth lists are saved in the chat. Ask Aman to show them again whenever you need.',
   },
   {
     id: 'code',
     title: 'Reading files and running code',
-    covers: ['code'],
+    covers: [],
     body: 'Aman can read files and run code in a sandbox, a small separate space on your computer. For example, ask Aman to add up your expenses by category and draw a chart.\n\nThe sandbox must be set up first. Open Settings, then Sandbox. The "Read files and run code" card only appears once the sandbox is ready.\n\nCode runs only inside the sandbox. Anything Aman writes to a file there stays in the sandbox until you ask it to move the file.',
   },
   {
@@ -47,19 +41,19 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'costs',
     title: 'What Aman costs',
-    covers: ['cost'],
+    covers: [],
     body: 'Each chat uses the model you chose, and the company behind a hosted model may charge for the words used. A local model on your computer has no per-use charge.\n\nAsk Aman "Show me what my chats have cost so far this month" to see a summary. Settings also has a usage panel.',
   },
   {
     id: 'daily-brief',
     title: 'Your morning brief and planning your day',
-    covers: ['brief', 'plan-day'],
+    covers: ['brief', 'today'],
     body: 'Your morning brief. Click **New Chat**, then click **Your morning brief**. Or ask Aman "What do I need to know today?" It goes through your calendar, your email and your tasks. It gives you one short list, most urgent first: things to check, decisions waiting on you, what is coming up, and what is due. Each item has one next step. Mark an item done and it stays done, so it does not come back tomorrow. The brief only uses what you have connected. With nothing connected, Aman works from what you tell it.\n\nTo get it every morning, click **New Chat** and type "Every weekday at 7:30, send me my morning brief". A card shows the plan. Click **Create it**. The brief then arrives as a chat at that time. See "Running things on a schedule".\n\nPlanning your day. Ask Aman to plan your day. It puts your tasks in a sensible order, adds times, and can suggest a place for lunch near where you will be. It works from your calendar and your to-do list. If you have not connected your calendar, tell Aman what is on your day.',
   },
   {
     id: 'doctors-appointments',
     title: "Doctor's appointments",
-    covers: ['appointment'],
+    covers: ['doctor', 'their_appointment'],
     body: 'Ask Aman to help with your doctor\'s appointments. It looks for appointments in your calendar and your email, tells you what to bring and what to ask, and reminds you of anything you still need to book.\n\nTo find appointments in your calendar and email, connect both first. See "Connecting your email and calendar". Without them, tell Aman the details and it will keep track for you in the chat.',
   },
   {
@@ -71,7 +65,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'email',
     title: 'Handling your email',
-    covers: ['email', 'reply'],
+    covers: ['waiting'],
     body: 'Once Aman can read your email, ask it to go through your unread mail. It tells you which messages need a reply first.\n\nReading and searching is free. Aman can read and search your mail without asking you each time.\n\nReplying needs your OK. Aman writes a draft, and a card shows you exactly what will be sent to whom. Approve the card to save a draft or to send the email. Deny it and nothing is sent.\n\nIf Aman cannot read your mail, connect Gmail first. See "Connecting your email and calendar".',
   },
   {
@@ -89,19 +83,25 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'meals',
     title: 'Planning meals',
-    covers: ['meals'],
+    covers: ['dinner'],
     body: 'Ask Aman to plan your meals for the week. It plans around the food you already have, and then writes a shopping list for what is missing.\n\nTell Aman what you already have in the cupboard and fridge, and any food you do not eat. Aman keeps the plan and the list in the chat, so you can change them later.',
   },
   {
     id: 'memory',
     title: 'Memory',
-    covers: ['memory'],
+    covers: [],
     body: 'Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.\n\nMemory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.\n\nMemory search uses a small model that runs on your computer. Nothing about it is sent away.',
+  },
+  {
+    id: 'personas',
+    title: 'Personas, agents, and choosing who answers',
+    covers: [],
+    body: 'A persona is a helper that answers in your chats. It has its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.\n\nAn agent is different. It is a saved set of instructions you build and try, and it is what runs your schedules.\n\n## Make a persona that answers in your chats\n\n1. Click **Settings** in the left bar.\n2. Click **Roles and Personas**.\n3. Click **Add persona**.\n4. In **Name**, type the name you will use to call the persona, such as Zara.\n5. In **Also answers to**, type other names for it, with commas between them. You can skip this.\n6. In **Model**, pick the model the persona should use.\n7. In **Role**, write how the persona should answer.\n8. Click **Save persona**.\n\nEach persona in that list has a knowledge library. You can add documents to it there.\n\n## Choose who answers a chat\n\n- Start your message with the persona\'s name, such as "Zara, plan a long weekend". The persona answers the rest of that chat.\n- Or hover over the small button by the message box until you see **Choose who answers this chat**. Click it, then click a persona in the list.\n- This button shows only after you have made at least one persona.\n- A small tag shows who is answering. To go back, click the button again and click **Default assistant**.\n\n## Build an agent to save and try\n\n1. Click **Build Agent** in the left bar.\n2. The **Agent Config** panel opens.\n3. Click **Edit Model** and choose a model.\n4. Click **Edit Instructions** and write what the agent should do.\n5. Click **Save Agent**.\n6. Type an **Agent name** and a **Description**. You need both.\n7. Click **Save changes**.\n\nTo use it, click **Agents** in the left bar. Click **Try** on the row of your agent. You can also pick it when you make a schedule.',
   },
   {
     id: 'phone',
     title: 'Using Aman from your phone',
-    covers: ['move'],
+    covers: [],
     body: 'You can use Aman from your phone when the phone is on the same home network as your computer.\n\nThe first time, open the "Trust this computer" link that the installer printed, or scan the square code on the screen. The page shows the steps for your phone. You do this once for each device. After that, open the address that ends in 8443 from the list the installer printed.\n\nIf the page says the connection is not private, the phone does not trust your computer yet. Do the trust steps again on the phone.',
   },
   {
@@ -119,19 +119,19 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'schedules',
     title: 'Running things on a schedule',
-    covers: ['schedule'],
+    covers: ['remember'],
     body: 'Aman can run a task at a set time, such as "Every weekday at 7:30, send me my morning brief". The result appears in a chat when the run finishes.\n\nA schedule always repeats. There is no one-time reminder. If you ask for one, Aman says it cannot make it.\n\n## Make a schedule by asking\n\n1. Click **New Chat**.\n2. Type what you want and how often, such as "Every weekday at 7:30, send me my morning brief". Aman asks if the time is unclear.\n3. A card shows when it runs and what it does. Check it.\n4. Click **Create it**. To stop, click **Not now**. To reword it first, click **Change it**.\n\n## Make a schedule on the Schedules page\n\n1. Click **Schedules** in the left bar.\n2. Click **New schedule**.\n3. In **Agent**, pick the agent that should do the task. If you have none, see the page about agents.\n4. Type a **Name** and a **Task**.\n5. Under **Frequency**, click **Hourly**, **Daily** or **Weekly**. For **Weekly**, pick the **Days**.\n6. Set the **Hour**, the **Minute** and the **Timezone**.\n7. Click **Save**. The schedule is saved paused.\n8. On the next screen, click **Activate Schedule** to start it.\n\n## Change a schedule\n\n- Click **Run now** on a row to run it at once.\n- Click the three dots on a row. Then click **Edit**, **Pause**, **Resume** or **Delete**.\n\nA scheduled run cannot skip your approval. If a run wants to send or change something, it holds that action. When the run finishes, its chat ends with a **Needs your OK** list. Nothing has been done until you approve an item. A scheduled run can read your email, but it never saves a draft or sends mail.',
   },
   {
     id: 'skills',
     title: 'Learning new skills',
-    covers: ['skills'],
+    covers: [],
     body: 'Aman can learn a new skill. For example, ask it to learn how to turn a photo of a receipt into a line in your expense list.\n\nSkills run in the sandbox, so the sandbox must be set up first. Open Settings, then Skills to see the skills Aman has, to add one, or to turn one off.\n\nThe "Learn new skills" card only appears once the sandbox is ready.',
   },
   {
     id: 'spaces',
     title: 'Spaces, your saved pages',
-    covers: ['spaces'],
+    covers: [],
     body: 'A space is a page that Aman keeps up to date for you. It can be a list, a table or a board.\n\n## Make a space\n\n1. Click **New Chat**.\n2. Ask for the page you want, such as "Make a space called Dog breeds that compares family dogs". Or click the **Keep pages in Spaces** card.\n3. Aman builds the page and tells you where to find it.\n4. Click **Spaces** in the left bar. Click your space to open it.\n\nAsk Aman in any chat to change a space. It keeps the page up to date as you talk.\n\n## Add pictures\n\nYou cannot add a picture yourself. Ask Aman, such as "Add a photo of each breed to Dog breeds".\n\nAman can only use pictures it found on the web in that same chat. If it has not looked yet, it searches first. Pictures from your own computer cannot be added.\n\n## What a space can and cannot do\n\nA space shows text, tables, colours and pictures. No scripts run in a space. Nothing in it can act on its own or reach your files.\n\n## Delete a space\n\nOpen the space, click **Space actions**, then click **Delete space**. This deletes the page for good.',
   },
   {
@@ -143,13 +143,13 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'web',
     title: 'Searching the web',
-    covers: ['web'],
+    covers: [],
     body: 'Ask Aman for the latest news or anything that changes often, and it searches the live web for you. It can give you the five stories that matter, with two lines each.\n\nWeb search needs a search provider. Open Settings and pick a web search provider. Without one, Aman says it cannot search the web.\n\nWhen Aman searches, the search words and the pages it opens are sent to the search service.',
   },
   {
     id: 'what-is-aman',
     title: 'What Aman is',
-    covers: ['get-to-know'],
+    covers: [],
     body: 'Aman is your personal assistant. It keeps track of your life and helps you with it: your day, your email, your calendar, your tasks, and the things you want to remember.\n\nAman runs on your own computer. Your chats and your notes stay there.\n\nAman checks with you before it does anything that matters. Reading is free. Sending, saving or changing something needs your OK first.\n\nAman is a set of helpers, and you can ask for any of them in plain words. Start with a simple question or a task, and Aman will ask what it needs.',
   },
 ];

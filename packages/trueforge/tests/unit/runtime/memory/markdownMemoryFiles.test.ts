@@ -1,3 +1,4 @@
+import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -158,6 +159,23 @@ describe('markdownMemoryFiles', () => {
         });
         expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: undefined })).toEqual([
           'tenant-1',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("applies the main assistant's grants when no agent answers", async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: { version: 1, shares: { [MAIN_ASSISTANT_SHARING_KEY]: ['persona:Beta'], Alpha: ['finance'] } },
+        });
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: undefined })).toEqual([
+          'tenant-1',
+          'tenant-1__persona_Beta',
         ]);
       } finally {
         await rm(dir, { recursive: true, force: true });

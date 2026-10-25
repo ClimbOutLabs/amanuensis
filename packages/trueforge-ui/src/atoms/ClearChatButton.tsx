@@ -5,9 +5,10 @@ import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
-import { auiButtonClass } from './lib/buttonClasses.js';
+import { railMenuRowClassName } from './lib/buttonClasses.js';
 
-// Resets the current chat / draft (Try Agent, New Chat, New Agent, Edit).
+// Resets the current chat / draft (Try Agent, New Chat, New Agent, Edit). A row in the chat
+// header's menu, since it is rarely used and should not sit one tap from the conversation.
 // Hidden while idle and on a fresh chat.
 export function ClearChatButton() {
   const shell = useOptionalShellMode();
@@ -21,8 +22,8 @@ export function ClearChatButton() {
     <PermissionGuard allowed={canManageSession}>
       <button
         type="button"
-        title="Clear chat"
-        className={auiButtonClass({ variant: 'ghost', size: 'large' })}
+        role="menuitem"
+        className={railMenuRowClassName}
         onClick={() => {
           if (canManageSession) shell.clearChat();
         }}

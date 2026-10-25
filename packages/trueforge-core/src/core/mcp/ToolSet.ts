@@ -19,15 +19,12 @@ import {
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
-import { isStandingTrustDecision } from '../permissions/connectorTrust';
+import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/connectorTrust';
 import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
-  countSilentFetches,
   isSearchAskReason,
   isSilentSearchReason,
-  namesUrl,
-  recordResultUrls,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -182,8 +179,12 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
-    case 'private_text_check':
-      return `Skipped: ${decision.reason_detail ?? 'it would have shared something from your mail or calendar.'} Continue without it.`;
+    case 'lookup_limit':
+      return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
+    case 'steered_by_content':
+      return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'private_detail':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
@@ -424,14 +425,6 @@ export class ToolSet implements IToolSet {
         texts: resultTexts(response.result),
       });
     }
-    if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
-      // What a search returned is what a later fetch in this turn may name. A call that itself
-      // names a URL is a fetch: its page's links are not search results, so they stay unreturned.
-      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
-      if (sent !== undefined && !namesUrl([...sent.values, ...sent.plumbing])) {
-        recordResultUrls({ state: this.sentinel.web_search, texts: resultTexts(response.result) });
-      }
-    }
     // The priming listTools() may have captured the first-connect init; carry it forward since the
     // subsequent callTool sees an already-open connection and reports none.
     if (listed.wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
@@ -514,12 +507,7 @@ export class ToolSet implements IToolSet {
       this.sentinel !== undefined
     ) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
-      const turn = this.sentinel.web_search;
-      turn.silentSearches += 1;
-      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
-      if (sent !== undefined) {
-        countSilentFetches({ values: sent.values, state: turn });
-      }
+      this.sentinel.web_search.silentSearches += 1;
     }
 
     if (
@@ -698,7 +686,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: isSilentSearchReason(decision.reason),
+              waiveUnclassified: isHostVouchedDecision(decision),
             })),
       },
       classification: decision,

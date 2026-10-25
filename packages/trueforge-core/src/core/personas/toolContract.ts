@@ -1,6 +1,6 @@
 /**
- * Canonical owner of the persona tool names. Adding a specialist always asks first; reading the list and
- * switching this chat to an existing specialist run without a card. Nothing here edits or deletes a persona.
+ * Canonical owner of the persona tool names. Adding a persona always asks first; reading the list and
+ * switching this chat to an existing persona run without a card. Nothing here edits or deletes a persona.
  */
 export const PERSONA_SERVER_ID = 'personas';
 

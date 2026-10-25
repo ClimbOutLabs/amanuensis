@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
+    "build:aman-installer": "pnpm --filter @truefoundry/aman-installer build",
     "build:dev-image": "docker build -f Dockerfile.dev --build-arg BUILD_REF=\"$(git rev-parse HEAD)\" -t aman:dev .",
     "chart:deps": "helm dependency build charts/trueforge",
     "chart:lint": "helm lint charts/trueforge --values charts/trueforge/ci/lint-values.yaml",
@@ -31,6 +32,7 @@
     "lint:check:files": "eslint --",
     "lint": "eslint . --fix --cache --cache-location .eslintcache --cache-strategy content",
     "lint:theme": "node scripts/check-theme-tokens.mjs",
+    "lint:aman-installer": "pnpm --filter @truefoundry/aman-installer lint",
     "nightona:sandbox:build": "docker build --build-arg \"TESSERACT_LANGS=eng deu fra spa ita por nld rus hin mar jpn chi_sim chi_tra kor ara\" --build-arg NIGHTONA_BASE_IMAGE=ghcr.io/OWNER/nightona-sandbox-base:0.6.0 -t ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7 -f ops/nightona-sandbox/Dockerfile .",
     "nightona:sandbox:push": "docker push ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7",
     "nightona:sandbox:verify": "bash ops/nightona-sandbox/verify-image.sh ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7",
@@ -63,6 +65,7 @@
     "test:frontend": "pnpm --filter frontend test",
     "test:trueforge-sdk": "pnpm --filter @truefoundry/trueforge-sdk test:wire",
     "test:aman-guide": "node --test tests/aman-guide-build.test.mjs tests/aman-guide-labels.test.mjs",
+    "test:aman-installer": "pnpm --filter @truefoundry/aman-installer test",
     "test:chart-version": "bash tests/scripts/resolve-chart-version.test.sh",
     "test:installer": "bash installer/tests/run.sh",
     "test:installer-image": "bash installer/tests/image-runtime.sh",

@@ -1,7 +1,7 @@
 ---
 id: daily-brief
 title: Your morning brief and planning your day
-covers: brief, plan-day
+covers: brief, today
 ---
 
 Your morning brief. Click **New Chat**, then click **Your morning brief**. Or ask Aman "What do I need to know today?" It goes through your calendar, your email and your tasks. It gives you one short list, most urgent first: things to check, decisions waiting on you, what is coming up, and what is due. Each item has one next step. Mark an item done and it stays done, so it does not come back tomorrow. The brief only uses what you have connected. With nothing connected, Aman works from what you tell it.

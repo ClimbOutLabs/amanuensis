@@ -1,7 +1,7 @@
 ---
 id: schedules
 title: Running things on a schedule
-covers: schedule
+covers: remember
 ---
 
 Aman can run a task at a set time, such as "Every weekday at 7:30, send me my morning brief". The result appears in a chat when the run finishes.

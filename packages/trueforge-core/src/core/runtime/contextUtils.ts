@@ -107,6 +107,16 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 `;
 
 /**
+ * Email is connected only through the Settings form, so the app password never passes through a
+ * chat. Without this, a model asked to "set up email with this password" will try to use the
+ * password somewhere, or repeat it back. The fix is a plain instruction to point at Settings and
+ * never touch the password, not a per-tool special case.
+ */
+export const EMAIL_PASSWORD_PROMPT = dedent`
+Email is connected only in Settings, under Connectors, Email, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect email with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, Email instead.
+`;
+
+/**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
  * retrieval route only when the sandbox can reach a network.
  */
@@ -115,7 +125,7 @@ export function createSourceDiscoveryContract({ shellCanFetch }: { shellCanFetch
     ? ', and the sandbox exec tool when it retrieves an already identified source through an advertised network client such as curl, subject to its normal permission gate'
     : '';
   return dedent`
-For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools${shellFetchClause}. No retrieval capability discovers or validates a guessed URL${shellCanFetch ? ', and the sandbox does not discover or validate a guessed URL either' : ''}. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present. Do not search for a person the user mentions unless they ask you to look that person up.
+For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools${shellFetchClause}. No retrieval capability discovers or validates a guessed URL${shellCanFetch ? ', and the sandbox does not discover or validate a guessed URL either' : ''}. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present. Do not search for a person the user mentions unless they ask you to look that person up. Search for one topic at a time. When the user asks you to check a list, run several short searches of a few items each instead of one long search.
 `;
 }
 

@@ -14,13 +14,16 @@ import { APICallError } from 'ai';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import {
   chunkHasSubstance,
+  chunkSubstanceField,
   describeStreamError,
   enforceStreamDeadlines,
+  isContextLengthError,
   mapFinishReason,
   mapStreamToChunks,
   ModelOutputRepetitionError,
   ModelStreamFault,
   normalizeUsage,
+  rawChunkProgressField,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
 
@@ -914,6 +917,21 @@ describe('mapStreamToChunks', () => {
     expect(rejection).toBeInstanceOf(Error);
   });
 
+  it('raises ModelStreamFault for a provider answer that the prompt is over the context length', async () => {
+    // A shorter history can fix this one definite provider answer, so it takes the retry path.
+    const cause = Object.assign(new Error("This model's maximum context length is 32768 tokens."), {
+      data: { message: '', type: 'BadRequestError', param: null, code: 400 },
+    });
+    const rejection: unknown = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([{ type: 'error', error: cause }]),
+        chunkMeta: CHUNK_META,
+      }),
+    ).catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ModelStreamFault);
+    expect(isContextLengthError(rejection)).toBe(true);
+  });
+
   it('raises ModelStreamFault when the stream ends with no text, no tool call, and no finish signal', async () => {
     // The shape a provider closing the connection mid-response takes: the stream's own async
     // iterable simply ends, with no 'error' part and nothing thrown.
@@ -1014,6 +1032,62 @@ describe('mapStreamToChunks', () => {
 
 // ─────────── chunkHasSubstance ───────────
 
+describe('isContextLengthError', () => {
+  it.each([
+    "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens.",
+    'prompt is too long: 210000 tokens > 200000 maximum',
+    'Input is too long for requested model.',
+    'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+    'context_length_exceeded',
+    'input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again',
+    'The decoder prompt (length 40000) is longer than the maximum model length of 32768.',
+    'the request exceeds the available context size, try increasing it',
+  ])('recognizes %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(true);
+  });
+
+  it('finds the wording in the cause chain and in an API response body', () => {
+    expect(isContextLengthError(new ModelStreamFault('broke', { cause: new Error('prompt is too long') }))).toBe(true);
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"code":"context_length_exceeded"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(true);
+  });
+
+  it('does not treat a dropped stream or a timeout as a context-length error', () => {
+    expect(isContextLengthError(new ModelStreamFault('The model stream ended without any text.'))).toBe(false);
+    expect(isContextLengthError(new Error('terminated', { cause: new Error('other side closed') }))).toBe(false);
+    expect(isContextLengthError(new Error('Rate limit reached: too many tokens per minute'))).toBe(false);
+  });
+
+  it.each([
+    'Rate limit reached for requests',
+    'Request timed out.',
+    'socket hang up',
+    'other side closed',
+    'read ECONNRESET',
+    'Bad Request',
+    'Invalid request: messages must not be empty',
+  ])('does not recognize %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(false);
+  });
+
+  it('does not treat a generic 400 answer as a context-length error', () => {
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"message":"Invalid value for temperature","type":"invalid_request_error"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(false);
+  });
+});
+
 describe('chunkHasSubstance', () => {
   it('rejects a part with no reader-visible content', () => {
     expect(chunkHasSubstance({ type: 'start' })).toBe(false);
@@ -1043,6 +1117,59 @@ describe('chunkHasSubstance', () => {
 
   it('accepts a step or turn finish, regardless of any accompanying usage', () => {
     expect(chunkHasSubstance(makeFinishStep('stop'))).toBe(true);
+  });
+
+  it('accepts a raw chunk whose delta carries text under a field the parser drops', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', text: 'thinking' }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('reasoning_details');
+    expect(rawChunkProgressField(part.rawValue)).toBe('reasoning_details');
+  });
+
+  it('accepts a raw chunk whose tool-call arguments are streaming before the call has a name', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"body":"<div>' } }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('tool_call_arguments');
+  });
+
+  it('rejects a raw chunk that is only a role marker or an empty keepalive', () => {
+    const roleOnly: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { role: 'assistant' } }] },
+    };
+    const empty: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { choices: [{ delta: {} }] } };
+    const emptyText: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { content: '', reasoning_details: [] } }] },
+    };
+    expect(chunkHasSubstance(roleOnly)).toBe(false);
+    expect(chunkHasSubstance(empty)).toBe(false);
+    expect(chunkHasSubstance(emptyText)).toBe(false);
+    expect(chunkSubstanceField(roleOnly)).toBeUndefined();
+  });
+
+  it('rejects a raw chunk that is not an OpenAI-shaped chunk at all', () => {
+    const part: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { type: 'content_block_delta' } };
+    expect(chunkHasSubstance(part)).toBe(false);
+    expect(rawChunkProgressField('not a chunk')).toBeUndefined();
+    expect(rawChunkProgressField(null)).toBeUndefined();
+  });
+
+  it('names the field a parsed part carried its progress under', () => {
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: 'a' })).toBe('content');
+    expect(chunkSubstanceField({ type: 'reasoning-delta', id: 'r1', text: 'a' })).toBe('reasoning');
+    expect(chunkSubstanceField({ type: 'tool-input-delta', id: 'c1', delta: '{' })).toBe('tool_call_arguments');
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: '' })).toBeUndefined();
   });
 });
 

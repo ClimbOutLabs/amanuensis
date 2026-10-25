@@ -1,7 +1,7 @@
 ---
 id: clear-head
 title: Clearing your head and breaking tasks into steps
-covers: clear-head, break-task
+covers: head, start, steps
 ---
 
 Clearing your head. Tell Aman what is on your mind. It asks you questions, then sorts the list into three groups: today, this week, and later. Aman keeps that list, so you can come back to it.

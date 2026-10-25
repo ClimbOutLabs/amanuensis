@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import * as staleApproval from '@/utils/staleApproval.js';
 import {
   EXPIRED_REQUEST_DESCRIPTION,
   EXPIRED_REQUEST_TITLE,
@@ -39,6 +40,15 @@ describe('expired request copy', () => {
     expect(EXPIRED_REQUEST_TITLE).toBe('This request expired');
     expect(EXPIRED_REQUEST_DESCRIPTION).toBe(
       'The chat moved on before this was answered. Nothing was approved or run. Ask again if you still want it.',
+    );
+  });
+});
+
+describe('ended request copy', () => {
+  it('is the one line shared by the card note and the refused answer', () => {
+    // Read through Reflect so this test alone fails when the shared line is not exported.
+    expect(Reflect.get(staleApproval, 'REQUEST_ENDED_LINE')).toBe(
+      'This request ended. Ask again if you still need it.',
     );
   });
 });

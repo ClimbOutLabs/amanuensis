@@ -1,7 +1,7 @@
 ---
 id: costs
 title: What Aman costs
-covers: cost
+covers:
 ---
 
 Each chat uses the model you chose, and the company behind a hosted model may charge for the words used. A local model on your computer has no per-use charge.

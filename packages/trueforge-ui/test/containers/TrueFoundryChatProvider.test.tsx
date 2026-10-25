@@ -11,6 +11,10 @@ import { createMockAgentUIServer } from '../server/mockServer.js';
 
 const runtimeSpy = vi.hoisted(() => vi.fn<(options: UseTrueFoundryAgentRuntimeOptions) => void>());
 const reloadSpy = vi.hoisted(() => vi.fn());
+const loadedChat = vi.hoisted(() => ({
+  messages: [] as { id: string; role: 'user'; content: string }[],
+  cancelledTurn: undefined as { turnId: string; reason: string } | undefined,
+}));
 const defaultAttachmentAdapter = vi.hoisted(() => ({
   accept: 'image/*,application/pdf',
   add: vi.fn(),
@@ -18,19 +22,21 @@ const defaultAttachmentAdapter = vi.hoisted(() => ({
   send: vi.fn(),
 }));
 
-vi.mock('@truefoundry/assistant-ui-runtime', () => ({
+vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
+  ...(await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>()),
   trueFoundryAttachmentAdapter: defaultAttachmentAdapter,
   useTrueFoundryAgentRuntime: (options: UseTrueFoundryAgentRuntimeOptions) => {
     runtimeSpy(options);
     // Called from ChatRuntimeScope (a React component), so hooks are valid here.
     return useExternalStoreRuntime<ThreadMessageLike>({
-      messages: [],
+      messages: loadedChat.messages,
       isRunning: false,
       convertMessage: (message: ThreadMessageLike) => message,
       onNew: async () => {},
     });
   },
   useTrueFoundryReload: () => reloadSpy,
+  useTrueFoundryCancelledTurn: () => loadedChat.cancelledTurn,
 }));
 
 import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
@@ -58,6 +64,8 @@ describe('TrueFoundryChatProvider', () => {
   beforeEach(() => {
     runtimeSpy.mockClear();
     reloadSpy.mockClear();
+    loadedChat.messages = [];
+    loadedChat.cancelledTurn = undefined;
   });
 
   it('resyncs a dropped reply stream instead of reporting it as an error', async () => {
@@ -118,6 +126,21 @@ describe('TrueFoundryChatProvider', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       sendRefusalText({ refusal: 'stopped_by_restart', assistantName: DEFAULT_ASSISTANT_NAME }),
     );
+  });
+
+  it('says it once when the page saw the restart and the chat also loaded it', async () => {
+    loadedChat.messages = [{ id: 'turn-restarted-user', role: 'user', content: 'Tell me about Lantern Row' }];
+    loadedChat.cancelledTurn = { turnId: 'turn-restarted', reason: 'abandoned' };
+    const forwardedOnError = renderWithNotice(vi.fn());
+    const line = sendRefusalText({ refusal: 'stopped_by_restart', assistantName: DEFAULT_ASSISTANT_NAME });
+    expect(screen.getAllByText(line)).toHaveLength(1);
+
+    await act(async () => {
+      forwardedOnError(new ReplyStoppedByRestartError({ cause: new Error('Request failed (412)') }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText(line)).toHaveLength(1);
   });
 
   it('forwards legacy runtime options and supplies the default attachment adapter', () => {

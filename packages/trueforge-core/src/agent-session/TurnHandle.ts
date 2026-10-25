@@ -22,7 +22,6 @@ import {
 } from '../core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../core/runtime/contextUsage';
 import type { AgentThreadMetrics } from '../core/runtime/metrics';
-import { chatFingerprintSaves } from './ChatFingerprintSaves';
 import type { ITurnResourceResolver } from './ITurnResourceResolver';
 import type { TurnRecord } from './models/TurnRecord';
 import { EventType, type PersistedTurnEvent, type TurnCreatedEvent, type TurnDoneEvent } from './schemas/events';
@@ -91,6 +90,9 @@ function cancellationReasonFromAbortReason(abortReason: unknown): CancellationRe
   }
   if (abortReason === CancellationReason.Abandoned) {
     return CancellationReason.Abandoned;
+  }
+  if (abortReason === CancellationReason.CouldNotStart) {
+    return CancellationReason.CouldNotStart;
   }
   return CancellationReason.ClientCancelled;
 }
@@ -509,19 +511,9 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       }
       this.stopCommandExecutionLeaseRenewals();
       if (lifecycle.frozenByStore) {
-        // A turn frozen from outside (Cancel) still read what it read, so its fingerprints are saved too.
-        try {
-          await chatFingerprintSaves.finish({
-            session_id: this.turn.session_id,
-            state: resolver.webSearchTurn,
-            store: this.store,
-            logger: resolver.logger,
-          });
-        } finally {
-          await resolver.close().catch((err: unknown) => {
-            resolver.logger.warn('TurnResourceResolver.close() failed', { err });
-          });
-        }
+        await resolver.close().catch((err: unknown) => {
+          resolver.logger.warn('TurnResourceResolver.close() failed', { err });
+        });
       } else {
         const updatedAt = new Date();
         const createdAtIso = updatedAt.toISOString();
@@ -642,12 +634,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
                 };
           }
         } finally {
-          await chatFingerprintSaves.finish({
-            session_id: this.turn.session_id,
-            state: resolver.webSearchTurn,
-            store: this.store,
-            logger: resolver.logger,
-          });
           await resolver.close().catch((err: unknown) => {
             resolver.logger.warn('TurnResourceResolver.close() failed', { err });
           });
@@ -697,13 +683,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         }
       }
       result = await generator.next();
-    }
-  }
-
-  /** Forgets a turn that ends without ever streaming, so it is not left among its chat's unsaved turns. */
-  forgetUnstarted(): void {
-    if (!this.streamStarted && this.resolver !== undefined) {
-      chatFingerprintSaves.forget({ session_id: this.turn.session_id, state: this.resolver.webSearchTurn });
     }
   }
 

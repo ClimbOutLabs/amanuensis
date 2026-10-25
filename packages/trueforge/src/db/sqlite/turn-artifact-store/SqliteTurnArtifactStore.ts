@@ -197,6 +197,37 @@ export class SqliteTurnArtifactStore implements ITurnArtifactStore<Transaction<D
     });
   }
 
+  async deleteArtifactsForSession(
+    input: TenantScopedInput & { session_id: string },
+    transaction?: Transaction<Database>,
+  ): Promise<number> {
+    return await this.#write(transaction, async trx => {
+      const deleted = await trx
+        .deleteFrom('turn_artifact')
+        .where('tenant_id', '=', input.tenant_id)
+        .where('session_id', '=', input.session_id)
+        .executeTakeFirst();
+      const deletedRows = Number(deleted.numDeletedRows);
+      // Blobs are content-addressed and shared across turns: only delete a
+      // blob when no surviving index row references its digest.
+      await trx
+        .deleteFrom('artifact_blob')
+        .where(eb =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('turn_artifact as ta')
+                .select('ta.digest')
+                .whereRef('ta.tenant_id', '=', 'artifact_blob.tenant_id')
+                .whereRef('ta.digest', '=', 'artifact_blob.digest'),
+            ),
+          ),
+        )
+        .execute();
+      return deletedRows;
+    });
+  }
+
   async #write<T>(
     transaction: Transaction<Database> | undefined,
     run: (trx: Transaction<Database>) => Promise<T>,

@@ -629,6 +629,18 @@ describe('POST /{session_id}/turns for a card whose request ended', () => {
     expect(await turnCount(app)).toBe(before);
   });
 
+  it('Dismissing the same ended card twice answers 200 both times and still creates no turn', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const first = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+    const second = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await turnCount(app)).toBe(before);
+  });
+
   it('Approve is refused with the ended-request conflict and no turn is created', async () => {
     const app = await buildApp(undefined, { endedCard: true });
     const before = await turnCount(app);

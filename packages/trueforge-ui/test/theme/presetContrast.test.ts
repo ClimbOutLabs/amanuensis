@@ -14,6 +14,9 @@ const BODY_PAIRS: Array<{ text: TokenName; surface: TokenName; base?: TokenName 
   { text: 'textPrimary', surface: 'secondaryBg' },
   { text: 'textSecondary', surface: 'primaryBg' },
   { text: 'textSecondary', surface: 'cardBg' },
+  // Placeholders: the muted token on every input surface.
+  { text: 'textMuted', surface: 'inputBoxBg' },
+  { text: 'textMuted', surface: 'cardBg' },
   { text: 'sidebarText', surface: 'sidebarBg' },
   { text: 'userMessageText', surface: 'userMessageBg', base: 'primaryBg' },
   { text: 'assistantMessageText', surface: 'primaryBg' },

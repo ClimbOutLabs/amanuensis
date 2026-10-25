@@ -68,40 +68,40 @@ function wordCount(text: string): number {
 }
 
 describe('EmailApprovalCard title and verb', () => {
-  it('asks "Send this reply?" with Send on the button for a reply', () => {
+  it('asks "Send this reply to grace@example.com?" with Allow on the button for a reply', () => {
     renderEmail({
       reply_in_thread: { subject: 'Lease', from: 'Grace' },
       subject: 'Re: Lease',
     });
-    expect(screen.getByRole('heading', { name: 'Send this reply?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send this reply to grace@example.com?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('asks "Send this email?" with Send on the button for a new message', () => {
+  it('asks "Send this email to grace@example.com?" with Allow on the button for a new message', () => {
     renderEmail();
-    expect(screen.getByRole('heading', { name: 'Send this email?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send this email to grace@example.com?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('asks "Save this draft?" with Save draft on the button when the action is a draft', () => {
+  it('asks "Save this draft?" with Allow on the button when the action is a draft', () => {
     renderEmail({ action: 'save' });
     expect(screen.getByRole('heading', { name: 'Save this draft?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
   });
 
   it('uses the same verb for a changed draft as for a new draft', () => {
     renderEmail({ action: 'change' });
     expect(screen.getByRole('heading', { name: 'Save this draft?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('shows the Gmail label and no all-caps or waiting pill', () => {
+  it('shows the Gmail label, one waiting line, and no all-caps', () => {
     const { container } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
     expect(screen.getByText('Gmail')).toBeInTheDocument();
-    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(container.querySelector('.uppercase')).toBeNull();
   });
 });
@@ -206,11 +206,11 @@ describe('EmailApprovalCard body', () => {
 
   it('keeps the action bar visible under a 3000-word body', () => {
     renderEmail({ body: longBody(300, 10) });
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Allow' });
     const bar = send.parentElement;
-    if (bar === null) throw new Error('the send button has no action bar');
+    if (bar === null) throw new Error('the allow button has no action bar');
     expect(bar).toHaveClass('sticky', 'bottom-0');
-    expect(within(bar).getByRole('button', { name: "Don't send" })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Show full message · 3000 words/ })).toBeInTheDocument();
   });
 
@@ -223,15 +223,15 @@ describe('EmailApprovalCard body', () => {
 describe('EmailApprovalCard actions', () => {
   it('sends once, then shows Sent with the time and no buttons', () => {
     const { onApprove } = renderEmail();
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/^Sent · /)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
   });
 
-  it("calls onDeny from Don't send", () => {
+  it('calls onDeny from Not now', () => {
     const { onDeny } = renderEmail();
-    fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
@@ -277,7 +277,7 @@ describe('EmailApprovalCard actions', () => {
   it('never offers Always allow on a mail card', () => {
     renderEmail();
     expect(screen.queryByText(/Always allow/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Approve for this chat/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Always allow this here/)).not.toBeInTheDocument();
   });
 });
 

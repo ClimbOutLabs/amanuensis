@@ -1,11 +1,11 @@
 /**
- * The one check on links a space body adds: a picture or a link must come from a search or page
- * result in this turn, be https when it is a picture, and never name a placeholder domain. A space
+ * The one check on links a space body adds: a picture or a link must come from the person or a search
+ * result in this chat, be https when it is a picture, and never name a placeholder domain. A space
  * page loads its pictures from the host itself, so a made up or mail-borne link would send the
  * person's browser to that host. Links already in the body before a write are left alone, so an
  * unrelated edit never trips over an older picture.
  */
-import { unreturnedUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { isTrustedLink, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
 import type { SpaceFormatSchema } from '../schemas/space';
 import { bodyLinks, type BodyLink } from './spaceBodyLinks';
@@ -42,7 +42,12 @@ export function isPlaceholder(host: string): boolean {
  * with the URL parser the browser uses, so a spelling a browser reads as a remote address is
  * checked as one, whatever its scheme separators look like.
  */
-function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+  // Scripts never run on a space page, whatever their source, so a script source is refused
+  // outright rather than checked against the chat's results and then stripped at render.
+  if (tag === 'script') {
+    return 'Scripts never run on a space page. Use plain HTML and CSS instead.';
+  }
   const noun = nounOf(kind);
   let url: URL;
   try {
@@ -72,8 +77,11 @@ function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): 
   }
   // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
-  if (unreturnedUrls({ values: [candidate], state: web_search }).length > 0) {
-    return `This ${noun}'s link did not come from a search or page in this chat. Search for the ${noun} first, then use a link from the results.`;
+  if (!isTrustedLink({ provenance: web_search.provenance, url: candidate })) {
+    if (kind === 'picture') {
+      return "Open the picture's page first, then use the image link from that page.";
+    }
+    return `This ${noun}'s link did not come from the person or a search in this chat. Search for the ${noun} first, then use a link from the results.`;
   }
   return undefined;
 }

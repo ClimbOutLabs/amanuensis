@@ -24,11 +24,14 @@ export async function classifyCaldavTool({
   review,
   mintToken,
   hasStandingGrant,
+  assistant,
 }: {
   action: Pick<SentinelAction, 'tool_name' | 'canonical_params' | 'tool_type' | 'mcp_server_name' | 'mcp_first_party'>;
   review: CaldavEventReview | null;
   mintToken: () => Promise<string>;
   hasStandingGrant: () => Promise<boolean>;
+  /** The assistant's display name, for the sentence that says who always asks. */
+  assistant: string;
 }): Promise<TierDecision | undefined> {
   if (action.tool_type !== 'mcp' || action.mcp_server_name !== CALDAV_SERVER_NAME || action.mcp_first_party !== true) {
     return undefined;
@@ -59,7 +62,7 @@ export async function classifyCaldavTool({
   if (card === null) {
     return undefined;
   }
-  const reach = reachFor({ tool });
+  const reach = reachFor({ tool, assistant });
   if (reach.own && (await hasStandingGrant())) {
     return tier1Decision({
       reason: TOOL_GRANT_REASON,
@@ -81,7 +84,7 @@ export async function classifyCaldavTool({
  * arguments. Aman cannot see every entry in a CalDAV calendar file, so a change or cancellation of an
  * existing event never counts as guest-free, whatever its fetched guest list says.
  */
-function reachFor({ tool }: { tool: CaldavToolName }): {
+function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string }): {
   reason: string;
   reason_detail: string;
   own: boolean;
@@ -92,7 +95,7 @@ function reachFor({ tool }: { tool: CaldavToolName }): {
       reason: 'caldav_invitation_reply',
       reason_detail: 'Calendar change that reaches guests always asks.',
       own: false,
-      sentence: ' This reply goes to the event organizer, so Aman always asks.',
+      sentence: ` This reply goes to the event organizer, so ${assistant} always asks.`,
     };
   }
   if (tool === 'create_event') {
@@ -108,7 +111,7 @@ function reachFor({ tool }: { tool: CaldavToolName }): {
     reason: 'caldav_calendar_guests',
     reason_detail: 'Change to an existing calendar event always asks.',
     own: false,
-    sentence: ` Aman always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
+    sentence: ` ${assistant} always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
   };
 }
 
@@ -173,13 +176,13 @@ function plainWhatFor({
     const title = stringParam(params, 'summary');
     const when = formatCaldavWhen({ value: stringParam(params, 'start') ?? '', all_day: false });
     return {
-      text: `Add ${title === null ? 'an event with no title' : `"${shown(title)}"`}${whenText(when)} to ${calendarText}.`,
+      text: `Add ${title === null ? 'an event with no title' : `"${shown(title)}"`}${whenText(when)} to ${calendarText}?`,
       cannot_be_undone: null,
     };
   }
   if (tool === 'update_event') {
     return {
-      text: `Change ${existing.text}.${emailedGuestsText({ review, lead: 'Changing this' })}`,
+      text: `Change ${existing.text}?${emailedGuestsText({ review, lead: 'Changing this' })}`,
       cannot_be_undone: null,
     };
   }
@@ -188,7 +191,7 @@ function plainWhatFor({
     const guests = review?.attendees ?? null;
     const mayEmailGuests = guests === null || guests.length > 0;
     return {
-      text: `Delete ${existing.text}.${emailedGuestsText({ review, lead: 'Deleting this' })}`,
+      text: `Delete ${existing.text}?${emailedGuestsText({ review, lead: 'Deleting this' })}`,
       cannot_be_undone: mayEmailGuests
         ? "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent."
         : "This removes the event from the calendar. It can't be restored from here.",
@@ -202,7 +205,7 @@ function plainWhatFor({
       ? 'The organizer will be told. Their name could not be read.'
       : `The organizer, ${shown(organizer)}, will be told.`;
   return {
-    text: `${verb} ${existing.text}. ${organizerText}`,
+    text: `${verb} ${existing.text}? ${organizerText}`,
     cannot_be_undone: "The reply to the organizer can't be unsent.",
   };
 }
