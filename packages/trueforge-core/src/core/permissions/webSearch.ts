@@ -37,8 +37,16 @@ export function isSilentSearchReason(reason: string): boolean {
 /** Reason code for a lookup held because read content chose its link and the link carries more than it gave. */
 export const SEARCH_STEERED_REASON = 'mcp_search_steered';
 
+/** Reason code for a lookup held because it carries a private detail of the person's, in a chat that read other content. */
+export const SEARCH_PRIVATE_DETAIL_REASON = 'mcp_search_private_detail';
+
 /** Reason codes for a designated-provider call that stops for approval, and why. */
-export const SEARCH_ASK_REASONS = ['mcp_search_setting_ask', 'mcp_search_guard', SEARCH_STEERED_REASON] as const;
+export const SEARCH_ASK_REASONS = [
+  'mcp_search_setting_ask',
+  'mcp_search_guard',
+  SEARCH_STEERED_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
+] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
 export function isSearchAskReason(reason: string): boolean {

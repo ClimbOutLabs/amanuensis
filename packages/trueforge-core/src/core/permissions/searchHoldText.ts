@@ -54,6 +54,7 @@ export function holdSay(assistant: string) {
     search_setting: `Searches are set to ask, so ${assistant} is checking with you first.`,
     search_limit: `${assistant} stopped looking things up, because it already looked up a lot in this reply. Ask again to keep going.`,
     steered: `${assistant} found this link in something it read, and opening it would send more than the link said.`,
+    private_detail: `This would send a private detail of yours, in a chat where ${assistant} has read things written by other people, so ${assistant} is checking with you first.`,
     secret: SECRET_SAY,
     card_number: 'This sends something that looks like a payment card number.',
     encoded: 'This sends a long block of coded text.',
