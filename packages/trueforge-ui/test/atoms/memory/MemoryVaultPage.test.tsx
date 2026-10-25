@@ -249,7 +249,9 @@ describe('Memory explorer with several collections', () => {
     model_name: 'anthropic/haiku',
   };
 
-  const SUMMARY_PENDING_LINE = "Couldn't make this summary yet. It will try again after the next chat.";
+  const SHARED_PENDING_LINE = "Couldn't make a summary of the latest chat. A later chat will make a new summary.";
+  const ZARA_PENDING_LINE =
+    "Couldn't make a summary of the latest chat with Zara. A later chat with Zara will make a new summary.";
 
   function personaApi(): PersonaApi {
     return {
@@ -294,7 +296,7 @@ describe('Memory explorer with several collections', () => {
     );
   }
 
-  it('still shows one agent’s stored summary when another collection fails to load', async () => {
+  it('still shows one persona’s stored summary when another collection fails to load', async () => {
     const catalog = catalogWith({
       listEntries: async namespace => {
         if (namespace === undefined) {
@@ -315,7 +317,7 @@ describe('Memory explorer with several collections', () => {
     expect(await screen.findByText('Some memories could not be loaded. Try again.')).toBeInTheDocument();
   });
 
-  it('shows the plain line in place of a summary that failed, for that agent only', async () => {
+  it('shows the plain line in place of a summary that failed, for that persona only', async () => {
     const catalog = catalogWith({
       listEntries: async namespace =>
         namespace === undefined
@@ -331,9 +333,34 @@ describe('Memory explorer with several collections', () => {
     });
     renderPersonaPanel(catalog);
 
-    expect(await screen.findByText(SUMMARY_PENDING_LINE)).toBeInTheDocument();
-    expect(screen.getAllByText(SUMMARY_PENDING_LINE)).toHaveLength(1);
+    expect(await screen.findByText(ZARA_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.queryByText(SHARED_PENDING_LINE)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(1);
     expect(screen.getByText(/Turn summary: the shared notes\./)).toBeInTheDocument();
+  });
+
+  it('names the persona on its own line and keeps the plain line for the shared collection', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: true }),
+    });
+    renderPersonaPanel(catalog);
+
+    expect(await screen.findByText(ZARA_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+    expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(2);
+  });
+
+  it('does not promise that the failed chat itself is summarised again', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: true }),
+    });
+    renderPersonaPanel(catalog);
+
+    const line = await screen.findByText(SHARED_PENDING_LINE);
+    expect(line.textContent).not.toMatch(/try again|retry/i);
+    expect(line.textContent).toMatch(/new summary/);
   });
 
   it('shows no pending line when every summary was made', async () => {
@@ -349,6 +376,6 @@ describe('Memory explorer with several collections', () => {
     renderPersonaPanel(catalog);
 
     expect(await screen.findByText(/Turn summary: the shared notes\./)).toBeInTheDocument();
-    expect(screen.queryByText(SUMMARY_PENDING_LINE)).toBeNull();
+    expect(screen.queryByText(/Couldn't make a summary/)).toBeNull();
   });
 });
