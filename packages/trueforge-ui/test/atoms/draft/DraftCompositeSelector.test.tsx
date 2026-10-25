@@ -44,9 +44,9 @@ beforeAll(() => {
   };
 });
 
-const workOnRepoState = vi.hoisted(() => ({
-  panel: null as null | { setPanelOpen: (open: boolean) => void },
-}));
+type WorkOnRepoPanel = { setPanelOpen: (open: boolean) => void };
+
+const workOnRepoState = vi.hoisted((): { panel: WorkOnRepoPanel | null } => ({ panel: null }));
 
 vi.mock('@/containers/workOnRepoPanel.js', () => ({
   useOptionalWorkOnRepoPanel: () => workOnRepoState.panel,

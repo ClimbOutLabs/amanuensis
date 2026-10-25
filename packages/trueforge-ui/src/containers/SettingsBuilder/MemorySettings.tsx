@@ -395,12 +395,12 @@ function headerCopy({
     return `${assistant} remembers what matters on its own. Checking with the server how memories are kept.`;
   }
   if (backend === 'markdown') {
-    return `${assistant} saves memories as local Markdown files on the server. The host recalls and retains them automatically.`;
+    return `${assistant} saves memories as notes on this computer and brings back the ones that matter on its own.`;
   }
   if (backend === 'hindsight') {
-    return `${assistant} remembers what matters on its own. This server runs the experimental Hindsight memory backend instead of Markdown files.`;
+    return `${assistant} remembers what matters on its own. This setup uses the experimental Hindsight memory instead of note files.`;
   }
-  return `${assistant} remembers what matters on its own. The server did not say which memory backend it runs, so the details below cannot be confirmed.`;
+  return `${assistant} remembers what matters on its own. It could not tell which kind of memory this setup uses, so the details below may not match.`;
 }
 
 /** The status pill tones: green dot for a confirmed-on backend, neutral otherwise. */
@@ -680,7 +680,7 @@ function MemoryEmbeddingsCard() {
           'The server did not report meaning-based recall status — it may be an older build, or the capabilities request has not finished.'}
       </p>
       <p className="mt-2 text-sm text-text-secondary">
-        {assistant} finds memories by meaning, not just matching words — so &ldquo;where did we stay on that trip&rdquo;
+        {assistant} finds memories by meaning, not just matching words. So &ldquo;where did we stay on that trip&rdquo;
         finds the hotel note even when it only names the hotel. To do that, the first time {assistant} runs it downloads
         a small helper model once (about 120&nbsp;MB), automatically in the background. There is nothing to install and
         nothing to click. After that one download, memory search works fully offline, and everything stays on this
