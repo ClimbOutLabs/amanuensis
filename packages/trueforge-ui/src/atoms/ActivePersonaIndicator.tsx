@@ -10,19 +10,31 @@ import {
   type PersonaApi,
   type SessionPersona,
 } from '../components/PersonaContext.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
-import { registerPersonaMutation } from '../personaMutationGate.js';
+import {
+  dropHeldPersonaUnlessFor,
+  heldPersonaFor,
+  holdPersonaForNewChat,
+  registerPersonaMutation,
+} from '../personaMutationGate.js';
 import { displayModelLabel } from './draft/DraftModelCatalogPanel.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
+import { useFitOnScreen } from './lib/useFitOnScreen.js';
+
+const MENU_HEADING = 'Who answers this chat';
+/** The menu's size before it is fitted to the screen, in CSS pixels. */
+const MENU_WIDTH = 224;
+const MENU_HEIGHT = 320;
 
 export type ActivePersonaIndicatorProps = {
   disabled?: boolean;
 };
 
 /**
- * Says who is answering this chat, and offers the configured personas as a
- * compact picker next to the chip.
+ * Says who is answering this chat, by name, and offers the configured personas in a menu that
+ * always fits on screen.
  *
  * The server decides the persona when a turn is created, so the chip re-reads
  * once a turn finishes rather than guessing from the message the user typed.
@@ -43,6 +55,7 @@ export function ActivePersonaIndicator({ disabled }: ActivePersonaIndicatorProps
       getSessionPersona={personas.getSessionPersona}
       setSessionPersona={personas.setSessionPersona}
       personas={personas.personas}
+      loading={personas.loading}
       {...(disabled === undefined ? {} : { disabled })}
     />
   );
@@ -52,11 +65,15 @@ function ActivePersonaChip({
   getSessionPersona,
   setSessionPersona,
   personas,
+  loading,
   disabled,
 }: Pick<PersonaApi, 'getSessionPersona' | 'setSessionPersona'> & {
   personas: Persona[];
+  loading: boolean;
 } & ActivePersonaIndicatorProps) {
+  const assistant = useAssistantDisplayName();
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
+  const threadId = useAuiState(state => state.threadListItem.id);
   const isRunning = useThreadIsRunning();
   const menuId = useId();
   const [active, setActive] = useState<SessionPersona | null>(null);
@@ -64,12 +81,25 @@ function ActivePersonaChip({
   const [statusUnavailable, setStatusUnavailable] = useState(false);
   const [lookupRetry, setLookupRetry] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  // On a new chat there is no session to switch yet: the pick is held and applied to its first turn.
+  const [heldId, setHeldId] = useState<string | null | undefined>(() => heldPersonaFor(threadId));
   const sessionIdRef = useRef(sessionId);
   const lookupGenerationRef = useRef(0);
   const mutationGenerationRef = useRef(0);
   const menuContainerRef = useRef<HTMLSpanElement | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuStyle = useFitOnScreen({
+    open: menuOpen,
+    anchorRef: menuTriggerRef,
+    width: MENU_WIDTH,
+    height: MENU_HEIGHT,
+  });
   sessionIdRef.current = sessionId;
+
+  useEffect(() => {
+    dropHeldPersonaUnlessFor(threadId);
+    setHeldId(heldPersonaFor(threadId));
+  }, [threadId]);
 
   useEffect(() => {
     lookupGenerationRef.current += 1;
@@ -149,10 +179,12 @@ function ActivePersonaChip({
 
   const applyPersona = useCallback(
     (personaId: string | null) => {
+      setMenuOpen(false);
       if (sessionId == null) {
+        setHeldId(personaId);
+        holdPersonaForNewChat({ threadId, personaId, apply: id => setSessionPersona(id, personaId) });
         return;
       }
-      setMenuOpen(false);
       if (active?.persona_id === personaId) {
         return;
       }
@@ -184,7 +216,7 @@ function ActivePersonaChip({
       registerPersonaMutation(mutation);
       void mutation;
     },
-    [setSessionPersona, sessionId, active],
+    [setSessionPersona, sessionId, threadId, active],
   );
 
   if (statusUnavailable) {
@@ -210,108 +242,82 @@ function ActivePersonaChip({
     );
   }
 
-  const pickerAvailable = personas.length > 0;
-  const showChip = active?.persona_id != null && active.persona_name != null;
-  if (!showChip && !pickerAvailable) {
-    // No active speaker and nothing to pick: every chat looks like this until
-    // someone configures a persona.
+  // Shown once the list has loaded with someone to pick, on a new chat as well as a running one.
+  if (loading || personas.length === 0) {
     return null;
   }
-  const triggerDisabled = disabled || busy || isRunning || sessionId == null;
-  const model = active?.model_name == null ? '' : displayModelLabel(active.model_name);
+  const triggerDisabled = disabled || busy || isRunning;
+  // Until the server has answered for this chat, the held pick is who answers.
+  const chosenId = active === null ? (heldId ?? null) : active.persona_id;
+  const answerer = active?.persona_name ?? personas.find(persona => persona.id === chosenId)?.display_name ?? assistant;
+  const itemClass = cn(
+    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary',
+    'hover:bg-ghost-button-hover focus-visible:bg-ghost-button-hover focus-visible:outline-none',
+    'disabled:opacity-50',
+  );
 
   return (
-    <span
-      ref={menuContainerRef}
-      className="relative flex min-w-0 items-center gap-1"
-      data-testid="active-persona-picker"
-    >
-      {showChip ? (
-        <span
-          className="flex min-w-0 items-center gap-1 rounded-full border border-border bg-secondary-bg/50 py-0.5 pl-2 pr-0.5 text-xs"
-          data-testid="active-persona"
+    <span ref={menuContainerRef} className="relative flex min-w-0 items-center" data-testid="active-persona-picker">
+      <button
+        ref={menuTriggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-controls={menuOpen ? menuId : undefined}
+        title="Choose a persona"
+        disabled={triggerDisabled}
+        className={cn(
+          auiButtonClass({ variant: 'ghost', size: 'small' }),
+          'h-8 min-w-0 max-w-40 gap-1 rounded-full px-2 text-[0.8125rem] font-normal text-text-secondary hover:text-text-primary',
+        )}
+        onClick={() => setMenuOpen(open => !open)}
+      >
+        <span className="truncate" data-testid={chosenId === null ? undefined : 'active-persona'}>
+          {answerer}
+        </span>
+        <Icon name="chevron-down" className="size-3.5 shrink-0" />
+      </button>
+      {menuOpen && menuStyle !== null ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={MENU_HEADING}
+          style={menuStyle}
+          className="z-50 rounded-md border border-border bg-card-bg py-1 shadow-lg"
         >
-          <Icon name="robot" className="size-3.5 shrink-0" />
-          <span className="truncate font-medium text-text-primary">{active.persona_name}</span>
-          {model ? <span className="truncate text-text-secondary">· {model}</span> : null}
+          <p className="m-0 px-3 pt-1 pb-1.5 text-[0.75rem] text-text-secondary">{MENU_HEADING}</p>
           <button
             type="button"
-            aria-label={`Return to the default assistant (currently ${active.persona_name})`}
-            title="Return to the default assistant"
-            disabled={disabled || busy}
-            className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'size-5 shrink-0')}
+            role="menuitem"
+            disabled={triggerDisabled}
+            className={itemClass}
             onClick={() => applyPersona(null)}
           >
-            <Icon name="xmark" className="size-3" />
+            <span className="min-w-0 flex-1 truncate">{assistant}</span>
+            {chosenId === null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
           </button>
-        </span>
-      ) : null}
-      {pickerAvailable ? (
-        <>
-          <button
-            ref={menuTriggerRef}
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-controls={menuOpen ? menuId : undefined}
-            aria-label="Choose who answers this chat"
-            title="Choose who answers this chat"
-            disabled={triggerDisabled}
-            className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'size-5 shrink-0')}
-            onClick={() => setMenuOpen(open => !open)}
-          >
-            <Icon name="chevron-down" className="size-3" />
-          </button>
-          {menuOpen ? (
-            <div
-              id={menuId}
-              role="menu"
-              aria-label="Personas"
-              className="absolute bottom-full right-0 z-50 mb-1 w-52 overflow-hidden rounded-md border border-border bg-card-bg py-1 shadow-lg"
+          {personas.map(persona => (
+            <button
+              key={persona.id}
+              type="button"
+              role="menuitem"
+              aria-label={persona.display_name}
+              disabled={triggerDisabled}
+              className={itemClass}
+              onClick={() => applyPersona(persona.id)}
             >
-              <button
-                type="button"
-                role="menuitem"
-                aria-label="Default assistant"
-                disabled={triggerDisabled}
-                className={cn(
-                  'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary',
-                  'hover:bg-ghost-button-hover focus-visible:bg-ghost-button-hover focus-visible:outline-none',
-                  'disabled:opacity-50',
-                )}
-                onClick={() => applyPersona(null)}
-              >
-                <span className="min-w-0 flex-1 truncate">Default assistant</span>
-                {active?.persona_id == null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
-              </button>
-              {personas.map(persona => (
-                <button
-                  key={persona.id}
-                  type="button"
-                  role="menuitem"
-                  aria-label={persona.display_name}
-                  disabled={triggerDisabled}
-                  className={cn(
-                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary',
-                    'hover:bg-ghost-button-hover focus-visible:bg-ghost-button-hover focus-visible:outline-none',
-                    'disabled:opacity-50',
-                  )}
-                  onClick={() => applyPersona(persona.id)}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{persona.display_name}</span>
-                    {persona.model_name ? (
-                      <span className="block truncate text-xs text-text-secondary">
-                        {displayModelLabel(persona.model_name)}
-                      </span>
-                    ) : null}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{persona.display_name}</span>
+                {persona.model_name ? (
+                  <span className="block truncate text-xs text-text-secondary">
+                    {displayModelLabel(persona.model_name)}
                   </span>
-                  {active?.persona_id === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </>
+                ) : null}
+              </span>
+              {chosenId === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
+            </button>
+          ))}
+        </div>
       ) : null}
     </span>
   );

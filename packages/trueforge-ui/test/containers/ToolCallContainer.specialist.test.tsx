@@ -50,7 +50,7 @@ function renderWithPersonas(content: ThreadMessageLike['content'], api: PersonaA
 }
 
 describe('a finished create_persona call', () => {
-  it('reads the persona list again so the new specialist shows without a reload', async () => {
+  it('reads the persona list again so the new persona shows without a reload', async () => {
     const api = personaApi();
     renderWithPersonas(
       [

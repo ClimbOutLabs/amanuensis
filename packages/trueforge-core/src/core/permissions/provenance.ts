@@ -289,6 +289,17 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
   }
 }
 
+/**
+ * Picture links from a page the chat opened: opening the page saw them, so a space may use a
+ * picture file no search result named. Only the page's own pictures count; a link the page
+ * merely points at is not a picture on it.
+ */
+export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
+  for (const url of input.urls) {
+    recordUrl(input.provenance.trusted, url);
+  }
+}
+
 /** Whether a link names only a site, with no path or query: it adds nothing to the site, so the site's trust holds. */
 function isBareSite(url: string): boolean {
   const parsed = parsedUrl(url);

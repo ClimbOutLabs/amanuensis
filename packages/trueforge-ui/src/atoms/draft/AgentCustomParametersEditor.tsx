@@ -154,7 +154,7 @@ export function AgentCustomParametersEditor({ value, reservedKeys, onChange }: A
                   value={draft.key}
                   aria-label="Custom parameter name"
                   placeholder="Key"
-                  className="text-text-primary placeholder:text-text-secondary h-8 min-w-0 flex-1 border-0 border-r border-input-border bg-transparent px-3 text-sm outline-none"
+                  className="text-text-primary placeholder:text-text-muted h-8 min-w-0 flex-1 border-0 border-r border-input-border bg-transparent px-3 text-sm outline-none"
                   onChange={event => updateDraft({ id: draft.id, patch: { key: event.target.value } })}
                 />
                 {draft.type !== 'json' ? (
@@ -163,7 +163,7 @@ export function AgentCustomParametersEditor({ value, reservedKeys, onChange }: A
                     value={draft.value}
                     aria-label={`Value for ${draft.key || 'custom parameter'}`}
                     placeholder="Value"
-                    className="text-text-primary placeholder:text-text-secondary h-8 min-w-0 flex-1 border-0 bg-transparent px-3 text-sm outline-none"
+                    className="text-text-primary placeholder:text-text-muted h-8 min-w-0 flex-1 border-0 bg-transparent px-3 text-sm outline-none"
                     onChange={event => updateDraft({ id: draft.id, patch: { value: event.target.value } })}
                   />
                 ) : null}

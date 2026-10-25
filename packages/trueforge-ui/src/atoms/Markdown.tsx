@@ -52,6 +52,8 @@ export type MarkdownProps = {
    * only pictures a stored space contains. Any other remote picture stays a plain link.
    */
   spacePictures?: boolean;
+  /** Builds the host picture-proxy URL for one external picture on a chat page; see HtmlArtifactPreview. */
+  pictureProxyUrl?: (url: string) => string;
   /** Marks each case-insensitive match of this text in the rendered output. */
   highlight?: string;
   className?: string;
@@ -141,7 +143,7 @@ export function markdownUrlTransform(value: string): string {
 }
 
 /** The owner's own picture route for a space picture; the server refuses any URL no stored space contains. */
-function spacePictureRouteUrl(src: string): string {
+export function spacePictureRouteUrl(src: string): string {
   return `/api/space-pictures?url=${encodeURIComponent(src)}`;
 }
 
@@ -332,6 +334,7 @@ function makeComponents(opts: {
   onFetchFile?: (path: string) => Promise<Blob>;
   readOnly?: boolean;
   spacePictures?: boolean;
+  pictureProxyUrl?: (url: string) => string;
   OpenUiFenceBlock: ComponentType<OpenUiFenceBlockProps>;
   SandboxArtifactDownload: ComponentType<SandboxArtifactDownloadProps>;
   SyntaxHighlighter: ComponentType<SyntaxHighlighterProps>;
@@ -346,6 +349,7 @@ function makeComponents(opts: {
     onFetchFile,
     readOnly,
     spacePictures,
+    pictureProxyUrl,
     OpenUiFenceBlock,
     SandboxArtifactDownload,
     SyntaxHighlighter,
@@ -414,6 +418,7 @@ function makeComponents(opts: {
             fileDownloadBaseUrl={fileDownloadBaseUrl}
             onDownloadArtifact={onDownloadArtifact}
             onFetchFile={onFetchFile}
+            pictureProxyUrl={pictureProxyUrl}
             readOnly={readOnly}
           />
         );
@@ -553,6 +558,7 @@ export function Markdown({
   readOnly,
   citationSources,
   spacePictures,
+  pictureProxyUrl,
   highlight,
   className,
 }: MarkdownProps) {
@@ -578,6 +584,7 @@ export function Markdown({
         onFetchFile,
         readOnly,
         spacePictures,
+        pictureProxyUrl,
         OpenUiFenceBlock,
         SandboxArtifactDownload,
         SyntaxHighlighter,
@@ -591,6 +598,7 @@ export function Markdown({
       onFetchFile,
       readOnly,
       spacePictures,
+      pictureProxyUrl,
       OpenUiFenceBlock,
       SandboxArtifactDownload,
       SyntaxHighlighter,

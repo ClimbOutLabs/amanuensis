@@ -22,7 +22,8 @@ const MOUNT_RETRY_MAX = 12;
 type ApprovalFocusApi = {
   registerTarget: (approvalId: string, getElement: () => HTMLElement | null) => () => void;
   registerExpand: (toolCallId: string, expand: () => void) => () => void;
-  focus: (approvalId: string) => void;
+  /** `focusPrimary` also moves keyboard focus to the card's main button; a card does not take focus on its own. */
+  focus: (approvalId: string, options?: { focusPrimary?: boolean }) => void;
   flashingApprovalId: string | null;
 };
 
@@ -72,7 +73,7 @@ export function ApprovalFocusProvider({ children }: { children: ReactNode }) {
   );
 
   const focus = useCallback(
-    (approvalId: string) => {
+    (approvalId: string, options?: { focusPrimary?: boolean }) => {
       const ancestors = findSubAgentAncestorsForApproval(messages, approvalId);
 
       if (retryTimerRef.current != null) {
@@ -88,6 +89,9 @@ export function ApprovalFocusProvider({ children }: { children: ReactNode }) {
         const el = targetsRef.current.get(approvalId)?.() ?? null;
         if (el == null) return false;
         el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+        if (options?.focusPrimary) {
+          el.querySelector<HTMLElement>('[data-approval-primary]')?.focus({ preventScroll: true });
+        }
         startFlash(approvalId);
         return true;
       };

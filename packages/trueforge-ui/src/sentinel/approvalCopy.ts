@@ -103,12 +103,3 @@ export function approvalStub(card: SentinelApprovalCard): ApprovalStub {
   };
 }
 
-/** What a mail card is called in the banner: "1 email waiting for your approval". */
-export function approvalKindNoun(card: SentinelApprovalCard): string {
-  const { email, calendar_event: event, schedule, persona } = card;
-  if (email !== null) return 'email';
-  if (event !== null) return 'calendar change';
-  if (schedule !== null) return 'schedule change';
-  if (persona !== null) return 'persona';
-  return 'action';
-}

@@ -27,6 +27,7 @@ const REQUIRED_TOKEN_KEYS: (keyof SemanticTokens)[] = [
   'inputBorder',
   'textPrimary',
   'textSecondary',
+  'textMuted',
   'textXs',
   'textSm',
   'textBase',

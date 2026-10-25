@@ -62,23 +62,20 @@ function EmailBody({ body }: { body: string }) {
   }, [expanded, body]);
 
   if (body === '') {
-    return <p className="px-4 py-3 text-sm text-text-secondary">This message has no text.</p>;
+    return <p className="px-4 py-3 text-text-secondary">This message has no text.</p>;
   }
 
   const long = clipped || isLongEmailBody(body);
   const collapsed = long && !expanded;
   return (
     <div className="px-4 py-3">
-      <div
-        ref={bodyRef}
-        className={cn('space-y-3 text-sm leading-6 text-text-primary', collapsed && COLLAPSED_HEIGHT_CLASS)}
-      >
+      <div ref={bodyRef} className={cn('space-y-3 text-text-primary', collapsed && COLLAPSED_HEIGHT_CLASS)}>
         {splitEmailBody(body).map((segment, index) =>
           segment.kind === 'code' ? (
             <pre
               // Segments only ever append, so the index is stable for this body.
               key={index}
-              className="overflow-x-auto whitespace-pre rounded-sm bg-primary-bg px-3 py-2 font-mono text-xs leading-5 text-text-primary"
+              className="overflow-x-auto whitespace-pre rounded-sm bg-primary-bg px-3 py-2 font-mono text-text-primary text-sm"
             >
               {segment.text}
             </pre>
@@ -96,7 +93,7 @@ function EmailBody({ body }: { body: string }) {
           onClick={() => {
             setExpanded(!expanded);
           }}
-          className="mt-2 border-0 bg-transparent p-0 text-sm font-medium text-gold-ink underline"
+          className="mt-2 border-0 bg-transparent p-0 font-medium text-gold-ink underline"
         >
           {expanded ? 'Show less' : `Show full message · ${String(countEmailWords(body))} words`}
         </button>
@@ -134,17 +131,17 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       data-role="approval-ticket"
       data-approval-id={approvalId}
       data-kind="email"
-      className="my-2 rounded-md border border-border bg-card-bg text-sm"
+      className="aui-approval-card my-2 rounded-md border border-border bg-card-bg"
     >
       <header className="flex items-center gap-2 px-4 py-3">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
-        <h3 className="min-w-0 flex-1 text-base font-medium text-text-primary">{emailQuestion(email)}</h3>
+        <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{emailQuestion(email)}</h3>
         <span className="shrink-0 text-text-secondary">Gmail</span>
         {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
       </header>
 
       <div className="border-t border-border px-4 py-3">
-        <p className="mb-2 text-sm text-text-secondary">What will be sent</p>
+        <p className="mb-2 text-text-secondary">What will be sent</p>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
           {email.reply_in_thread !== null && (
             <>
@@ -183,12 +180,12 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         {card.plain_why !== null && <p className="mt-2 text-text-secondary">Why: {card.plain_why}</p>}
         {card.cannot_be_undone !== null && <p className="mt-2 text-text-secondary">{card.cannot_be_undone}</p>}
         {card.why_asked_again !== null && (
-          <p className="mt-2 text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
+          <p className="mt-2 text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
       </div>
 
       <div className="border-t border-border">
-        <p className="px-4 pt-3 text-sm text-text-secondary">Message body</p>
+        <p className="px-4 pt-3 text-text-secondary">Message body</p>
         <EmailBody body={email.body} />
       </div>
 
@@ -213,6 +210,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
             <Button
               variant="primary"
               size="small"
+              data-approval-primary
               title={APPROVAL_CHOICES.approve.hint}
               onClick={sendNow}
               disabled={disabled}

@@ -1,36 +1,37 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
+import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
 import { useApprovalCardPlacement } from '../hooks/useApprovalCardPlacement.js';
 import { useApprovalNav } from '../hooks/useApprovalNav.js';
-import { approvalKindNoun } from '../sentinel/approvalCopy.js';
+import { approvalQuestion } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 
 /**
- * Composer banner that stands in for a pending approval only while its card is scrolled out of view.
- * Its click scrolls to the card and focuses it.
+ * Strip docked to the top of the composer while a pending approval's card is scrolled out of view.
+ * Its Review link scrolls to the card and focuses it. `children` gets whether the strip is docked,
+ * so the composer can drop the corners it shares with the strip.
  */
-export function ApprovalNavContainer() {
+export function ApprovalNavContainer({ children }: { children: (docked: boolean) => ReactNode }) {
   const ApprovalNavBanner = useSlot('ApprovalNavBanner');
-  const { count, index, canPrev, canNext, goPrev, goNext, focusCurrent, currentId } = useApprovalNav();
+  const { count, currentId, focusCurrent } = useApprovalNav();
   const sentinel = useOptionalSentinelState();
+  const assistantName = assistantDisplayName(useOptionalPersonalization()?.profile?.assistant_name);
   const placement = useApprovalCardPlacement(currentId);
-
-  if (count === 0 || placement !== 'off-screen') return null;
+  const docked = count > 0 && placement === 'off-screen';
 
   const card = currentId === null ? undefined : sentinel?.approvalFor(currentId)?.card;
-  const kind = count === 1 && card !== undefined ? approvalKindNoun(card) : undefined;
+  const title = card === undefined ? undefined : approvalQuestion(card);
 
   return (
-    <ApprovalNavBanner
-      total={count}
-      current={index + 1}
-      canPrev={canPrev}
-      canNext={canNext}
-      onPrev={goPrev}
-      onNext={goNext}
-      onFocusCurrent={focusCurrent}
-      kind={kind}
-    />
+    <>
+      {docked ? (
+        <ApprovalNavBanner total={count} assistantName={assistantName} title={title} onFocusCurrent={focusCurrent} />
+      ) : null}
+      {children(docked)}
+    </>
   );
 }

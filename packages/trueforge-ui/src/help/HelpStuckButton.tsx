@@ -3,7 +3,7 @@
 import { useAui, useAuiState } from '@assistant-ui/react';
 import { useEffect } from 'react';
 
-import { Button } from '../atoms/primitives/Button.js';
+import { headerActionClassName } from '../atoms/lib/buttonClasses.js';
 import { useOptionalShellMode, type ShellModeContextValue } from '../server/ShellModeContext.js';
 import { HELP_BUTTON_LABEL } from './helpModel.js';
 import { useOptionalHelp } from './HelpProvider.js';
@@ -35,9 +35,17 @@ export function HelpStuckButton() {
     });
   };
   return (
-    <Button type="button" variant="ghost" size="small" onClick={onClick} data-testid="help-stuck-button">
-      {HELP_BUTTON_LABEL}
-    </Button>
+    <button
+      type="button"
+      aria-label={HELP_BUTTON_LABEL}
+      className={headerActionClassName}
+      onClick={onClick}
+      data-testid="help-stuck-button"
+    >
+      {/* A phone header has room for one line, so the label shortens there. */}
+      <span className="sm:hidden">Help</span>
+      <span className="hidden sm:inline">{HELP_BUTTON_LABEL}</span>
+    </button>
   );
 }
 
