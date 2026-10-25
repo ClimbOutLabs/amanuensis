@@ -44,7 +44,7 @@ export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities:
 const PLAN_DAY: TourPrompt = {
   key: 'plan-day',
   title: 'Plan my day',
-  detail: () => 'The three things that matter, your free time, and what to prepare',
+  detail: () => 'Finds conflicts and travel time on your calendar',
   prompt:
     'Look at my calendar for today and my unread email from the last day. Give me a short plan: the three things that matter most, when I have free time, and anything I need to prepare. Keep it under ten lines.',
   source: 'my calendar for today',
@@ -57,7 +57,7 @@ export const GENERAL_CARDS: readonly TourPrompt[] = [
   {
     key: 'reply',
     title: 'Draft a reply',
-    detail: () => 'Reads the thread, writes it in your voice, asks before sending',
+    detail: () => 'Reads the thread, writes it, asks before sending',
     prompt:
       'Find my most recent email that needs a reply. Read the whole thread, then draft a short reply in my voice. Show me the draft and ask before sending.',
     source: 'my most recent email that needs a reply',
@@ -68,7 +68,7 @@ export const GENERAL_CARDS: readonly TourPrompt[] = [
   {
     key: 'places',
     title: 'Find places and routes',
-    detail: () => 'Three options on a map, with travel time and opening hours',
+    detail: () => 'A map with the stops, and how long it takes',
     prompt:
       'Find three good options near me for what I describe next, with how long it takes to get there and opening hours. Show them on a map.',
     source: 'what I describe next',
@@ -78,7 +78,7 @@ export const GENERAL_CARDS: readonly TourPrompt[] = [
   {
     key: 'schedule',
     title: 'Run things on a schedule',
-    detail: () => 'A short morning brief on weekdays, set up with you',
+    detail: () => 'A brief every morning, a check every Friday',
     prompt:
       "Set up a short morning brief for weekdays at 7:30: today's calendar, emails that need me, and the weather. Show me the schedule and ask before saving it.",
     source: "today's calendar",
