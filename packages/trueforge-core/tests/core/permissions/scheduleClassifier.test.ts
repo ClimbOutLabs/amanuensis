@@ -48,7 +48,7 @@ describe('Schedule tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write', auto_deny: null });
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.card?.plain_what).toBe(
-      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(decision.card?.schedule).toEqual(MORNING_BRIEF);
   });
@@ -60,7 +60,7 @@ describe('Schedule tool classification', () => {
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write' });
     expect(decision.card?.plain_what).toBe(
-      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York)?',
     );
     expect(decision.card?.cannot_be_undone).toBe('Once deleted, the schedule is gone for good.');
   });

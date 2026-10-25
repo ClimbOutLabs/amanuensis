@@ -3,6 +3,7 @@
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
@@ -104,6 +105,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   onChangeRequest,
   changeRequestNote,
 }) => {
+  const assistant = useAssistantDisplayName();
   const hasDetails =
     card.recipient !== null ||
     card.destination !== null ||
@@ -187,7 +189,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                description="The agent will run this tool on this connector without asking, in every chat."
+                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
                 onConfirm={onAlwaysAllow}
               />
             )}

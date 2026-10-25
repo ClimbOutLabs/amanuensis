@@ -9,6 +9,7 @@ import {
   ExportMemoryVaultResponseSchema,
   GetMemoryVaultEntryResponseSchema,
   GetMemoryVaultSharingResponseSchema,
+  GetMemoryVaultSummaryStatusResponseSchema,
   ImportMemoryVaultRequestSchema,
   ImportMemoryVaultResponseSchema,
   ListMemoryVaultEntriesResponseSchema,
@@ -186,6 +187,35 @@ export const putMemoryVaultSharingRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid sharing config.',
+    },
+    ...UNAUTHENTICATED,
+    ...SERVER_ERROR,
+    501: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The server does not run the markdown memory backend.',
+    },
+  },
+});
+
+export const getMemoryVaultSummaryStatusRoute = createRoute({
+  method: 'get',
+  path: '/summary-status',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'Get memory vault summary status',
+  description: 'Say whether one vault namespace is still owed a turn summary after a failed attempt.',
+  'x-fern-sdk-group-name': ['memory', 'vault'],
+  'x-fern-sdk-method-name': 'get_summary_status',
+  request: {
+    query: ListMemoryVaultEntriesQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetMemoryVaultSummaryStatusResponseSchema } },
+      description: 'Whether a turn summary is still owed for the namespace.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid namespace.',
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,

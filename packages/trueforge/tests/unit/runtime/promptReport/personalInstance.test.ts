@@ -15,7 +15,7 @@ type Baseline = { total: number; rows: Record<string, number> };
  */
 const BASELINE: Record<PersonalInstanceName, Baseline> = {
   personal: {
-    total: 8942,
+    total: 9141,
     rows: {
       'agent-identity': 184,
       'model-identity': 79,
@@ -52,12 +52,13 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       pause_schedule: 94,
       resume_schedule: 97,
       set_reminder: 264,
-      create_space: 360,
-      get_space: 201,
-      list_blocks: 127,
+      create_space: 334,
+      edit_space: 492,
+      get_space: 175,
+      list_blocks: 126,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 524,
+      update_space: 284,
       create_sub_agent: 272,
       usage_summary: 275,
       tavily_extract: 130,
@@ -65,7 +66,7 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-with-google': {
-    total: 9980,
+    total: 10179,
     rows: {
       'agent-identity': 184,
       'model-identity': 79,
@@ -109,12 +110,13 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       pause_schedule: 94,
       resume_schedule: 97,
       set_reminder: 264,
-      create_space: 360,
-      get_space: 201,
-      list_blocks: 127,
+      create_space: 334,
+      edit_space: 492,
+      get_space: 175,
+      list_blocks: 126,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 524,
+      update_space: 284,
       create_sub_agent: 272,
       usage_summary: 275,
       tavily_extract: 130,
@@ -122,7 +124,7 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-no-sandbox': {
-    total: 6037,
+    total: 6236,
     rows: {
       'agent-identity': 184,
       'model-identity': 79,
@@ -152,12 +154,13 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       pause_schedule: 94,
       resume_schedule: 97,
       set_reminder: 264,
-      create_space: 360,
-      get_space: 201,
-      list_blocks: 127,
+      create_space: 334,
+      edit_space: 492,
+      get_space: 175,
+      list_blocks: 126,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 524,
+      update_space: 284,
       create_sub_agent: 272,
       usage_summary: 275,
       tavily_extract: 130,
@@ -165,7 +168,7 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-no-server-sandbox': {
-    total: 6085,
+    total: 6284,
     rows: {
       'agent-identity': 184,
       'model-identity': 79,
@@ -195,12 +198,13 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       pause_schedule: 94,
       resume_schedule: 97,
       set_reminder: 264,
-      create_space: 360,
-      get_space: 201,
-      list_blocks: 127,
+      create_space: 334,
+      edit_space: 492,
+      get_space: 175,
+      list_blocks: 126,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 524,
+      update_space: 284,
       create_sub_agent: 272,
       usage_summary: 275,
       tavily_extract: 130,
@@ -270,6 +274,11 @@ const SANDBOX_SECTIONS: Record<string, string[]> = {
 };
 
 describe('system prompt sections follow the tools a chat has', () => {
+  it.each(PERSONAL_INSTANCE_NAMES)('sends %s no email-password row when no Email connector is set up', async name => {
+    const report = await measurePersonalInstance({ name, turn: 'core-only' });
+    expect(report.sections.map(row => row.name)).not.toContain('agent-capabilities/email-passwords');
+  });
+
   it('sends the sandbox-off line, and no sandbox tools, when the sandbox is off for the chat', async () => {
     const on = await measurePersonalInstance({ name: 'personal', turn: 'core-only' });
     const off = await measurePersonalInstance({ name: 'personal-no-sandbox', turn: 'core-only' });

@@ -303,18 +303,20 @@ email_plan_row() {
     "The email connector keeps the app password in a file only you can read."
 }
 
-# Writes the account file of the instance, records the connector line, and checks the sign-in once. The connector is
-# restarted alone, or with the instance when its settings line was new. A failed check is reported and the file stays,
-# so the next step is only to fix the password.
+# Saves the account in the connector, records the connector line, and checks the sign-in once. The connector is
+# restarted alone, or with the instance when its settings line was new. A failed check is reported and the saved
+# account stays, so the next step is only to fix the password.
 email_apply() { # name
   local name=$1 dir changed=0
   dir=$(instance_dir "$name")
-  email_write_file "$dir"
   if email_link_add "$dir/.env"; then changed=1; fi
+  if [ "$changed" = 1 ]; then
+    instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  fi
+  email_agent_write "$name"
   email_check "$name"
   EM_PASSWORD=
   if [ "$changed" = 1 ]; then
-    instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$name" recreate
   else
     email_restart "$name"
@@ -322,10 +324,25 @@ email_apply() { # name
   ui_ok "Email account connected to instance $name."
 }
 
-email_write_file() { # instance folder
-  local dir=$1
-  ensure_private_dir "$dir"
-  email_env_text | write_if_changed "$dir/.env.mail-email" 600 || true
+# Saves the account into the connector's volume through its account agent, run as a one-off container on the
+# instance's own compose project. The password travels on stdin only, never on a command line or in a host file.
+# The entrypoint is overridden: the service entrypoint is the sidecar wrapper, which would swallow the agent's command.
+email_agent_write() { # name
+  local name=$1
+  if ! email_env_text | dc "$name" run --rm --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --write-stdin >/dev/null; then
+    die "The email account could not be saved in the connector. Run: install.sh instance email $name"
+  fi
+}
+
+# Empties the account in the connector's volume through its account agent. Returns 0 when the compose file has no
+# connector service, so an instance from before the connector still removes cleanly.
+email_agent_remove() { # name
+  local name=$1 dir
+  dir=$(instance_dir "$name")
+  grep -q '^  mail-email:' "$dir/compose.yaml" 2>/dev/null || return 0
+  if ! dc "$name" run --rm --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --remove >/dev/null; then
+    die "The saved app password could not be removed from the connector. Run: install.sh instance email $name --remove"
+  fi
 }
 
 email_env_text() {
@@ -415,7 +432,9 @@ cmd_instance_email() {
   warn_if_installed_older
   dir=$(instance_dir "$name")
   if [ "$OPT_REMOVE" = 1 ]; then
-    if [ -f "$dir/.env.mail-email" ]; then rm -f -- "$dir/.env.mail-email"; fi
+    # The saved password is deleted for good from the connector's volume, through its account agent.
+    # An empty account in the volume means no account is connected.
+    email_agent_remove "$name"
     if email_link_remove "$dir/.env"; then changed=1; fi
     if [ "$changed" = 1 ]; then
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"

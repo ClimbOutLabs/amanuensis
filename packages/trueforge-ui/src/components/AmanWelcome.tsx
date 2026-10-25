@@ -3,7 +3,7 @@
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
-import { useFillPrompt } from '../hooks/useSendPrompt.js';
+import { useFillPrompt, useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useServerCapabilities } from '../server/ServerContext.js';
 import { AmanSetupTicket } from './AmanFirstRunGuide.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
@@ -36,6 +36,7 @@ function AmanHome() {
   const setup = useOptionalAmanSetup();
   const capabilities = useTourCapabilities();
   const fillPrompt = useFillPrompt();
+  const sendPrompt = useSendPrompt();
   const currentUser = useOptionalCurrentUser();
   const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
   const personName = personDisplayName({
@@ -49,10 +50,10 @@ function AmanHome() {
       capabilities={capabilities}
       userName={personName}
       assistantName={profile.assistant_name}
-      hasBrief={setup?.hasBrief === true}
       firstRun={firstRun}
       setupTicket={<AmanSetupTicket />}
       onSkip={firstRun ? dismiss : undefined}
+      onSend={sendPrompt}
       onFill={fillPrompt}
       canSend={setup === null || setup.modelName !== null}
     />

@@ -38,4 +38,16 @@ describe('persona wording', () => {
     const offenders = PERSONA_SCREENS.filter(path => /\bagents?\b/i.test(codeOf(join(root, path))));
     expect(offenders).toEqual([]);
   });
+
+  it('never calls the chat persona an agent in the grant hints or the always allow confirm steps', () => {
+    const grantCopy = [
+      'src/sentinel/approvalChoices.ts',
+      'src/sentinel/HeldActionCard.tsx',
+      'src/sentinel/PermissionApprovalCard.tsx',
+    ];
+    const offenders = grantCopy.filter(path =>
+      /the agent will|ask the agent/i.test(readFileSync(join(root, path), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+  });
 });

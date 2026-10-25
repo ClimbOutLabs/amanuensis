@@ -107,6 +107,21 @@ upgrade_report() {
   AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor --json >/dev/null 2>&1 || true
 }
 
+# Before the Email connector kept its account in its own volume, the installer kept the account
+# in a file in the instance folder, and nothing reads that file now. An instance that still has
+# the file has an account the upgrade did not carry over, so the output says how to connect it
+# again. Said once, however many instances have the file.
+upgrade_old_email_notice() {
+  local name dir
+  for name in $(reg_names); do
+    dir=$(instance_dir "$name")
+    if [ -s "$dir/.env.mail-email" ]; then
+      say "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+      return 0
+    fi
+  done
+}
+
 # The source a branch that tracks nothing would be pulled from: the checkout's only remote, when
 # it has exactly one. With no remote, or several to choose from, there is no safe guess.
 upgrade_fallback_remote() {
@@ -184,6 +199,7 @@ cmd_upgrade() {
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."
+      upgrade_old_email_notice
       upgrade_report
       return 0
     fi
@@ -198,6 +214,7 @@ cmd_upgrade() {
     for name in $(reg_names); do
       instance_up "$name" || exit 1
     done
+    upgrade_old_email_notice
     upgrade_report
     return 0
   fi
@@ -229,6 +246,7 @@ cmd_upgrade() {
   else
     say "Upgraded to $REL_APP_TAG. No backup was needed, since no instance had data yet."
   fi
+  upgrade_old_email_notice
   if [ -x "$(doctor_shim)" ]; then
     AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
   fi

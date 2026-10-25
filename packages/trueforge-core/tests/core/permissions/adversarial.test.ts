@@ -559,7 +559,7 @@ describe('Suite B - workspace containment escapes', () => {
           expect(decision.tier).toBe(3);
           expect(decision.reason).toBe('sandbox_tool_write');
           expect(decision.card?.plain_what).toBe(
-            `Save \`${path}\` in a folder where this workspace keeps programs it can run.`,
+            `Save \`${path}\` in a folder where this workspace keeps programs it can run?`,
           );
           expect(decision.card?.cannot_be_undone).toBe(
             'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',

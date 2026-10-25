@@ -253,7 +253,7 @@ describe('AssistantMessageContainer', () => {
     // The card itself says what waits on the person; the details row adds no label of its own.
     expect(screen.queryByText(/Waiting for approval/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
@@ -370,9 +370,9 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
     const card = within(internals);
-    expect(card.getByRole('button', { name: 'Allow it' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'Allow' })).toBeVisible();
     expect(card.getByRole('button', { name: 'Not now' })).toBeVisible();
-    fireEvent.click(card.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(card.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -520,7 +520,7 @@ describe('AssistantMessageContainer', () => {
       ]);
 
       expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
-      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow it' })).toBeVisible();
+      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow' })).toBeVisible();
     });
 
     it('shows the answer after a tool call while the message is still running', async () => {
@@ -735,7 +735,7 @@ describe('AssistantMessageContainer with agent details off', () => {
 
     expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeVisible();
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );

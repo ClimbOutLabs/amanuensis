@@ -48,8 +48,29 @@ describe('Space tool classification', () => {
   });
 
   it('runs update_space without asking when the call carries no name', async () => {
+    const decision = await classifyTier(spaceAction('update_space', { space_id: 'sp1' }), makeCtx());
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
+    expect(decision.reason_detail).toBe('Updated a space.');
+  });
+
+  it('runs edit_space without asking and names the space', async () => {
     const decision = await classifyTier(
-      spaceAction('update_space', { space_id: 'sp1', edits: [{ search: 'old', replace: 'new' }] }),
+      spaceAction('edit_space', {
+        space_name: 'Dog breeds',
+        edits: [{ type: 'search', search: 'old text', replace: 'new text' }],
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
+    expect(decision.reason_detail).toBe('Updated the space Dog breeds.');
+  });
+
+  it('runs edit_space without asking when the call names the space by id alone', async () => {
+    const decision = await classifyTier(
+      spaceAction('edit_space', {
+        space_id: 'sp1',
+        edits: [{ type: 'block', anchor: 'pricing', new_content: 'New prices.' }],
+      }),
       makeCtx(),
     );
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
@@ -129,7 +150,7 @@ describe('Space tool classification', () => {
     });
     expect(decision).toMatchObject({ tier: 3, reason: 'unclassified', card: null });
     const card = approvalCardForGatedCall({ action, agent_intent: null });
-    expect(card.plain_what).toBe('This is a new tool from space. Check what it will do before you allow it.');
+    expect(card.plain_what).toBe('Allow this new tool from space?');
   });
 
   it.each([
@@ -140,6 +161,9 @@ describe('Space tool classification', () => {
     ['create_space', {}, 'Created a space.'],
     ['update_space', { space_id: 'sp1', name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
     ['update_space', { space_id: 'sp1' }, 'Updated a space.'],
+    ['update_space', { space_name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
+    ['edit_space', { space_name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
+    ['edit_space', { space_id: 'sp1' }, 'Updated a space.'],
     ['revert_space', { space_id: 'sp1', revision: 2 }, 'Restored an earlier version of a space.'],
   ])('labels %s in plain words', async (name, params, line) => {
     const decision = await classifyTier(spaceAction(name, params), makeCtx());
@@ -181,8 +205,6 @@ describe('Space tool classification', () => {
     const decision = await classifyTier(action, makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).not.toBe('space_write');
-    expect(decision.card?.plain_what).toBe(
-      'This is a new tool from some-other-server. Check what it will do before you allow it.',
-    );
+    expect(decision.card?.plain_what).toBe('Allow this new tool from some-other-server?');
   });
 });

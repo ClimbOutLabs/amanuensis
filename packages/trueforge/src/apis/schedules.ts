@@ -18,6 +18,7 @@ import {
   type ResolveRequestContext,
 } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
+import configuration from '../config';
 import {
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
@@ -68,6 +69,8 @@ import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { scheduleRunsAs } from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { createMemoryClient } from '../runtime/memory/createMemoryClient';
+import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { deliverReminder, ReminderAgentNotFoundError } from '../runtime/reminderDelivery';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
@@ -162,6 +165,42 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     tenant_id: item.schedule.tenant_id,
     created_by: prepared.userRef,
   });
+  // Memory wiring mirrors the chat route: without a client the turn retains nothing, so
+  // a scheduled agent's turns are never summarized and never reach the Memories page.
+  // The markdown backend needs no provider lookup; hindsight resolves one like chat does.
+  const memoryProvider =
+    configuration.MEMORY_BACKEND === 'hindsight'
+      ? await resolveMemoryProvider({
+          mcpServerStore: deps.resolveMcpServerStore(c, prepared.agent),
+          tokenStore: deps.tokenStore,
+          tenantId: item.schedule.tenant_id,
+          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+          userRef: prepared.userRef,
+          logger: deps.logger,
+        })
+      : undefined;
+  const memoryClient = createMemoryClient({
+    backend: configuration.MEMORY_BACKEND,
+    markdownDir: configuration.MEMORY_MARKDOWN_DIR,
+    namespace: item.schedule.tenant_id,
+    vaultScope:
+      prepared.persona === undefined
+        ? undefined
+        : { personaName: prepared.persona.display_name, personaId: prepared.persona.id },
+    hindsight:
+      memoryProvider === undefined
+        ? undefined
+        : { apiBase: memoryProvider.apiBase, bank: memoryProvider.bank, headers: memoryProvider.headers },
+    // Same meaning-based recall wiring as the chat route: one subsystem singleton per
+    // vault, degrading to keyword-only until the model is ready.
+    embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
+      ? {
+          modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+          batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
+          log: (message: string) => deps.logger.info(message),
+        }
+      : undefined,
+  });
   await startTurnInProcess({
     session: prepared.session,
     input: prepared.input,
@@ -190,6 +229,9 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       tokenFactoryBudget: deps.tokenFactoryBudget,
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
+      memoryClient,
+      memoryProviderServerName: memoryProvider?.serverName,
+      memorySettings: memoryProvider?.settings,
       logger: deps.logger,
       // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
       clientTimezone: item.schedule.manifest.timezone,

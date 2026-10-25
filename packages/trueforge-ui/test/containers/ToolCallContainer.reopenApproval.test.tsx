@@ -196,7 +196,7 @@ describe('a reopened chat with one held search', () => {
         const live = await liveChoices(search);
         expect(live.includes('Always allow this here')).toBe(search.can_chat_allow);
         expect(live).not.toContain('Always allow this tool');
-        expect(live.slice(0, 3)).toEqual(['Allow it', 'Change it', 'Not now']);
+        expect(live.slice(0, 3)).toEqual(['Allow', 'Change it', 'Not now']);
       });
     });
   }
@@ -209,7 +209,7 @@ describe('a reopened chat with one held search', () => {
         throw new Error('offline');
       }),
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled());
     expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
     expect(document.querySelector('[data-role="approval-loading"]')).toBeNull();

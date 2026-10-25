@@ -41,7 +41,7 @@ describe('PermissionApprovalCard without a new recipient', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add and send' })).not.toBeInTheDocument();
