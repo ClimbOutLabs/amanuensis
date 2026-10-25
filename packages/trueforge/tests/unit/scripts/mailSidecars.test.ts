@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -21,6 +21,7 @@ const ServiceSchema = z
 
 const ComposeSchema = z.object({
   services: z.record(z.string(), ServiceSchema),
+  volumes: z.record(z.string(), z.unknown()).optional(),
 });
 
 const compose = ComposeSchema.parse(parse(readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf8')));
@@ -46,8 +47,28 @@ describe('mail and calendar sidecars', () => {
 
   it('mail-email exposes its MCP port only to the Compose network', () => {
     const service = serviceNamed('mail-email');
-    expect(service.expose).toEqual(['9557']);
+    expect(service.expose).toEqual(['9557', '9559']);
     expect(service.command).toEqual(['streamable-http', '--host', '0.0.0.0', '--port', '9557']);
+  });
+
+  it('mail-email runs the account agent on the private network, holding the one account file', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.environment?.['AMAN_MAIL_ACCOUNT_PORT']).toBe('9559');
+    expect(service.volumes).toContain('mail-account:/account');
+    expect(service.volumes).toContain(
+      './ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro',
+    );
+    expect(service.volumes).toContain(
+      './ops/compose/mail-email/email_check.py:/usr/local/bin/aman-mail-email-check:ro',
+    );
+    // The account agent's port is exposed to the Compose network only, never published.
+    expect(service.ports).toBeUndefined();
+  });
+
+  it('the server is pointed at the account agent, never at the Docker socket', () => {
+    const service = serviceNamed('server');
+    expect(service.environment?.['MAIL_EMAIL_ACCOUNT_URL']).toBe('http://mail-email:9559');
+    expect(service.volumes?.some(volume => volume.includes('docker.sock'))).toBe(false);
   });
 
   it('mail-email accepts requests only under its service name', () => {
@@ -85,7 +106,21 @@ describe('mail and calendar sidecars', () => {
     expect(service.environment?.['MAIL_POLICY_FILE']).toBe('/data/mail-policy/allowed_recipients.toml');
   });
 
-  it('mail-email reads account secrets from an optional git-ignored file only', () => {
-    expect(serviceNamed('mail-email').env_file).toEqual([{ path: './.env.mail-email', required: false }]);
+  it('the dev stack declares the account volume the connector owns', () => {
+    expect(Object.keys(compose.volumes ?? {})).toContain('mail-account');
+  });
+
+  it('mail-email binds no host file a fresh checkout lacks', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.env_file).toBeUndefined();
+    const hostPaths = [
+      ...(service.volumes ?? []),
+      ...(service.env_file ?? []).map(entry => (typeof entry === 'string' ? entry : entry.path)),
+    ]
+      .filter(entry => entry.startsWith('./'))
+      .map(entry => entry.replace(/:.*$/, ''));
+    for (const hostPath of hostPaths) {
+      expect(existsSync(resolve(REPO_ROOT, hostPath))).toBe(true);
+    }
   });
 });

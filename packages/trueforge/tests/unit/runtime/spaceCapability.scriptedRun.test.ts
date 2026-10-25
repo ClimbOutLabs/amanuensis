@@ -8,17 +8,20 @@ import type {
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { isRecord } from '../../fixtures/jsonGuards';
 
 /**
  * The owner's Oct 21 request, run as a scripted model: the calls a well-behaved model makes,
- * with each later call built from what the earlier results said. The point is the id: it comes
- * from the create result's summary and is reused for every block update, with no list or guess.
+ * with each later call built from what the earlier results said. The point is the name: it comes
+ * from the create result, which gives the name and link and never an id, and the exact name
+ * addresses every block edit, with no list or guess.
  */
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
@@ -77,6 +80,43 @@ function textOf(response: CallToolResponse): string {
   return content?.type === 'text' ? content.text : '';
 }
 
+function isErrorResponse(response: CallToolResponse): boolean {
+  return 'result' in response && response.result.isError === true;
+}
+
+/** Guards for tool-result JSON, so the test never leans on an assertion escape. */
+function parsedObject(text: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(text);
+  if (!isRecord(parsed)) {
+    throw new Error('expected a JSON object');
+  }
+  return parsed;
+}
+
+function fieldObject(owner: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = owner[field];
+  if (!isRecord(value)) {
+    throw new Error(`expected an object ${field}`);
+  }
+  return value;
+}
+
+function stringField(owner: Record<string, unknown>, field: string): string {
+  const value = owner[field];
+  if (typeof value !== 'string') {
+    throw new Error(`expected a string ${field}`);
+  }
+  return value;
+}
+
+function numberField(owner: Record<string, unknown>, field: string): number {
+  const value = owner[field];
+  if (typeof value !== 'number') {
+    throw new Error(`expected a number ${field}`);
+  }
+  return value;
+}
+
 function makeStore(): SpaceToolStore {
   const rows = new Map<string, SpaceRecord>();
   let aggregate = 0;
@@ -130,7 +170,7 @@ function makeStore(): SpaceToolStore {
 }
 
 describe('scripted run: top ten dog breeds', () => {
-  it('creates a skeleton, keeps the id from the create result, fills each block, and reads it back by name', async () => {
+  it('creates a skeleton, fills each block first try, reads it back, then replaces it with a full table first try', async () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: AUTHORITY,
@@ -144,63 +184,104 @@ describe('scripted run: top ten dog breeds', () => {
     const call = (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
 
     // Step 1: check for an existing space before creating one.
-    const listed = JSON.parse(textOf(await call(LIST_SPACES_TOOL_NAME, {}))) as { spaces: unknown[] };
-    expect(listed.spaces).toEqual([]);
+    const listed = parsedObject(textOf(await call(LIST_SPACES_TOOL_NAME, {})));
+    expect(listed['spaces']).toEqual([]);
 
-    // Step 2: the skeleton. The id is read from the summary, the first key of the result.
-    const created = JSON.parse(
-      textOf(
-        await call(CREATE_SPACE_TOOL_NAME, {
-          name: 'Dog breeds',
-          purpose: 'Top ten dog breeds by intelligence, with other traits.',
-          status: 'active',
-          format: 'markdown',
-          body: SKELETON_BODY,
-        }),
-      ),
-    ) as { summary: string };
-    const idMatch = /^Created space "Dog breeds" \(id: ([0-9a-z]+), revision 1\)\.$/.exec(created.summary);
-    expect(idMatch).not.toBeNull();
-    const spaceId = idMatch?.[1] ?? '';
+    // Step 2: the skeleton. The create result gives the name and link, never an id, and the
+    // call succeeds on the first try: no refusal, no retry.
+    const createdResponse = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Dog breeds',
+      purpose: 'Top ten dog breeds by intelligence, with other traits.',
+      status: 'active',
+      format: 'markdown',
+      body: SKELETON_BODY.join('\n'),
+    });
+    expect(isErrorResponse(createdResponse)).toBe(false);
+    const createdText = textOf(createdResponse);
+    const created = parsedObject(createdText);
+    const createdSpace = fieldObject(created, 'space');
+    expect(stringField(created, 'summary')).toBe('Created space "Dog breeds" (revision 1).');
+    expect(stringField(createdSpace, 'name')).toBe('Dog breeds');
+    expect(stringField(createdSpace, 'link')).toMatch(/^\/spaces\/[^/]+$/);
+    expect(createdText).not.toContain('"id"');
+    expect(createdText).not.toContain('(id:');
 
-    // Step 3: one block per update_space call, all with the same id.
+    // Step 3: one block per edit_space call, all addressed by the exact name, each succeeding first try.
     for (const [index, breed] of BREEDS.entries()) {
       const revision = index + 2;
-      const update = JSON.parse(
-        textOf(
-          await call(UPDATE_SPACE_TOOL_NAME, {
-            space_id: spaceId,
-            block_edits: [
-              {
-                anchor: `breed-${String(index + 1)}`,
-                new_content: [
-                  `## ${String(index + 1)}. ${breed}`,
-                  `- Intelligence rank: ${String(index + 1)} of 10`,
-                ].join('\n'),
-              },
-            ],
-          }),
-        ),
-      ) as { summary: string };
-      expect(update.summary).toBe(`Updated space "Dog breeds" (id: ${spaceId}, revision ${String(revision)}).`);
+      const updateResponse = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        edits: [
+          {
+            type: 'block',
+            anchor: `breed-${String(index + 1)}`,
+            new_content: [`## ${String(index + 1)}. ${breed}`, `- Intelligence rank: ${String(index + 1)} of 10`].join(
+              '\n',
+            ),
+          },
+        ],
+      });
+      expect(isErrorResponse(updateResponse)).toBe(false);
+      const update = parsedObject(textOf(updateResponse));
+      expect(stringField(update, 'summary')).toBe(`Updated space "Dog breeds" (revision ${String(revision)}).`);
     }
 
-    // Step 4: read it back by name, the way a model does after losing the id.
-    const read = JSON.parse(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))) as {
-      space: { id: string; body: string; revision: number };
-    };
-    expect(read.space.id).toBe(spaceId);
-    expect(read.space.revision).toBe(BREEDS.length + 1);
+    // Step 4: read it back by name.
+    const read = fieldObject(
+      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
+      'space',
+    );
+    expect(numberField(read, 'revision')).toBe(BREEDS.length + 1);
     BREEDS.forEach((breed, index) => {
-      expect(read.space.body).toContain(`## ${String(index + 1)}. ${breed}`);
+      expect(stringField(read, 'body')).toContain(`## ${String(index + 1)}. ${breed}`);
     });
-    expect(read.space.body).not.toContain('(to fill)');
+    expect(stringField(read, 'body')).not.toContain('(to fill)');
 
-    // Step 5: the final reply is plain prose with no markup in it.
+    // Step 5: read the space, then replace it wholesale with a full table, first try:
+    // no refusal, no retry. A full-body update_space call carries the whole new body
+    // as one string, with name, purpose, and status required.
+    const tableBody = [
+      '# Dog breeds',
+      '',
+      'Top ten by working and obedience intelligence.',
+      '',
+      '| Rank | Breed |',
+      '| --- | --- |',
+      ...BREEDS.map((breed, index) => `| ${String(index + 1)} | ${breed} |`),
+    ].join('\n');
+    const replacedResponse = await call(UPDATE_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      name: 'Dog breeds',
+      purpose: 'Top ten dog breeds by intelligence, with other traits.',
+      status: 'active',
+      format: 'markdown',
+      body: tableBody,
+    });
+    expect(isErrorResponse(replacedResponse)).toBe(false);
+    const replacedText = textOf(replacedResponse);
+    const replaced = parsedObject(replacedText);
+    expect(stringField(replaced, 'summary')).toBe('Updated space "Dog breeds" (revision 12).');
+    expect(replacedText).not.toContain('"id"');
+    expect(replacedText).not.toContain('(id:');
+
+    // Step 6: read it back again: the table is the whole body now.
+    const reread = fieldObject(
+      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
+      'space',
+    );
+    expect(numberField(reread, 'revision')).toBe(BREEDS.length + 2);
+    expect(stringField(reread, 'body')).toBe(tableBody);
+    BREEDS.forEach((breed, index) => {
+      expect(stringField(reread, 'body')).toContain(`| ${String(index + 1)} | ${breed} |`);
+    });
+    expect(stringField(reread, 'body')).not.toContain('(to fill)');
+    expect(stringField(reread, 'body')).not.toContain('<!-- @block:');
+
+    // Step 7: the final reply is plain prose with no markup in it.
     const finalReply = `I made "Dog breeds" with the top ten by intelligence. The Border Collie ranks first.`;
     for (const marker of RAW_MARKERS) {
       expect(finalReply).not.toContain(marker);
-      expect(read.space.body).not.toContain(marker);
+      expect(stringField(reread, 'body')).not.toContain(marker);
     }
   });
 });

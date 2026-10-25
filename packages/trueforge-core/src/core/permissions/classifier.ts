@@ -42,17 +42,7 @@ import {
   SCHEDULE_SERVER_ID,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import {
-  CREATE_SPACE_TOOL_NAME,
-  GET_SPACE_TOOL_NAME,
-  isSpaceReadToolName,
-  isSpaceWriteToolName,
-  LIST_BLOCKS_TOOL_NAME,
-  LIST_SPACES_TOOL_NAME,
-  REVERT_SPACE_TOOL_NAME,
-  SPACE_SERVER_ID,
-  UPDATE_SPACE_TOOL_NAME,
-} from '../spaces/toolContract';
+import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -96,7 +86,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { namesUrl, steeredDestinations, steeredLinks } from './provenance';
+import { carriedPrivateDetails, hasReadContent, namesUrl, steeredDestinations, steeredLinks } from './provenance';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -162,6 +152,7 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
+  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
   SEARCH_STEERED_REASON,
   SILENT_SEARCH_LIMIT,
@@ -1886,8 +1877,9 @@ async function holdSearchCall(input: {
 
 /**
  * The designated search provider's call: a search or a page read. Runs without asking unless the person switched
- * searches to ask, the outbound secret guard trips, the turn already ran its allowance of silent lookups, or content
- * the assistant read chose the link and the call adds to it. Returns undefined, leaving the call to the ordinary
+ * searches to ask, the outbound secret guard trips, the turn already ran its allowance of silent lookups, content
+ * the assistant read chose the link and the call adds to it, or the chat has read other people's content and the
+ * call carries one of the person's own private details. Returns undefined, leaving the call to the ordinary
  * rules, for a tool that the server did not declare read-only and the host's list does not name as a search tool,
  * that declares itself destructive or not read-only, falls in a name-based escalation class, or touches a sensitive
  * path: the role never lowers those, so designating a connector that can write does not make its unannotated tools
@@ -1979,6 +1971,14 @@ async function classifySearchProviderTool(input: {
   if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
+  // The detail is the person's own, but a chat that has read other people's content asks before sending one:
+  // what prompted putting it in a lookup may not have been the person.
+  if (
+    hasReadContent(ctx.web_search.provenance) &&
+    carriedPrivateDetails({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0
+  ) {
+    return ctx.services.unattended ? privateDetailSkipped(ctx) : held(SEARCH_PRIVATE_DETAIL_REASON, say.private_detail);
+  }
   return tier1Decision({
     reason: SEARCH_SILENT_REASON,
     reason_detail: `${page ? 'Opened' : 'Searched'}: ${queryText}`,
@@ -1994,6 +1994,17 @@ function steeredSkipped(ctx: ClassifyContext): TierDecision {
     reason: 'steered_by_content',
     reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
     owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
+    sensitive_read: false,
+  });
+}
+
+/** A lookup carrying a private detail that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateDetailSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
+  return autoDenyDecision({
+    reason: 'private_detail',
+    reason_detail: `It would have shared a private detail of yours, in a chat where ${assistant} read other people's content.`,
+    owner_message: 'One lookup was skipped, because it would have shared something private about you.',
     sensitive_read: false,
   });
 }
@@ -2650,31 +2661,20 @@ function spaceDisplayName(name: string | null): string | null {
 }
 
 /**
- * The plain line for a space tool, in the words the activity rail shows. A name is shown only when
- * the call carries one: get_space, list_blocks and revert_space name the space by id alone, so their
- * lines say "a space". Null for any tool that is not the host's own space tool.
+ * The plain line for a space tool, in the words the activity rail shows. The wording lives with the
+ * tool names in the space tool contract, so a space tool cannot exist without its line. The name shown
+ * is the one the call addresses the space by (space_name), or the name a create call gives it (name);
+ * a call that carries neither names no space, so the line says "a space". Null for any tool that is
+ * not the host's own space tool.
  */
 function spaceToolLine(action: SentinelAction): string | null {
   if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
     return null;
   }
-  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
-  switch (action.tool_name) {
-    case LIST_SPACES_TOOL_NAME:
-      return 'Looked at your spaces.';
-    case GET_SPACE_TOOL_NAME:
-      return 'Read a space.';
-    case LIST_BLOCKS_TOOL_NAME:
-      return 'Looked at the sections of a space.';
-    case CREATE_SPACE_TOOL_NAME:
-      return name === null ? 'Created a space.' : `Created the space ${name}.`;
-    case UPDATE_SPACE_TOOL_NAME:
-      return name === null ? 'Updated a space.' : `Updated the space ${name}.`;
-    case REVERT_SPACE_TOOL_NAME:
-      return 'Restored an earlier version of a space.';
-    default:
-      return null;
-  }
+  const name = spaceDisplayName(
+    stringParam(action.canonical_params, 'space_name') ?? stringParam(action.canonical_params, 'name'),
+  );
+  return spaceActivityLine({ tool_name: action.tool_name, space_name: name });
 }
 
 /**

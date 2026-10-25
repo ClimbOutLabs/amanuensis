@@ -60,6 +60,28 @@ async function homeEdges(page: Page) {
   });
 }
 
+/** The titles of the cards whose description is cut off, with the default set and then each pill chosen in turn. */
+async function cutOffCards(page: Page): Promise<string[]> {
+  const pills = page.getByRole('list', { name: 'What would help you most?' }).getByRole('button');
+  const cutOff: string[] = [];
+  for (let index = -1; index < (await pills.count()); index += 1) {
+    if (index >= 0) await pills.nth(index).click();
+    await page.waitForTimeout(100);
+    cutOff.push(
+      ...(await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[aria-labelledby="aman-home-cards-heading"] li button'))
+          .filter(card => {
+            const detail = card.lastElementChild;
+            return detail !== null && detail.scrollHeight > detail.clientHeight + 1;
+          })
+          .map(card => card.textContent ?? ''),
+      )),
+    );
+    if (index >= 0) await pills.nth(index).click();
+  }
+  return cutOff;
+}
+
 test('home is one left-aligned column whose edges the composer and the cards share', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
   const vite = await createServer({
@@ -98,6 +120,7 @@ test('home is one left-aligned column whose edges the composer and the cards sha
         Math.abs(edges.secondCardRight - edges.composerRight) <= 1,
         `${label}: the second card ends where the composer ends`,
       );
+      assert.deepEqual(await cutOffCards(page), [], `${label}: no description is cut off under any pill`);
       assert.equal(edges.truncated, 0, `${label}: no card description is cut off`);
       console.log(`${label} edges: ${JSON.stringify(edges)}`);
       await page.screenshot({ path: join(shots, `home-${viewport.width}x${viewport.height}-light.png`) });

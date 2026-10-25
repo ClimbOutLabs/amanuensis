@@ -62,3 +62,73 @@ docker exec "$NAME" node -e "require('node:fs').writeFileSync('/data/mail-policy
 
 printf 'ok: %s runs as uid 10001 with only /data and /tmp writable and became healthy\n' "$IMAGE"
 printf 'ok: a fresh send list volume is owned by uid 10001 and the app writes its send list into it\n'
+
+# The account agent runs as the sidecar's user with no capabilities, against the account file in the
+# sidecar's own volume: read, save and remove must all work there, while a file owned by another
+# user stays unreadable. Needs root (only root can make a file owned by another user), setpriv and
+# python3; skipped otherwise. No Docker is needed for this part.
+agent_fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  agent_tmp=$(mktemp -d)
+  trap 'if [ -n "${agent_tmp:-}" ]; then rm -rf "$agent_tmp"; fi; cleanup' EXIT
+  agent="$REPO/ops/compose/mail-email/account_agent.py"
+  agent_env() {
+    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-child-env
+  }
+  agent_write() {
+    printf '%s\n' "$2" | setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --write-stdin
+  }
+  agent_remove() {
+    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --remove
+  }
+  account_text=$(printf '%s\n' \
+    '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' \
+    "MCP_EMAIL_SERVER_PASSWORD='image-runtime-pw'" \
+    'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.invalid' \
+    'MCP_EMAIL_SERVER_IMAP_PORT=993' \
+    'MCP_EMAIL_SERVER_IMAP_SSL=true' \
+    'MCP_EMAIL_SERVER_IMAP_START_SSL=false' \
+    'MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=true' \
+    'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.invalid' \
+    'MCP_EMAIL_SERVER_SMTP_PORT=465' \
+    'MCP_EMAIL_SERVER_SMTP_SSL=true' \
+    'MCP_EMAIL_SERVER_SMTP_START_SSL=false' \
+    'MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true')
+  changed_text=$(printf '%s' "$account_text" | sed 's/a@example.invalid/b@example.invalid/')
+  # The sidecar's own file: owned by the sidecar's user, readable only by that user.
+  owned="$agent_tmp/owned.env"
+  printf '%s\n' "$account_text" >"$owned"
+  chmod 600 "$owned"
+  agent_env "$owned" | grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' ||
+    agent_fail "the capability-free agent could not read the sidecar's own account file"
+  agent_write "$owned" "$changed_text" | grep -qx 'saved' ||
+    agent_fail "the capability-free agent could not save the sidecar's own account file"
+  grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=b@example.invalid' "$owned" ||
+    agent_fail "the saved account did not land in the sidecar's own account file"
+  [ "$(stat -c %a "$owned")" = 600 ] ||
+    agent_fail "the saved account file has mode $(stat -c %a "$owned"), expected 600"
+  agent_remove "$owned" | grep -qx 'removed' ||
+    agent_fail "the capability-free agent could not remove the sidecar's own account file"
+  [ ! -s "$owned" ] || agent_fail "the account file is not empty after remove"
+  agent_env "$owned" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+    agent_fail "a removed account still reads as connected"
+  # Another user's file: the old bind-mounted layout, which the volume replaces.
+  foreign="$agent_tmp/foreign.env"
+  printf '%s\n' "$account_text" >"$foreign"
+  chmod 600 "$foreign"
+  chown 1000 "$foreign"
+  agent_env "$foreign" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+    agent_fail "the capability-free agent read another user's account file"
+  if agent_write "$foreign" "$changed_text" >/dev/null 2>&1; then
+    agent_fail "the capability-free agent wrote another user's account file"
+  fi
+  grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' "$foreign" ||
+    agent_fail "the failed save changed another user's account file"
+  printf 'ok: the capability-free account agent reads, saves and removes the sidecar-owned account file, and not another user'"'"'s file\n'
+else
+  printf 'skip: the account agent permission case needs root, setpriv and python3\n'
+fi

@@ -46,13 +46,16 @@ import {
 } from './hindsightClient';
 import {
   appendVaultTombstone,
+  clearSummaryPending,
   entryMetadata,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
+  markSummaryFailed,
   namespaceDirFor,
   personaForVaultFilesystemNamespace,
   personaForVaultNamespace,
+  readSummaryPending,
   readVaultTombstones,
   sanitizeNamespace,
   scanNamespaceEntries,
@@ -70,6 +73,7 @@ import type {
   MemoryClient,
   MemoryVaultEntry,
   MemoryVaultFailure,
+  SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
 
@@ -477,6 +481,37 @@ export class MarkdownMemoryClient implements MemoryClient {
         return vaultTimeoutFailure(params.timeoutMs);
       }
       return { ok: false, code: 'request_failed', reason: failureReason('markdown vault list failed', error) };
+    }
+  }
+
+  /**
+   * Notes one turn-summary attempt's outcome on this client's write vault: a failure
+   * leaves the summary-pending marker, a success clears it. Never throws: the marker
+   * is page state, and losing it must never fail or delay the turn it belongs to.
+   */
+  async noteSummaryOutcome(params: SummaryOutcomeNote): Promise<void> {
+    try {
+      if (params.outcome === 'summarized') {
+        await clearSummaryPending({ baseDir: this.baseDir, namespace: this.writeNamespace });
+      } else {
+        await markSummaryFailed({
+          baseDir: this.baseDir,
+          namespace: this.writeNamespace,
+          mark: { failed_at: new Date().toISOString(), reason: params.reason ?? 'model_failed' },
+        });
+      }
+    } catch {
+      // Best effort only; the retain path logs the summary outcome itself.
+    }
+  }
+
+  /** Whether the vault for a wire namespace is still owed a turn summary. Never throws. */
+  async summaryPending(params: { namespace: string }): Promise<boolean> {
+    try {
+      const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
+      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace })) !== undefined;
+    } catch {
+      return false;
     }
   }
 

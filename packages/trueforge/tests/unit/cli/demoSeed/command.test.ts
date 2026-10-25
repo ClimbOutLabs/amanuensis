@@ -6,7 +6,7 @@ import { UsageError, type CliIo } from '../../../../src/cli/io';
 
 const NOW = new Date('2026-10-26T08:00:00Z');
 const SEED_REPORT: SeedReport = {
-  personas: { 'demo-synthetic-persona-june': 'created', 'demo-synthetic-persona-theo': 'created' },
+  personas: { 'maya-persona-june': 'created', 'maya-persona-theo': 'created' },
   profile: 'created',
   agent: 'created',
   schedule: 'created',

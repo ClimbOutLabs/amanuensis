@@ -85,6 +85,7 @@ export const AUTO_DENY_REASONS = [
   'lookup_limit',
   'offline_mode',
   'outbound_guard',
+  'private_detail',
   'steered_by_content',
   'tool_not_prepared',
   'unattended_run',
