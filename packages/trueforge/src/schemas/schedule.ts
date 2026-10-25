@@ -136,6 +136,36 @@ export const UpdateScheduleRequestSchema = z
   .strict()
   .openapi('UpdateScheduleRequest');
 
+/**
+ * `schedule`: the schedule has its own tools, which can be changed here.
+ * `saved_agent`: it runs as an agent the person saved, so its tools are set on that agent.
+ */
+export const ScheduleToolsSourceSchema = z.enum(['schedule', 'saved_agent']).openapi('ScheduleToolsSource');
+
+const ScheduleToolsFields = {
+  connectors: z.array(z.string().min(1)).max(100).describe('Names of the connectors it can use.'),
+  skills: z.array(z.string().min(1)).max(50).describe('Names of the skills it can use.'),
+  sandbox_enabled: z.boolean().describe('Whether it can use the sandbox. Skills need the sandbox.'),
+};
+
+export const ScheduleToolsSchema = z
+  .object({
+    source: ScheduleToolsSourceSchema,
+    agent_name: NameSchema,
+    ...ScheduleToolsFields,
+  })
+  .strict()
+  .openapi('ScheduleTools');
+
+export const UpdateScheduleToolsRequestSchema = z
+  .object(ScheduleToolsFields)
+  .strict()
+  .openapi('UpdateScheduleToolsRequest');
+
+export const GetScheduleToolsResponseSchema = z
+  .object({ data: ScheduleToolsSchema })
+  .openapi('GetScheduleToolsResponse');
+
 export const GetScheduleResponseSchema = z.object({ data: ScheduleSchema }).openapi('GetScheduleResponse');
 export const ListSchedulesResponseSchema = z
   .object({
@@ -204,6 +234,8 @@ export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>;
 export type ScheduleManifest = z.infer<typeof ScheduleManifestSchema>;
 export type Schedule = z.infer<typeof ScheduleSchema>;
+export type ScheduleTools = z.infer<typeof ScheduleToolsSchema>;
+export type UpdateScheduleToolsRequest = z.infer<typeof UpdateScheduleToolsRequestSchema>;
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>;
 export type ExecuteScheduleRunRequest = z.infer<typeof ExecuteScheduleRunRequestSchema>;
 export type CreateScheduleRequest = z.infer<typeof CreateScheduleRequestSchema>;
