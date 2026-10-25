@@ -17,6 +17,7 @@ import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
 import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
+import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
@@ -1911,7 +1912,9 @@ export class AgentThread {
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
-    capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+    if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
+      capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+    }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
     if (this.sandbox === undefined && !this.parent) {

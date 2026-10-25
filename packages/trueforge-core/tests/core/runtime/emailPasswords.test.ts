@@ -1,4 +1,4 @@
-import { MAIL_CONNECTOR_TOOL_NAMES } from '../../../src/core/email/mailConnector/toolContract';
+import { MAIL_CONNECTOR_NAME, MAIL_CONNECTOR_TOOL_NAMES } from '../../../src/core/email/mailConnector/toolContract';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
@@ -76,6 +76,7 @@ async function* toolCallStream(input: {
 async function runScriptedTurn(input: {
   instruction: string;
   message: string;
+  emailConnectorSetUp: boolean;
   streams: AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown>[];
 }): Promise<LLMCreateParamsStreaming[]> {
   const requests: LLMCreateParamsStreaming[] = [];
@@ -103,7 +104,8 @@ async function runScriptedTurn(input: {
       modelId: undefined,
       configuredModels: undefined,
       instruction: input.instruction,
-      toolSets: [makeEmailToolSet()],
+      toolSets: input.emailConnectorSetUp ? [makeEmailToolSet()] : [],
+      setUpConnectorNames: input.emailConnectorSetUp ? [MAIL_CONNECTOR_NAME] : [],
     },
     context: [{ role: 'user', content: input.message }],
   });
@@ -118,6 +120,7 @@ describe('the app password never reaches the model', () => {
     const requests = await runScriptedTurn({
       instruction: 'test',
       message: 'Read my newest email, then send a short reply to the sender.',
+      emailConnectorSetUp: true,
       streams: [
         toolCallStream({ id: 'call-1', name: 'list_emails_metadata', args: { mailbox: 'INBOX' } }),
         toolCallStream({
@@ -149,10 +152,11 @@ describe('the app password never reaches the model', () => {
 });
 
 describe('a password pasted into chat', () => {
-  it('the system prompt always tells the model to point at Settings, whatever the persona says', async () => {
+  it('the system prompt tells the model to point at Settings when Email is set up, whatever the persona says', async () => {
     const requests = await runScriptedTurn({
       instruction: 'You are a terse senior engineer. Use precise technical terms.',
       message: `Set up my email with this app password: ${CANARY}`,
+      emailConnectorSetUp: true,
       streams: [finalAnswerStream('I cannot do that here.')],
     });
     const system = requests[0]?.messages.find(message => message.role === 'system')?.content;
@@ -164,5 +168,18 @@ describe('a password pasted into chat', () => {
     // The host's own prompt parts never carry a password either; only the person's own
     // message does, and it is theirs.
     expect(EMAIL_PASSWORD_PROMPT).not.toContain(CANARY);
+  });
+
+  it('sends no email-password section when the Email connector is not set up', async () => {
+    const requests = await runScriptedTurn({
+      instruction: 'test',
+      message: 'Hello.',
+      emailConnectorSetUp: false,
+      streams: [finalAnswerStream('Hello.')],
+    });
+    const system = requests[0]?.messages.find(message => message.role === 'system')?.content;
+    const prompt = typeof system === 'string' ? system : '';
+    expect(prompt).not.toContain('<email-passwords>');
+    expect(prompt).not.toContain(EMAIL_PASSWORD_PROMPT.trim());
   });
 });
