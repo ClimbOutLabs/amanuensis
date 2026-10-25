@@ -434,6 +434,26 @@ describe('ToolMarkupGuard stray closing tags', () => {
     expect(guard.finish()).toBe('clean');
   });
 
+  it('hides a spaced pair of stray closing tags split inside the second tag', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done.</tool_call> </to', 'ol_calls>']) {
+      shown += guard.push(piece);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('hides a spaced pair of stray closing tags split inside both tags', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done.</tool', '_call> </tool', '_calls>']) {
+      shown += guard.push(piece);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
   it('keeps a closing tag named in a sentence with words after it on the line', () => {
     const guard = new ToolMarkupGuard();
     const sentence = 'End the block with </tool_call> and then stop.';

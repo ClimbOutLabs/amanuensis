@@ -327,8 +327,18 @@ function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean
   const newlineAt = rest.indexOf('\n');
   const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
   if (/[^ \t\r]/.test(lineRest)) {
-    // One more tag of the run may still be arriving: while it can, the run waits.
-    if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(lineRest))) {
+    // One more tag of the run may still be arriving: while it can, the run waits. The tag
+    // arrives after the blanks that follow the run, so the wait is judged on the tail after
+    // those blanks, the same blanks the run scan above steps over.
+    let tailAt = 0;
+    while (
+      tailAt < lineRest.length &&
+      (lineRest.charAt(tailAt) === ' ' || lineRest.charAt(tailAt) === '\t' || lineRest.charAt(tailAt) === '\r')
+    ) {
+      tailAt++;
+    }
+    const arrivingTail = lineRest.slice(tailAt);
+    if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(arrivingTail))) {
       return { verdict: 'undecided' };
     }
     return { verdict: 'dead', deadLength: tag.length };
