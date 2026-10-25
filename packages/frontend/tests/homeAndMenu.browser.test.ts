@@ -209,10 +209,11 @@ test(
       assert.match(JSON.stringify(answered), /"persona_name":"Nova"/, 'the picked agent answered the first message');
 
       // Starting another new chat offers the picker again.
-      await pickPage
-        .getByRole('complementary', { name: 'Recent chats' })
-        .getByRole('button', { name: 'New chat' })
-        .click();
+      const chatList = pickPage.getByRole('complementary', { name: 'Recent chats' });
+      if (!(await chatList.isVisible())) {
+        await pickPage.getByRole('navigation', { name: 'Sidebar' }).getByRole('button', { name: 'Chats' }).click();
+      }
+      await chatList.getByRole('button', { name: 'New chat' }).click();
       await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
     } finally {
