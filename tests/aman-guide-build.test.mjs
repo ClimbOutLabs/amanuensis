@@ -13,13 +13,13 @@ export type TourCapabilities = {
   email: boolean;
   sandbox: boolean;
 };
-const ADD_NUMBERS: TourPrompt = { key: 'code', title: 'Run code', prompt: 'Add numbers.', needs: ['sandbox'] };
-export const GENERAL_CARDS: readonly TourPrompt[] = [
-  { key: 'brief', title: 'Your morning brief', prompt: BRIEF_PROMPT },
-  { key: 'email', title: 'Handle your email', prompt: 'Read my mail.', needs: ['email'] },
-];
-export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly TourPrompt[] }> = {
-  productivity: { label: 'Productivity', cards: [ADD_NUMBERS] },
+export const CARDS = {
+  brief: { title: 'Your morning brief', prompt: BRIEF_PROMPT },
+  email: { title: 'Handle your email', prompt: 'Read my mail.', needs: ['email'] },
+  code: { title: 'Run code', prompt: 'Add numbers.', needs: ['sandbox'] },
+} satisfies Record<string, TourCard>;
+export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly CardKey[] }> = {
+  productivity: { label: 'Productivity', cards: ['code'] },
 };
 `;
 
@@ -75,7 +75,7 @@ test('the real repo build writes the pack and every required card has a page', a
   }
 });
 
-test('reads Tour cards through the constants and topics that hold them', async () => {
+test('reads Tour cards from the card table, keyed by card id', async () => {
   const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
   try {
     const result = await buildAmanGuide(fx.options);
@@ -144,11 +144,11 @@ test('the build fails when a Tour card needs a capability the type does not decl
   }
 });
 
-test('the build fails when a card constant is not exported from tourPrompts.ts', async () => {
-  const tour = TOUR_FIXTURE.replace('export const GENERAL_CARDS', 'const GENERAL_CARDS');
+test('the build fails when the card table is not exported from tourPrompts.ts', async () => {
+  const tour = TOUR_FIXTURE.replace('export const CARDS', 'const CARDS');
   const fx = await fixture({ tour, topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
   try {
-    await assert.rejects(buildAmanGuide(fx.options), /must export GENERAL_CARDS/);
+    await assert.rejects(buildAmanGuide(fx.options), /must export CARDS/);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
   }
