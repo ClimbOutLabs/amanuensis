@@ -55,7 +55,15 @@ function collectAgentIds(req?: ListSchedulesParams): string[] {
 }
 
 function wireStatus(manifest: TrueForgeApi.ScheduleManifest): ScheduleStatus {
-  return manifest.status ?? 'active';
+  return manifest.status === 'paused' ? 'paused' : 'active';
+}
+
+/**
+ * The Schedules page edits repeating tasks only. A one-time schedule has no repeating time, and a reminder lives in
+ * the Reminders chat; saving either from the task form would turn it into something else.
+ */
+function isRepeatingTask(wire: TrueForgeApi.Schedule): boolean {
+  return typeof wire.manifest.cron === 'string' && Reflect.get(wire.manifest, 'kind') !== 'reminder';
 }
 
 function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule {
@@ -67,7 +75,7 @@ function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule 
     agentName: wire.agentName,
     runsAs: wire.runsAs,
     task: wire.manifest.task,
-    cron: wire.manifest.cron,
+    cron: typeof wire.manifest.cron === 'string' ? wire.manifest.cron : '',
     timezone: wire.manifest.timezone ?? 'UTC',
     status: wireStatus(wire.manifest),
     lastRunAt: null,
@@ -120,7 +128,7 @@ export function createScheduleServer(options: { client: TrueForge }): ScheduleSe
         ...(req?.pageToken === undefined || req.pageToken === '' ? {} : { pageToken: req.pageToken }),
         ...(agentNames === undefined ? {} : { agentNames }),
       });
-      return toListResult(page, row => toUiSchedule(row, index));
+      return toListResult({ ...page, data: page.data.filter(isRepeatingTask) }, row => toUiSchedule(row, index));
     },
 
     async getSchedule({ id }): Promise<Schedule> {

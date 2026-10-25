@@ -20,6 +20,7 @@ import {
 } from '../atoms/lib/threadListMeta.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
+import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { useOptionalChatFolders, type ChatFolderSession } from '../server/ChatFolderContext.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
@@ -64,6 +65,15 @@ function ThreadListItemRow({
   const mainThreadId = useAuiState(s => s.threads.mainThreadId);
   const agentName = readThreadAgentName(custom);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
+  const reminders = useOptionalReminders();
+  const isRemindersChat = remoteId != null && remoteId === reminders?.remindersSessionId;
+  const unread = isRemindersChat && reminders?.unread === true;
+  const isOpen = id === mainThreadId && !sidebarNavOpen;
+  const markRemindersSeen = reminders?.markSeen;
+  // The mark clears once the chat is open, however it was opened.
+  useEffect(() => {
+    if (isRemindersChat && isOpen && unread) markRemindersSeen?.();
+  }, [isRemindersChat, isOpen, unread, markRemindersSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent
@@ -75,10 +85,12 @@ function ThreadListItemRow({
     <ThreadListItemPrimitive.Root className="min-w-0">
       <ThreadListRow
         title={title ?? 'New Chat'}
-        active={id === mainThreadId && !sidebarNavOpen}
+        active={isOpen}
         agentName={agentName}
         lastMessageAt={lastMessageAt}
+        unread={unread}
         onSelect={() => {
+          if (isRemindersChat) markRemindersSeen?.();
           onThreadOpen?.();
           shell?.setSettingsOpen(false);
           shell?.setLibraryOpen(false);

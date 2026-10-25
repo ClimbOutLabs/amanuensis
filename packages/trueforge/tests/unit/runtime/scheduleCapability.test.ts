@@ -594,8 +594,93 @@ describe('the schedule rule in the system prompt', () => {
       build(prompt);
     }
     expect(prompt.build()).toContain(
-      'Schedules can only be made with create_schedule, and only repeating ones: a one-time reminder or check-in later cannot be set. Never tell the user something is scheduled',
+      'Repeating tasks need create_schedule. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat.',
     );
+  });
+});
+
+const MEDICINE = { what: 'Take the medicine', at: '2026-10-19T18:00:00-04:00' };
+
+describe('reminder tools', () => {
+  it('sets a one-time reminder without a card, records it, and tells the activity log in plain words', async () => {
+    const built = await setup();
+    const { info, result } = await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({
+      tier: 1,
+      tier_reason: 'reminder_write',
+      is_approval_required: false,
+      tier3_card: null,
+    });
+    expect(JSON.parse(resultText(result))).toMatchObject({
+      set: { what: 'Take the medicine', repeats: false, next: 'Monday, October 19 at 6:00 PM' },
+    });
+    const [saved] = await built.listAll();
+    expect(saved).toMatchObject({
+      status: 'active',
+      created_by_subject: OWNER,
+      manifest: {
+        task: 'Take the medicine',
+        cron: null,
+        run_at: '2026-10-19T18:00:00-04:00',
+        kind: 'reminder',
+        timezone: 'America/New_York',
+      },
+    });
+    const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
+    expect(pending?.scheduled_for).toBe('2026-10-19T22:00:00.000Z');
+    expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
+      ['set_reminder', 'Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine', 'ran'],
+    ]);
+  });
+
+  it('refuses a time in the past with a message that says what to do next', async () => {
+    const built = await setup();
+    const { result } = await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Too late', at: '2026-10-18T07:00:00-04:00' },
+    });
+    expect(resultText(result)).toContain(
+      'Nothing was set because that time has already passed. Ask the user for a later time.',
+    );
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('makes a repeating reminder from the existing cron path', async () => {
+    const built = await setup();
+    await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Take the medicine', at: '2026-10-19T08:30:00-04:00', repeat: 'weekdays' },
+    });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ cron: '30 8 * * 1-5', run_at: null, kind: 'reminder' });
+  });
+
+  it('lists upcoming reminders apart from schedules, and cancels one by id without asking', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const schedules = await dispatch({ built, name: 'list_schedules', args: {} });
+    expect(JSON.parse(resultText(schedules.result))).toEqual({ schedules: [] });
+
+    const listed = await dispatch({ built, name: 'list_reminders', args: {} });
+    expect(listed.info).toMatchObject({ tier: 1, tier_reason: 'reminder_read', is_approval_required: false });
+    const { reminders } = JSON.parse(resultText(listed.result));
+    expect(reminders).toHaveLength(1);
+
+    const cancelled = await dispatch({ built, name: 'cancel_reminder', args: { reminder: reminders[0].id } });
+    expect(cancelled.info).toMatchObject({ tier: 1, tier_reason: 'reminder_write', is_approval_required: false });
+    expect(JSON.parse(resultText(cancelled.result))).toMatchObject({ cancelled: { what: 'Take the medicine' } });
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('cancels by the exact words, and says what to do when none matches', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const missing = await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'Walk the dog' } });
+    expect(resultText(missing.result)).toContain('Call list_reminders');
+    await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'take the medicine' } });
+    expect(await built.listAll()).toEqual([]);
   });
 });
 

@@ -84,6 +84,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'revert_space',
     'space_write',
   ]),
+  ...words({ doing: 'Setting a reminder', done: 'Set a reminder', thing: 'A reminder' }, ['set_reminder']),
+  ...words({ doing: 'Checking your reminders', done: 'Checked your reminders', thing: 'Your reminders' }, [
+    'list_reminders',
+  ]),
+  ...words({ doing: 'Cancelling a reminder', done: 'Cancelled a reminder', thing: 'A reminder' }, ['cancel_reminder']),
   ...words({ doing: 'Checking your schedules', done: 'Checked a schedule', thing: 'Your schedules' }, [
     'list_schedules',
     'schedule_read',
