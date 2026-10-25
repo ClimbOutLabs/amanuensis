@@ -61,14 +61,30 @@ upgrade_any_sandbox() {
 }
 
 # Only an instance that was healthy once has anything the upgrade could harm, so only its failure stops the upgrade;
-# an instance that never started is what the upgrade is for. --force skips the check.
+# an instance that never started is what the upgrade is for. --force skips the check. Healthy means the doctor's
+# report for the instance holds no fail record: warnings pass, and the message names the failing parts from the
+# report itself. A doctor run that produces no report is a check that could not run, not a healthy instance, so it
+# stops the upgrade too, with its own message.
 upgrade_health_gate() {
-  local name
+  local name out rc fails flat
   [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ] || return 0
   for name in $(reg_names); do
     instance_ever_healthy "$name" || continue
-    run_doctor --json --local --instance "$name" >/dev/null 2>&1 ||
-      die "Instance $name worked before but has a problem now, so the upgrade did not start. See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
+    rc=0
+    out=$(DOCTOR_TIMEOUT=180 run_doctor --json --local --instance "$name" 2>/dev/null) || rc=$?
+    fails=$(doctor_fail_details "$out")
+    if [ -n "$fails" ]; then
+      flat=$(printf '%s' "$fails" | tr '\n' ' ')
+      flat=${flat% }
+      case "$flat" in
+        *.) ;;
+        *) flat="$flat." ;;
+      esac
+      die "Instance $name worked before but has a problem now, so the upgrade did not start: $flat See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
+    fi
+    if [ "$rc" != 0 ] || [ -z "$out" ]; then
+      die "Instance $name could not be checked, so the upgrade did not start. See it with: aman doctor. Or upgrade anyway with: aman upgrade --force"
+    fi
   done
 }
 

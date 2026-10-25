@@ -145,10 +145,40 @@ test_doctor_failure_blocks_unless_forced() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
   assert_flat_contains "$ERR" "has a problem now, so the upgrade did not start"
+  assert_flat_contains "$ERR" "The main app is not running"
+  assert_no_path "$AMAN_HOME/backups"
+  run_install upgrade --force
+  assert_rc 0
+  sandbox_drop
+}
+
+test_gate_passes_when_the_doctor_reports_only_warnings() {
+  t_begin "an upgrade with only warnings in the doctor report passes the gate"
+  sandbox_new
+  install_machine
+  repo_commit_change "warn only"
+  STUB_DOCTOR_JSON='{"machine":[{"id":"backup","state":"warn","detail":"Daily backups are off.","fix":"Run aman backup"}],"instances":{"main":[]}}'
+  STUB_DOCTOR_EXIT=0
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Upgraded to"
+  sandbox_drop
+}
+
+test_gate_blocks_when_the_doctor_cannot_be_checked() {
+  t_begin "a doctor run that produces no fail record but still fails blocks with its own message"
+  sandbox_new
+  install_machine
+  repo_commit_change "needs doctor"
+  STUB_DOCTOR_EXIT=1
+  run_install upgrade
+  assert_rc 1
+  assert_flat_contains "$ERR" "could not be checked, so the upgrade did not start"
   assert_no_path "$AMAN_HOME/backups"
   run_install upgrade --force
   assert_rc 0
@@ -244,10 +274,11 @@ test_upgrade_still_needs_force_for_an_instance_with_data() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start."
+  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start: The main app is not running."
   assert_flat_contains "$ERR" "upgrade --force"
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
@@ -259,11 +290,12 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   install_machine
   sed -i '/^healthy=/d' "$AMAN_HOME/state/instances/main.conf"
   repo_commit_change "older record"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
   assert_flat_contains "$ERR" "worked before but has a problem now"
-  unset STUB_DOCTOR_EXIT
+  unset STUB_DOCTOR_EXIT STUB_DOCTOR_JSON
   run_install upgrade
   assert_rc 0
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1

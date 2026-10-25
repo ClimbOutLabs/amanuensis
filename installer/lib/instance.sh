@@ -386,6 +386,15 @@ doctor_status() {
   fi
 }
 
+# The fail records of a doctor JSON document, one plain detail per line, in order. The doctor prints
+# records as {"id", "state", "detail", "fix"} in that order, and the pattern allows escaped characters
+# inside a detail, so a detail that quotes something is not cut short.
+doctor_fail_details() {
+  printf '%s' "$1" |
+    grep -oE '"state":"fail","detail":"(([^"\\]|\\.)*)"' |
+    sed -e 's/^"state":"fail","detail":"//' -e 's/"$//' -e 's/\\"/"/g' -e 's/\\\\/\\/g' || true
+}
+
 # ---- inputs -----------------------------------------------------------------------------------
 
 # Fills I_* from flags and prompts. Plan-time calls (dry run) never prompt. Which address the app answers at is
