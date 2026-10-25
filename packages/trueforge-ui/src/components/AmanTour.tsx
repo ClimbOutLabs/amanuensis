@@ -6,7 +6,7 @@ import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useHomeTopic } from './homeTopic.js';
-import { HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
+import { composerTextFor, HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
 
 /** Morning, afternoon or evening, by the local hour. */
 function greetingFor(now: Date): string {
@@ -43,7 +43,7 @@ function NameUnderline() {
 const PILL_CLASS =
   'inline-flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border px-3 font-[inherit] text-[0.8125rem] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
 
-/** Compact: icon and title on one line, one line of description, so all four fit with the composer. */
+/** Icon and serif title on one line, the description below it in at most two lines. */
 const CARD_CLASS =
   'flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-[0.625rem] border border-border bg-card-bg px-3 py-2 text-left font-[inherit] text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring';
 
@@ -52,7 +52,7 @@ function MapPinIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="size-4"
+      className="size-4.5"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"
@@ -74,16 +74,16 @@ export type AmanTourProps = {
   assistantName?: string | null;
   /** The clock the greeting reads; the host's clock when omitted. */
   now?: Date;
-  /** Whether a morning brief exists yet; the Productivity pill is gold once it does. */
-  hasBrief: boolean;
   /** On a first run the prompt line, the setup ticket and Skip show; otherwise they do not. */
   firstRun: boolean;
   /** The setup ticket, shown on a first run. */
   setupTicket: ReactNode;
   /** Puts the first-run lines away for good. Omitted when the host cannot remember that. */
   onSkip?: () => void;
-  /** Puts the prompt in the composer so the person can change it before sending. */
-  onFill: (prompt: string) => void;
+  /** Sends the text as the first message of a turn. */
+  onSend: (text: string) => void;
+  /** Puts the text in the composer instead, when no model is set and nothing can run. */
+  onFill: (text: string) => void;
   /** False until the host reports a model; a chat cannot run without one. */
   canSend: boolean;
 };
@@ -97,10 +97,10 @@ export function AmanTour({
   userName,
   assistantName,
   now = new Date(),
-  hasBrief,
   firstRun,
   setupTicket,
   onSkip,
+  onSend,
   onFill,
   canSend,
 }: AmanTourProps) {
@@ -111,7 +111,7 @@ export function AmanTour({
 
   return (
     <>
-      <h1 className="aui-face-serif order-0 m-0 px-4 pt-[clamp(3rem,12vh,8rem)] pb-4 text-center text-[1.75rem] leading-[1.2] font-normal text-text-primary">
+      <h1 className="aman-home-greeting aui-face-serif order-0 m-0 pt-[clamp(3rem,8vh,8rem)] text-left text-[1.75rem] leading-[1.2] font-normal text-text-primary">
         {hello}
         {firstName === null ? null : (
           <>
@@ -124,21 +124,21 @@ export function AmanTour({
         )}
       </h1>
 
-      {/* pt-4 keeps the first row clear of the composer above; the cards sit a little further down still. */}
-      <div className="order-1 mx-auto flex w-full max-w-160 flex-col gap-4 px-4 pt-4 pb-4">
+      {/* Shares the home column's edges: no width or side padding of its own (see .aman-home-greeting in styles.css). */}
+      <div className="order-1 flex w-full flex-col gap-5 pb-4">
         {canSend ? null : (
-          <p className="m-0 text-center text-[0.8125rem] text-text-secondary">
+          <p className="m-0 text-[0.8125rem] text-text-secondary">
             Choose a model in Settings before you start a chat.
           </p>
         )}
 
         {firstRun ? (
-          <p className="m-0 text-center text-[0.8125rem] text-text-secondary">
+          <p className="m-0 text-[0.8125rem] text-text-secondary">
             What would help you most? Pick one to see what {assistant} can do there.
           </p>
         ) : null}
 
-        <ul aria-label="What would help you most?" className="m-0 flex list-none flex-wrap justify-center gap-2 p-0">
+        <ul aria-label="What would help you most?" className="m-0 flex list-none flex-wrap justify-start gap-2 p-0">
           {HOME_TOPIC_IDS.map(id => {
             const chosen = topic === id;
             return (
@@ -149,9 +149,6 @@ export function AmanTour({
                   onClick={() => setTopic(chosen ? null : id)}
                   className={cn(PILL_CLASS, chosen ? 'border-gold-line bg-gold-soft' : 'border-border bg-card-bg')}
                 >
-                  {id === 'productivity' && hasBrief ? (
-                    <span className="size-1.5 rounded-full bg-gold" aria-hidden="true" />
-                  ) : null}
                   {HOME_TOPICS[id].label}
                 </button>
               </li>
@@ -161,27 +158,31 @@ export function AmanTour({
 
         {firstRun ? setupTicket : null}
 
-        <section className="mt-2 flex flex-col gap-2.5" aria-labelledby="aman-home-cards-heading">
+        <section className="mt-7 flex flex-col gap-5" aria-labelledby="aman-home-cards-heading">
           <h2 id="aman-home-cards-heading" className="m-0 text-[0.8125rem] font-normal text-text-secondary">
             Some things {assistant} can do
           </h2>
           <ul className="m-0 grid list-none grid-cols-2 gap-2.5 p-0">
             {cards.map(card => (
-              <li key={card.key}>
-                <button type="button" className={cn(CARD_CLASS, 'h-full w-full')} onClick={() => onFill(card.prompt)}>
-                  <span className="flex min-w-0 items-center gap-2" data-role="home-card-title">
-                    <span className="flex shrink-0 text-gold-ink">
+              <li key={card.title}>
+                <button
+                  type="button"
+                  className={cn(CARD_CLASS, 'h-full w-full')}
+                  onClick={() => (canSend ? onSend : onFill)(composerTextFor(card))}
+                >
+                  <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
+                    <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
                       {card.icon === 'map-pin' ? (
                         <MapPinIcon />
                       ) : (
-                        <Icon name={card.icon} size="1rem" aria-hidden="true" />
+                        <Icon name={card.icon} size="1.125rem" aria-hidden="true" />
                       )}
                     </span>
-                    <span className="truncate text-[0.875rem] font-medium">{card.title}</span>
+                    <span className="aui-face-serif text-[0.9375rem] leading-[1.2] font-normal text-text-primary">
+                      {card.title}
+                    </span>
                   </span>
-                  <span className="truncate text-[0.8125rem] text-text-secondary" title={card.detail(assistant)}>
-                    {card.detail(assistant)}
-                  </span>
+                  <span className="line-clamp-2 text-[0.8125rem] text-text-secondary">{card.detail(assistant)}</span>
                 </button>
               </li>
             ))}
@@ -189,7 +190,7 @@ export function AmanTour({
         </section>
 
         {firstRun && onSkip !== undefined ? (
-          <div className="flex justify-center">
+          <div className="flex">
             <button
               type="button"
               onClick={onSkip}

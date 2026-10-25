@@ -99,7 +99,7 @@ describe('a card whose request ended', () => {
 
     expect(await screen.findByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
     expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Allow it' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
   });
 
@@ -127,9 +127,9 @@ describe('a card whose request ended', () => {
     state.server = server;
     renderCard(newestPendingCard);
 
-    expect(await screen.findByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Allow' })).toBeInTheDocument();
     await waitFor(() => expect(server.peekSessionTip).toHaveBeenCalledTimes(2), { timeout: 3000 });
-    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByText('This request ended. Ask again if you still need it.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   });
@@ -138,7 +138,7 @@ describe('a card whose request ended', () => {
     state.server = fakeServer([CARD_ID]);
     renderCard(newestPendingCard);
 
-    expect(await screen.findByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByText('This request ended. Ask again if you still need it.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   });

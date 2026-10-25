@@ -8,6 +8,7 @@ import type {
 import { createWebSearchTurnState, InstructionBuilder, isAuthRequired } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_BLOCKS_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
@@ -376,22 +377,8 @@ describe('space capability', () => {
     expect(resultText(response)).toContain('Stale space aggregate revision');
   });
 
-  it('create_space joins a body given as an array of lines, keeping empty-string elements as blank lines', async () => {
-    const createSpace = jest.fn().mockResolvedValue({
-      record: {
-        tenant_id: 'default',
-        created_by: 'user-a',
-        id: 'space-1',
-        name: 'Spain houses',
-        purpose: 'Track candidate houses in Spain.',
-        status: 'active',
-        body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |\n\nMore notes.',
-        revision: 1,
-        created_at: '2026-09-13T00:00:00.000Z',
-        updated_at: '2026-09-13T00:00:00.000Z',
-      },
-      aggregate_revision: 1,
-    });
+  it('create_space refuses a body given as an array of lines: body is one string', async () => {
+    const createSpace = jest.fn();
     const capability = spaceCapability({
       store: makeStore({ createSpace }),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -404,7 +391,7 @@ describe('space capability', () => {
       throw new Error('expected space tool set');
     }
 
-    await toolSet.callTool({
+    const response = await toolSet.callTool({
       name: CREATE_SPACE_TOOL_NAME,
       arguments: {
         name: 'Spain houses',
@@ -415,11 +402,14 @@ describe('space capability', () => {
       },
     });
 
-    expect(createSpace).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |\n\nMore notes.',
-      }),
-    );
+    if (!('result' in response)) {
+      throw new Error('expected space tool result');
+    }
+    expect(response.result.isError).toBe(true);
+    expect(resultText(response)).toContain('Invalid space call');
+    expect(resultText(response)).toContain('body');
+    expect(resultText(response)).toContain('Fix the listed fields and send the call again.');
+    expect(createSpace).not.toHaveBeenCalled();
   });
 
   it('update_space leaves a body given as a string unchanged', async () => {
@@ -513,11 +503,13 @@ describe('space capability', () => {
     expect(text).not.toContain('created_by');
     expect(text).not.toContain('default');
     expect(text).not.toContain('user-a');
+    expect(text).not.toContain('"id"');
+    expect(text).not.toContain('(id:');
     expect(JSON.parse(text)).toEqual({
-      summary: 'Created space "Spain houses" (id: space-1, revision 1).',
+      summary: 'Created space "Spain houses" (revision 1).',
       space: {
-        id: 'space-1',
         name: 'Spain houses',
+        link: '/spaces/space-1',
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
         body: 'Body text.',
@@ -677,7 +669,9 @@ describe('space capability', () => {
     }
     expect(response.result.isError).toBe(true);
     expect(JSON.parse(resultText(response))).toEqual({
-      error: 'Stale space aggregate revision',
+      error:
+        'Stale space aggregate revision. Call list_spaces to read the current aggregate_revision, ' +
+        'then send the call again with expected_aggregate_revision set to the aggregate_revision in this result.',
       aggregate_revision: 5,
     });
   });
@@ -704,7 +698,9 @@ describe('space capability', () => {
     }
     expect(response.result.isError).toBe(true);
     expect(JSON.parse(resultText(response))).toEqual({
-      error: 'Stale space revision: space-1',
+      error:
+        'Stale space revision: space-1. Call get_space to read the current revision, then send the call ' +
+        'again with expected_revision set to the revision in this result.',
       revision: 4,
     });
   });
@@ -859,7 +855,9 @@ describe('space capability', () => {
     }
     expect(response.result.isError).toBe(true);
     expect(JSON.parse(resultText(response))).toEqual({
-      error: 'Stale space revision: space-1',
+      error:
+        'Stale space revision: space-1. Call get_space to read the current revision, then send the call ' +
+        'again with expected_revision set to the revision in this result.',
       revision: 21,
     });
   });
@@ -965,7 +963,8 @@ describe('space tool model-facing schemas', () => {
     // space_id or space_name: one of the two is required, which the schema refine enforces.
     [GET_SPACE_TOOL_NAME, []],
     [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [UPDATE_SPACE_TOOL_NAME, []],
+    [UPDATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
+    [EDIT_SPACE_TOOL_NAME, ['edits']],
     [REVERT_SPACE_TOOL_NAME, ['revision', 'space_id']],
     [LIST_BLOCKS_TOOL_NAME, ['space_id']],
   ])('%s keeps the required fields the model must send', async (name, required) => {
@@ -973,10 +972,19 @@ describe('space tool model-facing schemas', () => {
     expect([...(tools.get(name)?.required ?? [])].sort()).toEqual(required);
   });
 
-  it('update_space still offers all three ways to change a body', async () => {
+  it('update_space offers only the full body, and edit_space offers the one edits list', async () => {
     const tools = await listedSpaceTools();
-    expect(tools.get(UPDATE_SPACE_TOOL_NAME)?.properties).toEqual(
-      expect.arrayContaining(['body', 'edits', 'block_edits', 'confirm_shrink', 'expected_revision']),
+    const updateProperties = tools.get(UPDATE_SPACE_TOOL_NAME)?.properties ?? [];
+    expect(updateProperties).toEqual(
+      expect.arrayContaining(['body', 'name', 'purpose', 'status', 'confirm_shrink', 'expected_revision']),
     );
+    expect(updateProperties).not.toContain('edits');
+    expect(updateProperties).not.toContain('block_edits');
+    const editProperties = tools.get(EDIT_SPACE_TOOL_NAME)?.properties ?? [];
+    expect(editProperties).toEqual(
+      expect.arrayContaining(['edits', 'confirm_shrink', 'expected_revision', 'space_id', 'space_name']),
+    );
+    expect(editProperties).not.toContain('body');
+    expect(editProperties).not.toContain('block_edits');
   });
 });

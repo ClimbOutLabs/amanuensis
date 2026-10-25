@@ -41,7 +41,10 @@ export function heldActionsNote(waiting: readonly string[]): string {
   const lines = waiting.map(sentence => sentence.trim().replace(/\.$/, ''));
   const [first = '', ...rest] = lines;
   if (rest.length === 0) {
-    return `I need your OK for one thing: ${first}. Approve it on your Needs your OK list and I'll add it here.`;
+    // A card sentence that already ends with a question mark keeps it; other
+    // sentences get the stop the line needs before the next sentence.
+    const firstWithStop = first.endsWith('?') ? first : `${first}.`;
+    return `I need your OK for one thing: ${firstWithStop} Approve it on your Needs your OK list and I'll add it here.`;
   }
   return [
     `I need your OK for ${String(lines.length)} things:`,

@@ -21,6 +21,13 @@ import { MEMORY_PAGE_SIZE, type MemoryVaultState } from './useMemoryVaultState.j
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
+/** The one line shown for a collection whose latest summary failed; a persona's collection names its persona. */
+export function summaryPendingLine(persona: string | null): string {
+  return persona === null
+    ? "Couldn't make a summary of the latest chat. A later chat will make a new summary."
+    : `Couldn't make a summary of the latest chat with ${persona}. A later chat with ${persona} will make a new summary.`;
+}
+
 /** The undo bar: forgotten memories wait here for the undo window before the server call. */
 function ForgetUndoBar({ state }: { state: MemoryVaultState }) {
   return (
@@ -292,6 +299,18 @@ export function MemoryVaultFactsPanel({
           {state.actionError}
         </p>
       ) : null}
+      {state.loadWarning !== null ? (
+        <p role="alert" className="text-sm text-error-text">
+          {state.loadWarning}
+        </p>
+      ) : null}
+      {state.error === null && !state.loading
+        ? state.summaryPending.map(pending => (
+            <div key={pending.namespace} className="rounded-xl border border-border bg-card-bg p-4">
+              <p className="text-sm text-text-primary">{summaryPendingLine(pending.persona)}</p>
+            </div>
+          ))
+        : null}
       {body}
       <ManageCollections state={state} />
     </div>

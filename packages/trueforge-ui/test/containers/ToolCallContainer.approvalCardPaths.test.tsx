@@ -195,17 +195,17 @@ function expectNoRawRequest() {
 /** The new generic ticket, waiting, with buttons a person can press. */
 async function expectStandInTicket(title: string) {
   expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Allow it' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
   expectNoOldCard();
   expectNoRawRequest();
 }
 
-/** The new mail card for a draft. */
+/** The new mail card for a draft: the uniform Allow verb, never the old Save draft verb. */
 async function expectDraftCard() {
-  expect(await screen.findByRole('button', { name: 'Save draft' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: "Don't save" })).toBeEnabled();
-  expect(screen.queryByRole('button', { name: 'Allow it' })).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Allow' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
   expectNoOldCard();
   expectNoRawRequest();
 }
@@ -297,7 +297,7 @@ describe('every waiting approval uses the new card family', () => {
   it('a helper agent step with its server card can be answered, and the answer goes to the helper call', async () => {
     renderChat({ message: subAgentMessage('direct'), saved: [draftInfo('nested-draft', 'helper-thread')] });
     await expectDraftCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'nested-draft', approved: true, optionId: 'allow-once' }),
     );
@@ -339,7 +339,7 @@ describe('every waiting approval uses the new card family', () => {
       onRespondToToolApproval,
     });
     await expectStandInTicket('Allow the assistant to use "draft email"?');
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'call-draft', approved: true, optionId: 'allow-once' }),
     );

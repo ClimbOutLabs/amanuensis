@@ -157,7 +157,7 @@ describe('create_persona', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add a persona: Travel planner. Plans trips in detail, with a day-by-day route.',
+      'Add a persona: Travel planner? Plans trips in detail, with a day-by-day route.',
     );
     // The card shows the exact text that would be saved, so the person reads what will shape later answers.
     expect(info.tier3_card?.persona).toEqual({

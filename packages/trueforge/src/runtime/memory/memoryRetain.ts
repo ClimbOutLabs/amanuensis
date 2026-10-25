@@ -174,6 +174,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
         turnId: params.turnId,
         summaryLength: result.summary.length,
       });
+      await recordSummaryOutcome(params, { outcome: 'summarized' });
       return result.summary;
     }
     if (result.status === 'failed') {
@@ -181,6 +182,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
         reason: result.reason,
       });
       logFullTextFallback(params, result.fallback);
+      await recordSummaryOutcome(params, { outcome: 'failed', reason: result.fallback });
     } else {
       // `skipped` is an intentional no-op, but the reason must stay observable: a turn
       // that never summarizes (no model configured, overlong exchange) is otherwise
@@ -199,7 +201,29 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       reason: error instanceof Error ? error.message : String(error),
     });
     logFullTextFallback(params, 'model_failed');
+    await recordSummaryOutcome(params, { outcome: 'failed', reason: 'model_failed' });
     return undefined;
+  }
+}
+
+/**
+ * Notes a summary attempt's outcome on the client when it tracks summary state, so a
+ * failed summary stays visible on the Memories page until a later summary succeeds.
+ * A deliberate skip (an overlong or empty exchange keeps its full text by design) is
+ * not a failure and never reaches this helper. Never throws.
+ */
+async function recordSummaryOutcome(
+  params: SubmitRetainParams,
+  note: { outcome: 'summarized' | 'failed'; reason?: SummaryFallbackReason | undefined },
+): Promise<void> {
+  try {
+    await params.client.noteSummaryOutcome?.(note);
+  } catch (error) {
+    params.logger.debug('Recording the turn summary outcome failed', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

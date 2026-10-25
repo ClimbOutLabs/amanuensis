@@ -448,7 +448,7 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, SentinelAction } from './permissions/classifier';
+export type { ClassifyContext, ReminderLine, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,

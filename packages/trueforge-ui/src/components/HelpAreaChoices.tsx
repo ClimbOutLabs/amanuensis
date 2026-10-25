@@ -2,13 +2,21 @@
 
 import type { FC } from 'react';
 
-import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
-import { HOME_HELP_AREA_IDS, HOME_TOPICS } from './tourPrompts.js';
+import { HELP_AREA_TOPIC, HOME_TOPIC_IDS, HOME_TOPICS, type HomeTopicId } from './tourPrompts.js';
 
-/** Adds an area at the end when it is not chosen yet, and removes it when it is; the list keeps the order chosen. */
-export function toggleHelpArea(current: readonly HelpAreaId[], id: HelpAreaId): HelpAreaId[] {
-  return current.includes(id) ? current.filter(item => item !== id) : [...current, id];
+/** The pills that a saved help area leads to, in the order the home shows them. */
+const CHOICE_TOPIC_IDS = HOME_TOPIC_IDS.filter(topic => HELP_AREA_IDS.some(id => HELP_AREA_TOPIC[id] === topic));
+
+/**
+ * Turns a pill on by adding its first help area at the end, and off by removing every area that leads to it,
+ * so two areas on one pill never leave it half on. The list keeps the order chosen.
+ */
+export function toggleHelpAreaTopic(current: readonly HelpAreaId[], topic: HomeTopicId): HelpAreaId[] {
+  if (current.some(id => HELP_AREA_TOPIC[id] === topic)) return current.filter(id => HELP_AREA_TOPIC[id] !== topic);
+  const first = HELP_AREA_IDS.find(id => HELP_AREA_TOPIC[id] === topic);
+  return first === undefined ? [...current] : [...current, first];
 }
 
 /** "What would help you most?": the Tour's card choice, shared by the setup card and Settings. */
@@ -24,20 +32,20 @@ export const HelpAreaChoices: FC<{
       Pick any, and change them any time. They show as pills on the home.
     </p>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {HOME_HELP_AREA_IDS.map(id => (
+      {CHOICE_TOPIC_IDS.map(topic => (
         <label
-          key={id}
+          key={topic}
           className="flex items-start gap-2 rounded-lg border border-border/70 bg-secondary-bg px-3 py-2 text-sm text-text-primary"
         >
           <input
-            id={`${idPrefix}-${id}`}
+            id={`${idPrefix}-${topic}`}
             type="checkbox"
             className="mt-0.5"
-            checked={value.includes(id)}
+            checked={value.some(id => HELP_AREA_TOPIC[id] === topic)}
             disabled={disabled}
-            onChange={() => onChange(toggleHelpArea(value, id))}
+            onChange={() => onChange(toggleHelpAreaTopic(value, topic))}
           />
-          <span>{HOME_TOPICS[id].label}</span>
+          <span>{HOME_TOPICS[topic].label}</span>
         </label>
       ))}
     </div>

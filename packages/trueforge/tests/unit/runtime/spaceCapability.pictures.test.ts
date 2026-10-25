@@ -14,6 +14,7 @@ import {
 import { recordToolResultProvenance } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import {
   CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
@@ -156,7 +157,7 @@ function setup(webSearch: WebSearchTurnState, store: SpaceToolStore = makeStore(
   return (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
 }
 
-function createArgs(body: string | string[]) {
+function createArgs(body: string) {
   return { name: 'Dog breeds', purpose: 'Dog breeds with pictures.', status: 'active', format: 'markdown', body };
 }
 
@@ -273,28 +274,18 @@ describe('space pictures and links come only from this chat', () => {
     // Turn one: the search ran, and the skeleton used its picture.
     const turnOne = createWebSearchTurnState();
     recordSearchResults({ provenance: turnOne.provenance, texts: [searchResult([COLLIE_URL])] });
-    const created = fieldObject(
-      parsedObject(
-        textOf(
-          await setup(turnOne, store)(CREATE_SPACE_TOOL_NAME, {
-            ...createArgs(
-              [
-                '# Dog breeds',
-                '<!-- @block:one -->',
-                `![Collie](${COLLIE_URL})`,
-                '<!-- @block:two -->',
-                '(to fill)',
-              ].join('\n'),
-            ),
-          }),
+    const createdResponse = await setup(turnOne, store)(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs(
+        ['# Dog breeds', '<!-- @block:one -->', `![Collie](${COLLIE_URL})`, '<!-- @block:two -->', '(to fill)'].join(
+          '\n',
         ),
       ),
-      'space',
-    );
+    });
+    expect(isErrorResponse(createdResponse)).toBe(false);
     // Turn two: no search ran, so the old picture is not in this turn's results. A text edit still goes through.
-    const updated = await setup(createWebSearchTurnState(), store)(UPDATE_SPACE_TOOL_NAME, {
-      space_id: stringField(created, 'id'),
-      block_edits: [{ anchor: 'two', new_content: 'Border Collie, rank 1.' }],
+    const updated = await setup(createWebSearchTurnState(), store)(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      edits: [{ type: 'block', anchor: 'two', new_content: 'Border Collie, rank 1.' }],
     });
     expect(textOf(updated)).toContain('Updated space \\"Dog breeds\\"');
   });
@@ -302,15 +293,13 @@ describe('space pictures and links come only from this chat', () => {
   it('refuses a block edit that adds an invented picture to a space', async () => {
     const webSearch = createWebSearchTurnState();
     const call = setup(webSearch);
-    const created = fieldObject(
-      parsedObject(
-        textOf(await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\n<!-- @block:one -->\n(to fill)') })),
-      ),
-      'space',
-    );
-    const response = await call(UPDATE_SPACE_TOOL_NAME, {
-      space_id: stringField(created, 'id'),
-      block_edits: [{ anchor: 'one', new_content: '![Collie](https://cdn.example.net/collie.jpg)' }],
+    const createdResponse = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs('# Dog breeds\n<!-- @block:one -->\n(to fill)'),
+    });
+    expect(isErrorResponse(createdResponse)).toBe(false);
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      edits: [{ type: 'block', anchor: 'one', new_content: '![Collie](https://cdn.example.net/collie.jpg)' }],
     });
     expect(await errorOf(response)).toContain('placeholder domain');
   });
@@ -343,11 +332,13 @@ describe('scripted run: dog breeds with pictures', () => {
       ),
     );
     const createdSpace = fieldObject(created, 'space');
-    expect(stringField(created, 'summary')).toMatch(/^Created space "Dog breeds" \(id: [0-9a-z]+, revision 1\)\.$/);
+    expect(stringField(created, 'summary')).toBe('Created space "Dog breeds" (revision 1).');
+    expect(stringField(createdSpace, 'link')).toMatch(/^\/spaces\/[^/]+$/);
+    expect('id' in createdSpace).toBe(false);
     expect(stringField(createdSpace, 'body')).toContain(COLLIE_URL);
     expect(stringField(createdSpace, 'body')).toContain(POODLE_URL);
 
-    // Step 3: read it back by name, the way a model does after losing the id.
+    // Step 3: read it back by name, the way a model addresses a space now.
     const read = fieldObject(
       parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
       'space',
@@ -394,22 +385,36 @@ describe('page reads, scripts, and empty bodies', () => {
 
   it('refuses an empty create body instead of saving an empty space', async () => {
     const call = setup(createWebSearchTurnState());
-    for (const body of ['', '   ', []]) {
+    for (const body of ['', '   ']) {
       const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(body) });
       expect(await errorOf(response)).toContain('The space body is empty');
       expect(isErrorResponse(response)).toBe(true);
     }
   });
 
+  it('refuses an array body, since the contract takes one string body only', async () => {
+    const call = setup(createWebSearchTurnState());
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Dog breeds',
+      purpose: 'Dog breeds with pictures.',
+      status: 'active',
+      format: 'markdown',
+      body: ['# Dog breeds', 'A line.'],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    const error = await errorOf(response);
+    expect(error).toContain('Invalid space call');
+    expect(error).toContain('body');
+    expect(error).toContain('Fix the listed fields and send the call again.');
+  });
+
   it('refuses an empty full-body update instead of wiping the space', async () => {
     const store = makeStore();
     const call = setup(createWebSearchTurnState(), store);
-    const created = fieldObject(
-      parsedObject(textOf(await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\nSome content here.') }))),
-      'space',
-    );
+    const createdResponse = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\nSome content here.') });
+    expect(isErrorResponse(createdResponse)).toBe(false);
     const response = await call(UPDATE_SPACE_TOOL_NAME, {
-      space_id: stringField(created, 'id'),
+      space_name: 'Dog breeds',
       name: 'Dog breeds',
       purpose: 'Dog breeds with pictures.',
       status: 'active',
@@ -418,7 +423,7 @@ describe('page reads, scripts, and empty bodies', () => {
     });
     expect(await errorOf(response)).toContain('The space body is empty');
     const read = fieldObject(
-      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_id: stringField(created, 'id') }))),
+      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
       'space',
     );
     expect(stringField(read, 'body')).toBe('# Dog breeds\nSome content here.');
@@ -435,6 +440,7 @@ describe('page reads, scripts, and empty bodies', () => {
     const error = await errorOf(response);
     expect(error).toContain('Invalid space call');
     expect(error).toContain('body');
+    expect(error).toContain('Fix the listed fields and send the call again.');
     expect(error).not.toBe('Validation failed');
   });
 

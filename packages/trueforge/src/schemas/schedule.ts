@@ -72,21 +72,37 @@ export const ScheduleTaskSchema = z
   .min(1)
   .describe('First user message sent to the agent on every run.');
 
-export const ScheduleStatusSchema = z.enum(['active', 'paused']).openapi('ScheduleStatus');
+/** `done`: a one-time schedule that has run and will never run again. */
+export const ScheduleStatusSchema = z.enum(['active', 'paused', 'done']).openapi('ScheduleStatus');
+
+/** `reminder`: the host writes the text into the Reminders chat itself, with no model call. */
+export const ScheduleKindSchema = z.enum(['task', 'reminder']).openapi('ScheduleKind');
+
+export const RunAtSchema = z.iso
+  .datetime({ offset: true })
+  .describe('The single time a one-time schedule runs: ISO 8601 with a UTC offset, like 2026-10-26T18:00:00-04:00.')
+  .openapi('RunAt');
 
 /**
- * Schedule document persisted as `schedule.manifest`.
+ * Schedule document persisted as `schedule.manifest`. Exactly one of `cron` and `run_at` is set. The two kinds
+ * share no literal discriminator (rows saved before `run_at` existed carry only `cron`), so this is one object
+ * with an either-or check rather than a discriminated union.
  */
 export const ScheduleManifestObjectSchema = z
   .object({
     task: ScheduleTaskSchema,
-    cron: CronExpressionSchema,
+    cron: CronExpressionSchema.nullable().default(null),
+    run_at: RunAtSchema.nullable().default(null),
     timezone: TimezoneSchema.default('UTC'),
     status: ScheduleStatusSchema.default('active'),
+    kind: ScheduleKindSchema.default('task'),
   })
   .strict();
 
-export const ScheduleManifestSchema = ScheduleManifestObjectSchema.openapi('ScheduleManifest');
+export const ScheduleManifestSchema = ScheduleManifestObjectSchema.refine(
+  manifest => (manifest.cron === null) !== (manifest.run_at === null),
+  { message: 'set either cron (repeats) or run_at (runs once), not both and not neither' },
+).openapi('ScheduleManifest');
 
 /** List/get/create/update response item. */
 export const ScheduleSchema = z
@@ -183,6 +199,7 @@ export const ExecuteScheduleRunRequestSchema = z
   .strict()
   .openapi('ExecuteScheduleRunRequest');
 
+export type ScheduleKind = z.infer<typeof ScheduleKindSchema>;
 export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>;
 export type ScheduleManifest = z.infer<typeof ScheduleManifestSchema>;

@@ -19,6 +19,11 @@ const MemoryVaultSharingSchema = z.object({
 export type MemoryVaultEntry = z.infer<typeof MemoryVaultEntrySchema>;
 export type MemoryVaultSharing = z.infer<typeof MemoryVaultSharingSchema>;
 
+/** Whether a vault is still owed a turn summary after a failed attempt. */
+export type MemoryVaultSummaryStatus = {
+  summaryPending: boolean;
+};
+
 /** Wire namespace of a persona's own vault. */
 export function personaVaultNamespace(displayName: string): string {
   return `persona:${displayName}`;
@@ -26,6 +31,7 @@ export function personaVaultNamespace(displayName: string): string {
 
 export interface MemoryVaultCatalog {
   listEntries(namespace?: string): Promise<MemoryVaultEntry[]>;
+  getSummaryStatus(namespace?: string): Promise<MemoryVaultSummaryStatus>;
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
   deleteEntry(entryId: string): Promise<void>;
   exportEntries(namespace?: string): Promise<{ namespace: string; exportedAt: string; entries: MemoryVaultEntry[] }>;
@@ -106,6 +112,22 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
   return {
     listEntries: namespace =>
       request('GET', `/api/v1/memory/vault${namespaceQuery(namespace)}`, undefined, parseEntries),
+    getSummaryStatus: async namespace => {
+      const parsed = z
+        .object({ data: z.object({ summary_pending: z.boolean() }) })
+        .safeParse(
+          await request(
+            'GET',
+            `/api/v1/memory/vault/summary-status${namespaceQuery(namespace)}`,
+            undefined,
+            value => value,
+          ),
+        );
+      if (!parsed.success) {
+        throw new Error('The server returned an unexpected memory payload');
+      }
+      return { summaryPending: parsed.data.data.summary_pending };
+    },
     updateEntry: ({ entryId, text }) =>
       request('PUT', `/api/v1/memory/vault/${encodeURIComponent(entryId)}`, { text }, parseEntry),
     deleteEntry: entryId =>

@@ -225,7 +225,7 @@ export class ScheduleNameConflictError extends Error {
 }
 
 /**
- * Pending run is replaced only when `status`, `cron`, or `timezone` change.
+ * Pending run is replaced only when `status`, `cron`, `run_at`, or `timezone` change.
  * `name` and `task` edits leave the pending row alone.
  */
 export function shouldSyncPendingRun(
@@ -235,6 +235,7 @@ export function shouldSyncPendingRun(
   return (
     previous.status !== next.status ||
     previous.manifest.cron !== next.manifest.cron ||
+    previous.manifest.run_at !== next.manifest.run_at ||
     previous.manifest.timezone !== next.manifest.timezone
   );
 }

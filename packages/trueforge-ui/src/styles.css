@@ -104,6 +104,8 @@
     --gold-soft: oklch(0.955 0.048 93);
     --gold-line: #c9a95a;
     --gold-line: oklch(0.747 0.105 87.7);
+    /* The lift under raised shell surfaces: the main column and the left rail. */
+    --shadow-raise: 0 0 1.125rem rgba(44, 42, 38, 0.08);
     /* The panda's frame, sampled from aman-avatar.png: parchment and wood in light. */
     --panda-glow-from: #e5c7a1;
     --panda-glow-from: oklch(0.846 0.061 73.2);
@@ -193,6 +195,8 @@
     --gold-soft: oklch(0.328 0.044 91.4);
     --gold-line: #8a6a2a;
     --gold-line: oklch(0.544 0.091 81.9);
+    /* The lift under raised shell surfaces: the main column and the left rail. */
+    --shadow-raise: 0 0 1.125rem rgba(0, 0, 0, 0.28);
     /* The panda's frame, sampled from aman-avatar.png: the wall's glow and its deep brown in dark. */
     --panda-glow-from: #824b25;
     --panda-glow-from: oklch(0.469 0.091 53);
@@ -326,7 +330,8 @@
   width: 17.5rem;
   flex-direction: column;
   gap: 0.75rem;
-  border-left: 0.0625rem solid var(--border);
+  position: relative;
+  z-index: 1;
   background: var(--sidebar-bg);
   padding: 0.875rem 1rem;
   color: var(--text-primary);
@@ -597,6 +602,17 @@
   margin: 0;
 }
 
+/* The live wait line in the Activity row: it comes from the chat, not the receipt, so it sits
+ * above the history and never counts as an entry. */
+.aman-runtime-rail__waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
 /* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
 ::placeholder {
   color: var(--text-muted);
@@ -649,6 +665,7 @@
   --color-sidebar-bg: var(--sidebar-bg);
   --color-topbar-bg: var(--topbar-bg);
   --color-primary-bg: var(--primary-bg);
+  --color-paper: var(--paper);
   --color-secondary-bg: var(--secondary-bg);
   --color-border: var(--border);
   --color-input-box-bg: var(--input-box-bg);
@@ -1572,6 +1589,20 @@
 /* Home greeting: the first name carries a hand-drawn stroke. Fraunces is not bundled, so the serif is Newsreader. */
 .aui-face-serif {
   font-family: var(--font-serif);
+}
+
+/* The new-chat home is one 40rem column: greeting, composer, pills, label and cards share both edges. */
+[data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+  max-width: 40rem;
+  padding-inline: 0;
+  gap: 1.25rem;
+}
+
+@media (max-width: 42rem) {
+  [data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+    max-width: 100%;
+    padding-inline: 1rem;
+  }
 }
 
 .aui-name-underline {

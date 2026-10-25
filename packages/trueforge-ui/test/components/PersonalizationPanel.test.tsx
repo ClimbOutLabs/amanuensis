@@ -212,16 +212,16 @@ describe('PersonalizationPanel', () => {
     );
 
     await screen.findByDisplayValue('Mira');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'New to a country' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Family and home' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I just moved here' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Someone I look after' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
     await waitFor(() =>
       expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({ help_areas: ['new_country', 'family'] })),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
-    expect(screen.getByRole('checkbox', { name: 'New to a country' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Family and home' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'I just moved here' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Someone I look after' })).toBeChecked();
   });
 
   it('persists the learning switch through the ordinary save flow', async () => {

@@ -44,11 +44,10 @@ const ALLOWED_FONT_SIZES = new Set(['28px', '17px', '15px', '14px', '13px', '12p
 
 /** What each home state shows: the setup ticket's count, and the first-run lines around it. */
 const EXPECTED = {
-  fresh: { ticket: '0 of 3 done', firstRun: true, productivityDot: false },
-  half: { ticket: '1 of 3 done', firstRun: true, productivityDot: false },
-  done: { ticket: null, firstRun: false, productivityDot: false },
-  brief: { ticket: null, firstRun: false, productivityDot: true },
-  skipped: { ticket: null, firstRun: false, productivityDot: false },
+  fresh: { ticket: '0 of 3 done', firstRun: true },
+  half: { ticket: '1 of 3 done', firstRun: true },
+  done: { ticket: null, firstRun: false },
+  skipped: { ticket: null, firstRun: false },
 } as const;
 
 async function screenshotDir(): Promise<string> {
@@ -63,8 +62,8 @@ async function screenshotDir(): Promise<string> {
 async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   const expected = EXPECTED[state];
   assert.match(await page.getByRole('heading', { level: 1, name: GREETING }).innerText(), GREETING);
-  assert.equal(await page.getByRole('list', { name: 'What would help you most?' }).getByRole('button').count(), 3);
-  assert.equal(await page.getByRole('button', { name: /^Some things|Draft a reply/ }).count(), 1);
+  assert.equal(await page.getByRole('list', { name: 'What would help you most?' }).getByRole('button').count(), 7);
+  assert.equal(await page.getByRole('button', { name: /^Some things|Everything's in my head/ }).count(), 1);
   const ticket = page.getByTestId('aman-setup-ticket');
   if (expected.ticket === null) {
     assert.equal(await ticket.count(), 0, `${state} shows no setup ticket`);
@@ -76,8 +75,6 @@ async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   assert.equal(firstRunLine, expected.firstRun ? 1 : 0, `${state} first-run prompt line`);
   const skip = await page.getByRole('button', { name: 'Skip the tour' }).count();
   assert.equal(skip, expected.firstRun ? 1 : 0, `${state} Skip shows only on a first run`);
-  const productivityDot = await page.getByRole('button', { name: 'Productivity' }).locator('.bg-gold').count();
-  assert.equal(productivityDot === 1, expected.productivityDot, `${state} Productivity gold dot`);
 }
 
 async function checkSizes(page: Page) {
@@ -140,7 +137,7 @@ test('home screens render in light and dark at desktop and phone width', { timeo
           await page.screenshot({ path: join(outDir, `${state}-${viewport.name}-${theme}.png`), fullPage: true });
         };
 
-        for (const state of ['fresh', 'half', 'done', 'brief', 'skipped'] as const) {
+        for (const state of ['fresh', 'half', 'done', 'skipped'] as const) {
           await open(state);
           await checkHome(page, state);
           await checkSizes(page);
@@ -155,7 +152,7 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         // The real shell: the top bar, the home and the composer share one screen with no page scroll.
         await open('shell');
         await page
-          .getByRole('button', { name: /Draft a reply/ })
+          .getByRole('button', { name: /Everything's in my head/ })
           .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         await shoot('shell');
         assert.ok(
@@ -187,14 +184,16 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         );
 
         // A pill swaps the cards and sends nothing; pressing it again brings the general cards back.
-        const family = page.getByRole('button', { name: 'Family and home' });
+        const family = page.getByRole('button', { name: 'Someone I look after' });
         await family.click();
         assert.equal(await family.getAttribute('aria-pressed'), 'true');
-        await page.getByRole('button', { name: /Plan this week's meals/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page
+          .getByRole('button', { name: /Keep their care in one place/ })
+          .waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.equal(await page.locator('[data-role="user"]').count(), 0, 'choosing a pill sends nothing');
         await shoot('shell-pill');
         await family.click();
-        await page.getByRole('button', { name: /Draft a reply/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByRole('button', { name: /Everything's in my head/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await context.close();
     }

@@ -116,3 +116,18 @@ export const UpdateMemoryVaultSharingRequestSchema = z
     shares: z.record(z.string(), z.array(z.string())),
   })
   .openapi('UpdateMemoryVaultSharingRequest');
+
+/** Whether one vault namespace is still owed a turn summary after a failed attempt. */
+export const MemoryVaultSummaryStatusSchema = z
+  .object({
+    summary_pending: z
+      .boolean()
+      .describe('True when the newest turn summary for this vault failed and has not been made yet.'),
+  })
+  .openapi('MemoryVaultSummaryStatus');
+
+export const GetMemoryVaultSummaryStatusResponseSchema = z
+  .object({
+    data: MemoryVaultSummaryStatusSchema,
+  })
+  .openapi('GetMemoryVaultSummaryStatusResponse');

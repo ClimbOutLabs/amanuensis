@@ -385,6 +385,8 @@ function createTurnResolver(deps: {
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
+  /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
+  unattended?: boolean | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
@@ -845,8 +847,8 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
-      // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
-      recallEnabled: undefined,
+      // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
+      recallEnabled: deps.unattended ? false : undefined,
       internalSourceState,
     },
     {
@@ -1620,6 +1622,7 @@ async function beginAcceptedTurnExecution(
         memoryClient: deps.memoryClient,
         memoryProviderServerName: deps.memoryProviderServerName,
         memorySettings: effectiveMemorySettings,
+        unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         sessionTitle: deps.sessionTitle,
         clientTimezone: deps.clientTimezone,

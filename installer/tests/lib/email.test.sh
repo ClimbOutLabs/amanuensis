@@ -18,7 +18,9 @@ zoho imap.zoho.com 993 true smtp.zoho.com 465 true
 gmx imap.gmx.net 993 true mail.gmx.net 465 true
 webde imap.web.de 993 true smtp.web.de 587 false'
 
-env_mail() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env.mail-email" | head -n 1; }
+# The account as the connector's account agent saved it, in the named volume the stub models for the
+# instance's compose project. Tests read the volume, never a host file: the installer writes no host file.
+env_mail() { sed -n "s/^$2=//p" "$STUB_STATE/mail-account-aman-$1" | head -n 1; }
 
 mail_link_lines() { grep -c '^MAIL_EMAIL_MCP_URL=' "$AMAN_HOME/instances/main/.env" || true; }
 
@@ -41,13 +43,22 @@ mail_run() {
   clear_input
 }
 
-# The app password may appear only in the account file of the instance: not in any other file, the log or the output.
+# The app password may appear only in the connector's volume for the instance: not in any other file, the log or the output.
 assert_secret_only_in_account_file() {
   local found
-  found=$(grep -rIl -- "$EMAIL_PW" "$AMAN_HOME" "$SB/stub.log" "$SB/out" "$SB/err" 2>/dev/null | sort | tr '\n' ' ' || true)
-  assert_eq "$found" "$AMAN_HOME/instances/main/.env.mail-email " "files holding the app password"
+  found=$(grep -rIl -- "$EMAIL_PW" "$AMAN_HOME" "$SB/stub.log" "$SB/out" "$SB/err" "$STUB_STATE/mail-account-aman-main" 2>/dev/null | sort | tr '\n' ' ' || true)
+  assert_eq "$found" "$STUB_STATE/mail-account-aman-main " "files holding the app password"
   assert_not_contains "$OUT" "$EMAIL_PW" "stdout"
   assert_not_contains "$ERR" "$EMAIL_PW" "stderr"
+}
+
+# No account is saved: the connector's volume file is absent, or present and empty of any account.
+# An empty volume file is the no-account state.
+assert_no_mail_account() {
+  local file="$STUB_STATE/mail-account-aman-main"
+  if [ -f "$file" ]; then
+    assert_not_contains "$(cat "$file")" "MCP_EMAIL_SERVER_EMAIL_ADDRESS" "no account is saved"
+  fi
 }
 
 test_presets_write_their_servers() {
@@ -70,7 +81,7 @@ test_presets_write_their_servers() {
     assert_eq "$(env_mail main MCP_EMAIL_SERVER_IMAP_VERIFY_SSL)" true "$slug incoming certificate check"
     assert_eq "$(env_mail main MCP_EMAIL_SERVER_SMTP_VERIFY_SSL)" true "$slug outgoing certificate check"
   done <<<"$PRESET_TABLE"
-  assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
+  assert_file "$STUB_STATE/mail-account-aman-main"
   run_install instance email main --email-provider proton --email-address person@example.invalid
   assert_rc 2
   assert_flat_contains "$ERR" "Type a number from 1 to 9" "Proton Mail Bridge is not offered"
@@ -148,7 +159,7 @@ test_outlook_families_are_skipped() {
     run_install instance email main --email-provider gmail --email-address "$address"
     assert_rc 0
     assert_flat_contains "$OUT$ERR" "Microsoft addresses, such as Outlook, Hotmail, Live and MSN, need a Microsoft sign-in" "$address"
-    assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+    assert_no_mail_account
   done
   sandbox_drop
 }
@@ -163,7 +174,7 @@ test_scripted_flags_with_piped_input() {
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_IMAP_HOST)" imap.gmail.com
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_SMTP_PORT)" 465
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_PASSWORD)" "'$EMAIL_PW'"
-  assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
+  assert_file "$STUB_STATE/mail-account-aman-main"
   assert_not_contains "$OUT" "Connect an email account" "the question is not asked with flags"
   assert_flat_contains "$OUT" "Signed in to imap.gmail.com as you@gmail.com"
   assert_eq "$(sed -n 5p "$SB_STATE/imap_stdin")" "$EMAIL_PW" "the password reached the sign-in check on stdin"
@@ -178,7 +189,7 @@ test_yes_without_email_flags_skips_the_step() {
   install_python_stub
   install_machine
   assert_rc 0
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   assert_not_contains "$OUT" "Connect an email account"
   sandbox_drop
 }
@@ -208,7 +219,7 @@ Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_SMTP_PORT)" 587
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_SMTP_SSL)" false
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_SMTP_START_SSL)" true
-  assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
+  assert_file "$STUB_STATE/mail-account-aman-main"
   assert_not_contains "$OUT" "$EMAIL_PW" "stdout"
   sandbox_drop
 }
@@ -229,10 +240,10 @@ test_instance_command_adds_changes_and_removes() {
   assert_eq "$(env_mail main MCP_EMAIL_SERVER_IMAP_HOST)" imap.fastmail.com "changed server"
   assert_eq "$(mail_link_lines)" 1 "still one connector line after a change"
   assert_log_has "mail-email"
-  assert_mode "$AMAN_HOME/instances/main/.env.mail-email" 600
+  assert_file "$STUB_STATE/mail-account-aman-main"
   run_install instance email main --remove
   assert_rc 0
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   assert_eq "$(mail_link_lines)" 0 "connector line gone after remove"
   assert_flat_contains "$OUT$ERR" "The Email connector is removed. Any saved app password has been deleted from this computer."
   sandbox_drop
@@ -248,7 +259,7 @@ test_sign_in_check_answers_are_plain() {
   assert_rc 0
   assert_flat_contains "$OUT$ERR" "imap.gmail.com did not accept this address and app password" "login refused"
   assert_flat_contains "$OUT$ERR" "install.sh instance email main" "next step"
-  assert_file "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_file "$STUB_STATE/mail-account-aman-main"
   printf 'server\n' >"$SB_STATE/imap_answer"
   mail_run --email-provider gmail --email-address a@gmail.com --email-password-stdin
   assert_flat_contains "$OUT$ERR" "Could not reach imap.gmail.com on port 993" "server unreachable"
@@ -257,7 +268,7 @@ test_sign_in_check_answers_are_plain() {
   mail_run --email-provider gmail --email-address a@gmail.com --email-password-stdin
   assert_rc 0
   assert_flat_contains "$OUT$ERR" "was not checked: python3 is not on this computer" "no python3"
-  assert_file "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_file "$STUB_STATE/mail-account-aman-main"
   sandbox_drop
 }
 
@@ -341,6 +352,11 @@ test_compose_runs_the_connector() {
   assert_contains "$service" "    cap_drop:
       - ALL" "the connector drops every capability"
   assert_contains "$service" "      - no-new-privileges:true" "the connector cannot gain privileges"
+  assert_contains "$service" "      - mail-account:/account" "the account lives in the connector's volume"
+  assert_not_contains "$service" "./.env.mail-email" "no host account file is bound"
+  assert_not_contains "$service" "env_file" "no host settings file is loaded into the connector"
+  assert_contains "$(cat "$compose")" "  mail-account:
+    name: aman_main_mail_account" "the account volume is declared"
   assert_not_contains "$(cat "$compose")" "@@"
   sandbox_drop
 }
@@ -374,7 +390,7 @@ test_instance_email_needs_the_connector_installed() {
   mail_run --email-provider gmail --email-address a@gmail.com --email-password-stdin
   assert_rc 1
   assert_flat_contains "$ERR" "has no email connector yet. Run install.sh upgrade first"
-  assert_no_path "$AMAN_HOME/instances/main/.env.mail-email"
+  assert_no_mail_account
   sandbox_drop
 }
 

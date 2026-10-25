@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
-import { GENERAL_CARDS } from '@/components/tourPrompts.js';
+import { CARDS, HOME_TOPICS, SHARED_RULES } from '@/components/tourPrompts.js';
 
 const noCapabilities = { email: false, calendar: false, sandbox: false, maps: true };
+const connected = { email: true, calendar: true, sandbox: false, maps: true };
 const morning = new Date(2026, 9, 23, 9, 0);
 
 function renderTour(overrides: Partial<AmanTourProps> = {}) {
@@ -13,9 +15,9 @@ function renderTour(overrides: Partial<AmanTourProps> = {}) {
     userName: 'Priya Shah',
     assistantName: 'Mannie',
     now: morning,
-    hasBrief: false,
     firstRun: false,
     setupTicket: <p>Setup ticket</p>,
+    onSend: vi.fn(),
     onFill: vi.fn(),
     canSend: true,
     ...overrides,
@@ -37,6 +39,12 @@ describe('greetingLine and greetingParts', () => {
   });
 });
 
+function cardTitles(): (string | null | undefined)[] {
+  return within(screen.getByRole('region', { name: /Some things .* can do/ }))
+    .getAllByRole('button')
+    .map(card => card.querySelector('[data-role="home-card-title"]')?.textContent);
+}
+
 describe('AmanTour home', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -51,56 +59,74 @@ describe('AmanTour home', () => {
     expect(container.querySelectorAll('.aui-name-underline')).toHaveLength(1);
   });
 
-  it('shows three pills, Productivity first, and the gold dot on Productivity once a brief exists', () => {
-    const { rerender, props } = renderTour({ hasBrief: false });
+  it('shows the seven pills in order, none pressed', () => {
+    renderTour();
     const pills = within(screen.getByRole('list', { name: 'What would help you most?' })).getAllByRole('button');
-    expect(pills.map(pill => pill.textContent)).toEqual(['Productivity', 'Family and home', 'New to a country']);
+    expect(pills.map(pill => pill.textContent)).toEqual([
+      "I'm behind",
+      "Something's coming up",
+      'I need to write something hard',
+      'Help me think',
+      'Someone I look after',
+      'Money',
+      'I just moved here',
+    ]);
     expect(pills.every(pill => pill.getAttribute('aria-pressed') === 'false')).toBe(true);
-    expect(pills[0]?.querySelector('.bg-gold')).toBeNull();
+  });
 
-    rerender(<AmanTour {...props} hasBrief />);
-    expect(screen.getByRole('button', { name: 'Productivity' }).querySelector('.bg-gold')).not.toBeNull();
+  it('shows the four expected default cards on a fresh install and when email and calendar are connected', () => {
+    const fresh = renderTour();
+    expect(cardTitles()).toEqual([CARDS.head.title, CARDS.start.title, CARDS.kindly.title, CARDS.dinner.title]);
+    fresh.unmount();
+
+    renderTour({ capabilities: connected });
+    expect(cardTitles()).toEqual([CARDS.brief.title, CARDS.today.title, CARDS.dropping.title, CARDS.head.title]);
   });
 
   it('uses the pills as tabs for the cards: choosing one swaps the cards and sends nothing', () => {
     const { props } = renderTour();
-    const cardTitles = () =>
-      within(screen.getByRole('region', { name: 'Some things Mannie can do' }))
-        .getAllByRole('button')
-        .map(card => card.querySelector('[data-role="home-card-title"]')?.textContent);
-    expect(cardTitles()).toEqual(GENERAL_CARDS.map(card => card.title));
+    const defaults = cardTitles();
 
-    const family = screen.getByRole('button', { name: 'Family and home' });
+    const family = screen.getByRole('button', { name: 'Someone I look after' });
     fireEvent.click(family);
     expect(family).toHaveAttribute('aria-pressed', 'true');
     expect(family).toHaveClass('bg-gold-soft');
-    expect(cardTitles()).toEqual([
-      "Plan this week's meals",
-      "Keep track of someone's care",
-      'Make a medicine schedule',
-      'Prepare for a care visit',
-    ]);
-    expect(screen.getByText('Medicines, appointments and questions, kept in one place by Mannie')).toBeInTheDocument();
-    expect(props.onFill).not.toHaveBeenCalled();
+    expect(cardTitles()).toEqual([CARDS.care.title, CARDS.meds.title, CARDS.chores.title, CARDS.hard_talk.title]);
+    expect(screen.getByText('Mannie helps you find the words')).toBeInTheDocument();
+    expect(props.onSend).not.toHaveBeenCalled();
 
-    // Pressing the chosen pill again goes back to the general set.
+    // Pressing the chosen pill again goes back to the default set.
     fireEvent.click(family);
     expect(family).toHaveAttribute('aria-pressed', 'false');
-    expect(cardTitles()).toEqual(GENERAL_CARDS.map(card => card.title));
+    expect(cardTitles()).toEqual(defaults);
   });
 
   it('keeps the chosen pill after a reload', () => {
     const first = renderTour();
-    fireEvent.click(screen.getByRole('button', { name: 'New to a country' }));
+    fireEvent.click(screen.getByRole('button', { name: 'I just moved here' }));
     first.unmount();
 
     renderTour();
-    expect(screen.getByRole('button', { name: 'New to a country' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /Explain a letter/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'I just moved here' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Explain this letter/ })).toBeInTheDocument();
   });
 
-  it('gives every topic four cards, each naming the assistant by its display name where it names one', () => {
-    renderTour({ assistantName: 'Juniper' });
+  it('reads a pill stored by an older version as no pill', () => {
+    for (const old of ['productivity', 'family', 'new_country']) {
+      localStorage.setItem('aman-home-topic', old);
+      const view = renderTour();
+      const pills = within(screen.getByRole('list', { name: 'What would help you most?' })).getAllByRole('button');
+      expect(
+        pills.every(pill => pill.getAttribute('aria-pressed') === 'false'),
+        old,
+      ).toBe(true);
+      expect(cardTitles()).toEqual([CARDS.head.title, CARDS.start.title, CARDS.kindly.title, CARDS.dinner.title]);
+      view.unmount();
+    }
+  });
+
+  it('gives every pill four cards, each naming the assistant by its display name where it names one', () => {
+    renderTour({ assistantName: 'Juniper', capabilities: connected });
     for (const pill of within(screen.getByRole('list', { name: 'What would help you most?' })).getAllByRole('button')) {
       fireEvent.click(pill);
       const cards = within(screen.getByRole('region', { name: 'Some things Juniper can do' })).getAllByRole('button');
@@ -111,16 +137,32 @@ describe('AmanTour home', () => {
     }
   });
 
-  it('fills the composer, without sending, from a card of the chosen topic', () => {
+  it('sends the card prompt with the shared rules under it, and fills nothing', () => {
     const { props } = renderTour();
 
     expect(screen.getByRole('heading', { name: 'Some things Mannie can do' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Plan my day/ }));
-    expect(props.onFill).toHaveBeenLastCalledWith(expect.stringContaining('Look at my calendar for today'));
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(props.onSend).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onFill).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Productivity' }));
+  it('sends only the morning brief prompt, with no rules, from the brief card', () => {
+    const { props } = renderTour({ capabilities: connected });
+
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
-    expect(props.onFill).toHaveBeenCalledTimes(2);
+    expect(props.onSend).toHaveBeenCalledTimes(1);
+    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_PROMPT);
+  });
+
+  it('puts the same card under two pills, sent the same way', () => {
+    const { props } = renderTour();
+    const filled: string[] = [];
+    for (const topic of ['behind', 'help_me_think'] as const) {
+      fireEvent.click(screen.getByRole('button', { name: HOME_TOPICS[topic].label }));
+      fireEvent.click(screen.getByRole('button', { name: /Everything's in my head/ }));
+      filled.push(String(vi.mocked(props.onSend).mock.lastCall?.[0]));
+    }
+    expect(filled[0]).toBe(filled[1]);
   });
 
   it('shows the prompt line, the setup ticket and Skip only on a first run', () => {
@@ -138,10 +180,18 @@ describe('AmanTour home', () => {
     expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
   });
 
+  it('only fills the composer from a card when no model is set, so nothing is sent', () => {
+    const { props } = renderTour({ canSend: false });
+
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(props.onFill).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+
   it('says what to do when no model is set, and the pills still switch the cards', () => {
     renderTour({ canSend: false });
 
     expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Productivity' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: "I'm behind" })).toBeEnabled();
   });
 });

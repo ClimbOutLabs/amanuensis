@@ -1,5 +1,7 @@
 import {
+  carriedPrivateDetails,
   emptyChatProvenance,
+  hasReadContent,
   namesUrl,
   recordEmailText,
   recordPersonText,
@@ -183,5 +185,77 @@ describe('where a link came from', () => {
     expect(steeredLinks({ provenance, values: ['http://docs.example.net/guide'] })).toEqual([]);
     expect(steeredLinks({ provenance, values: ['https://www.docs.example.net/guide#top'] })).toEqual([]);
     expect(steeredLinks({ provenance, values: ['https://docs.example.net/other'] })).toHaveLength(1);
+  });
+});
+
+describe("the person's own details, and what the chat has read", () => {
+  it("has read nothing in a new chat, nor after only the person's words and a search's results", () => {
+    const provenance = emptyChatProvenance();
+    expect(hasReadContent(provenance)).toBe(false);
+    recordPersonText({ provenance, text: 'My address is sam.rivers@example.com' });
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url: 'https://shop.example.net/b' }] })] });
+    expect(hasReadContent(provenance)).toBe(false);
+  });
+
+  it('has read content once a page, a mail or a file was read', () => {
+    const byPage = emptyChatProvenance();
+    recordUntrustedText({ provenance: byPage, text: 'A page about tides.', source: 'page' });
+    expect(hasReadContent(byPage)).toBe(true);
+    const byMail = emptyChatProvenance();
+    recordEmailText({ provenance: byMail, text: 'From: Dana Wolfe <dana@example.org>' });
+    expect(hasReadContent(byMail)).toBe(true);
+    const byFile = emptyChatProvenance();
+    recordUntrustedText({ provenance: byFile, text: 'Notes from a file.', source: 'file' });
+    expect(hasReadContent(byFile)).toBe(true);
+  });
+
+  it("carries an address from the person's mail, and their phone number however it is written", () => {
+    const provenance = emptyChatProvenance();
+    recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>\nMy new number is +1 415 555 0132.' });
+    expect(carriedPrivateDetails({ provenance, values: ['dana@example.org'] })).toEqual(['dana@example.org']);
+    expect(carriedPrivateDetails({ provenance, values: ['ring 415-555-0132 tonight'] })).toEqual(['4155550132']);
+    expect(carriedPrivateDetails({ provenance, values: ['the ferry timetable'] })).toEqual([]);
+  });
+
+  it('carries a detail however the sending text spells it', () => {
+    const provenance = emptyChatProvenance();
+    recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>\nMy new number is +1 415 555 0132.' });
+    expect(
+      carriedPrivateDetails({ provenance, values: ['https://directory.example/lookup?email=dana%40example.org'] }),
+    ).toEqual(['dana@example.org']);
+    expect(carriedPrivateDetails({ provenance, values: ['dana @example.org'] })).toEqual(['dana@example.org']);
+  });
+
+  it('reads a value with a broken percent sign as it stands', () => {
+    const provenance = emptyChatProvenance();
+    recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>' });
+    expect(carriedPrivateDetails({ provenance, values: ['100% sure it is dana@example.org, code %zz'] })).toEqual([
+      'dana@example.org',
+    ]);
+    expect(carriedPrivateDetails({ provenance, values: ['100% sure, code %zz'] })).toEqual([]);
+  });
+
+  it("carries a detail from the person's own words", () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'Reach me at sam.rivers@example.com' });
+    expect(carriedPrivateDetails({ provenance, values: ['sam.rivers@example.com'] })).toEqual([
+      'sam.rivers@example.com',
+    ]);
+  });
+
+  it("does not count an address only a page named as one of the person's details", () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: 'Send your details to collect@scam.example today.', source: 'page' });
+    expect(carriedPrivateDetails({ provenance, values: ['collect@scam.example'] })).toEqual([]);
+  });
+
+  it("counts a guest's address from the person's calendar, and an address in their file", () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: 'Dinner with Priya <priya@example.net> at seven.', source: 'event' });
+    recordUntrustedText({ provenance, text: 'Invoices go to billing@supplier.example', source: 'file' });
+    expect(carriedPrivateDetails({ provenance, values: ['priya@example.net'] })).toEqual(['priya@example.net']);
+    expect(carriedPrivateDetails({ provenance, values: ['billing@supplier.example'] })).toEqual([
+      'billing@supplier.example',
+    ]);
   });
 });

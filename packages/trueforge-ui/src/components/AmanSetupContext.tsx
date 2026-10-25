@@ -22,8 +22,6 @@ export type AmanSetupState = {
    * out, which leaves that line off the checklist.
    */
   hasChatted?: boolean | undefined;
-  /** Whether the owner has a morning brief yet; the Productivity pill is gold once it does. */
-  hasBrief?: boolean;
   /** The setup ticket's dismissal (Skip); omitted shows the ticket without a way to put it away. */
   firstRunGuide?: FirstRunGuideState;
   /** Where the setup links point; omitted renders the same text without links. */

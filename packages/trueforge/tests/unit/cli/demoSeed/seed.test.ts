@@ -9,6 +9,7 @@ import {
   DEMO_SCHEDULE_NAME,
   DEMO_TASKS_SPACE_ID,
   DEMO_THEO_ID,
+  DEMO_USER_PROFILE,
 } from '../../../../src/cli/demoSeed/world';
 import { SentinelAuditStore } from '../../../../src/db/sentinelAuditStore';
 import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
@@ -24,6 +25,9 @@ const NOTE_COUNT = buildDemoWorld({
   modelName: MODEL_NAME,
 }).notes.length;
 
+/** What earlier seeds stamped before the assistant-visible marker became a plain name. */
+const LEGACY_MARKER = 'demo_synthetic';
+const LEGACY_AGENT_NAME = 'demo-synthetic-assistant';
 const LEGACY_SCHEDULE_NAME = 'demo-synthetic-morning-briefing';
 const subject: CreatedBySubject = { subject_id: USER_ID, subject_type: 'user', subject_display_name: USER_ID };
 
@@ -355,13 +359,16 @@ describe('demo seed against the real stores', () => {
       expect(retained.ok).toBe(true);
     }
 
-    /** What an earlier demo seed left: a briefing schedule under its old name and a prewritten briefing chat. */
+    /**
+     * What an earlier demo seed left: its agent with a briefing schedule under an old name, a prewritten briefing
+     * chat, and a persona, space, memory note and profile under the old marker.
+     */
     async function plantLegacyWorld(): Promise<{ sessionId: string }> {
       const agent = await stores.agentStore.createAgent({
         host_managed: false,
         tenant_id: TENANT_ID,
-        name: DEMO_AGENT_NAME,
-        description: `Synthetic demo assistant (${DEMO_MARKER}).`,
+        name: LEGACY_AGENT_NAME,
+        description: `Synthetic demo assistant (${LEGACY_MARKER}).`,
         manifest: worldFor(DAY_ONE).agentSpec,
         external_id: null,
         created_by_subject: subject,
@@ -388,7 +395,7 @@ describe('demo seed against the real stores', () => {
         created_by_subject: subject,
         agent: { type: 'inline', spec: worldFor(DAY_ONE).agentSpec },
         external_id: null,
-        metadata: { [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-12' },
+        metadata: { [LEGACY_MARKER]: 'true', demo_seed_day: '2026-10-12' },
       });
       await new SentinelAuditStore(world.db).record({
         tenant_id: TENANT_ID,
@@ -399,6 +406,50 @@ describe('demo seed against the real stores', () => {
         description: 'Send a reply',
         outcome: 'denied',
         auto_deny_reason: null,
+      });
+      await stores.personaStore.createPersona({
+        ...owner,
+        updated_by: USER_ID,
+        id: 'demo-synthetic-persona-june',
+        display_name: 'June',
+        aliases: [],
+        instructions: 'June is the life-admin assistant of Maya, a fictional demo user.',
+        model_name: MODEL_NAME,
+      });
+      await stores.knowledge.addTextDocument({
+        personaId: 'demo-synthetic-persona-june',
+        title: 'Old guide',
+        text: 'Old.',
+        sourceLabel: `${LEGACY_MARKER}:0123456789ab`,
+      });
+      await stores.spaceStore.createSpace({
+        ...owner,
+        id: 'demo-synthetic-tasks',
+        name: 'Tasks',
+        purpose: 'Old tasks.',
+        status: 'active',
+        format: 'markdown',
+        body: '- [ ] Old task',
+        expected_aggregate_revision: (await stores.spaceStore.getAggregate(owner)).revision,
+      });
+      const retained = await stores.memory.retain({
+        items: [
+          {
+            content: 'Maya is allergic to penicillin.',
+            timestamp: DAY_ONE.toISOString(),
+            context: `${LEGACY_MARKER}:health-allergy`,
+            document_id: 'demo-synthetic-health-allergy',
+          },
+        ],
+        operationId: 'legacy-op',
+        timeoutMs: 5000,
+      });
+      expect(retained.ok).toBe(true);
+      await stores.personalizationStore.upsertProfile({
+        ...owner,
+        updated_by: USER_ID,
+        ...worldFor(DAY_ONE).profile,
+        user_profile: `Maya, a fictional demo user (${LEGACY_MARKER}).`,
       });
       return { sessionId };
     }
@@ -433,7 +484,12 @@ describe('demo seed against the real stores', () => {
       expect(left.schedules).toEqual([]);
       expect(left.session).toBeUndefined();
       expect(left.audit.map(row => row.tool_name)).toEqual(['send_email']);
-      expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME })).toBeUndefined();
+      expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: LEGACY_AGENT_NAME })).toBeUndefined();
+      expect(await stores.personaStore.listPersonas(owner)).toEqual([]);
+      expect(await stores.knowledge.listDocuments({ personaId: 'demo-synthetic-persona-june' })).toEqual([]);
+      expect(await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 })).toEqual([]);
+      expect(await vault(stores)).toEqual([]);
+      expect(await stores.personalizationStore.getProfile(owner)).toBeUndefined();
     });
 
     it('replaces what an earlier seed left when it seeds again', async () => {
@@ -445,6 +501,18 @@ describe('demo seed against the real stores', () => {
       expect(left.schedules).toEqual([DEMO_SCHEDULE_NAME]);
       expect(left.session).toBeUndefined();
       expect(left.audit).toHaveLength(1);
+      expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: LEGACY_AGENT_NAME })).toBeUndefined();
+      expect((await stores.personaStore.listPersonas(owner)).map(persona => persona.id).sort()).toEqual(
+        [DEMO_JUNE_ID, DEMO_THEO_ID].sort(),
+      );
+      expect(
+        (await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 })).map(space => space.id),
+      ).toEqual([DEMO_TASKS_SPACE_ID]);
+      const entries = await vault(stores);
+      expect(entries).toHaveLength(NOTE_COUNT);
+      expect(entries.every(entry => entry.text.includes(`> ${DEMO_MARKER}:`))).toBe(true);
+      expect(entries.some(entry => entry.text.includes(LEGACY_MARKER))).toBe(false);
+      expect((await stores.personalizationStore.getProfile(owner))?.user_profile).toBe(DEMO_USER_PROFILE);
     });
 
     it('removes the synthetic records and nothing else', async () => {
