@@ -12,6 +12,7 @@ import type { IScheduleStore } from '../../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ISpaceStore } from '../../db/spaceStore';
 import type { WithTransaction } from '../../db/transaction';
+import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
@@ -32,8 +33,10 @@ export interface DemoSeedStores<TTransaction> {
   agentStore: IAgentStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   spaceStore: ISpaceStore<TTransaction>;
-  /** Only for clearing chats an earlier version of the seed wrote; this one writes none. */
+  /** Clears chats an earlier version of the seed wrote, and every chat for `--fresh`. */
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  /** Chat deletion leaves saved files behind, so `--fresh` removes them through this store. */
+  turnArtifactStore: ITurnArtifactStore<TTransaction>;
   knowledge: DemoKnowledgeLibrary;
   memory: MemoryClient;
 }

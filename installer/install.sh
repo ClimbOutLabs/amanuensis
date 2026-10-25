@@ -2,7 +2,7 @@
 # Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
-#        install.sh instance demo-seed [--reset]
+#        install.sh instance demo-seed [--reset | --fresh]
 #        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
@@ -105,6 +105,7 @@ OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
 OPT_RESET=0
+OPT_FRESH=0
 OPT_NAME=
 OPT_INSTANCE=
 OPT_EMAIL=
@@ -149,8 +150,8 @@ Amanuensis installer
   install.sh instance list        show every instance
   install.sh instance remove <name> [--purge-data]
                                   remove an instance; --purge-data deletes its data too
-  install.sh instance demo-seed [--reset] [--instance NAME]
-                                  fill a demo instance with example data, or clear it with --reset
+  install.sh instance demo-seed [--reset | --fresh] [--instance NAME]
+                                  fill a demo instance with example data, clear it with --reset, or start it fresh with --fresh
   install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
                                   put an exported file into an instance (it is backed up first; its app pauses meanwhile)
   install.sh migrate --from-compose <folder> [--user ID]
@@ -197,6 +198,7 @@ Options
   --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
   --demo                make the instance a demo and fill it with example data once it runs
   --reset               with instance demo-seed, remove the example data instead of adding it
+  --fresh               with instance demo-seed, remove everything the demo person made (chats, spaces, memory, schedules, personas, files), then add the example data again
   --local-only          open Aman on this computer only (by default it also opens for other devices on your private network)
   --backups daily|off   back up every day (default) or never, without asking
   --address HOST        also open Aman at this name or private address; repeat for more (for example --address host.local)
@@ -275,6 +277,7 @@ parse_args() {
       --purge-data) OPT_PURGE=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
+      --fresh) OPT_FRESH=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
       --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
@@ -360,7 +363,7 @@ print_signout_note() {
   fi
 }
 
-# --demo belongs to install and instance add; --reset only to instance demo-seed.
+# --demo belongs to install and instance add; --reset and --fresh only to instance demo-seed.
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
@@ -369,6 +372,12 @@ check_demo_options() {
   fi
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
+  fi
+  if [ "$OPT_FRESH" = 1 ] && [ "$seeding" != 1 ]; then
+    usage_die "--fresh applies to instance demo-seed"
+  fi
+  if [ "$OPT_FRESH" = 1 ] && [ "$OPT_RESET" = 1 ]; then
+    usage_die "Use either --fresh or --reset, not both."
   fi
   if [ -n "$OPT_YOUR_NAME" ] && [ "$COMMAND" != install ] && [ "$COMMAND:$SUBCOMMAND" != instance:add ]; then
     usage_die "--your-name applies to install and instance add"

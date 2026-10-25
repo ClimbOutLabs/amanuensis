@@ -212,4 +212,34 @@ export function runTurnArtifactStoreContractSuite(fixtures: TurnArtifactContract
     expect(await store.getArtifact(newIdentity)).toBeDefined();
     expect(await store.getBlob({ tenant_id: 'default', digest: survivor.digest ?? '' })).toEqual(data);
   });
+
+  it("deletes one chat's rows and unshared blobs, and leaves another chat's alone", async () => {
+    const store = getStore();
+    const mine = { tenant_id: 'default', session_id: 'wipe-me', turn_id: 't1', path: '/tmp/mine.txt' };
+    const shared = { tenant_id: 'default', session_id: 'wipe-me', turn_id: 't1', path: '/tmp/shared-mine.txt' };
+    const other = { tenant_id: 'default', session_id: 'keep-me', turn_id: 't1', path: '/tmp/shared-other.txt' };
+    const mineRecord = await store.recordStoredArtifact({
+      ...mine,
+      name: 'mine.txt',
+      data: Buffer.from('only in the wiped chat'),
+      mime: 'text/plain',
+    });
+    const sharedData = Buffer.from('in both chats');
+    await store.recordStoredArtifact({ ...shared, name: 'shared-mine.txt', data: sharedData, mime: 'text/plain' });
+    const otherRecord = await store.recordStoredArtifact({
+      ...other,
+      name: 'shared-other.txt',
+      data: sharedData,
+      mime: 'text/plain',
+    });
+
+    const deleted = await store.deleteArtifactsForSession({ tenant_id: 'default', session_id: 'wipe-me' });
+
+    expect(deleted).toBe(2);
+    expect(await store.getArtifact(mine)).toBeUndefined();
+    expect(await store.getBlob({ tenant_id: 'default', digest: mineRecord.digest ?? '' })).toBeUndefined();
+    expect(await store.getArtifact(other)).toBeDefined();
+    expect(await store.getBlob({ tenant_id: 'default', digest: otherRecord.digest ?? '' })).toEqual(sharedData);
+    expect(await store.deleteArtifactsForSession({ tenant_id: 'default', session_id: 'wipe-me' })).toBe(0);
+  });
 }
