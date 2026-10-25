@@ -108,7 +108,7 @@ describe('extractSentinelFromEvent', () => {
         why_asked_again: 'Held for approval: it contains a secret this server holds.',
       });
       expect(card?.plain_what).toBe(
-        'Search the web through finder. This search contains something that looks like a password or key.',
+        'Search the web through finder. This sends something that looks like a password or key.',
       );
       expect(card?.outbound_text).toBeNull();
       expect(card?.why_asked_again).toBeNull();
@@ -121,9 +121,7 @@ describe('extractSentinelFromEvent', () => {
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
       // A card saved before the wording changed gets the plain reason after its sentence.
-      expect(card?.plain_what).toBe(
-        'Search the web through finder for: oslo weather. Aman is checking with you before searching.',
-      );
+      expect(card?.plain_what).toBe('Search the web through finder for: oslo weather. It checked with you first.');
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
     });
@@ -666,7 +664,7 @@ describe('parseAuditEntries', () => {
 
 describe('sentinelAuditLabel', () => {
   it('says a Tier 1 run the settings allow is done, and a Tier 2 or 3 call is waiting for the person', () => {
-    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done · allowed by your settings');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Allowed by your settings');
     expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Waiting for you');
     expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Waiting for you');
   });
@@ -682,12 +680,12 @@ describe('sentinelAuditLabel', () => {
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off, nothing relaxed and searches running without asking', () => {
+  it('defaults to offline off, nothing relaxed, and searches and maps running without asking', () => {
     const defaults = {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
@@ -707,7 +705,7 @@ describe('parseUserSettings', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -717,9 +715,9 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
-  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
-    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
-    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
+  it('reads the maps setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: false } }).maps_without_asking).toBe(false);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(true);
   });
 
   it('reads the sandbox setting, and falls back to running without asking when it is not a boolean', () => {
@@ -733,7 +731,7 @@ describe('parseUserSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });

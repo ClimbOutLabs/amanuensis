@@ -94,7 +94,7 @@ async function getOrCreateChatAssistantAgent(input: {
   }
 }
 
-/** The model a chat's turns run on, which a specialist created in that chat answers with. */
+/** The model a chat's turns run on, which a persona created in that chat answers with. */
 export function chatModelName(runner: ChatRunner): string {
   return runner.kind === 'plain' ? runner.spec.model.name : runner.agent.manifest.model.name;
 }

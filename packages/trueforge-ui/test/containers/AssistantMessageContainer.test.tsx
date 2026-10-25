@@ -123,6 +123,20 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('does not render the error banner while the thread is still running', () => {
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: 'partial',
+          status: { type: 'incomplete', reason: 'error', error: 'boom' },
+        },
+      ],
+      { isRunning: true },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('hides the action bar while the thread is running (streaming state)', () => {
     renderAssistantMessage([{ role: 'assistant', content: 'typing...' }], { isRunning: true });
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
@@ -165,7 +179,7 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByText(/^\d+ \/ \d+$/)).not.toBeInTheDocument();
   });
 
-  it('labels a running turn as waiting for the model when no tool is running', async () => {
+  it('shows exactly one status line while the model thinks, even with agent details on', async () => {
     await renderWithDetailsOn(
       [
         {
@@ -177,10 +191,11 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText(/Waiting for model/)).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.queryByText(/Waiting for model/)).not.toBeInTheDocument();
   });
 
-  it('labels a running turn as executing tools when a tool part is running', async () => {
+  it('names a running tool once, in plain words, with no raw tool name and no Awaiting Response pill', async () => {
     await renderWithDetailsOn(
       [
         {
@@ -200,10 +215,16 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Lookup notes…');
+    expect(screen.queryByText(/Executing tools/)).not.toBeInTheDocument();
+    expect(screen.queryByText('lookup_notes')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Awaiting Response/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ steps? · \d+ tools?$/)).not.toBeNull();
+    expect(screen.getAllByText(/\d+ steps? · \d+ tools?/)).toHaveLength(1);
   });
 
-  it('labels a real message-level tool approval pause as waiting for approval', async () => {
+  it('shows a real message-level tool approval pause through its card, not a second label', async () => {
     await renderWithDetailsOn([
       {
         role: 'assistant',
@@ -229,7 +250,8 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
+    // The card itself says what waits on the person; the details row adds no label of its own.
+    expect(screen.queryByText(/Waiting for approval/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
@@ -406,7 +428,7 @@ describe('AssistantMessageContainer', () => {
 
     const internals = getAgentInternals();
     expect(internals).toHaveTextContent(/2 steps · 1 tool/);
-    expect(within(internals).getByText('lookup_notes')).toBeVisible();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
   });
 
@@ -498,7 +520,7 @@ describe('AssistantMessageContainer', () => {
       ]);
 
       expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
-      expect(getAgentInternals()).toHaveTextContent(/Waiting for approval/);
+      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow it' })).toBeVisible();
     });
 
     it('shows the answer after a tool call while the message is still running', async () => {
@@ -542,9 +564,9 @@ describe('AssistantMessageContainer', () => {
     await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(within(internals).getByText('lookup_notes')).toBeVisible();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
     fireEvent.click(screen.getByTestId('assistant-message-agent-internals-toggle'));
-    expect(within(internals).getByText('lookup_notes')).not.toBeVisible();
+    expect(within(internals).getByText('Lookup notes')).not.toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 
@@ -560,7 +582,7 @@ describe('AssistantMessageContainer', () => {
     await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(within(internals).getByText('lookup_notes')).toBeVisible();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
     expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
   });
@@ -674,7 +696,7 @@ describe('AssistantMessageContainer with agent details off', () => {
     expect(screen.getByText(SECOND_LINE)).toBeVisible();
     const disclosures = screen.getAllByTestId('assistant-message-agent-internals');
     expect(disclosures[1]).toHaveTextContent(/3 steps · 3 tools/);
-    for (const element of screen.getAllByText(/read_note/)) expect(element).toBeVisible();
+    for (const element of screen.getAllByText(/Read note/)) expect(element).toBeVisible();
     expect(screen.getByText(new RegExp(RAW_ERROR))).toBeVisible();
     expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
   });
@@ -724,7 +746,7 @@ describe('AssistantMessageContainer with agent details off', () => {
     renderAssistantMessage([erroredToolCallMessage()]);
 
     expect(screen.getByTestId('assistant-message-not-finished')).toHaveTextContent(
-      'This reply did not finish. Ask again, or turn on Show agent details to see what went wrong.',
+      'This reply did not finish. Ask again, or turn on Agent details to see what went wrong.',
     );
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     for (const element of screen.queryAllByText(/lookup failed|lookup_notes/)) expect(element).not.toBeVisible();
@@ -834,24 +856,23 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     return result;
   }
 
-  it('shows the "N recalled" segment and recall counts when agent details are expanded', async () => {
+  it('shows the recall count once, on the memory row, when agent details are expanded', async () => {
     await renderWithStoredPreference({ agentDetails: 'expanded' });
     const internals = getAgentInternals();
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
-    expect(within(internals).getByText('3 items, 1 entity')).toBeInTheDocument();
+    expect(within(internals).queryByText(/recalled/)).not.toBeInTheDocument();
+    expect(within(internals).getAllByText('3 items, 1 entity')).toHaveLength(1);
   });
 
-  it('hides the "N recalled" segment and recall counts when agent details are collapsed', async () => {
+  it('hides the recall counts when agent details are collapsed', async () => {
     await renderWithStoredPreference({ agentDetails: 'collapsed' });
     expect(screen.queryByText(/recalled/)).not.toBeInTheDocument();
     expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
   });
 
-  it('keeps the attention dot and the recall count in the summary when a completed recall errored', async () => {
+  it('keeps the attention dot when a completed recall errored', async () => {
     await renderWithStoredPreference({ agentDetails: 'expanded', recallOutcome: 'error' });
 
-    const internals = getAgentInternals();
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
+    expect(within(getAgentInternals()).getByText('Recall failed')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 
@@ -940,12 +961,11 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(queueRoot()).not.toBeNull();
   });
 
-  it('lights the Writing station when the first tokens stream', () => {
+  it('says Writing in its one status line when the first tokens stream', () => {
     render(turnTree('mount-1', 'hello there'));
 
-    const writingLabel = document.querySelector('.aui-wait-queue__station--active .aui-wait-queue__label');
-    expect(writingLabel).toHaveTextContent('Writing');
-    expect(document.querySelector('.aui-wait-queue__station--arriving')).not.toBeNull();
+    expect(document.querySelector('.aui-wait-queue__microcopy')).toHaveTextContent('Writing…');
+    expect(document.querySelector('.aui-state-sprite--writing')).not.toBeNull();
   });
 
   it('keeps one turn clock across a text→tool→text turn with remounts, noting only quiet spells', () => {
@@ -958,7 +978,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
 
       const { rerender } = render(turnTree('phase-text-1', 'first tokens'));
       act(() => {
-        vi.advanceTimersByTime(10_000);
+        vi.advanceTimersByTime(50_000);
       });
 
       // Text → tool phase. The mount-key change forces a full remount, like
@@ -969,29 +989,28 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
         vi.advanceTimersByTime(6_000);
       });
 
-      // The tool call arrived 6s ago, so the turn is not quiet yet: no long-wait note.
-      expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
+      // The tool call arrived 6s ago, so the turn is not quiet yet: the line names the work.
+      const line = () => document.querySelector('.aui-wait-queue__microcopy')?.textContent;
+      expect(line()).toBe('Reading…');
 
       act(() => {
         vi.advanceTimersByTime(10_000);
       });
 
-      // 16s of quiet, 26s into the same turn: the note carries the turn's
+      // 16s of quiet, 66s into the same turn: the line carries the turn's
       // clock, not the time since the remount.
-      const longWait = document.querySelector('.aui-wait-queue__longwait');
-      expect(longWait).not.toBeNull();
-      expect(longWait?.textContent).toMatch(/26s so far/);
+      expect(line()).toBe('Still reading… 1 min');
 
       // …and back to text: the new tokens end the quiet spell, and the clock is still the turn's.
       rerender(turnTree('phase-text-2', 'more tokens'));
       act(() => {
         vi.advanceTimersByTime(2_000);
       });
-      expect(document.querySelector('.aui-wait-queue__longwait')).toBeNull();
+      expect(line()).toBe('Writing…');
       act(() => {
-        vi.advanceTimersByTime(15_000);
+        vi.advanceTimersByTime(60_000);
       });
-      expect(document.querySelector('.aui-wait-queue__longwait')?.textContent).toMatch(/43s so far/);
+      expect(line()).toBe('Still writing… 2 min');
     } finally {
       vi.useRealTimers();
     }

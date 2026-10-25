@@ -27,7 +27,6 @@ import type {
   Tier2ActionKind,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
-import type { ChatPrivateFingerprints } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
@@ -116,12 +115,6 @@ export interface SessionTable {
   approval_grants: JSONColumnType<string[], string[], string[]>;
   /** Host-owned durable ordered task state. */
   task_checklist: JSONColumnType<TaskChecklist, TaskChecklist, TaskChecklist>;
-  /** Fingerprints of the chat's private texts for later turns' searches; null until a private read. Never sent to clients. */
-  private_fingerprints: JSONColumnType<
-    ChatPrivateFingerprints,
-    ChatPrivateFingerprints,
-    ChatPrivateFingerprints
-  > | null;
   /**
    * Optional unique key within `tenant_id` (`session_external_id_uq`,
    * partial WHERE external_id IS NOT NULL).

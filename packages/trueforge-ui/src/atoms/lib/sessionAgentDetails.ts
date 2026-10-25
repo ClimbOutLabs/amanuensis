@@ -1,4 +1,4 @@
-/** Session metadata key for the chat-level "Show agent details" preference (wire/jsonb snake_case). */
+/** Session metadata key for the chat-level "Agent details" preference (wire/jsonb snake_case). */
 export const AGENT_DETAILS_METADATA_KEY = 'agent_details';
 
 /** Whether a chat's agent internals (tool calls, reasoning steps) render expanded for every turn. */

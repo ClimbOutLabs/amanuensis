@@ -181,8 +181,19 @@ export { ToolSet } from './mcp/ToolSet';
 export { isFailoverRetryable, withFailover } from './llm/failoverLanguageModel';
 export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
+export { ModelRequestGate } from './llm/ModelRequestGate';
+export type { ModelRequestSlot } from './llm/ModelRequestGate';
+export {
+  MODEL_WAITING_EVENT_TYPE,
+  MODEL_WAITING_MESSAGE,
+  ModelWaitingEventSchema,
+  buildModelWaitingEvent,
+} from './llm/modelWaitingEvent';
+export type { ModelWaitingEvent, ModelWaitingEventEnvelope } from './llm/modelWaitingEvent';
 export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseFormat';
 export type { ResponseFormat } from './llm/responseFormat';
+export { streamDeadlineDetailsOf } from './llm/streamDeadline';
+export type { StreamDeadlineDetails } from './llm/streamDeadline';
 export {
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -470,6 +481,7 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
+export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -492,14 +504,16 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export {
-  SILENT_SEARCH_LIMIT,
-  createWebSearchTurnState,
-  recordResultUrls,
-  unreturnedUrls,
-} from './permissions/webSearch';
+export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
+export {
+  FETCHED_PAGE_TEXT_MAX_CHARS,
+  FetchedPageStore,
+  fetchedPages,
+  isPageReaderTool,
+  isSearchResultTool,
+  recordFetchedPages,
+} from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';
 export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';

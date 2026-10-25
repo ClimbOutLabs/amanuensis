@@ -107,6 +107,16 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 `;
 
 /**
+ * Email is connected only through the Settings form, so the app password never passes through a
+ * chat. Without this, a model asked to "set up email with this password" will try to use the
+ * password somewhere, or repeat it back. The fix is a plain instruction to point at Settings and
+ * never touch the password, not a per-tool special case.
+ */
+export const EMAIL_PASSWORD_PROMPT = dedent`
+Email is connected only in Settings, under Connectors, Email, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect email with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, Email instead.
+`;
+
+/**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
  * retrieval route only when the sandbox can reach a network.
  */

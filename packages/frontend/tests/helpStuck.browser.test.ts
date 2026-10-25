@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { HELP_COMPOSER_PLACEHOLDER } from '../../trueforge-ui/src/help/helpModel.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -97,7 +99,7 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
           await results.getByText(text, { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         }
         if ('told' in testCase) {
-          await results.getByText('What Iris was told').click();
+          await results.getByText(`What ${AMAN_GUIDE_NAME} was told`).click();
           await results
             .getByText(testCase.told, { exact: false })
             .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
@@ -107,6 +109,21 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
         }
         // Give a crash loop time to show itself before the page is judged.
         await page.waitForTimeout(1_500);
+        // The main composer is the only place to type in the help chat. Hidden helpers, such as the
+        // composer's auto-size copy, are not places to type.
+        const textInputs = page.locator(
+          ['textarea', 'input:not([type])', 'input[type="text"]', 'input[type="search"]', '[contenteditable="true"]']
+            .map(selector => `${selector}:not([aria-hidden="true"])`)
+            .join(', '),
+        );
+        assert.equal(await textInputs.count(), 1, `${testCase.name}: the help chat has exactly one text input`);
+        if (await page.getByTestId('help-choices').isVisible()) {
+          assert.equal(
+            await textInputs.first().getAttribute('placeholder'),
+            HELP_COMPOSER_PLACEHOLDER,
+            `${testCase.name}: the composer carries the help hint`,
+          );
+        }
         assert.deepEqual(pageErrors, [], `${testCase.name}: the page should not throw`);
         assert.ok(await results.isVisible(), `${testCase.name}: the help panel should still be on screen`);
         await page.screenshot({

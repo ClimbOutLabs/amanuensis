@@ -33,6 +33,9 @@ export interface HelpHealthCheck {
 
 export const HELP_BUTTON_LABEL = "Help, I'm stuck";
 
+/** The main composer's hint in the help chat, the one place to type there. */
+export const HELP_COMPOSER_PLACEHOLDER = `Or tell ${AMAN_GUIDE_NAME} where you are stuck, in your own words`;
+
 /** One-tap answers under Iris's first message. Tapping one sends it as the person's own message. */
 export const IRIS_HELP_CHOICES: readonly string[] = [
   'Setting up a model',

@@ -557,7 +557,7 @@ export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 /** Permission settings as an export wrote them. Exports from before a switch lack its field, so it reads as the default. */
 const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
-  maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(false),
+  maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(true),
   sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
 });
 

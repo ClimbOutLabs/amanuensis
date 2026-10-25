@@ -81,11 +81,9 @@ describe('connector mail reads', () => {
     expect(decision.card?.destination_host).toBe('mail.bridge.example');
   });
 
-  it('a read marks the chat as having read private data, so a later search asks', async () => {
+  it('a later search still runs without asking after a read', async () => {
     const services = servicesFor({ demo: false });
     const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
-    expect(await classifyTier(SEARCH, makeCtx(services))).toMatchObject({ tier: 1 });
-
     await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -93,10 +91,7 @@ describe('connector mail reads', () => {
       action: mailCall('list-messages', { mailbox: 'INBOX' }),
     });
 
-    expect(await classifyTier(SEARCH, makeCtx(services))).toMatchObject({
-      tier: 3,
-      reason: 'mcp_search_after_private_read',
-    });
+    expect(await classifyTier(SEARCH, makeCtx(services))).toMatchObject({ tier: 1 });
   });
 
   it('a read is not a send, so it is not refused or carded as one', async () => {

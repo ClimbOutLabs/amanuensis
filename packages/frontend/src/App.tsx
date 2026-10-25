@@ -1,5 +1,4 @@
 import {
-  AmanPandaSourceProvider,
   AmanRuntimeRail,
   AmanSetupProvider,
   AmanWelcome,
@@ -97,7 +96,6 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
-  defaultMode: 'light',
   webFonts: false,
   brand: {
     mode: 'icon-title',
@@ -241,8 +239,6 @@ function AmanShell({
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
-        settingsHref="/settings"
-        sessionId={activeSessionId}
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
@@ -531,19 +527,17 @@ export function App() {
                                 }}
                               >
                                 <ComposerDraftScopeProvider scope={draftScope}>
-                                  <AmanPandaSourceProvider src={AMAN_PANDA_SRC}>
-                                    <AmanShell
-                                      defaultAgentSpec={boot.defaultAgentSpec}
-                                      openSettings={boot.openSettings}
-                                      displayName={session.displayName}
-                                      overrides={overrides}
-                                      modelName={
-                                        setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                      }
-                                      version={boot.build?.version}
-                                      buildRef={boot.build?.ref}
-                                    />
-                                  </AmanPandaSourceProvider>
+                                  <AmanShell
+                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                    openSettings={boot.openSettings}
+                                    displayName={session.displayName}
+                                    overrides={overrides}
+                                    modelName={
+                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                    }
+                                    version={boot.build?.version}
+                                    buildRef={boot.build?.ref}
+                                  />
                                 </ComposerDraftScopeProvider>
                               </AmanSetupProvider>
                             </HelpProvider>

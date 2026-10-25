@@ -12,6 +12,7 @@ import {
   useServerCapabilities,
   useServerCapabilitiesSettled,
 } from '@/server/ServerContext.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
@@ -347,6 +348,7 @@ function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingSta
 
 /** Turn-summarization switch: on saves a short summary per turn, off keeps the full transcript. */
 function MemorySummarizeCard() {
+  const assistant = useAssistantDisplayName();
   const setting = useMemorySummarizeSetting();
   // The whole card hides when the server has no summarization port: no heading,
   // no empty bordered box, nothing to confuse the eye.
@@ -357,10 +359,10 @@ function MemorySummarizeCard() {
         Turn summaries
       </h4>
       <p className="mt-1 text-sm text-text-secondary">
-        When this is on, Aman condenses each finished chat into a short summary before saving it to the memory log,
-        instead of keeping the full word-for-word transcript. Summaries keep the important details and skip the small
-        talk, so the log stays compact and quick to search. If a summary can&rsquo;t be made for a turn, Aman keeps the
-        full transcript &mdash; a memory is never lost.
+        When this is on, {assistant} condenses each finished chat into a short summary before saving it to the memory
+        log, instead of keeping the full word-for-word transcript. Summaries keep the important details and skip the
+        small talk, so the log stays compact and quick to search. If a summary can&rsquo;t be made for a turn,{' '}
+        {assistant} keeps the full transcript &mdash; a memory is never lost.
       </p>
       <div className="mt-4 border-t border-border pt-4">
         <MemorySummarizeToggle setting={setting} />
@@ -380,17 +382,25 @@ const MEMORY_NOTES_MARKDOWN = [
 type ConfirmedBackend = ReturnType<typeof readMemoryBackend>;
 
 /** Header tagline: Markdown-native wording only once the Markdown backend is confirmed. */
-function headerCopy({ settled, backend }: { settled: boolean; backend: ConfirmedBackend }): string {
+function headerCopy({
+  settled,
+  backend,
+  assistant,
+}: {
+  settled: boolean;
+  backend: ConfirmedBackend;
+  assistant: string;
+}): string {
   if (!settled) {
-    return 'Aman remembers what matters on its own — checking with the server how memories are kept.';
+    return `${assistant} remembers what matters on its own. Checking with the server how memories are kept.`;
   }
   if (backend === 'markdown') {
-    return 'Aman saves memories as local Markdown files on the server. The host recalls and retains them automatically.';
+    return `${assistant} saves memories as notes on this computer and brings back the ones that matter on its own.`;
   }
   if (backend === 'hindsight') {
-    return 'Aman remembers what matters on its own. This server runs the experimental Hindsight memory backend instead of Markdown files.';
+    return `${assistant} remembers what matters on its own. This setup uses the experimental Hindsight memory instead of note files.`;
   }
-  return 'Aman remembers what matters on its own. The server did not say which memory backend it runs, so the details below cannot be confirmed.';
+  return `${assistant} remembers what matters on its own. It could not tell which kind of memory this setup uses, so the details below may not match.`;
 }
 
 /** The status pill tones: green dot for a confirmed-on backend, neutral otherwise. */
@@ -411,6 +421,7 @@ function StatusPill({ tone, text }: { tone: 'on' | 'neutral'; text: string }) {
 
 /** The recall switch: off stops saved memories from shaping replies; the memories themselves stay. */
 function MemoryRecallToggle() {
+  const assistant = useAssistantDisplayName();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
 
@@ -436,7 +447,7 @@ function MemoryRecallToggle() {
           Use memories in replies
         </label>
         <p className="mt-0.5 text-xs text-text-secondary">
-          When this is off, Aman does not bring saved memories into its replies. Saved memories are kept.
+          When this is off, {assistant} does not bring saved memories into its replies. Saved memories are kept.
         </p>
       </div>
       <Switch
@@ -509,6 +520,7 @@ function MemoryStatusCard() {
  * and render only on a confirmed Markdown backend.
  */
 const MemorySettings = () => {
+  const assistant = useAssistantDisplayName();
   const capabilities = useServerCapabilities();
   const settled = useServerCapabilitiesSettled();
   const backend = readMemoryBackend(capabilities);
@@ -520,7 +532,7 @@ const MemorySettings = () => {
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto pb-1">
       <header>
         <h3 className="text-base font-semibold text-text-primary">Memory</h3>
-        <p className="mt-1 text-sm text-text-secondary">{headerCopy({ settled, backend })}</p>
+        <p className="mt-1 text-sm text-text-secondary">{headerCopy({ settled, backend, assistant })}</p>
       </header>
 
       <MemoryStatusCard />
@@ -533,7 +545,7 @@ const MemorySettings = () => {
         <ScreenStatusCard
           headingId="memory-screen-status-heading"
           title="Recall screening"
-          description="The recall checker runs against memories Aman recalls for itself, on this tenant only."
+          description={`The recall checker runs against memories ${assistant} recalls for itself, on this tenant only.`}
           status={memoryScreen}
           enabledText="Recall screening is on"
           disabledText="Recall screening is off"
@@ -612,6 +624,7 @@ function MemoryStorageLine() {
 
 /** Live meaning-based recall status: downloading → indexing → ready, or keyword fallback. */
 function MemoryEmbeddingsCard() {
+  const assistant = useAssistantDisplayName();
   const capabilities = useServerCapabilities();
   const refreshCapabilities = useOptionalRefreshServerCapabilities();
   const status = readMemoryEmbeddingsStatus(capabilities);
@@ -640,7 +653,7 @@ function MemoryEmbeddingsCard() {
     <section aria-labelledby="memory-search-heading" className="rounded-xl border border-border bg-card-bg p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h4 id="memory-search-heading" className="text-sm font-medium text-text-primary">
-          How Aman finds memories
+          How {assistant} finds memories
         </h4>
         <EmbeddingsBadge status={status} />
       </div>
@@ -667,11 +680,11 @@ function MemoryEmbeddingsCard() {
           'The server did not report meaning-based recall status — it may be an older build, or the capabilities request has not finished.'}
       </p>
       <p className="mt-2 text-sm text-text-secondary">
-        Aman finds memories by meaning, not just matching words — so &ldquo;where did we stay on that trip&rdquo; finds
-        the hotel note even when it only names the hotel. To do that, the first time Aman runs it downloads a small
-        helper model once (about 120&nbsp;MB), automatically in the background. There is nothing to install and nothing
-        to click. After that one download, memory search works fully offline, and everything stays on this server. If
-        the download can&rsquo;t finish, Aman just keeps finding memories with keywords.
+        {assistant} finds memories by meaning, not just matching words. So &ldquo;where did we stay on that trip&rdquo;
+        finds the hotel note even when it only names the hotel. To do that, the first time {assistant} runs it downloads
+        a small helper model once (about 120&nbsp;MB), automatically in the background. There is nothing to install and
+        nothing to click. After that one download, memory search works fully offline, and everything stays on this
+        server. If the download can&rsquo;t finish, {assistant} just keeps finding memories with keywords.
       </p>
     </section>
   );

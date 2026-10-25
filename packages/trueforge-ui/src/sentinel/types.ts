@@ -151,21 +151,21 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
-  /** The whole specialist when the action adds one, or null. */
+  /** The whole persona when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
 };
 
-/** The whole specialist a chat call adds, in plain words. */
+/** The whole persona a chat call adds, in plain words. */
 export type SentinelApprovalPersona = {
-  /** Specialist name in plain words. */
+  /** Persona name in plain words. */
   name: string;
-  /** One line on what the specialist is for. */
+  /** One line on what the persona is for. */
   description: string;
-  /** The whole instruction text the specialist follows. */
+  /** The whole instruction text the persona follows. */
   instructions: string;
-  /** The model the specialist answers with. */
+  /** The model the persona answers with. */
   model_name: string;
 };
 
@@ -205,7 +205,7 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
 /** The one owner of the words for a call that ran because the person's settings allow it. */
-export const ALLOWED_BY_SETTINGS_LABEL = 'Done · allowed by your settings';
+export const ALLOWED_BY_SETTINGS_LABEL = 'Allowed by your settings';
 
 /** The one owner of the words for a call held for the person's OK. */
 export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
@@ -507,7 +507,7 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
-/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+/** A card missing any field is not shown as a persona, so a partial one is never approved as if it were whole. */
 function parsePersona(value: unknown): SentinelApprovalPersona | null {
   if (!isRecord(value)) return null;
   const name = optionalString(value, 'name');
@@ -760,7 +760,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     };
   }
@@ -768,7 +768,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
-    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }

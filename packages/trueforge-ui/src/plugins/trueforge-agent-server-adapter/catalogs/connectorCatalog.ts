@@ -15,6 +15,7 @@ import {
 } from '../../../server/connectorChecks.js';
 
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
+import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
@@ -31,6 +32,7 @@ import type {
 import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
+import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
@@ -318,7 +320,8 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
 > &
   ConnectorChecks &
   ConnectorToolGrants &
-  GoogleSetupPort;
+  GoogleSetupPort &
+  EmailSetupPort;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -370,6 +373,7 @@ export function createConnectorCatalog(
 
   return {
     ...createGoogleSetupApi(client),
+    ...createEmailSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));

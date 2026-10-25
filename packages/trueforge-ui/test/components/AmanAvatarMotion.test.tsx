@@ -3,7 +3,14 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AVATAR_ALT, AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
+import {
+  AmanAvatarMotion,
+  avatarAltText,
+  clipForActivity,
+  type AmanAvatarMotionSources,
+} from '@/components/AmanAvatarMotion.js';
+
+const ALT = avatarAltText('Maya');
 
 const SOURCES: AmanAvatarMotionSources = {
   idle: ['/aman-avatar/idle-a.mp4', '/aman-avatar/idle-b.mp4'],
@@ -12,6 +19,8 @@ const SOURCES: AmanAvatarMotionSources = {
   error: '/aman-avatar/error.mp4',
   poster: '/aman-avatar/poster.jpg',
 };
+
+const WAITING_SOURCES: AmanAvatarMotionSources = { ...SOURCES, waiting: '/aman-avatar/waiting.mp4' };
 
 function stubMatchMedia(matches: boolean): void {
   Object.defineProperty(window, 'matchMedia', {
@@ -31,7 +40,7 @@ let observerCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | 
 let observerDisconnect: ReturnType<typeof vi.fn> | null = null;
 
 function avatar(): HTMLElement {
-  return screen.getByRole('img', { name: AVATAR_ALT });
+  return screen.getByRole('img', { name: ALT });
 }
 
 function videoElement(): HTMLVideoElement {
@@ -70,7 +79,7 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('paints the poster alone on an idle page: no video element, no clip bytes', () => {
-    render(<AmanAvatarMotion activity="idle" sources={SOURCES} className="aman-runtime-rail__avatar" />);
+    render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} className="aman-runtime-rail__avatar" />);
 
     const still = avatar();
     expect(still.tagName).toBe('IMG');
@@ -83,11 +92,13 @@ describe('AmanAvatarMotion', () => {
 
   it('instantiates the video on the first non-idle activity, already on the right clip', () => {
     const { rerender } = render(
-      <AmanAvatarMotion activity="idle" sources={SOURCES} className="aman-runtime-rail__avatar" />,
+      <AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} className="aman-runtime-rail__avatar" />,
     );
     expect(document.querySelectorAll('video')).toHaveLength(0);
 
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} className="aman-runtime-rail__avatar" />);
+    rerender(
+      <AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} className="aman-runtime-rail__avatar" />,
+    );
 
     const video = avatar();
     expect(video.tagName).toBe('VIDEO');
@@ -106,33 +117,33 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('keeps the same accessible name in every state', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
-    expect(avatar()).toHaveAccessibleName(AVATAR_ALT);
+    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAccessibleName(ALT);
 
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
-    expect(avatar()).toHaveAccessibleName(AVATAR_ALT);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAccessibleName(ALT);
   });
 
   it('acknowledges the send immediately with the thinking clip (attentive beat)', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
 
     // The user sees "heard you" inside 300ms: the thinking clip commits at once, and its
     // quill-lift opening is the attentive beat. No 1.2s of dead idle after the send.
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     expect(avatar()).toHaveAttribute('src', SOURCES.thinking);
   });
 
   it('skips the thinking loop when streaming starts inside the beat window', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
 
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     // Attentive beat is showing.
     expect(avatar()).toHaveAttribute('src', SOURCES.thinking);
 
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
     // Streaming inside the 1.2s beat window cuts straight to writing: the thinking loop
     // never settles in.
     expect(avatar()).toHaveAttribute('src', SOURCES.writing);
@@ -144,30 +155,30 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('debounces thinking<->writing flip-flop with a dwell', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
 
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     act(() => {
       vi.advanceTimersByTime(1200);
     });
     expect(avatar()).toHaveAttribute('src', SOURCES.thinking);
 
     // A brief streaming burst does not flip the display.
-    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(avatar()).toHaveAttribute('src', SOURCES.thinking);
 
     // …but a strobe that flips back cancels the pending transition.
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     act(() => {
       vi.advanceTimersByTime(2000);
     });
     expect(avatar()).toHaveAttribute('src', SOURCES.thinking);
 
     // A sustained new state commits after the dwell.
-    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
     act(() => {
       vi.advanceTimersByTime(1500);
     });
@@ -175,29 +186,29 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('acknowledges errors immediately and follows the auto-clear without dwell', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
 
-    rerender(<AmanAvatarMotion activity="error" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="error" sources={SOURCES} alt={ALT} />);
     expect(avatar()).toHaveAttribute('src', SOURCES.error);
 
-    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
     expect([...SOURCES.idle]).toContain(avatar().getAttribute('src'));
   });
 
   it('drops straight back to idle when a turn ends', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
     act(() => {
       vi.advanceTimersByTime(1500);
     });
     expect(avatar()).toHaveAttribute('src', SOURCES.writing);
 
-    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
     expect([...SOURCES.idle]).toContain(avatar().getAttribute('src'));
   });
 
   it('renders only the static poster when the user prefers reduced motion', () => {
     stubMatchMedia(true);
-    render(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    render(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
 
     const still = avatar();
     expect(still.tagName).toBe('IMG');
@@ -205,10 +216,10 @@ describe('AmanAvatarMotion', () => {
     expect(document.querySelectorAll('video')).toHaveLength(0);
   });
 
-  it('falls back to the poster when a clip fails to load', () => {
+  it('falls back to the poster when a clip fails, then tries the next state', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+      const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
       expect(videoElement()).toBeInTheDocument();
 
       act(() => {
@@ -220,13 +231,74 @@ describe('AmanAvatarMotion', () => {
       expect(still).toHaveAttribute('src', SOURCES.poster);
       expect(document.querySelectorAll('video')).toHaveLength(0);
       expect(consoleError).toHaveBeenCalled();
+
+      // One bad clip must not freeze the panda for the rest of the session: the next state
+      // gets its own attempt at its own clip.
+      rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
+      expect(avatar()).toHaveAttribute('src', SOURCES.writing);
     } finally {
       consoleError.mockRestore();
     }
   });
 
+  it('shows the poster, not a broken clip, for a waiting state with no waiting clip', () => {
+    const { rerender } = render(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAttribute('src', SOURCES.writing);
+
+    rerender(<AmanAvatarMotion activity="waiting" sources={SOURCES} alt={ALT} />);
+    const still = avatar();
+    expect(still.tagName).toBe('IMG');
+    expect(still).toHaveAttribute('src', SOURCES.poster);
+    expect(document.querySelectorAll('video')).toHaveLength(0);
+  });
+
+  it('plays the waiting clip at once when the waiting state has one', () => {
+    const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={WAITING_SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAttribute('src', WAITING_SOURCES.thinking);
+
+    // Waiting on the person is settled, not work: no dwell before it shows.
+    rerender(<AmanAvatarMotion activity="waiting" sources={WAITING_SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAttribute('src', WAITING_SOURCES.waiting);
+  });
+
+  it('resumes working motion as soon as the person has answered', () => {
+    const { rerender } = render(<AmanAvatarMotion activity="waiting" sources={WAITING_SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAttribute('src', WAITING_SOURCES.waiting);
+
+    rerender(<AmanAvatarMotion activity="thinking" sources={WAITING_SOURCES} alt={ALT} />);
+    expect(avatar()).toHaveAttribute('src', WAITING_SOURCES.thinking);
+  });
+
+  describe('clipForActivity', () => {
+    it.each([
+      ['thinking', SOURCES.thinking],
+      ['writing', SOURCES.writing],
+      ['error', SOURCES.error],
+    ] as const)('maps %s to its own clip', (activity, clip) => {
+      expect(clipForActivity({ activity, idleVariant: 0, sources: SOURCES })).toBe(clip);
+    });
+
+    it('maps idle to the chosen idle variant', () => {
+      expect(clipForActivity({ activity: 'idle', idleVariant: 1, sources: SOURCES })).toBe(SOURCES.idle[1]);
+    });
+
+    it('maps waiting to its clip, and to no clip (the poster) when none exists', () => {
+      expect(clipForActivity({ activity: 'waiting', idleVariant: 0, sources: WAITING_SOURCES })).toBe(
+        WAITING_SOURCES.waiting,
+      );
+      expect(clipForActivity({ activity: 'waiting', idleVariant: 0, sources: SOURCES })).toBeUndefined();
+    });
+
+    it('never maps two different states to the same clip, except the poster stand-in', () => {
+      const clips = (['idle', 'thinking', 'writing', 'waiting', 'error'] as const)
+        .map(activity => clipForActivity({ activity, idleVariant: 0, sources: WAITING_SOURCES }))
+        .filter((clip): clip is string => clip !== undefined);
+      expect(new Set(clips).size).toBe(clips.length);
+    });
+  });
+
   it('pauses when the tab hides and resumes when it returns', () => {
-    render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     const video = avatar();
     const pause = vi.mocked(window.HTMLMediaElement.prototype.pause);
     const play = vi.mocked(window.HTMLMediaElement.prototype.play);
@@ -248,7 +320,7 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('pauses when the rail scrolls out of view', () => {
-    render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     const pause = vi.mocked(window.HTMLMediaElement.prototype.pause);
     const play = vi.mocked(window.HTMLMediaElement.prototype.play);
     pause.mockClear();
@@ -267,8 +339,8 @@ describe('AmanAvatarMotion', () => {
   });
 
   it('rotates the idle variants at each loop restart', () => {
-    const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
-    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
+    rerender(<AmanAvatarMotion activity="idle" sources={SOURCES} alt={ALT} />);
     const first = avatar().getAttribute('src');
     expect([...SOURCES.idle]).toContain(first);
 
@@ -283,23 +355,23 @@ describe('AmanAvatarMotion', () => {
 
   it('does not rebuild the media pipeline when the clip has not changed', () => {
     const load = vi.mocked(window.HTMLMediaElement.prototype.load);
-    const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    const { rerender } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     const initialCalls = load.mock.calls.length;
     expect(initialCalls).toBeGreaterThan(0);
 
     // Re-render with the same activity: the clip is identical, so no new load().
-    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     expect(load.mock.calls.length).toBe(initialCalls);
   });
 
   it('clears pending transition timers and disconnects the observer on unmount', () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    const { rerender, unmount } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} />);
+    const { rerender, unmount } = render(<AmanAvatarMotion activity="thinking" sources={SOURCES} alt={ALT} />);
     // Past the beat window, a writing flip arms the 1.5s dwell timer.
     act(() => {
       vi.advanceTimersByTime(1300);
     });
-    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} />);
+    rerender(<AmanAvatarMotion activity="writing" sources={SOURCES} alt={ALT} />);
 
     unmount();
 

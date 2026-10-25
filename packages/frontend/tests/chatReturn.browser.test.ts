@@ -83,8 +83,8 @@ function chatNotice(page: Page) {
   return page.locator('[data-role="host-chat-notice"]');
 }
 
-function cancelButton(page: Page) {
-  return page.getByRole('button', { name: 'Cancel' });
+function stopButton(page: Page) {
+  return page.getByRole('button', { name: 'Stop' });
 }
 
 async function sessionIdOf(page: Page): Promise<string> {
@@ -114,11 +114,11 @@ async function finishedChat({ page, origin, text }: { page: Page; origin: string
   return await sessionIdOf(page);
 }
 
-/** The chat shows `message` with its live reply, and the composer is locked behind Cancel. */
+/** The chat shows `message` with its live reply, and the composer offers Stop. */
 async function expectLiveReply({ page, message }: { page: Page; message: string }): Promise<void> {
   await page.locator('main [data-role="user"]').getByText(message).waitFor({ timeout: RENDER_TIMEOUT_MS });
   await page.locator('main').getByText(STALLED_ANSWER_START).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-  await cancelButton(page).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await stopButton(page).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
 /** What a full reload of the same chat shows, for comparison. */
@@ -142,8 +142,8 @@ async function cancelStopsReply({
   api: ApprovalTestServer;
   sessionId: string;
 }): Promise<void> {
-  await cancelButton(page).first().click();
-  await cancelButton(page).first().waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
+  await stopButton(page).first().click();
+  await stopButton(page).first().waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
   await waitForTurnStatus({ api, sessionId, ready: status => status !== 'running' });
 }
 
@@ -337,7 +337,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       await chatNotice(page).filter({ hasText: COULD_NOT_START }).waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await composer(page).inputValue(), text, 'the typed text is still in the composer');
       assert.deepEqual(await userMessages(page), before, 'the refused message is not shown');
-      assert.equal(await cancelButton(page).count(), 0, 'the composer is free');
+      assert.equal(await stopButton(page).count(), 0, 'the composer is free');
       assert.equal(await page.getByText(COULD_NOT_START).count(), 1, 'the line is said once, in the chat');
       assert.equal(await page.getByText(/Request failed/).count(), 0, 'no raw error');
     });
@@ -352,7 +352,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       await api.restart();
       await page.reload({ waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await chatNotice(page).filter({ hasText: STOPPED_BY_RESTART }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-      assert.equal(await cancelButton(page).count(), 0, 'the composer is free');
+      assert.equal(await stopButton(page).count(), 0, 'the composer is free');
       assert.equal(await page.getByText('Something went wrong').count(), 0, 'no raw error');
       await waitForTurnStatus({ api, sessionId: alpha, ready: status => status !== 'running' });
 

@@ -4,11 +4,7 @@ import type { SentinelApprovalCard } from './types.js';
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
-  approveForChat: { label: 'Approve for this chat', hint: 'Allow this kind of call for the rest of this chat.' },
-  allowSearchesForChat: {
-    label: 'Allow searches in this chat',
-    hint: 'Later searches in this chat skip the private-read check. Every other check still runs.',
-  },
+  approveForChat: { label: 'Always allow this here', hint: "Don't ask again for this kind of action in this chat." },
   alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
     label: 'Always allow this tool',
@@ -50,7 +46,7 @@ export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
 export const ALWAYS_ALLOW_TOOL_OPTION_ID = 'allow-standing';
 
 /**
- * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new specialist, or a
+ * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new persona, or a
  * held web search, whose words they may want to change before it is sent.
  */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {

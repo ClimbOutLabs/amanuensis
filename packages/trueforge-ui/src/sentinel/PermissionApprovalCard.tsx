@@ -1,6 +1,5 @@
 'use client';
 
-import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { useRef, useState, type FC } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
@@ -77,7 +76,7 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
             setExpanded(!expanded);
           }}
           aria-expanded={expanded}
-          className="mt-1 block text-xs font-medium text-text-secondary underline hover:text-text-primary"
+          className="mt-1 block font-medium text-text-secondary underline hover:text-text-primary"
         >
           {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
         </button>
@@ -88,8 +87,8 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
 
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-baseline gap-2 text-sm">
-      <dt className="shrink-0 text-xs font-medium text-text-secondary">{label}</dt>
+    <div className="flex items-baseline gap-2">
+      <dt className="shrink-0 font-medium text-text-secondary">{label}</dt>
       <dd className="min-w-0">
         <FoldedText
           text={value}
@@ -105,14 +104,12 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
 function PlumbingDetails({ text }: { text: string }) {
   return (
     <details className="rounded border border-border bg-primary-bg px-3 py-2">
-      <summary className="cursor-pointer text-sm text-text-secondary">Search service details</summary>
-      <p className="mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
-        Also sent by the search service
-      </p>
+      <summary className="cursor-pointer text-text-secondary">Search service details</summary>
+      <p className="mb-1 mt-2 font-medium text-text-secondary">Also sent by the search service</p>
       <FoldedText
         text={text}
         as="pre"
-        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-text-primary text-sm"
       />
     </details>
   );
@@ -134,19 +131,19 @@ function visibleOutboundText(text: string, plumbing: string | null): string {
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium text-text-secondary">Full request</p>
-      {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
+      <p className="mb-1 font-medium text-text-secondary">Full request</p>
+      {truncated && <p className="mb-1 text-text-primary">Part of what will be sent is not shown in full.</p>}
       <FoldedText
         text={text}
         as="pre"
-        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-text-primary text-sm"
       />
     </div>
   );
 }
 
 /**
- * Approval ticket for calendar, schedule, specialist and other non-mail actions. The question is the
+ * Approval ticket for calendar, schedule, persona and other non-mail actions. The question is the
  * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
  * raw request and the connector's arguments fold into Details unless `outboundOpen` is set. Mail uses EmailApprovalCard
  * instead.
@@ -182,10 +179,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
-  // A held search's chat choice only lifts its private-read check, so it says what it lets through.
-  const chatChoice = isSearchHoldCardText(card.plain_what)
-    ? APPROVAL_CHOICES.allowSearchesForChat
-    : APPROVAL_CHOICES.approveForChat;
   const plumbingText = card.outbound_plumbing_text ?? null;
   const outboundShown =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
@@ -207,7 +200,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const stubContent = (
     <>
       <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
-      <p className="aui-ticket__detail text-sm text-text-primary">{stub.detail}</p>
+      <p className="aui-ticket__detail text-text-primary">{stub.detail}</p>
       <p className="aui-ticket__label text-gold-ink">{stub.state}</p>
     </>
   );
@@ -216,11 +209,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     <article
       data-role="approval-ticket"
       data-approval-id={approvalId}
-      className={cn('aui-ticket aui-ticket--stub aui-ticket--punch aui-settle', highlighted && 'aui-ticket--selected')}
+      className={cn(
+        'aui-approval-card aui-ticket aui-ticket--stub aui-ticket--punch aui-settle',
+        highlighted && 'aui-ticket--selected',
+      )}
     >
       <div className="min-w-0 space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
+          <h3 className="aui-approval-card__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
           {sentAt === null ? (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
               {WAITING_FOR_YOU_LABEL}
@@ -231,17 +227,17 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             </span>
           )}
         </div>
-        {card.plain_why !== null && <p className="text-sm text-text-secondary">Why: {card.plain_why}</p>}
+        {card.plain_why !== null && <p className="text-text-secondary">Why: {card.plain_why}</p>}
 
         {card.cannot_be_undone !== null && (
-          <p className="flex items-start gap-2 text-sm text-text-secondary">
+          <p className="flex items-start gap-2 text-text-secondary">
             <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>{card.cannot_be_undone}</span>
           </p>
         )}
 
         {card.why_asked_again !== null && (
-          <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
+          <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
         {hasDetails && (
@@ -274,6 +270,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="primary"
             size="small"
+            data-approval-primary
             title={APPROVAL_CHOICES.approve.hint}
             onClick={markSent(onApprove)}
             disabled={disabled || sentAt !== null}
@@ -313,12 +310,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <Button
             variant="secondary"
             size="small"
-            title={chatChoice.hint}
+            title={APPROVAL_CHOICES.approveForChat.hint}
             onClick={markSent(onApproveForChat)}
             disabled={disabled || sentAt !== null}
             className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
           >
-            {chatChoice.label}
+            {APPROVAL_CHOICES.approveForChat.label}
           </Button>
         )}
         {changing && onChangeRequest !== undefined && (
@@ -340,7 +337,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </Button>
         )}
 
-        <details className="text-sm">
+        <details>
           <summary className="cursor-pointer text-text-secondary underline">Details</summary>
           <div className="mt-2 space-y-3">
             {!outboundOpen && outboundShown !== null && (

@@ -51,12 +51,6 @@ describe('CalDAV read classification', () => {
       expect(decision.reason_detail).toBe('Read your calendar.');
     },
   );
-
-  it('marks the turn as having read private data', async () => {
-    const ctx = makeCtx();
-    await classifyTier(caldavAction('list_events'), ctx);
-    expect(ctx.web_search.privateDataRead).toBe(true);
-  });
 });
 
 describe('CalDAV respond_to_event', () => {

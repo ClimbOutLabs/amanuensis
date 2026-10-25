@@ -19,8 +19,10 @@ import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
+import { createChatPicturesRouter } from './apis/chatPictures';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
@@ -103,6 +105,7 @@ import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
+import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
@@ -805,6 +808,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Browser session only, like Google's: the email account is the instance owner's, and its app
+  // password passes through the save call to the sidecar only.
+  app.route(
+    EMAIL_SETTINGS_BASE_PATH,
+    withAuth(
+      createEmailAccountRouter({
+        fetchImpl: undefined,
+        resolveRequestContext,
+        logger: deps.logger,
+        mcpServerStore: deps.resolveMcpServerStore(),
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
   // credentials (agents, sandboxes, API clients) are refused.
   app.route(
@@ -842,6 +859,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
           now: () => Date.now(),
         }),
+        resolveRequestContext,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Chat-page pictures, browser session only: only a link the chat itself saw, read back from its
+  // stored turns, and no agent or API token may fetch on the person\'s behalf.
+  app.route(
+    '/api/chat-pictures',
+    withAuth(
+      createChatPicturesRouter({
+        pictures: createChatPictureService({
+          sessionStore: deps.sessionStore,
+          fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+          now: () => Date.now(),
+        }),
+        sessions: deps.sessions,
         resolveRequestContext,
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
