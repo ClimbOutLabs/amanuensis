@@ -6,6 +6,7 @@ import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
@@ -44,7 +45,10 @@ export type AmanRuntimeRailProps = {
   buildRef?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
-  /** Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting state. */
+  /**
+   * Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting
+   * state, and puts a live Waiting for you line above the history in the Activity row.
+   */
   pendingApprovalIds?: readonly string[];
   /**
    * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
@@ -302,6 +306,18 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           )}
 
           <FoldedRow section="activity" title="Activity">
+            {/* The wait line comes straight from the chat, not the receipt: a carded action is
+            written to the history only after it is answered, so while it waits the history
+            holds nothing about it, and this line is the sign of it here. */}
+            {waitingOnPerson && (
+              <p className="aman-runtime-rail__waiting">
+                <span
+                  aria-hidden="true"
+                  className={`size-2 shrink-0 rounded-full ${ACTIVITY_STATE_DOT_CLASSES.waiting}`}
+                />
+                {WAITING_FOR_YOU_LABEL}
+              </p>
+            )}
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
           </FoldedRow>
 
