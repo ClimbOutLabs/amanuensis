@@ -1,7 +1,7 @@
 ---
 id: web
 title: Searching the web
-covers: web
+covers:
 ---
 
 Ask Aman for the latest news or anything that changes often, and it searches the live web for you. It can give you the five stories that matter, with two lines each.

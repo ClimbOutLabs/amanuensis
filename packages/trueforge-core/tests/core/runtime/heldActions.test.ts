@@ -310,7 +310,7 @@ describe('an unattended run', () => {
     // The run's last message names what it held, so the owner knows to look at the list.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: This is a new tool from mail. Check what it will do before you allow it. Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: Allow this new tool from mail? Approve it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
@@ -858,7 +858,7 @@ describe('audit rows for a held web search', () => {
       await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
       expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(descriptions(h))).not.toContain(query);
-      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This search contains /);
+      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This sends something that looks like /);
     }
   });
 

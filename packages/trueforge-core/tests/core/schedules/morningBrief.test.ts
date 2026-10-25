@@ -1,8 +1,6 @@
 import {
   briefItemKey,
   isMorningBriefPrompt,
-  MORNING_BRIEF_NO_MAIL_INSTRUCTION,
-  MORNING_BRIEF_NO_MAIL_LINE,
   MORNING_BRIEF_PROMPT,
   parseMorningBrief,
 } from '../../../src/core/schedules/morningBrief';
@@ -155,18 +153,6 @@ describe('parseMorningBrief', () => {
   it('requires a when only as an offset ISO time', () => {
     const item = { ...VALID.items[1], when: 'Sunday 3:30pm' };
     expect(parseMorningBrief(answer({ digest: 'One item.', items: [item] }))).toBeNull();
-  });
-});
-
-describe('the no-mail line', () => {
-  it('is one plain line that says where to connect email', () => {
-    expect(MORNING_BRIEF_NO_MAIL_LINE).toBe('No email is connected. You can connect one in Settings, Connectors.');
-    expect(MORNING_BRIEF_NO_MAIL_LINE).not.toContain('\n');
-  });
-
-  it('the instruction carries the line and keeps email out of the rest of the brief', () => {
-    expect(MORNING_BRIEF_NO_MAIL_INSTRUCTION).toContain(MORNING_BRIEF_NO_MAIL_LINE);
-    expect(MORNING_BRIEF_NO_MAIL_INSTRUCTION).toContain('digest');
   });
 });
 

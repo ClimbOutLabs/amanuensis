@@ -1,4 +1,5 @@
-import { createWebSearchTurnState, recordResultUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
 
 const SEEN = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
@@ -6,7 +7,10 @@ const UNSEEN = 'https://upload.wikimedia.org/wikipedia/commons/4/4d/Invented_Fox
 
 function webSearchWith(urls: string[]): WebSearchTurnState {
   const state = createWebSearchTurnState();
-  recordResultUrls({ state, texts: [JSON.stringify({ results: urls.map(url => ({ title: 'Result', url })) })] });
+  recordSearchResults({
+    provenance: state.provenance,
+    texts: [JSON.stringify({ results: urls.map(url => ({ title: 'Result', url })) })],
+  });
   return state;
 }
 
@@ -162,10 +166,9 @@ describe('space links are checked from a real parse of the body', () => {
     expect(refusalOf({ body, format: 'html' })).toContain('cannot be checked for links safely');
   });
 
-  it('refuses an http link written without slashes, even when the same host was seen over https', () => {
-    // `http:host/...` names a different address from the seen `https://host/...`, so it is checked as its own.
+  it('keeps an http spelling of a link a search returned over https, since it names the same page', () => {
     const body = `<a href="${SEEN.replace('https://', 'http:')}">Fox</a>`;
-    expect(refusalOf({ body, format: 'html' })).toContain('did not come from a search or page');
+    expect(refusalOf({ body, format: 'html' })).toBeUndefined();
   });
 
   it('checks only links a write adds, so an unrelated edit keeps a link from an earlier turn', () => {

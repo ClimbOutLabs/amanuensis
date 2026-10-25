@@ -13,7 +13,6 @@ import {
   MAIL_CONNECTOR_TOOL_NAMES,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
-import { MORNING_BRIEF_NO_MAIL_INSTRUCTION } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
@@ -37,11 +36,7 @@ export interface MemoryTurnContext {
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
-  /** Connector names the person turned off for this chat, from the chat's stored choice. Absent: nothing is off. */
-  turnedOffConnectorNames?: readonly string[] | undefined;
-  /** This turn is a morning brief and no mail source is set up: the brief says so in one plain line. */
-  noMailBrief?: boolean | undefined;
-  /** When false, the user has disabled memory recall and retention for this session. */
+  /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
@@ -112,28 +107,14 @@ function mailAttachmentCapabilities(spec: AgentSpec): AgentCapability[] {
   return [{ toolResponseProcessors: [new MailAttachmentProcessor()] }];
 }
 
-/** A connector offered to every root thread, so a chat that never opened Add-ons still has it. */
-function withConnectorAttached(spec: AgentSpec, serverName: string): AgentSpec {
+/** The designated search provider is offered to every root thread, so a chat that never opened Add-ons still searches. */
+function withSearchProviderAttached(spec: AgentSpec, searchProviderServerName: string): AgentSpec {
   const servers = spec.mcp_servers ?? [];
-  if (servers.some(entry => entry.name === serverName)) {
+  if (servers.some(entry => entry.name === searchProviderServerName)) {
     return spec;
   }
-  const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: serverName }]);
+  const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: searchProviderServerName }]);
   return attached === undefined ? spec : { ...spec, mcp_servers: [...servers, attached] };
-}
-
-/** The built-in sources offered by default alongside search: email and calendar, each only when set up. */
-const DEFAULT_SOURCE_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME];
-
-/** Root-only: a brief with no mail source says so in one plain line, in the digest. */
-function noMailBriefCapability(): AgentCapability {
-  return {
-    instructionBuilders: [
-      builder => {
-        builder.addSection('morning-brief-no-mail', MORNING_BRIEF_NO_MAIL_INSTRUCTION, true);
-      },
-    ],
-  };
 }
 
 /** Adds host-enforced long-term memory (recall + retain) to the root thread of one turn. */
@@ -156,47 +137,18 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     this.#toolOutputScreen = toolOutputScreen;
   }
 
-  /**
-   * The spec with the set-up Email and Calendar connectors attached, when the chat does not
-   * list them and has not turned them off. A set-up list that could not be read attaches
-   * nothing: a turn must not gain a connector whose setup could not be confirmed.
-   */
-  async #withDefaultSourcesAttached(spec: AgentSpec, turnedOff: ReadonlySet<string>): Promise<AgentSpec> {
-    const setUpConnectorNames = await this.setUpConnectorNames;
-    if (setUpConnectorNames === undefined) {
-      return spec;
-    }
-    let next = spec;
-    for (const name of DEFAULT_SOURCE_CONNECTOR_NAMES) {
-      if (setUpConnectorNames.includes(name) && !turnedOff.has(name)) {
-        next = withConnectorAttached(next, name);
-      }
-    }
-    return next;
-  }
-
   override async resolveAgentDefinition(
     input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0],
   ): Promise<ResolvedAgentDefinition> {
     const isSubAgent = input.agent_info !== undefined;
     const providerServerName = this.#memory.providerServerName;
-    const turnedOff = new Set(this.#memory.turnedOffConnectorNames ?? []);
     // Root threads only, matching where the memory capability itself is attached: a sub-agent
     // is not the thread the host retains, so its mounts are left exactly as the spec states them.
-    const designatedSearchProvider = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
-    // A chat that turned search off keeps it off: the designated provider is not offered again.
-    const searchProviderServerName =
-      designatedSearchProvider !== undefined && turnedOff.has(designatedSearchProvider)
-        ? undefined
-        : designatedSearchProvider;
-    // The set-up Email and Calendar connectors are offered by default on root threads, the
-    // same way the search provider is below: a chat that never opened Add-ons still reads its
-    // mail and calendar, unless the person turned one off for this chat.
-    const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);
+    const searchProviderServerName = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
     const narrowedSpec =
       providerServerName === undefined || isSubAgent
-        ? defaultedSpec
-        : withMemoryProviderNarrowedToReads(defaultedSpec, providerServerName);
+        ? input.spec
+        : withMemoryProviderNarrowedToReads(input.spec, providerServerName);
     // The Email connector is offered only its eight tools on every thread, sub-agents included.
     const mailNarrowedSpec = narrowConnectorTools(narrowedSpec, {
       server_name: MAIL_CONNECTOR_NAME,
@@ -207,16 +159,16 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       server_name: CALDAV_SERVER_NAME,
       tools: CALDAV_TOOL_NAMES,
     });
-    const effectiveSpec =
-      searchProviderServerName === undefined
-        ? calendarNarrowedSpec
-        : withConnectorAttached(calendarNarrowedSpec, searchProviderServerName);
     const resolved = await super.resolveAgentDefinition({
       ...input,
-      spec: effectiveSpec,
+      spec:
+        searchProviderServerName === undefined
+          ? calendarNarrowedSpec
+          : withSearchProviderAttached(calendarNarrowedSpec, searchProviderServerName),
     });
-    // Derive recallEnabled from the spec (defaults to true per schema)
-    const recallEnabled = input.spec.config.memory.recall_enabled;
+    // An explicit recallEnabled on the turn wins over the spec (defaults to true per schema):
+    // unattended runs pass false so their own earlier tasks cannot fingerprint-block their searches.
+    const recallEnabled = this.#memory.recallEnabled ?? input.spec.config.memory.recall_enabled;
     const memoryCapabilities = memoryCapabilitiesForTurn({
       memory: { ...this.#memory, recallEnabled },
       webSearch: this.webSearchTurn,
@@ -227,8 +179,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const extraCapabilities = [
       ...memoryCapabilities,
       ...(outputScreen === undefined ? [] : [outputScreen]),
-      ...mailAttachmentCapabilities(effectiveSpec),
-      ...(this.#memory.noMailBrief === true && !isSubAgent ? [noMailBriefCapability()] : []),
+      ...mailAttachmentCapabilities(input.spec),
     ];
     if (extraCapabilities.length === 0) {
       return resolved;

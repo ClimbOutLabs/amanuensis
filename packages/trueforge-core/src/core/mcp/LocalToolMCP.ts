@@ -22,6 +22,7 @@ function withValidatedInput<T extends z.ZodType>(
     approvalDecision?: ApprovalDecision,
     context?: ToolInvocationContext,
   ) => Promise<CallToolResponse>,
+  onInvalid?: (error: z.ZodError) => string,
 ) {
   return async (
     raw: unknown,
@@ -31,7 +32,10 @@ function withValidatedInput<T extends z.ZodType>(
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       return toolResultResponse({
-        text: JSON.stringify({ error: 'Validation failed', details: z.treeifyError(parsed.error) }),
+        text:
+          onInvalid !== undefined
+            ? onInvalid(parsed.error)
+            : JSON.stringify({ error: 'Validation failed', details: z.treeifyError(parsed.error) }),
         isError: true,
       });
     }
@@ -54,6 +58,11 @@ export function defineTool<T extends z.ZodType>(config: {
   description: string;
   schema: T;
   /**
+   * Renders an invalid-input error for the model. Absent, the error stays the shared
+   * `Validation failed` JSON shape, so tools that pin it keep it.
+   */
+  invalidInput?: ((error: z.ZodError) => string) | undefined;
+  /**
    * MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint).
    * Surfaced on toolCallInfo so the permission layer classifies built-in
    * tools from the same server-declared metadata remote tools carry.
@@ -75,7 +84,7 @@ export function defineTool<T extends z.ZodType>(config: {
     description: config.description,
     inputSchema: jsonSchema,
     ...(config.annotations !== undefined && { annotations: config.annotations }),
-    execute: withValidatedInput(config.schema, config.handler),
+    execute: withValidatedInput(config.schema, config.handler, config.invalidInput),
   };
 }
 

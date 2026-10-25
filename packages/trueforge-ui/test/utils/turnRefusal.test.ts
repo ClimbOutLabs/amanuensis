@@ -31,7 +31,7 @@ describe('turnRefusalCode', () => {
 const sendLines: Array<[SendRefusal, string]> = [
   [
     'previous_turn_running',
-    'Juniper is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    'Juniper is still working on your last message. Wait for it to finish, or press Stop, then send again.',
   ],
   ['turn_could_not_start', 'That reply could not start. Send your message again.'],
   ['stopped_by_restart', 'This reply stopped when Juniper restarted. Send your message again.'],
@@ -40,7 +40,7 @@ const sendLines: Array<[SendRefusal, string]> = [
 const answerLines: Array<[TurnRefusalCode, string]> = [
   [
     'previous_turn_running',
-    'Juniper is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    'Juniper is still working on your last message. Wait for it to finish, or press Stop, then send again.',
   ],
   ['turn_could_not_start', 'That reply could not start, so nothing was done. Answer again.'],
 ];

@@ -387,6 +387,18 @@ export interface ExtendedChatCompletionChunk extends Omit<ChatCompletionChunk, '
   usage?: CompletionUsage | null;
 }
 
+/**
+ * Which repetition guard stopped a reply, the channel it was watching, and, for the
+ * reasoning guard, how many words it had seen when it tripped. Carried on the stream
+ * result and on the reasoning error so the stop can be logged with its guard and channel
+ * instead of guessed at afterwards.
+ */
+export interface RepetitionStop {
+  guard: 'answer_units' | 'streaming_shingles';
+  channel: 'answer' | 'reasoning';
+  words?: number | undefined;
+}
+
 export interface RawAssistantMessageWithUsage {
   output: RawAssistantMessage;
   usage: CompletionUsage;
@@ -402,6 +414,8 @@ export interface RawAssistantMessageWithUsage {
    * nothing after the first copy of the loop. Absent when the reply was not cut.
    */
   repetition_stopped?: true;
+  /** Which guard cut the answer short and on which channel, present when repetition_stopped is set. */
+  repetition_stop?: RepetitionStop;
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

@@ -36,6 +36,7 @@ import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { standInApprovalCard } from '../sentinel/standInCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
+import { REQUEST_ENDED_LINE } from '../utils/staleApproval.js';
 import {
   allowChatOptionId,
   allowOnceOptionId,
@@ -65,6 +66,7 @@ import {
   toolCallNotDoneReason,
   toStatus,
 } from '../utils/toolCallParsing.js';
+import { toolStepTitle } from '../utils/toolWords.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedApprovalBridge.js';
@@ -125,7 +127,7 @@ function EndedApprovalNote({ onDismiss, dismissing }: { onDismiss: (() => void) 
       data-role="approval-expired"
       className="text-text-secondary flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
     >
-      <p>This request ended. Ask again if you still need it.</p>
+      <p>{REQUEST_ENDED_LINE}</p>
       {onDismiss !== undefined && (
         <Button.Secondary size="small" onClick={onDismiss} disabled={dismissing}>
           Dismiss
@@ -471,12 +473,12 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
-  // A specialist added in this chat shows in the persona list without a page reload.
+  // A persona added in this chat shows in the persona list without a page reload.
   const reloadPersonas = useOptionalPersonas()?.reload;
-  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  const personaAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
   useEffect(() => {
-    if (specialistAdded) void reloadPersonas?.();
-  }, [specialistAdded, reloadPersonas]);
+    if (personaAdded) void reloadPersonas?.();
+  }, [personaAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -620,7 +622,9 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         onToggle={onToggle}
         durationText={durationText}
         outcomeText={outcomeText}
-        command={command}
+        awaiting={status === 'running' && !showApproval}
+        // While the approval waits, the card's Command row is the one place the command shows.
+        command={showApproval ? undefined : command}
         summary={summary}
         exitCode={exitCode}
         argsJson={showApproval ? undefined : argsJson}
@@ -658,8 +662,8 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
           icon="mcp-server"
           expanded={expanded}
           onToggle={onToggle}
-          awaiting={status === 'running'}
-          awaitingText={durationText ?? 'Awaiting Response…'}
+          awaiting={status === 'running' && !showApproval}
+          awaitingText={durationText}
           outcomeText={outcomeText}
           status={status}
           showResponseLine={status !== 'running' && !!resultDisplay.data}
@@ -684,8 +688,8 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         icon="mcp-server"
         expanded={expanded}
         onToggle={onToggle}
-        awaiting={status === 'running'}
-        awaitingText={durationText ?? 'Awaiting Response…'}
+        awaiting={status === 'running' && !showApproval}
+        awaitingText={durationText}
         outcomeText={outcomeText}
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
@@ -707,11 +711,14 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
   return (
     <ToolCallCard
-      toolName={part.toolName}
+      toolName={toolStepTitle({
+        toolName: part.toolName,
+        state: status === 'running' ? 'running' : notDoneReason !== undefined ? 'not_done' : 'done',
+      })}
       expanded={expanded}
       onToggle={onToggle}
-      awaiting={status === 'running'}
-      awaitingText={durationText ?? 'Awaiting Response…'}
+      awaiting={status === 'running' && !showApproval}
+      awaitingText={durationText}
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}

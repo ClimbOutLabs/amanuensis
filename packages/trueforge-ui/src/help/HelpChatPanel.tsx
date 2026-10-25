@@ -1,7 +1,8 @@
 'use client';
 
 import { useAui } from '@assistant-ui/react';
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
@@ -169,11 +170,11 @@ function phaseLine(session: HelpSession): ReactNode {
   switch (session.phase) {
     case 'pending':
     case 'checking':
-      return 'Checking Aman. This takes a few seconds.';
+      return 'Checking the app. This takes a few seconds.';
     case 'joining':
-      return 'Iris is joining this chat.';
+      return `${AMAN_GUIDE_NAME} is joining this chat.`;
     case 'unavailable':
-      return 'Iris could not join this chat. Check your connection, then press Check again.';
+      return `${AMAN_GUIDE_NAME} could not join this chat. Check your connection, then press Check again.`;
     case 'check_failed':
       return 'The check could not run. Check your connection, then press Check again.';
     case 'no_model':
@@ -221,7 +222,7 @@ export function HelpChatPanel() {
         )}
         {session.sentMessage === null ? null : (
           <details className="text-sm text-text-secondary">
-            <summary className="cursor-pointer">What Iris was told</summary>
+            <summary className="cursor-pointer">What {AMAN_GUIDE_NAME} was told</summary>
             <p className="mt-2 whitespace-pre-wrap">{session.sentMessage}</p>
           </details>
         )}
@@ -238,26 +239,16 @@ export function HelpChatPanel() {
 }
 
 /**
- * The one-tap answers under Iris's first message, and a box for anything else. Tapping sends the
- * choice as the person's own message.
+ * The one-tap answers under the guide's first message. Tapping sends the choice as the person's own
+ * message; anything else goes in the main composer, the chat's only place to type.
  */
 export function HelpChoices() {
   const help = useOptionalHelp();
   const sendAsPerson = useSendAsPerson();
-  const [typed, setTyped] = useState('');
   const groupId = useId();
   if (help === null || help.session === null || help.session.phase !== 'joined') {
     return null;
   }
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = typed.trim();
-    if (text === '') {
-      return;
-    }
-    sendAsPerson(text);
-    setTyped('');
-  };
   return (
     <section aria-labelledby={groupId} className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 pb-4">
       <h2 id={groupId} className="sr-only">
@@ -272,21 +263,6 @@ export function HelpChoices() {
           </li>
         ))}
       </ul>
-      <form className="flex gap-2" onSubmit={submit}>
-        <label className="sr-only" htmlFor={`${groupId}-text`}>
-          Tell Iris in your own words
-        </label>
-        <input
-          id={`${groupId}-text`}
-          value={typed}
-          onChange={event => setTyped(event.target.value)}
-          placeholder="Or tell Iris in your own words"
-          className="min-w-0 flex-1 rounded-lg border border-border bg-card-bg px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40"
-        />
-        <Button type="submit" variant="secondary" size="small">
-          Send
-        </Button>
-      </form>
     </section>
   );
 }

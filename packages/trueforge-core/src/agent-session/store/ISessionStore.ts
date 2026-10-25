@@ -9,7 +9,6 @@ import type {
 import type { RegisteredCommandExecution } from '../../core/llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../../core/mcp/executeToolCalls';
 import type { ImplementationPlanGrant, ImplementationPlanGrantOwner } from '../../core/mcp/implementationPlanGrant';
-import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type {
   AgentThreadSnapshot,
   ContextMessage,
@@ -37,11 +36,6 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
 > & {
   custom: TSessionCustom | null;
 };
-
-export interface SetPrivateFingerprintsInput {
-  session_id: string;
-  fingerprints: ChatPrivateFingerprints;
-}
 
 /**
  * PATCH fields for an existing session; `undefined` fields are left unchanged.
@@ -547,13 +541,6 @@ export interface ISessionStore<
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
-
-  /**
-   * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
-   * searches. Entries are joined; once incomplete or holding a secret, the record stays so. A missing session is a
-   * no-op. Deleted with the session.
-   */
-  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void>;
 
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;

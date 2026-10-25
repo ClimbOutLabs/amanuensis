@@ -42,11 +42,7 @@ import {
   type BoundRepository,
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
-import { readTurnedOffConnectors } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
-import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
-import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
-import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -135,6 +131,7 @@ import {
   getModelDetails,
   isGithubConnectorAttached,
   isWebConnectorAttached,
+  modelRequestGate,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -349,46 +346,6 @@ export type BeginTurnExecutionDeps = Pick<
 };
 
 /**
- * Whether this turn is a morning brief with no mail source to read: the Email connector is
- * not set up for the tenant and the person has no Google login that can read mail. Only
- * then does the brief carry the one plain line saying so. A read that fails answers false:
- * the line is a courtesy, never a reason to fail the turn.
- */
-async function resolveNoMailBrief(input: {
-  turnInput: TurnInputItem[] | undefined;
-  mcpServerStore: IMcpServerWithAuthStore;
-  googleConnectionStore: IGoogleConnectionStore | undefined;
-  tenant_id: string;
-  userRef: string;
-  logger: Logger;
-}): Promise<boolean> {
-  if (!isMorningBriefPrompt(extractUserMessageText(input.turnInput))) {
-    return false;
-  }
-  try {
-    const servers = await input.mcpServerStore.listServers({ tenant_id: input.tenant_id, names: undefined });
-    if (servers.some(server => server.name === MAIL_CONNECTOR_NAME)) {
-      return false;
-    }
-    if (input.googleConnectionStore !== undefined) {
-      const connection = await input.googleConnectionStore.get({
-        tenant_id: input.tenant_id,
-        created_by: input.userRef,
-      });
-      if (connection !== null && grantedFeatures(connection.granted_scopes).includes('gmail_read')) {
-        return false;
-      }
-    }
-    return true;
-  } catch (error) {
-    input.logger.debug('The brief mail check could not be read; the brief runs without the no-mail line', {
-      ...extractErrorLogFields(error),
-    });
-    return false;
-  }
-}
-
-/**
  * Builds the per-turn resolver. Agent / MCP / sandbox / LLM lookups are wired
  * the same way: async factories over the corresponding stores.
  */
@@ -408,8 +365,6 @@ function createTurnResolver(deps: {
   turnId: string;
   /** The turn's input holds a new message from the person, not only approvals or tool responses. */
   startsAnswer: boolean;
-  /** This turn is a morning brief and no mail source is set up: the brief says so in one plain line. */
-  noMailBrief?: boolean | undefined;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -425,6 +380,8 @@ function createTurnResolver(deps: {
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
+  /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
+  unattended?: boolean | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
@@ -447,7 +404,7 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
-  /** Chat turns that have a model to answer with; absent, no specialist tool mounts. */
+  /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
@@ -465,7 +422,6 @@ function createTurnResolver(deps: {
     session,
     turnId,
     startsAnswer,
-    noMailBrief,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -576,6 +532,12 @@ function createTurnResolver(deps: {
                   build: buildClient,
                 }),
           defaultModelParams: resolved.defaultModelParams,
+          // The per-model request limit, keyed by the configured model whatever provider ends
+          // up serving it: a step on this model waits for a place before it sends.
+          modelRequestGate:
+            resolved.maxConcurrentRequests === undefined
+              ? undefined
+              : { gate: modelRequestGate, key: name, limit: resolved.maxConcurrentRequests },
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
           // prompt names what it really is.
@@ -877,12 +839,8 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
-      // The chat's own stored choice, read off the session record: the connectors the
-      // person turned off for this chat stay off on every turn of it.
-      turnedOffConnectorNames: readTurnedOffConnectors(session.record.metadata),
-      noMailBrief: noMailBrief === true,
-      // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
-      recallEnabled: undefined,
+      // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
+      recallEnabled: deps.unattended ? false : undefined,
       internalSourceState,
     },
     {
@@ -1513,7 +1471,6 @@ async function abandonTurnThatCouldNotStart(input: {
   logger: Logger;
 }): Promise<void> {
   input.abortController.abort(CancellationReason.CouldNotStart);
-  input.turn.forgetUnstarted();
   await input.resolver.close().catch((closeError: unknown) => {
     input.logger.warn('Failed to close turn resources for a turn that could not start', {
       sessionId: input.session.session_id,
@@ -1622,18 +1579,9 @@ async function beginAcceptedTurnExecution(
         helperFqn: turnHelperModelFqn(),
         logger: deps.logger,
       });
-      const noMailBrief = await resolveNoMailBrief({
-        turnInput: input,
-        mcpServerStore: deps.mcpServerStore,
-        googleConnectionStore: deps.googleConnectionStore,
-        tenant_id,
-        userRef,
-        logger: deps.logger,
-      });
       const resolver = createTurnResolver({
         mcpCatalog: deps.mcpCatalog,
         mcpServerStore: deps.mcpServerStore,
-        noMailBrief,
         tokenStore: deps.tokenStore,
         skillStore: deps.skillStore,
         sandboxProviderStore: deps.sandboxProviderStore,
@@ -1664,6 +1612,7 @@ async function beginAcceptedTurnExecution(
         memoryClient: deps.memoryClient,
         memoryProviderServerName: deps.memoryProviderServerName,
         memorySettings: effectiveMemorySettings,
+        unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         sessionTitle: deps.sessionTitle,
         clientTimezone: deps.clientTimezone,
@@ -2505,18 +2454,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProvider?.settings,
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
-    const noMailBrief = await resolveNoMailBrief({
-      turnInput: body.input,
-      mcpServerStore,
-      googleConnectionStore: deps.googleConnectionStore,
-      tenant_id: requestContext.tenant_id,
-      userRef,
-      logger: deps.logger,
-    });
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
-      noMailBrief,
       tokenStore: deps.tokenStore,
       skillStore,
       sandboxProviderStore,
@@ -2708,7 +2648,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.CouldNotStart);
-      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,

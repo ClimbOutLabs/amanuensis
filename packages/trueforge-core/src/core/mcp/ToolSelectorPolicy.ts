@@ -170,9 +170,9 @@ export class ToolSelectorPolicy {
    * undefined defaults to write+destructive+unclassified, i.e. fail-closed (constructor); an
    * explicit list — including empty — is exact.
    *
-   * `waiveUnclassified` lets a host that already vouches for the tool (the user's search provider
-   * running a tool its own list names) pass what the default list gates only for missing
-   * annotations. It applies to the default list alone: a list the user changed in any way, `@all`,
+   * `waiveUnclassified` lets a call the host already vouches for (the user's search provider running a
+   * tool its own list names, the operator's own Email sidecar reading mail, a standing grant) pass what
+   * the default list gates only for missing annotations. It applies to the default list alone: a list the user changed in any way, `@all`,
    * a literal tool name, or `@unclassified` on its own, is the user's explicit choice and gates.
    */
   requiresApproval(

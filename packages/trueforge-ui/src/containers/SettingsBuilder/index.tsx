@@ -17,8 +17,6 @@ import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
-import { AmanFirstRunGuide } from '@/components/AmanFirstRunGuide.js';
-import { useOptionalAmanSetup } from '@/components/AmanSetupContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import { Icon } from '@/icons/Icon.js';
@@ -160,7 +158,6 @@ const TruefoundrySettingsBuilder = () => {
   // The one section both the tab strip and the body show. A stored section the host no longer
   // offers falls back to Models here, so the highlighted tab and the content cannot disagree.
   const activeSection = sections.find(item => item.id === section)?.id ?? 'models';
-  const showFirstRunGuide = useOptionalAmanSetup() !== null && activeSection === 'models';
 
   const panelVisible = settingsOpen && catalog != null;
 
@@ -285,7 +282,6 @@ const TruefoundrySettingsBuilder = () => {
           className="flex flex-col h-full flex-1 overflow-y-auto scroll-pb-6 px-6 py-4"
         >
           <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto pb-6">
-            {showFirstRunGuide ? <AmanFirstRunGuide placement="settings" className="mb-4 max-w-none shrink-0" /> : null}
             <Suspense fallback={<SettingsSectionFallback />}>
               {activeSection === 'models' ? <ModelSettings /> : null}
               {activeSection === 'model-roles' ? <ModelRoleSettings /> : null}

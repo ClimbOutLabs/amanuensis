@@ -190,6 +190,12 @@ describe('grounded finder over the real server path', () => {
       ),
     );
     expect(saved.status).toBe(200);
+    // Maps set to ask, so the pin's card is what these tests check.
+    const maps = await server.request(
+      '/api/v1/user/settings/sentinel',
+      jsonInit({ maps_without_asking: false }, 'PATCH'),
+    );
+    expect(maps.status).toBe(200);
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -246,7 +252,7 @@ describe('grounded finder over the real server path', () => {
   );
 
   it(
-    'asks before the search when searches are set to Ask, with the words, host and credits',
+    'asks before the search when searches are set to Ask, with the words, provider and credits',
     async () => {
       await setSearchWithoutAsking(false);
       const sessionId = await createSession(server);
@@ -258,7 +264,8 @@ describe('grounded finder over the real server path', () => {
       expect(recorded.calls).toEqual([]);
       const searchCard = pendingCall(first)?.call.tier3_card;
       expect(searchCard?.plain_what).toContain(FIND_PLACES_QUERY);
-      expect(searchCard?.plain_what).toContain('api.tavily.com');
+      expect(searchCard?.plain_what).toContain('Tavily');
+      expect(searchCard?.plain_what).not.toContain('api.tavily.com');
       expect(searchCard?.plain_what).not.toMatch(/endpoint/);
       expect(searchCard?.plain_what).not.toContain('/search');
       expect(searchCard?.plain_what).toContain('2 Tavily credits');
@@ -268,7 +275,8 @@ describe('grounded finder over the real server path', () => {
       const extractCard = pendingCall(second)?.call.tier3_card;
       expect(extractCard?.plain_what).toContain(HARBOUR_URL);
       expect(extractCard?.plain_what).toContain(GARDEN_URL);
-      expect(extractCard?.plain_what).toContain('api.tavily.com');
+      expect(extractCard?.plain_what).toContain('Tavily');
+      expect(extractCard?.plain_what).not.toContain('api.tavily.com');
       expect(extractCard?.plain_what).not.toMatch(/endpoint/);
       expect(extractCard?.plain_what).not.toContain('/extract');
       expect(extractCard?.plain_what).toContain('1 Tavily credit');

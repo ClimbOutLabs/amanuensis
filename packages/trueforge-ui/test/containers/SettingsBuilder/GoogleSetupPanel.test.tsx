@@ -475,7 +475,7 @@ describe('GoogleSetupPanel', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      "Google didn't confirm. Aman removed the connection here; you can also remove access in your Google account settings.",
+      "Google didn't confirm. Aman removed the connection here. You can also remove access in your Google account settings.",
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(await screen.findByText('Add yourself as a test user')).toBeInTheDocument();

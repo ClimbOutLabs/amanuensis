@@ -62,6 +62,35 @@ test_successful_upgrade_backs_up_first() {
   sandbox_drop
 }
 
+test_upgrade_notes_an_old_email_account_file() {
+  t_begin "upgrade says how to reconnect email when the old account file is there"
+  sandbox_new
+  install_machine
+  printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    'MCP_EMAIL_SERVER_EMAIL_ADDRESS=owner@example.invalid' >"$AMAN_HOME/instances/main/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_file "$AMAN_HOME/instances/main/.env.mail-email"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_email_account_file_stays_quiet() {
+  t_begin "upgrade without the old account file says nothing about reconnecting email"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Email was set up the old way"
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -588,6 +617,8 @@ test_upgrade_still_needs_force_for_an_instance_with_data
 test_a_record_from_before_the_flag_counts_as_having_data
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
+test_upgrade_notes_an_old_email_account_file
+test_upgrade_without_an_old_email_account_file_stays_quiet
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker

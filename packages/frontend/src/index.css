@@ -30,6 +30,11 @@ body {
   min-width: 0;
 }
 
+/* A folded right panel lends the chat column part of the width it frees. */
+.aman-shell:has(> .aman-runtime-rail--collapsed) {
+  --thread-extra-right: 8rem;
+}
+
 .aman-chat-surface {
   min-width: 0;
   min-height: 0;

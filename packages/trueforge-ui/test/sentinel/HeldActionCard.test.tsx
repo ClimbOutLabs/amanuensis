@@ -8,7 +8,7 @@ import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
-    plain_what: 'Send a note to Ana.',
+    plain_what: 'Send a note to Ana?',
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -91,6 +91,16 @@ describe('HeldActionCard', () => {
     expect(onAlwaysAllow).not.toHaveBeenCalled();
   });
 
+  it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(
+      screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
     const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
     fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
@@ -134,7 +144,7 @@ describe('HeldActionCard', () => {
   ])('shows %j without hiding what was asked', (status, text) => {
     renderCard({ status });
     expect(screen.getByText(text)).toBeInTheDocument();
-    expect(screen.getByText('Send a note to Ana.')).toBeInTheDocument();
+    expect(screen.getByText('Send a note to Ana?')).toBeInTheDocument();
   });
 
   it('takes the buttons away once the action is answered or has expired', () => {

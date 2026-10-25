@@ -69,7 +69,7 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -81,7 +81,7 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
 
@@ -91,14 +91,14 @@ describe('Sentinel user settings routes', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
     expect(await read('bob')).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });
@@ -127,7 +127,7 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: false,
     });
 
@@ -150,7 +150,7 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     });
   });

@@ -150,6 +150,36 @@ describe('ToasterProvider', () => {
     expect(screen.queryByText(/01m4/)).toBeNull();
   });
 
+  it('shows exactly the ended line, and nothing else, when an answer is refused because the request ended', async () => {
+    const endedError = Object.assign(new Error('Status code: 409'), {
+      statusCode: 409,
+      body: {
+        error: {
+          message: 'This request ended. Ask again if you still need it.',
+          type: 'conflict',
+          code: 'approval_request_ended',
+        },
+      },
+    });
+
+    render(
+      <SlotsProvider>
+        <ToasterProvider>
+          <Trigger errors={[endedError]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.queryByText('This request expired')).toBeNull();
+    expect(screen.queryByText(/Request failed/)).toBeNull();
+    expect(screen.queryByText(/chat moved on/)).toBeNull();
+    expect(screen.queryByText(/Nothing was approved/)).toBeNull();
+  });
+
   it('tells the user the daily demo budget is used up, not that the request failed', async () => {
     const capError = Object.assign(new Error('Status code: 429'), {
       statusCode: 429,

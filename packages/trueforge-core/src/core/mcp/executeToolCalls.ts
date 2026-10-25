@@ -36,7 +36,14 @@ import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/aud
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
-import { isSearchAskReason, isSilentSearchReason, recordPrivateToolResult } from '../permissions/webSearch';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import { parseToolCallArguments } from './toolArgumentCheck';
+import {
+  isSearchAskReason,
+  isSilentSearchReason,
+  recordToolResultProvenance,
+  resultTexts,
+} from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
@@ -240,6 +247,8 @@ export interface ToolCallMemoSnapshot {
   successful_writes_this_turn: number;
   /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
   step_kinds_this_turn: TurnStepKind[];
+  /** Prose of the steps that carried tool calls in the current turn, in step order. */
+  step_texts_this_turn: string[];
   /** Signature of the call made last in the turn, across threads; the consecutive-repeat stop. */
   last_call_signature: string | undefined;
   /** Tool calls written as text in the turn, and the retries sent for them. */
@@ -303,6 +312,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
   | 'step_kinds_this_turn'
+  | 'step_texts_this_turn'
   | 'last_call_signature'
   | 'tool_markup_leaks_this_turn'
   | 'tool_markup_retries_this_turn'
@@ -339,6 +349,8 @@ type LegacyToolCallMemoSnapshot = Omit<
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
   step_kinds_this_turn?: TurnStepKind[] | undefined;
+  // A snapshot written before step prose was kept for the claim check omits the key.
+  step_texts_this_turn?: string[] | undefined;
   last_call_signature?: string | undefined;
   tool_markup_leaks_this_turn?: number | undefined;
   tool_markup_retries_this_turn?: number | undefined;
@@ -378,6 +390,12 @@ export interface TurnToolCallLedger {
   successfulWritesThisTurn: number;
   /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
   stepKindsThisTurn: Set<TurnStepKind>;
+  /**
+   * Prose of the steps that carried tool calls this turn, in step order. The unbacked-claim
+   * check reads it at the turn's final step, so a claim made in an early step's prose is
+   * checked against the whole turn the same way the final step's own prose is.
+   */
+  stepTextsThisTurn: string[];
   /** Tool calls written as text this turn. None of them ran. */
   toolMarkupLeaksThisTurn: number;
   /** Retries sent to the model for tool calls written as text this turn. */
@@ -404,6 +422,7 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
     stepKindsThisTurn: new Set(),
+    stepTextsThisTurn: [],
     toolMarkupLeaksThisTurn: 0,
     toolMarkupRetriesThisTurn: 0,
     stoppedForWriteCap: false,
@@ -453,6 +472,13 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
     for (const kind of ledger.stepKindsThisTurn) {
       merged.stepKindsThisTurn.add(kind);
+    }
+    for (const text of ledger.stepTextsThisTurn) {
+      // Snapshots of one turn overlap (a later one holds the earlier steps too), so a text
+      // already present is the same step seen again, not a step that ran twice.
+      if (!merged.stepTextsThisTurn.includes(text)) {
+        merged.stepTextsThisTurn.push(text);
+      }
     }
     merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
     merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
@@ -606,6 +632,7 @@ export function createToolCallMemoState(
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
   state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
+  state.turn.stepTextsThisTurn = [...(snapshot.step_texts_this_turn ?? [])];
   state.turn.lastCallSignature = snapshot.last_call_signature;
   state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
   state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
@@ -695,6 +722,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
     step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
+    step_texts_this_turn: [...state.turn.stepTextsThisTurn],
     last_call_signature: state.turn.lastCallSignature,
     tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
     tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,
@@ -2241,12 +2269,14 @@ export async function executeToolCalls({
     }
 
     const { result, wasInitialized } = response;
-    // Every result the model sees passes here, so a private read is recorded whichever tool it came from.
+    // Every result the model sees passes here, so where its links came from is known on every thread.
     if (sentinel !== undefined) {
-      recordPrivateToolResult({
+      const sent = collectOutboundStrings(parseToolCallArguments(toolCall) ?? {});
+      recordToolResultProvenance({
         state: sentinel.web_search,
         tool_name: toolCall.tool_info.original_tool_name,
-        result,
+        argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
+        texts: resultTexts(result),
       });
     }
 

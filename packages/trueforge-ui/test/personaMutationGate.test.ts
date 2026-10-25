@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { awaitPendingPersonaMutation, registerPersonaMutation } from '@/personaMutationGate.js';
+import {
+  applyHeldPersona,
+  awaitPendingPersonaMutation,
+  dropHeldPersonaUnlessFor,
+  heldPersonaFor,
+  holdPersonaForNewChat,
+  registerPersonaMutation,
+} from '@/personaMutationGate.js';
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -69,5 +76,26 @@ describe('personaMutationGate', () => {
     second.resolve();
     await waiter;
     expect(settled).toBe(true);
+  });
+
+  it('drops a pick held for another chat, so it never applies to the wrong one', async () => {
+    const apply = vi.fn(async () => undefined);
+    holdPersonaForNewChat({ threadId: 'chat-a', personaId: 'p-1', apply });
+    expect(heldPersonaFor('chat-a')).toBe('p-1');
+    dropHeldPersonaUnlessFor('chat-a');
+    expect(heldPersonaFor('chat-a')).toBe('p-1');
+    dropHeldPersonaUnlessFor('chat-b');
+    expect(heldPersonaFor('chat-a')).toBeUndefined();
+    await applyHeldPersona('sess-b');
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('lets the first turn run when applying the held pick fails', async () => {
+    holdPersonaForNewChat({
+      threadId: 'chat-a',
+      personaId: 'p-1',
+      apply: () => Promise.reject(new Error('PUT failed')),
+    });
+    await expect(applyHeldPersona('sess-a')).resolves.toBeUndefined();
   });
 });

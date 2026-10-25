@@ -30,7 +30,7 @@ export const ChangeRequestBox: FC<ChangeRequestBoxProps> = ({ onSend, onCancel, 
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 rounded border border-border bg-primary-bg px-3 py-2">
-      <label htmlFor={inputId} className="text-xs font-medium text-text-primary">
+      <label htmlFor={inputId} className="font-medium text-text-primary">
         What should change?
       </label>
       <input
@@ -47,7 +47,7 @@ export const ChangeRequestBox: FC<ChangeRequestBoxProps> = ({ onSend, onCancel, 
           event.preventDefault();
           onCancel();
         }}
-        className="h-8 rounded border border-input-border bg-card-bg px-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-focus-ring"
+        className="h-8 rounded border border-input-border bg-card-bg px-2 text-text-primary focus:outline-none focus:ring-1 focus:ring-focus-ring"
       />
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" size="small" disabled={disabled} onClick={onCancel}>

@@ -51,12 +51,6 @@ describe('CalDAV read classification', () => {
       expect(decision.reason_detail).toBe('Read your calendar.');
     },
   );
-
-  it('marks the turn as having read private data', async () => {
-    const ctx = makeCtx();
-    await classifyTier(caldavAction('list_events'), ctx);
-    expect(ctx.web_search.privateDataRead).toBe(true);
-  });
 });
 
 describe('CalDAV respond_to_event', () => {
@@ -79,7 +73,7 @@ describe('CalDAV respond_to_event', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). The organizer, Office Admin, will be told. This reply goes to the event organizer, so Aman always asks.',
+      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? The organizer, Office Admin, will be told. This reply goes to the event organizer, so Aman always asks.',
     );
     expect(decision.card?.cannot_be_undone).toBe("The reply to the organizer can't be unsent.");
     expect(decision.approval_token_id).toEqual(expect.any(String));
@@ -116,7 +110,7 @@ describe('CalDAV respond_to_event', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Accept the event with id ev1. Its title could not be read. The organizer will be told. Their name could not be read. This reply goes to the event organizer, so Aman always asks.',
+      'Accept the event with id ev1. Its title could not be read? The organizer will be told. Their name could not be read. This reply goes to the event organizer, so Aman always asks.',
     );
   });
 
@@ -143,7 +137,7 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe('Add "Team sync", 23 Oct 2026, 09:30 to "work".');
+    expect(decision.card?.plain_what).toBe('Add "Team sync", 23 Oct 2026, 09:30 to "work"?');
   });
 
   it('shows an update card that names the existing event', async () => {
@@ -153,7 +147,7 @@ describe('CalDAV changes', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
     );
   });
 
@@ -258,7 +252,7 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Changing this will email: Sam Lee, dana@example.com. Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Changing this will email: Sam Lee, dana@example.com. Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
     );
   });
 
@@ -289,7 +283,7 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Deleting this will email: Sam Lee. Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
+      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Deleting this will email: Sam Lee. Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
     );
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent.",
@@ -300,7 +294,7 @@ describe('CalDAV changes', () => {
     const decision = await classifyTier(caldavAction('delete_event', EVENT_ID, { caldav_event: DENTIST }), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
+      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
     );
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here.",

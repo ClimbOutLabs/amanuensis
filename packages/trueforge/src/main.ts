@@ -72,7 +72,7 @@ import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
 import { SkillCatalog } from './catalog/SkillCatalog';
-import { type DistributedServerConfiguration } from './config';
+import { mailMcpUrlFromAccountUrl, type DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
@@ -114,6 +114,7 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -689,6 +690,20 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     policyPath: configuration.MAIL_POLICY_FILE,
     logger,
   });
+  // An account saved through Settings on an instance the installer never linked still needs the
+  // connector: the account agent is asked in the background, and the connector is registered
+  // from what it reports. With the installer's link configured, the steps above already ran.
+  if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
+    registerMailConnectorFromSavedAccountInBackground({
+      accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      mcpUrl: mailMcpUrlFromAccountUrl(configuration.MAIL_EMAIL_ACCOUNT_URL),
+      policyPath: configuration.MAIL_POLICY_FILE,
+      fetchImpl: undefined,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
   // Registered at boot when the calendar sidecar is configured; a no-op otherwise.
   await registerCalendarConnectorAtBoot({
     url: configuration.CALENDAR_CONNECTOR_URL,

@@ -5,8 +5,10 @@ import {
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
+import { InstructionBuilder } from '@truefoundry/trueforge-core/core/InstructionBuilder';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
+import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -18,7 +20,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { activateSessionPersona } from '../../../src/personas/sessionPersona';
 import type { ChatRunner } from '../../../src/runtime/chatAssistant';
 import { chatModelName } from '../../../src/runtime/chatAssistant';
-import { PersonaToolSet, personaContentFor } from '../../../src/runtime/personaCapability';
+import { PersonaToolSet, personaCapability, personaContentFor } from '../../../src/runtime/personaCapability';
 import { resolveTurnPersona } from '../../../src/runtime/turnPersona';
 
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Test Owner' };
@@ -80,7 +82,7 @@ async function setup(input: { existing?: string[] } = {}) {
     created_by: OWNER.subject_id,
     conversation_id: 'chat-1',
   });
-  const tools = new PersonaToolSet({
+  const options = {
     tracing: NOOP_AGENT_TRACING,
     store,
     modelProviderStore,
@@ -90,11 +92,12 @@ async function setup(input: { existing?: string[] } = {}) {
     session_id: CHAT_SESSION_ID,
     logger: winston.createLogger({ silent: true }),
     sentinel,
-  });
+  };
+  const tools = new PersonaToolSet(options);
   const listAll = () => store.listPersonas({ tenant_id: 'default', created_by: OWNER.subject_id });
   const activeChatPersona = () =>
     store.getLatestManualSessionPersona({ tenant_id: TENANT_ID, session_id: CHAT_SESSION_ID });
-  return { tools, sentinel, store, modelProviderStore, listAll, activeChatPersona };
+  return { tools, options, sentinel, store, modelProviderStore, listAll, activeChatPersona };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -149,12 +152,12 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_persona', () => {
-  it('shows one card with the whole specialist, then saves it on approval', async () => {
+  it('shows one card with the whole persona, then saves it on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add a specialist: Travel planner. Plans trips in detail, with a day-by-day route.',
+      'Add a persona: Travel planner? Plans trips in detail, with a day-by-day route.',
     );
     // The card shows the exact text that would be saved, so the person reads what will shape later answers.
     expect(info.tier3_card?.persona).toEqual({
@@ -185,14 +188,14 @@ describe('create_persona', () => {
     expect(await built.listAll()).toEqual([]);
   });
 
-  it('refuses a name that another specialist already answers to, in any case, with a plain message', async () => {
+  it('refuses a name that another persona already answers to, in any case, with a plain message', async () => {
     const built = await setup({ existing: ['Zara'] });
     const info = await built.tools.toolCallInfo({
       name: 'create_persona',
       arguments: { ...TRAVEL_PLANNER, name: 'zara' },
     });
     expect(info.pre_dispatch_failure?.message).toBe(
-      'Nothing was added because the user already has a specialist named "zara". Try again with another name.',
+      'Nothing was added because the user already has a persona named "zara". Try again with another name.',
     );
     expect(info.tier3_card).toBeUndefined();
 
@@ -201,7 +204,7 @@ describe('create_persona', () => {
       args: { ...TRAVEL_PLANNER, name: 'zara' },
       decision: { status: 'allow' },
     });
-    expect(resultText(result)).toContain('already has a specialist named');
+    expect(resultText(result)).toContain('already has a persona named');
     expect((await built.listAll()).map(persona => persona.display_name)).toEqual(['Zara']);
   });
 
@@ -242,7 +245,7 @@ describe('create_persona', () => {
     expect(text).toContain('Do not say the current request was handed to them.');
   });
 
-  it('switches this chat to the specialist it just added', async () => {
+  it('switches this chat to the persona it just added', async () => {
     const built = await setup();
     expect(await built.activeChatPersona()).toBeUndefined();
 
@@ -256,11 +259,11 @@ describe('create_persona', () => {
   });
 });
 
-describe('reusing a specialist', () => {
-  it('creates the specialist once, then reuses it with no card the second time', async () => {
+describe('reusing a persona', () => {
+  it('creates the persona once, then reuses it with no card the second time', async () => {
     const built = await setup();
 
-    // First run: the card is shown, approved, and the chat switches to the new specialist.
+    // First run: the card is shown, approved, and the chat switches to the new persona.
     await dispatch({ built, args: TRAVEL_PLANNER, decision: { status: 'allow' } });
     const [created] = await built.listAll();
 
@@ -270,7 +273,7 @@ describe('reusing a specialist', () => {
     expect(listed.info.tier3_card).toBeUndefined();
     expect(resultText(listed.result)).toContain('"name":"Travel planner"');
 
-    // The model then switches to the one it found, with no card and no new specialist.
+    // The model then switches to the one it found, with no card and no new persona.
     const info = await built.tools.toolCallInfo({ name: 'use_persona', arguments: { name: 'travel PLANNER' } });
     expect(info.is_approval_required).toBe(false);
     expect(info.tier3_card).toBeUndefined();
@@ -288,34 +291,34 @@ describe('reusing a specialist', () => {
 
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
     expect(info.tier3_card).toBeUndefined();
-    expect(info.pre_dispatch_failure?.message).toContain('already has a specialist named "Travel planner"');
+    expect(info.pre_dispatch_failure?.message).toContain('already has a persona named "Travel planner"');
     expect(await built.listAll()).toHaveLength(1);
   });
 
-  it('refuses to switch to a name the user has no specialist for, and changes nothing', async () => {
+  it('refuses to switch to a name the user has no persona for, and changes nothing', async () => {
     const built = await setup({ existing: ['Zara'] });
     const { result } = await dispatch({ built, args: { name: 'Milo' }, name: 'use_persona' });
-    expect(resultText(result)).toContain('has no specialist named \\"Milo\\"');
+    expect(resultText(result)).toContain('has no persona named \\"Milo\\"');
     expect(await built.activeChatPersona()).toBeUndefined();
   });
 
-  it('lists each specialist by name, aliases and its one-line description, with no card', async () => {
+  it('lists each persona by name, aliases and its one-line description, with no card', async () => {
     const built = await setup({ existing: ['Zara'] });
     const info = await built.tools.toolCallInfo({ name: 'list_personas', arguments: {} });
     expect(info.is_approval_required).toBe(false);
     const { result } = await dispatch({ built, args: {}, name: 'list_personas' });
     expect(JSON.parse(resultText(result))).toEqual({
-      specialists: [{ name: 'Zara', aliases: [], description: 'Be brief.' }],
+      personas: [{ name: 'Zara', aliases: [], description: 'Be brief.' }],
     });
   });
 });
 
 describe('the chat after a switch', () => {
-  it('answers from the specialist next, and switching back returns to the default assistant', async () => {
+  it('answers from the persona next, and switching back returns to the default assistant', async () => {
     const built = await setup({ existing: ['Zara'] });
     const [zara] = await built.listAll();
     if (zara === undefined) {
-      throw new Error('The seeded specialist is missing.');
+      throw new Error('The seeded persona is missing.');
     }
     await dispatch({ built, args: { name: 'Zara' }, name: 'use_persona' });
 
@@ -343,5 +346,47 @@ describe('the chat after a switch', () => {
       persona: undefined,
     });
     expect(await resolveNext()).toBeUndefined();
+  });
+});
+
+describe('persona tools through the route a chat classifies them on', () => {
+  /** What the turn does with a built-in's info before the call can run: the host classifies it. */
+  async function classified(built: Setup, call: { name: string; arguments: Record<string, unknown> }) {
+    return classifyUnstampedToolCall({
+      sentinel: built.sentinel,
+      canonical_params: call.arguments,
+      info: await built.tools.toolCallInfo(call, true),
+    });
+  }
+
+  it('switches who answers this chat with no card, and lists personas with no card', async () => {
+    const built = await setup({ existing: ['Zara'] });
+
+    const switched = await classified(built, { name: 'use_persona', arguments: { name: 'Zara' } });
+    expect(switched).toMatchObject({ tier: 1, tier_reason: 'persona_switch' });
+    expect(switched.is_approval_required).not.toBe(true);
+    expect(switched.tier3_card ?? null).toBeNull();
+
+    const listed = await classified(built, { name: 'list_personas', arguments: {} });
+    expect(listed).toMatchObject({ tier: 1, tier_reason: 'persona_read' });
+    expect(listed.is_approval_required).not.toBe(true);
+  });
+
+  it('still asks before adding a persona', async () => {
+    const built = await setup();
+    const created = await classified(built, { name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(created).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
+  });
+});
+
+describe('persona wording', () => {
+  it('never calls a persona a specialist in its tools, results or instruction', async () => {
+    const built = await setup({ existing: ['Zara'] });
+    const listed = await dispatch({ built, args: {}, name: 'list_personas' });
+    const instruction = new InstructionBuilder('system-prompt');
+    for (const build of personaCapability(built.options).instructionBuilders ?? []) build(instruction);
+
+    const text = [JSON.stringify(await built.tools.listTools()), resultText(listed.result), instruction.build()];
+    for (const part of text) expect(part).not.toMatch(/specialist/i);
   });
 });

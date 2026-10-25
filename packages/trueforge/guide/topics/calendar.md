@@ -1,7 +1,7 @@
 ---
 id: calendar
 title: Keeping your calendar
-covers: calendar
+covers:
 ---
 
 Ask Aman what is on your calendar this week. It reads your events and tells you what is coming up.

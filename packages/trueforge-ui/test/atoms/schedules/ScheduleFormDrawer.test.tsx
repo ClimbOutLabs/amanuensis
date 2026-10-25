@@ -149,6 +149,11 @@ async function saveCreateForm() {
 }
 
 describe('ScheduleFormDrawer', () => {
+  it('still calls the schedule runner an agent on a new schedule', async () => {
+    renderDrawer({});
+    expect(await screen.findByText('Run an agent on a repeating schedule.')).toBeInTheDocument();
+  });
+
   it('shows agent picker on create', async () => {
     renderDrawer({});
     const picker = await screen.findByLabelText('Agent');

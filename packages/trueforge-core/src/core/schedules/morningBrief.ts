@@ -14,15 +14,6 @@ export function isMorningBriefPrompt(text: string): boolean {
   return text.startsWith(MORNING_BRIEF_OPENING);
 }
 
-/**
- * The one line a brief carries when no mail source is connected on the instance, so the
- * person learns from the brief itself that email was not part of it, and where to add it.
- */
-export const MORNING_BRIEF_NO_MAIL_LINE = 'No email is connected. You can connect one in Settings, Connectors.';
-
-/** What the model is told on a brief turn with no mail source: say the one line in the digest, and nothing more about email. */
-export const MORNING_BRIEF_NO_MAIL_INSTRUCTION = `No email account is connected on this instance, so this brief has no email in it. In the digest, include this line: "${MORNING_BRIEF_NO_MAIL_LINE}" Do not mention email anywhere else in the brief.`;
-
 export const BRIEF_SECTION_VALUES = ['check_first', 'decision', 'coming_up', 'deadline'] as const;
 
 export const BriefSectionSchema = z.enum(BRIEF_SECTION_VALUES);

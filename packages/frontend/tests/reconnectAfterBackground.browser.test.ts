@@ -11,7 +11,7 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const USER_TEXT = 'run:inert_write please';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const RECONNECTING = 'Reconnecting…';
 const LOST = 'Connection lost. Check your network, then tap Retry.';
 /** The chat only re-checks after a hide this long; a shorter tab switch is left alone. */

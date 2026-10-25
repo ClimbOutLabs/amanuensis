@@ -1,6 +1,6 @@
 import type { Logger } from 'winston';
 import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
-import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
+import { chatProvenanceCapability } from '../core/capabilities/builtins/ChatProvenance';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import {
   MailAccountDirectory,
@@ -110,6 +110,8 @@ interface ResolvedModel {
   /** See AgentDefinition.modelSupportsVision. Every implementation must set this explicitly. */
   modelSupportsVision: boolean;
   modelProperties?: AgentDefinition['modelProperties'];
+  /** See AgentDefinition.modelRequestGate. Absent leaves the model unlimited. */
+  modelRequestGate?: AgentDefinition['modelRequestGate'];
 }
 
 /** The saved Authorization header of a connector, whether its headers are static or resolved at connect. */
@@ -578,6 +580,7 @@ export class TurnResourceResolver<
         // unchanged.
         modelId: resolvedModel.modelId ?? modelName.slice(modelName.indexOf('/') + 1),
         modelSupportsVision: resolvedModel.modelSupportsVision,
+        modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
@@ -605,9 +608,9 @@ export class TurnResourceResolver<
         setUpConnectorNames,
       },
       compactionModel,
-      // Only the root thread holds the chat's private-read state. A sub-agent's mail and calendar reads reach the
-      // same turn state through its tool set, so the flag and the text checks still cover them.
-      extraCapabilities: agentInfo === undefined ? [privateDataReadCapability({ turn: this.webSearchTurn })] : [],
+      // Only the root thread reads the chat's history for where its links came from. A sub-agent's results reach the
+      // same turn state through the dispatch loop as they arrive.
+      extraCapabilities: agentInfo === undefined ? [chatProvenanceCapability({ turn: this.webSearchTurn })] : [],
     };
   }
 

@@ -1,7 +1,7 @@
 ---
 id: code
 title: Reading files and running code
-covers: code
+covers:
 ---
 
 Aman can read files and run code in a sandbox, a small separate space on your computer. For example, ask Aman to add up your expenses by category and draw a chart.
