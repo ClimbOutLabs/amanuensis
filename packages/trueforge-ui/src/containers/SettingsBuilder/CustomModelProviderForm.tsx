@@ -88,7 +88,7 @@ const createModelRows = (initialValues?: CustomProviderInitialValues): ModelRow[
 // Flat, de-boxed input with enough contrast to read as editable: a slightly
 // deeper fill, a subtle hairline, and a clear focus ring.
 const inputClassName =
-  'h-11 w-full rounded-md border border-border/70 bg-secondary-bg px-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary/70 focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
+  'h-11 w-full rounded-md border border-border/70 bg-input-box-bg px-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 const inputErrorClassName = 'border-failure-bg focus-visible:border-failure-bg focus-visible:ring-failure-bg';
 
 /** Parse an optional positive integer; returns null when empty or invalid (so it's simply omitted). */

@@ -1395,7 +1395,7 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
-  /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
+  /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;

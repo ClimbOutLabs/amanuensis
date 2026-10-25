@@ -22,7 +22,7 @@ describe('ToolCallCard MCP label', () => {
   it('derives the friendly label from the MCP meta-tool display form', () => {
     render(<ToolCallCard toolName="call_tool: list_teams (linear)" mcpServerName="linear" dataTestPrefix="meta" />);
 
-    expect(screen.getByTestId('meta-header-title')).toHaveTextContent('list_teams · linear');
-    expect(screen.getByTitle('call_tool: list_teams (linear)')).toHaveTextContent('list_teams · linear');
+    expect(screen.getByTestId('meta-header-title')).toHaveTextContent('List teams · linear');
+    expect(screen.getByTitle('call_tool: list_teams (linear)')).toHaveTextContent('List teams · linear');
   });
 });

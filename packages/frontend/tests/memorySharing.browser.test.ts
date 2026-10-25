@@ -16,7 +16,7 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
-const LIST_NAME = 'Memory sharing by specialist';
+const LIST_NAME = 'Which notes each persona can read';
 
 async function screenshotDir(): Promise<string> {
   const configured = process.env.AMAN_SCREENSHOT_DIR;
@@ -35,7 +35,7 @@ async function openSharingTab(page: Page) {
   await page.getByRole('list', { name: LIST_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
-/** Scrolls the last specialist row to the end of its scroll area and returns its box and the footer's top edge. */
+/** Scrolls the last agent row to the end of its scroll area and returns its box and the footer's top edge. */
 async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; footerTop: number; viewport: number }> {
   const row: Locator = page.getByRole('list', { name: LIST_NAME }).getByRole('listitem').last();
   await row.evaluate(element => element.scrollIntoView({ block: 'end' }));
@@ -52,7 +52,7 @@ async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; foot
 
 type Box = { left: number; right: number; top: number; bottom: number };
 
-/** Measures the settings scroll area around the sharing list, each specialist name, and each chip. */
+/** Measures the settings scroll area around the sharing list, each row's lead line, and each checkbox. */
 async function sharingGeometry(page: Page): Promise<{ panel: Box; names: Box[]; chips: Box[]; chipRows: Box[][] }> {
   const list = page.getByRole('list', { name: LIST_NAME });
   // Plain rects only: a named helper here would be rewritten by the test transform and fail in the page.
@@ -65,9 +65,9 @@ async function sharingGeometry(page: Page): Promise<{ panel: Box; names: Box[]; 
     const rows = Array.from(element.querySelectorAll(':scope > li'));
     return {
       panel: panelElement.getBoundingClientRect().toJSON(),
-      names: rows.map(row => (row.querySelector('span.text-sm.font-medium') ?? row).getBoundingClientRect().toJSON()),
+      names: rows.map(row => (row.querySelector(':scope > span') ?? row).getBoundingClientRect().toJSON()),
       chipRows: rows.map(row =>
-        Array.from(row.querySelectorAll('button')).map(chip => chip.getBoundingClientRect().toJSON()),
+        Array.from(row.querySelectorAll('label')).map(chip => chip.getBoundingClientRect().toJSON()),
       ),
     };
   });
@@ -83,7 +83,7 @@ function overlaps(a: Box, b: Box): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-/** Every chip sits inside the settings panel, and no chip covers a specialist name or another chip in its row. */
+/** Every checkbox sits inside the settings panel, and none covers a row's lead line or another checkbox. */
 function assertChipsInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
   assert.ok(geometry.chips.length > 0, `there are chips to check (${label})`);
   for (const chip of geometry.chips) {
@@ -106,7 +106,7 @@ function assertChipsInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeome
 }
 
 test(
-  'sharing chips stay inside the panel and clear the names, and the last row clears the footer, at desktop and phone width',
+  'sharing checkboxes stay inside the panel and clear the lead lines, and the last row clears the footer, at desktop and phone width',
   { timeout: 300_000 },
   async () => {
     const frontendRoot = fileURLToPath(new URL('../', import.meta.url));

@@ -16,6 +16,7 @@ import { resolvePresetTokens } from '@/theme/presets/index.js';
 import { useThemeMode } from '@/theme/SlotsProvider.js';
 import { TOKEN_CSS_VARS } from '@/theme/types.js';
 
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { setComposerPrefill } from '../hooks/useComposerDraft.js';
 import { SPACE_PAGE_BASE_STYLE, spaceThemeDeclarations } from './spacePageBase.js';
 
@@ -87,12 +88,13 @@ function SpacesListSkeleton() {
 
 /** Null when no composer can open here: the example is then left out, not shown as a button that does nothing. */
 function SpacesEmptyState({ onStartChat }: { onStartChat: ((text: string) => void) | null }) {
+  const assistant = useAssistantDisplayName();
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-16 text-center">
       <Icon name="cube" className="size-6 text-text-secondary" aria-hidden />
       <p className="text-base font-medium text-text-primary">No spaces yet</p>
       <p className="max-w-sm text-sm text-text-secondary">
-        A space is a page Aman keeps up to date for you, as a list, a table or a board.
+        A space is a page {assistant} keeps up to date for you, as a list, a table or a board.
       </p>
       {onStartChat != null ? (
         <>
@@ -464,10 +466,11 @@ function PurposeLine({ purpose }: { purpose: string }) {
 }
 
 function UpdatedLine({ updatedAt }: { updatedAt: string }) {
+  const assistant = useAssistantDisplayName();
   const exact = formatUpdated(updatedAt);
   return (
     <p className="text-sm text-text-secondary">
-      Kept up to date by Aman ·{' '}
+      Kept up to date by {assistant} ·{' '}
       <time dateTime={updatedAt} title={exact} aria-label={`updated ${exact}`}>
         updated {formatRelativeUpdated(updatedAt, Date.now())}
       </time>
@@ -486,6 +489,7 @@ function SpaceDetailPage({
   onAskChange: ((text: string) => void) | null;
 }) {
   const ctx = useOptionalSpaces();
+  const assistant = useAssistantDisplayName();
   const space = useMemo(() => ctx?.spaces.find(s => s.id === spaceId), [ctx, spaceId]);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -522,7 +526,7 @@ function SpaceDetailPage({
                 type="button"
                 onClick={() => onAskChange(`In the space “${space.name}”, `)}
               >
-                Ask Aman to change this
+                Ask {assistant} to change this
               </Button>
             ) : null}
             <SpaceOverflowMenu onRequestDelete={() => setDeleteOpen(true)} />

@@ -402,7 +402,7 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
-  /** Chat turns that have a model to answer with; absent, no specialist tool mounts. */
+  /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {

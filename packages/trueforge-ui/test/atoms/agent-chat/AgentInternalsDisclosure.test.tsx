@@ -93,23 +93,11 @@ describe('AgentInternalsDisclosure', () => {
     expect(screen.getByTestId('trace-body')).toBeVisible();
   });
 
-  it('shows the live status label with a spinner while running', () => {
-    renderDisclosure({ isRunning: true, liveLabel: 'Executing tools' });
+  it('shows only its summary while running, never a second live status line or spinner', () => {
+    renderDisclosure({ isRunning: true });
 
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
-    expect(screen.getByTestId(`${PREFIX}-agent-internals-live-spinner`)).toBeInTheDocument();
-  });
-
-  it('shows the plain summary once the run completes', () => {
-    const { rerender } = renderDisclosure({ isRunning: true, liveLabel: 'Executing tools' });
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
-
-    rerender(
-      <AgentInternalsDisclosure summary="3 steps · 2 tools · 6s" dataTestPrefix={PREFIX} expanded={false}>
-        <div data-testid="trace-body">trace contents</div>
-      </AgentInternalsDisclosure>,
-    );
-    expect(screen.queryByText('Executing tools')).not.toBeInTheDocument();
     expect(screen.getByText('3 steps · 2 tools · 6s')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(document.querySelector('.animate-spin')).toBeNull();
   });
 });

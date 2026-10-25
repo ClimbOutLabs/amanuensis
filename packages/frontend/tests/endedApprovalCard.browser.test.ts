@@ -141,10 +141,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
 
       // Either the click reached the server and was refused, or the chat had already ended the card.
       if (await clickUnlessEnded(page, ALLOW)) {
-        await page
-          .getByText('Nothing was approved or run', { exact: false })
-          .first()
-          .waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByText(ENDED_NOTE).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await page.screenshot({ path: join(outDir, 'ended-4-allow-refused.png'), fullPage: true });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');

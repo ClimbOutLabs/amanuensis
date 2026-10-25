@@ -10,8 +10,8 @@ import type { SentinelAuditEntry, SentinelAuditOutcome } from './types.js';
 /** Live refresh cadence for the receipt. */
 const AUDIT_POLL_MS = 5000;
 
-/** Rows shown before "Show all" appears. */
-const RECEIPT_ROWS_SHOWN = 5;
+/** The panel keeps to the latest few actions; the full history lives in Settings. */
+export const RECEIPT_ROWS_SHOWN = 5;
 
 export function outcomeTone(outcome: SentinelAuditOutcome): string {
   switch (outcome) {
@@ -28,10 +28,7 @@ export function outcomeTone(outcome: SentinelAuditOutcome): string {
 
 const ReceiptRowItem: FC<{ row: ReceiptRow }> = ({ row }) => (
   <li className="aui-row aui-row--2">
-    <span className="text min-w-0 break-words">
-      {row.verb}
-      {row.count > 1 && ` · ${row.count}`}
-    </span>
+    <span className="text min-w-0 break-words">{row.verb}</span>
     <span className="state flex items-center gap-1.5 text-text-secondary">
       <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${ACTIVITY_STATE_DOT_CLASSES[row.state]}`} />
       {ACTIVITY_STATE_LABELS[row.state]}
@@ -44,16 +41,14 @@ export type SentinelAuditFeedProps = {
 };
 
 /**
- * The receipt for the active session: every permission-relevant action grouped into one row per
- * verb and state, with a count. Polls the host's audit-log API. The raw tool name and the
- * per-entry detail are not shown here.
+ * The receipt for the active session: the latest permission-relevant actions, one row per verb and
+ * state. Polls the host's audit-log API. The raw tool name and the per-entry detail are not shown here.
  */
 export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => {
   const sentinel = useOptionalSentinelApiState();
   const api = sentinel?.api ?? null;
   const [entries, setEntries] = useState<SentinelAuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
     if (api === null) return;
@@ -69,7 +64,6 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   useEffect(() => {
     setEntries([]);
     setError(null);
-    setShowAll(false);
     void load();
     if (api === null) return;
     const timer = setInterval(() => {
@@ -82,7 +76,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
 
   if (api === null) return null;
 
-  const visibleRows = showAll ? rows : rows.slice(0, RECEIPT_ROWS_SHOWN);
+  const visibleRows = rows.slice(0, RECEIPT_ROWS_SHOWN);
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -99,23 +93,11 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
       {entries.length === 0 && error === null ? (
         <p className="py-4 text-center text-xs text-text-secondary">Nothing has happened in this chat yet.</p>
       ) : (
-        <>
-          <ul className="aui-receipt">
-            {visibleRows.map(row => (
-              <ReceiptRowItem key={row.key} row={row} />
-            ))}
-          </ul>
-          {rows.length > RECEIPT_ROWS_SHOWN && (
-            <button
-              type="button"
-              className="mt-2 w-full text-center font-mono text-[0.68rem] uppercase tracking-widest text-gold-ink underline underline-offset-2"
-              aria-expanded={showAll}
-              onClick={() => setShowAll(previous => !previous)}
-            >
-              {showAll ? 'Show less' : `Show all (${entries.length})`}
-            </button>
-          )}
-        </>
+        <ul className="aui-receipt">
+          {visibleRows.map(row => (
+            <ReceiptRowItem key={row.key} row={row} />
+          ))}
+        </ul>
       )}
     </div>
   );

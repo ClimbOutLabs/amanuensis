@@ -1,4 +1,5 @@
-import { formatDuration, notDoneText, parseMcpToolArgs } from './toolCallParsing.js';
+import { notDoneText, parseMcpToolArgs } from './toolCallParsing.js';
+import { humanizeToolName, toolDoingWords } from './toolWords.js';
 
 /**
  * The wait queue: a turn's journey rendered as winding stations, Disneyland-queue
@@ -81,27 +82,6 @@ const READ_TOOLS = new Set(['read_file', 'read', 'open_file', 'cat']);
 const EDIT_TOOLS = new Set(['write_file', 'apply_patch', 'replace_text', 'edit_file']);
 const EXEC_TOOLS = new Set(['exec', 'sandbox_exec', 'run_command', 'shell', 'run_registered_command']);
 
-const TOOL_LABELS: Record<string, string> = {
-  web_search: 'Searching the web',
-  search: 'Searching the web',
-  google_search: 'Searching the web',
-  brave_search: 'Searching the web',
-  read_file: 'Reading',
-  read: 'Reading',
-  open_file: 'Reading',
-  write_file: 'Editing files',
-  apply_patch: 'Editing files',
-  replace_text: 'Editing files',
-  edit_file: 'Editing files',
-  exec: 'Running a command',
-  sandbox_exec: 'Running a command',
-  run_command: 'Running a command',
-  shell: 'Running a command',
-  run_registered_command: 'Running a command',
-  create_sub_agent: 'Consulting a helper',
-  ask_user_question: 'Asking a question',
-};
-
 /** Microcopy stays compact no matter what the model puts in a tool name. */
 const MAX_LABEL_CHARS = 64;
 
@@ -114,19 +94,29 @@ function safeToolName(part: WaitQueuePart): string {
   return typeof part.toolName === 'string' ? part.toolName : '';
 }
 
-/** Prettifies a raw tool name without inventing meaning: `list_dir` → `List dir`. */
-function humanizeToolName(toolName: string): string {
-  const lastSegment = toolName.split('__').pop() ?? toolName;
-  const words = lastSegment.replace(/[_-]+/g, ' ').trim();
-  if (!words) return 'Working';
-  const titled = words.charAt(0).toUpperCase() + words.slice(1);
-  return titled.length > MAX_LABEL_CHARS ? `${titled.slice(0, MAX_LABEL_CHARS - 1).trimEnd()}…` : titled;
+/** The space a space tool works on, when its arguments name it, so the line can say which one. */
+function spaceNameFromArgs(argsText: string | undefined): string | undefined {
+  if (!argsText) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(argsText);
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    for (const key of ['space_name', 'name', 'title']) {
+      const value: unknown = Reflect.get(parsed, key);
+      if (typeof value === 'string' && value.trim() !== '') return value.trim().slice(0, MAX_LABEL_CHARS);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function toolLabel(part: WaitQueuePart): string {
   const name = safeToolName(part);
-  const direct = TOOL_LABELS[name];
-  if (direct !== undefined) return direct;
+  const direct = toolDoingWords(name);
+  if (direct !== undefined) {
+    const space = name.includes('space') ? spaceNameFromArgs(part.argsText) : undefined;
+    return space === undefined ? direct : `${direct} ${space}`;
+  }
   if (name === 'call_tool' || name === 'list_tools' || name === 'get_tool_info') {
     const { innerToolName, mcpServer } = parseMcpToolArgs(part.argsText);
     // parseMcpToolArgs casts without runtime validation and argsText is
@@ -180,7 +170,7 @@ function memoryTick(memory: WaitQueueMemory): string | undefined {
     if (items > 0) return `Found ${String(items)} ${items === 1 ? 'memory' : 'memories'}`;
     return 'Checked memories';
   }
-  if (memory.outcome === 'empty') return 'Checked memories — nothing new';
+  if (memory.outcome === 'empty') return 'Checked memories, nothing new';
   return undefined;
 }
 
@@ -310,36 +300,28 @@ export type LongWaitNoteInput = {
   microcopy: string;
 };
 
-/**
- * The long-queue show: elapsed time plus an honest explainer naming the actual
- * current activity. Never invents a reason for the slowness, never blames.
- */
-export function buildLongWaitNote({ elapsedMs, activeStation, microcopy }: LongWaitNoteInput): string {
-  const elapsed = formatDuration(elapsedMs);
-  if (microcopy === COMPACTING_LINE) return `Still tidying up the conversation, ${elapsed} so far.`;
-  if (activeStation === 'listening') {
-    return `Still waiting for the first response — ${elapsed} so far.`;
-  }
-  const activity = microcopy.replace(/…$/, '').trim();
-  const lowered = activity.charAt(0).toLowerCase() + activity.slice(1);
-  return `Still ${lowered} — ${elapsed} so far.`;
+/** How long a reply has run, in whole minutes, so a screen reader hears the line change at most once a minute. */
+export function elapsedWords(elapsedMs: number): string | undefined {
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 1) return undefined;
+  if (minutes < 60) return `${String(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${String(hours)} hr` : `${String(hours)} hr ${String(rest)} min`;
 }
 
-export type LongWaitAnnouncementInput = {
-  activeStation: WaitStationId | null;
-  microcopy: string;
-};
-
 /**
- * Stable across timer ticks (no elapsed number): announced exactly once, when
- * the long-wait show begins, instead of every second.
+ * The same status line after a quiet spell: still the actual activity, with how long it has run, for
+ * example "Still writing… 2 min". Never invents a reason for the slowness, never blames.
  */
-export function buildLongWaitAnnouncement({ activeStation, microcopy }: LongWaitAnnouncementInput): string {
-  if (microcopy === COMPACTING_LINE) return 'Still tidying up the conversation. This can take a few minutes.';
-  if (activeStation === 'listening') {
-    return 'Still waiting for the first response — this is taking longer than usual.';
+export function buildLongWaitNote({ elapsedMs, activeStation, microcopy }: LongWaitNoteInput): string {
+  const elapsed = elapsedWords(elapsedMs);
+  let activity: string;
+  if (microcopy === COMPACTING_LINE) activity = 'tidying up the conversation';
+  else if (activeStation === 'listening') activity = 'waiting for the first words';
+  else {
+    const plain = microcopy.replace(/…$/, '').trim();
+    activity = plain.charAt(0).toLowerCase() + plain.slice(1);
   }
-  const activity = microcopy.replace(/…$/, '').trim();
-  const lowered = activity.charAt(0).toLowerCase() + activity.slice(1);
-  return `Still ${lowered} — this is taking longer than usual.`;
+  return elapsed === undefined ? `Still ${activity}…` : `Still ${activity}… ${elapsed}`;
 }

@@ -24,10 +24,26 @@ const baseClasses =
 /** Sidebar / rail nav control corner radius: 12px. */
 export const sidebarButtonRadiusClassName = 'rounded-[0.75rem]';
 
-/** Compact sidebar rail control: 66×54px → 4.125rem × 3.375rem. */
+/** Rail and Chats-column corner radius: the composer's 20px, so the left column reads as one family with it. */
+export const sidebarQuietRadiusClassName = 'rounded-[1.25rem]';
+
+/** One row in a small menu (the rail's More, the chat header's): icon and label on one line, quiet corners, no border. */
+export const railMenuRowClassName = cn(
+  sidebarQuietRadiusClassName,
+  'flex h-8 w-full shrink-0 flex-row items-center justify-start gap-2 border-0 bg-transparent px-2.5 text-[0.875rem] font-normal whitespace-nowrap text-text-primary shadow-none hover:bg-ghost-button-hover',
+);
+
+/** The selected rail entry: the soft fill the composer's open menu uses, not a solid block. */
+export const railSelectedClassName =
+  'border-border bg-dropdown-selected-item-bg text-dropdown-selected-item-text hover:text-dropdown-selected-item-text';
+
+/**
+ * Compact sidebar rail control: 4rem × 3.375rem, icon over a 0.75rem label. No box at rest;
+ * hover and the selected item use the soft fill tokens, not a heavy primary fill.
+ */
 export const sidebarRailButtonClassName = cn(
-  sidebarButtonRadiusClassName,
-  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 whitespace-normal px-0.5 text-[0.625rem] font-normal leading-tight !justify-center shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text [&_svg]:size-3.5',
+  sidebarQuietRadiusClassName,
+  'h-[3.375rem] w-[4rem] shrink-0 flex-col gap-1 border border-transparent whitespace-normal px-0.5 text-[0.75rem] font-normal leading-tight text-sidebar-text !justify-center shadow-none hover:bg-ghost-button-hover hover:text-text-primary [&_svg]:size-3.5',
 );
 
 /** Shared Button / native `<button>` className helper (SDK utilities are layered). */
@@ -42,3 +58,14 @@ export function auiButtonClass({
 } = {}): string {
   return cn(baseClasses, variantClasses[variant], sizeClasses[size], className);
 }
+
+/**
+ * Every action in a chat header: plain words on no box, one height and type size, so the header's
+ * actions read as one set. Icon-only actions use the same class.
+ */
+export const headerActionClassName = auiButtonClass({
+  variant: 'ghost',
+  size: 'large',
+  className:
+    'shrink-0 gap-1.5 rounded-full border-0 bg-transparent px-2.5 text-[0.8125rem] font-normal text-text-secondary shadow-none hover:text-text-primary',
+});

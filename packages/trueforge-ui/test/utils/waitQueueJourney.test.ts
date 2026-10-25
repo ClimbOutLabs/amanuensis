@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { parseToolNotDoneReason } from '@/utils/toolCallParsing.js';
 import {
   arrivalSignature,
-  buildLongWaitAnnouncement,
   buildLongWaitNote,
   COMPACTING_LINE,
   countWords,
   deriveWaitQueue,
+  elapsedWords,
   LONG_WAIT_MS,
   type WaitQueueInput,
   type WaitQueuePart,
@@ -68,7 +68,7 @@ describe('deriveWaitQueue', () => {
     expect(singular.ticks).toEqual(['Found 1 memory']);
 
     const empty = deriveWaitQueue(input({ memory: { available: true, landed: true, items: 0, outcome: 'empty' } }));
-    expect(empty.ticks).toEqual(['Checked memories — nothing new']);
+    expect(empty.ticks).toEqual(['Checked memories, nothing new']);
   });
 
   it('stays quiet on recall timeout — the context card owns that failure', () => {
@@ -89,10 +89,7 @@ describe('deriveWaitQueue', () => {
         activeStation: compacting.activeStation,
         microcopy: compacting.microcopy,
       }),
-    ).toMatch(/^Still tidying up the conversation, /);
-    expect(
-      buildLongWaitAnnouncement({ activeStation: compacting.activeStation, microcopy: compacting.microcopy }),
-    ).toBe('Still tidying up the conversation. This can take a few minutes.');
+    ).toBe('Still tidying up the conversation… 2 min');
 
     const writing = deriveWaitQueue(input({ compacting: true, parts: [part({ type: 'text' })] }));
     expect(writing.microcopy).toBe('Writing…');
@@ -330,24 +327,26 @@ describe('long-wait show', () => {
     expect(LONG_WAIT_MS).toBe(15_000);
   });
 
-  it('names the actual slow activity with elapsed time', () => {
+  it('names the actual slow activity with whole minutes, and no number before the first minute', () => {
     expect(buildLongWaitNote({ elapsedMs: 24_000, activeStation: 'doing', microcopy: 'Searching the web…' })).toBe(
-      'Still searching the web — 24s so far.',
+      'Still searching the web…',
+    );
+    expect(buildLongWaitNote({ elapsedMs: 130_000, activeStation: 'writing', microcopy: 'Writing…' })).toBe(
+      'Still writing… 2 min',
     );
   });
 
   it('is honest when nothing has arrived yet', () => {
     expect(buildLongWaitNote({ elapsedMs: 90_000, activeStation: 'listening', microcopy: 'On it…' })).toBe(
-      'Still waiting for the first response — 1m 30s so far.',
+      'Still waiting for the first words… 1 min',
     );
   });
 
-  it('keeps the screen-reader announcement stable across timer ticks', () => {
-    const first = buildLongWaitAnnouncement({ activeStation: 'doing', microcopy: 'Searching the web…' });
-    const second = buildLongWaitAnnouncement({ activeStation: 'doing', microcopy: 'Searching the web…' });
-    expect(first).toBe(second);
-    expect(first).not.toMatch(/\d+s/);
-    expect(first).toBe('Still searching the web — this is taking longer than usual.');
+  it('changes at most once a minute, so a screen reader is not read a ticking clock', () => {
+    const at = (elapsedMs: number) =>
+      buildLongWaitNote({ elapsedMs, activeStation: 'doing', microcopy: 'Searching the web…' });
+    expect(at(61_000)).toBe(at(119_000));
+    expect(elapsedWords(3_900_000)).toBe('1 hr 5 min');
   });
 });
 

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import {
   formatRelativeUpdated,
   measureFrameContentHeight,
@@ -277,6 +278,23 @@ describe('SpacesView space page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Aman to change this' }));
     await waitFor(() => expect(shell.spacesOpen).toBe(false));
     expect(takeComposerPrefill()).toBe('In the space “Spain houses”, ');
+  });
+
+  it('names the assistant by its display name on the ask button', async () => {
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Mannie' }),
+          updateProfile: async profile => profile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <ComposerHarness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />
+      </PersonalizationProvider>,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Ask Mannie to change this' })).toBeInTheDocument();
+    expect(screen.queryByText(/\bAman\b/)).not.toBeInTheDocument();
   });
 
   it('hides Ask Aman to change this when no composer can open', async () => {

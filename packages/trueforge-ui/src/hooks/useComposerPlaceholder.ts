@@ -1,5 +1,8 @@
 import { useAuiState } from '@assistant-ui/react';
 
+import { HELP_COMPOSER_PLACEHOLDER } from '../help/helpModel.js';
+import { useOptionalHelp } from '../help/HelpProvider.js';
+
 /** The only composer placeholders. The assistant asks these itself, so they never carry its name. */
 export const COMPOSER_PLACEHOLDER_LINES: readonly string[] = [
   "What's on your mind?",
@@ -40,5 +43,8 @@ export function resolveComposerPlaceholder({ chatId, random }: { chatId: string;
 /** The line for the open chat. `threadListItem.id` is the local id, which survives the first send. */
 export function useComposerPlaceholder(): string {
   const chatId = useAuiState(state => state.threadListItem.id);
+  const help = useOptionalHelp();
+  // In the help chat the composer is the only place to type, so it carries the help hint.
+  if (help !== null && help.isSessionFor(chatId)) return HELP_COMPOSER_PLACEHOLDER;
   return resolveComposerPlaceholder({ chatId, random: Math.random });
 }

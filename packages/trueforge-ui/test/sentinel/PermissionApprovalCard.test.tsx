@@ -305,7 +305,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
 });
 
 describe('PermissionApprovalCard "Change it"', () => {
-  // A new specialist is a card the person may change; a mail card has its own Edit button.
+  // A new persona is a card the person may change; a mail card has its own Edit button.
   const changeableCard: SentinelApprovalCard = {
     ...baseCard(),
     persona: { name: 'Tax helper', description: 'Files receipts', instructions: 'Keep receipts.', model_name: 'm' },

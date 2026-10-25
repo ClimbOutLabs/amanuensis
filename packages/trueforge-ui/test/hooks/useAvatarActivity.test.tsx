@@ -60,27 +60,27 @@ describe('AvatarActivityProvider', () => {
     expect(onActivity).toHaveBeenLastCalledWith('idle');
 
     act(() => {
-      sink.reportDerived({ isBusy: false, isTextStreaming: false });
+      sink.reportDerived({ isBusy: false, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenCalledTimes(1);
 
     act(() => {
-      sink.reportDerived({ isBusy: true, isTextStreaming: false });
+      sink.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenLastCalledWith('thinking');
 
     act(() => {
-      sink.reportDerived({ isBusy: true, isTextStreaming: false });
+      sink.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenCalledTimes(2);
 
     act(() => {
-      sink.reportDerived({ isBusy: true, isTextStreaming: true });
+      sink.reportDerived({ isBusy: true, isTextStreaming: true, isWaiting: false });
     });
     expect(onActivity).toHaveBeenLastCalledWith('writing');
 
     act(() => {
-      sink.reportDerived({ isBusy: false, isTextStreaming: false });
+      sink.reportDerived({ isBusy: false, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenLastCalledWith('idle');
   });
@@ -96,7 +96,7 @@ describe('AvatarActivityProvider', () => {
 
     // Derived idle reports while the error is armed do not clear it early.
     act(() => {
-      sink.reportDerived({ isBusy: false, isTextStreaming: false });
+      sink.reportDerived({ isBusy: false, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenLastCalledWith('error');
 
@@ -116,7 +116,7 @@ describe('AvatarActivityProvider', () => {
     expect(onActivity).toHaveBeenLastCalledWith('error');
 
     act(() => {
-      sink.reportDerived({ isBusy: true, isTextStreaming: false });
+      sink.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: false });
     });
     expect(onActivity).toHaveBeenLastCalledWith('thinking');
 
@@ -169,7 +169,7 @@ describe('AvatarActivityProvider', () => {
       throw new Error('sink was not provided');
     }
     act(() => {
-      sink.reportDerived({ isBusy: true, isTextStreaming: false });
+      sink.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: false });
     });
     expect(first).toHaveBeenLastCalledWith('thinking');
 
@@ -294,7 +294,7 @@ describe('AvatarActivityBridge', () => {
     expect(onActivity).toHaveBeenLastCalledWith('thinking');
   });
 
-  it('reports thinking while the turn is parked waiting on the user (tool approval)', () => {
+  it('reports waiting while the turn is parked waiting on the user (tool approval)', () => {
     const onActivity = vi.fn();
     renderBridge(
       <RuntimeHarness
@@ -316,10 +316,10 @@ describe('AvatarActivityBridge', () => {
       </RuntimeHarness>,
       onActivity,
     );
-    expect(onActivity).toHaveBeenLastCalledWith('thinking');
+    expect(onActivity).toHaveBeenLastCalledWith('waiting');
   });
 
-  it('reports thinking while the turn is parked on an ask-user answer', () => {
+  it('reports waiting while the turn is parked on an ask-user answer', () => {
     const onActivity = vi.fn();
     renderBridge(
       <RuntimeHarness
@@ -338,7 +338,7 @@ describe('AvatarActivityBridge', () => {
       </RuntimeHarness>,
       onActivity,
     );
-    expect(onActivity).toHaveBeenLastCalledWith('thinking');
+    expect(onActivity).toHaveBeenLastCalledWith('waiting');
   });
 
   it('reports idle for a turn whose parked approval already resolved', () => {

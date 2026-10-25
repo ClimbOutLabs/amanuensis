@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
+import { useRef, useState } from 'react';
 
-import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
-import { Icon } from '@/icons/Icon.js';
 import {
   personaVaultNamespace,
   type MemoryVaultSharing,
@@ -11,164 +11,146 @@ import {
 
 export type MemorySharingPersona = { id: string; displayName: string };
 
-/** One chip on a specialist's row. `subject` completes "X can see …" for the accessible name. */
-type SharingChoice = { value: string; label: string; subject: string };
+/** One persona row: who reads, and the key its grants are saved under. */
+type SharingRow = { key: string; label: string; main: boolean; namespace: string | null };
 
-/** The choices a specialist can be given: the other specialists, then the topics. */
-function sharingChoices(options: {
-  persona: MemorySharingPersona;
-  personas: MemorySharingPersona[];
-  topics: Array<{ value: string; label: string }>;
-}): { specialists: SharingChoice[]; topics: SharingChoice[] } {
-  const specialists = options.personas
-    .filter(other => other.id !== options.persona.id)
-    .map(other => ({
-      value: personaVaultNamespace(other.displayName),
-      label: other.displayName,
-      subject: `${other.displayName}'s memories`,
-    }));
-  const topics = options.topics.map(topic => ({
-    value: topic.value,
-    label: topic.label,
-    subject: `the ${topic.label} memories`,
-  }));
-  return { specialists, topics };
+/** One box on a row: a collection of notes the row's persona can also read. */
+type SharingChoice = { value: string; label: string };
+
+const SAVE_FAILED_LINE = 'That change was not saved. Check your connection, then try again.';
+
+/** The shares with one grant turned on or off; a row with nothing granted is left out. */
+function withGrant({
+  shares,
+  key,
+  namespace,
+  on,
+}: {
+  shares: Record<string, string[]>;
+  key: string;
+  namespace: string;
+  on: boolean;
+}): Record<string, string[]> {
+  const current = shares[key] ?? [];
+  const next = on ? Array.from(new Set([...current, namespace])) : current.filter(item => item !== namespace);
+  const copy = { ...shares };
+  if (next.length === 0) delete copy[key];
+  else copy[key] = next;
+  return copy;
 }
 
 /**
- * Cross-specialist sharing: which memory namespaces each specialist may read.
- * Each row is one specialist; its chips are the memories it can also see.
+ * Which other personas' notes each persona can read. Everything the person says about themselves is
+ * shared with every persona already; this only adds a persona's own notes to another's reading. Each
+ * change saves as it is made.
  */
 export function MemorySharing(props: {
   personas: MemorySharingPersona[];
-  /** Topic memories, offered to every specialist alongside the other specialists. */
+  /** The main assistant's display name; it reads the shared notes and keeps none of its own. */
+  assistant: string;
+  /** Display names of the personas that have notes of their own. */
+  personasWithNotes: ReadonlySet<string>;
+  /** Topic collections, offered on every row after the personas. */
   namespaces: Array<{ value: string; label: string }>;
   sharing: MemoryVaultSharing;
   onSave: (sharing: MemoryVaultSharing) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState<Record<string, string[]>>(() => ({ ...props.sharing.shares }));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [shares, setShares] = useState<Record<string, string[]>>(() => ({ ...props.sharing.shares }));
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const confirmed = useRef<Record<string, string[]>>({ ...props.sharing.shares });
+  // Saves run one after another, so a quick second change never lands before the first.
+  const queue = useRef<Promise<void>>(Promise.resolve());
 
-  function toggle(personaId: string, namespace: string, enabled: boolean) {
-    setSaved(false);
-    setDraft(previous => {
-      const current = previous[personaId] ?? [];
-      const next = enabled ? Array.from(new Set([...current, namespace])) : current.filter(item => item !== namespace);
-      const copy = { ...previous };
-      if (next.length === 0) {
-        delete copy[personaId];
-      } else {
-        copy[personaId] = next;
+  // The Help persona is listed only when it keeps notes of its own, and then by what it is for.
+  const listed = props.personas
+    .filter(persona => persona.displayName !== AMAN_GUIDE_NAME || props.personasWithNotes.has(AMAN_GUIDE_NAME))
+    .map(persona => ({
+      key: persona.id,
+      label: persona.displayName === AMAN_GUIDE_NAME ? 'Help' : persona.displayName,
+      main: false,
+      namespace: personaVaultNamespace(persona.displayName),
+    }));
+  const rows: SharingRow[] = [
+    { key: MAIN_ASSISTANT_SHARING_KEY, label: props.assistant, main: true, namespace: null },
+    ...listed,
+  ];
+
+  function choicesFor(row: SharingRow): SharingChoice[] {
+    return [
+      ...listed.filter(other => other.key !== row.key).map(other => ({ value: other.namespace, label: other.label })),
+      ...props.namespaces,
+    ];
+  }
+
+  function toggle({ row, choice, on }: { row: SharingRow; choice: SharingChoice; on: boolean }) {
+    const next = withGrant({ shares, key: row.key, namespace: choice.value, on });
+    setShares(next);
+    setStatus('saving');
+    queue.current = queue.current.then(async () => {
+      try {
+        await props.onSave({ shares: next });
+        confirmed.current = next;
+        setStatus('saved');
+      } catch {
+        // Show what is really saved, and say what to do.
+        setShares(confirmed.current);
+        setStatus('failed');
       }
-      return copy;
     });
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await props.onSave({ shares: draft });
-      setSaved(true);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save sharing settings.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function renderChip(persona: MemorySharingPersona, choice: SharingChoice, granted: string[]) {
-    const on = granted.includes(choice.value);
+  if (listed.length === 0) {
     return (
-      <button
-        key={choice.value}
-        type="button"
-        aria-pressed={on}
-        aria-label={`${persona.displayName} can see ${choice.subject}`}
-        disabled={saving}
-        onClick={() => toggle(persona.id, choice.value, !on)}
-        className="aui-chip focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-60"
-      >
-        {on ? <Icon name="check" className="h-3 w-3 shrink-0" /> : null}
-        {choice.label}
-      </button>
+      <p className="text-[0.875rem] text-text-secondary">
+        No personas keep notes of their own yet, so there is nothing to share.
+      </p>
     );
   }
 
-  if (props.personas.length === 0) {
-    return <p className="text-sm text-text-secondary">No specialists are set up yet, so there is nothing to share.</p>;
-  }
-
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-sm text-text-secondary">
-        Every specialist sees the shared memories. Choose whose own memories each one can also see.
+    <div className="flex flex-col gap-4 font-sans">
+      <p className="m-0 text-[0.875rem] text-text-secondary">
+        Everything you tell any persona about yourself is shared with all of them. Each persona also keeps its own
+        notes. Choose which other personas’ notes each one can read.
       </p>
-      <ul aria-label="Memory sharing by specialist" className="flex flex-col gap-3">
-        {props.personas.map(persona => {
-          const { specialists, topics } = sharingChoices({
-            persona,
-            personas: props.personas,
-            topics: props.namespaces,
-          });
-          const granted = draft[persona.id] ?? [];
-          const anyOn = [...specialists, ...topics].some(choice => granted.includes(choice.value));
+      <ul aria-label="Which notes each persona can read" className="m-0 flex list-none flex-col gap-2 p-0">
+        {rows.map(row => {
+          const choices = choicesFor(row);
+          const granted = shares[row.key] ?? [];
+          const anyOn = choices.some(choice => granted.includes(choice.value));
+          const lead = `${row.label} can also read notes from`;
           return (
-            <li key={persona.id} className="aui-row aui-row--2 aui-row--stack aui-row--sharing">
-              <div className="min-w-0">
-                <span className="text-sm font-medium text-text-primary">{persona.displayName}</span>
-                {anyOn ? null : <span className="block text-xs text-text-secondary">None</span>}
+            <li
+              key={row.key}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[0.75rem] border border-border bg-card-bg px-3 py-2.5 text-[0.875rem] text-text-primary"
+            >
+              <span>{lead}:</span>
+              <div role="group" aria-label={lead} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                {choices.map(choice => (
+                  <label key={choice.value} className="inline-flex cursor-pointer items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      className="aui-sharing-box size-4 accent-primary-button-bg"
+                      checked={granted.includes(choice.value)}
+                      onChange={event => toggle({ row, choice, on: event.target.checked })}
+                    />
+                    {choice.label}
+                  </label>
+                ))}
               </div>
-              {specialists.length === 0 && topics.length === 0 ? (
-                <p className="text-sm text-text-secondary">No other specialists to share with yet.</p>
-              ) : (
-                <div className="flex min-w-0 flex-col gap-2">
-                  {specialists.length > 0 ? (
-                    <div
-                      className="flex min-w-0 flex-wrap gap-1.5"
-                      role="group"
-                      aria-label={`What ${persona.displayName} can see`}
-                    >
-                      {specialists.map(choice => renderChip(persona, choice, granted))}
-                    </div>
-                  ) : null}
-                  {topics.length > 0 ? (
-                    <div
-                      className="flex min-w-0 flex-wrap items-center gap-1.5"
-                      role="group"
-                      aria-label={`Topics ${persona.displayName} can see`}
-                    >
-                      <span className="text-xs text-text-secondary">Topics:</span>
-                      {topics.map(choice => renderChip(persona, choice, granted))}
-                    </div>
-                  ) : null}
-                </div>
+              {anyOn ? null : (
+                <span className="text-text-muted">{row.main ? 'Only the shared notes' : 'Only its own notes'}</span>
               )}
             </li>
           );
         })}
       </ul>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          className={auiButtonClass({ variant: 'primary', size: 'large' })}
-        >
-          {saving ? 'Saving…' : 'Save sharing'}
-        </button>
-        {saved ? (
-          <span role="status" className="text-xs text-success-bg">
-            Sharing saved.
-          </span>
-        ) : null}
-      </div>
-      {error !== null ? (
-        <p role="alert" className="text-xs text-error-text">
-          {error}
+      <p role="status" aria-live="polite" className="m-0 min-h-[1.25rem] text-[0.8125rem] text-text-secondary">
+        {status === 'saved' ? 'Saved' : status === 'saving' ? 'Saving…' : ''}
+      </p>
+      {status === 'failed' ? (
+        <p role="alert" className="m-0 text-[0.8125rem] text-error-text">
+          {SAVE_FAILED_LINE}
         </p>
       ) : null}
     </div>
