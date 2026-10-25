@@ -1140,7 +1140,7 @@ journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () =
             purpose: 'Compare popular dog breeds',
             status: 'active',
             format: 'markdown',
-            body: ['# Dog breeds', '', 'A few popular breeds to compare.'],
+            body: '# Dog breeds\n\nA few popular breeds to compare.',
           }),
         };
       }
