@@ -1,9 +1,10 @@
 /**
- * SCRATCH PROBES for symptom 3 (early done claims) at the AgentThread level.
- * Mirrors the harness in fakeToolCalls.test.ts. Logs observed outcomes.
+ * Turn-level checks for runaway replies: a claim of finished work made in an early step of a
+ * turn is held to the same check as one in the final step, and a repetition stop is logged
+ * with the guard and channel that made it.
  */
-import { appendFileSync } from 'node:fs';
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { Logger } from 'winston';
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type {
@@ -16,11 +17,11 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { isRecord } from '../../../src/core/util/records';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
-function note(text: string): void {
-  appendFileSync('/home/hatch/workspace/job-runaway-replies/probe-results2.txt', `${text}\n`);
-}
+const CLAIM = "I've set the reminder for 9:10.";
+const NOTE = 'Nothing was changed yet: no action ran in this reply.';
 
 const CREATE_SCHEMA = {
   type: 'object' as const,
@@ -49,6 +50,7 @@ function makeToolSet(failCreates: boolean) {
       mcp_server_name: toolSet.name,
       original_tool_name: params.name,
       is_approval_required: false,
+      ...(params.name === 'get_event' ? { read_only_hint: true } : {}),
     }),
   );
   jest.mocked(toolSet.callTool).mockImplementation((params: CallToolRequest['params']) =>
@@ -67,6 +69,7 @@ type CallSpec = { id: string; name: string; args: Record<string, unknown> };
 async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
+  repetitionStopped?: boolean;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls: RawToolCall[] = (input.calls ?? []).map(spec => ({
     id: spec.id,
@@ -105,10 +108,13 @@ async function* replyStream(input: {
     },
     usage: getEmptyUsage(),
     finish_reason: calls.length > 0 ? 'tool_calls' : 'stop',
+    ...(input.repetitionStopped === true
+      ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
+      : {}),
   };
 }
 
-function makeThread(input: { toolSet: IToolSet; create: ILLM['create'] }) {
+function makeThread(input: { toolSet: IToolSet; create: ILLM['create']; logger?: Logger }) {
   return new AgentThread({
     threadId: 'main',
     title: 'Main',
@@ -117,7 +123,7 @@ function makeThread(input: { toolSet: IToolSet; create: ILLM['create'] }) {
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
-    logger: makeSilentLogger(),
+    logger: input.logger ?? makeSilentLogger(),
     definition: {
       modelClient: { create: input.create, createNonStream: jest.fn() },
       modelId: undefined,
@@ -139,82 +145,68 @@ async function drain(thread: AgentThread): Promise<unknown[]> {
 
 function deliveredText(events: unknown[]): string {
   return events
-    .map(event =>
-      typeof event === 'object' && event !== null && 'type' in event && event.type === EventType.MODEL_MESSAGE_DELTA
-        ? (event as { content?: unknown }).content
-        : undefined,
-    )
+    .map(event => (isRecord(event) && event['type'] === EventType.MODEL_MESSAGE_DELTA ? event['content'] : undefined))
     .filter((content): content is string => typeof content === 'string')
     .join('');
 }
 
-describe('probes: symptom 3, claims in early steps', () => {
-  it('C1 claim in step 1 with only a read call in the turn, bland final step', async () => {
+describe('claims made in an early step of a turn', () => {
+  it('adds the note when the claim came in an early step and only a read ran', async () => {
     const toolSet = makeToolSet(false);
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
       return round === 1
-        ? replyStream({
-            text: "I've set the reminder for 9:10.",
-            calls: [{ id: 'r1', name: 'get_event', args: { event_id: 'evt-1' } }],
-          })
+        ? replyStream({ text: CLAIM, calls: [{ id: 'r1', name: 'get_event', args: { event_id: 'evt-1' } }] })
         : replyStream({ text: 'Anything else I can do?' });
     });
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-    note(`C1 delivered: ${JSON.stringify(deliveredText(events))}`);
+    const delivered = deliveredText(await drain(makeThread({ toolSet, create })));
+    expect(delivered).toContain(CLAIM);
+    expect(delivered.endsWith(NOTE)).toBe(true);
   });
 
-  it('C2 claim in step 1, the matching write succeeds in step 2, bland final step', async () => {
+  it('adds the note when the claim and its failed write came in an early step', async () => {
+    const toolSet = makeToolSet(true);
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      return round === 1
+        ? replyStream({ text: CLAIM, calls: [{ id: 'w1', name: 'create_event', args: { title: 'Dentist' } }] })
+        : replyStream({ text: 'Anything else I can do?' });
+    });
+    const delivered = deliveredText(await drain(makeThread({ toolSet, create })));
+    expect(delivered.endsWith(NOTE)).toBe(true);
+  });
+
+  it('adds no note when a later step in the turn does the work the early claim named', async () => {
     const toolSet = makeToolSet(false);
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
       if (round === 1) {
-        return replyStream({
-          text: "I've set the reminder for 9:10.",
-          calls: [{ id: 'r1', name: 'get_event', args: { event_id: 'evt-1' } }],
-        });
+        return replyStream({ text: CLAIM, calls: [{ id: 'r1', name: 'get_event', args: { event_id: 'evt-1' } }] });
       }
       if (round === 2) {
-        return replyStream({ calls: [{ id: 'c1', name: 'create_event', args: { title: 'Reminder' } }] });
+        return replyStream({ calls: [{ id: 'w1', name: 'create_event', args: { title: 'Dentist' } }] });
       }
       return replyStream({ text: 'All done.' });
     });
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-    note(`C2 delivered: ${JSON.stringify(deliveredText(events))}`);
+    const delivered = deliveredText(await drain(makeThread({ toolSet, create })));
+    expect(delivered).not.toContain('Nothing was changed yet');
   });
+});
 
-  it('C3 the matching write fails, claim in the final step (control)', async () => {
-    const toolSet = makeToolSet(true);
-    let round = 0;
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
-      round += 1;
-      return round === 1
-        ? replyStream({ calls: [{ id: 'c1', name: 'create_event', args: { title: 'Reminder' } }] })
-        : replyStream({ text: "I've set the reminder for 9:10." });
-    });
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-    note(`C3 delivered: ${JSON.stringify(deliveredText(events))}`);
-  });
-
-  it('C4 claim in step 1, the matching write fails in step 1, bland final step', async () => {
-    const toolSet = makeToolSet(true);
-    let round = 0;
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
-      round += 1;
-      return round === 1
-        ? replyStream({
-            text: "I've set the reminder for 9:10.",
-            calls: [{ id: 'c1', name: 'create_event', args: { title: 'Reminder' } }],
-          })
-        : replyStream({ text: 'Anything else I can do?' });
-    });
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-    note(`C4 delivered: ${JSON.stringify(deliveredText(events))}`);
+describe('repetition stop logging', () => {
+  it('logs the stop with the guard and channel that made it', async () => {
+    const logger = makeSilentLogger();
+    const info = jest.spyOn(logger, 'info');
+    const toolSet = makeToolSet(false);
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: 'The visit is on Monday.', repetitionStopped: true }),
+    );
+    await drain(makeThread({ toolSet, create, logger }));
+    const stopLog = info.mock.calls.find(([message]) => message === 'Stopped a reply that was repeating itself');
+    expect(stopLog).toBeDefined();
+    expect(stopLog?.[1]).toMatchObject({ guard: 'answer_units', channel: 'answer' });
   });
 });

@@ -364,7 +364,35 @@ describe('ToolMarkupGuard stray closing tags', () => {
   it('hides a stray closing tag at the very end of the reply', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Done.\n</tool_call>');
+    expect(guard.finish()).toBe('clean');
     expect(shown + guard.heldText).toBe('Done.\n');
+  });
+
+  it('hides a stray closing tag glued to the end of an answer line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call>\nMore text follows here.');
+    expect(shown + guard.heldText).toBe('Done.\nMore text follows here.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('drops a stray closing tag the reply ends on, after words on the same line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Your visit is Monday at 2:30 pm.</tool_call>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Your visit is Monday at 2:30 pm.');
+  });
+
+  it('drops a stray closing tag followed only by spaces when the reply ends', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call>  ');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('keeps a closing tag named in a sentence with words after it on the line', () => {
+    const guard = new ToolMarkupGuard();
+    const sentence = 'End the block with </tool_call> and then stop.';
+    expect(guard.push(sentence) + guard.heldText).toBe(sentence);
     expect(guard.finish()).toBe('clean');
   });
 

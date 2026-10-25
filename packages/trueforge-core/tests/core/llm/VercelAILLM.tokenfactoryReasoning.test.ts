@@ -6,7 +6,7 @@
  * Leaked tool-call markup is held out of the reply, and nothing in it is ever run.
  */
 import type { LLMCreateParams } from '../../../src/core/llm/ILLM';
-import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
+import { ModelOutputRepetitionError, VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { makeSilentLogger } from '../harnessMocks';
 
 const RAW_MARKERS = ['<tool_call', '</tool_call', '<think', '</think', '<tool_calls', '</invoke', '<invoke'];
@@ -96,6 +96,165 @@ describe('Token Factory answer text with think tags', () => {
     const result = await modelClient().createNonStream(request({ reasoning: true }));
     expect(result.output.content).toBe('Found it.');
     expect(JSON.stringify(result.output.thinking_blocks)).toContain('Plan the lookup.');
+  });
+});
+
+/** Mocks fetch to stream these content pieces and end with the given finish reason. */
+function mockContentStreamEndingWith(pieces: string[], finishReason: 'length' | 'tool_calls'): void {
+  const frame = (delta: Record<string, unknown>, reason: string | null) =>
+    `data: ${JSON.stringify({
+      id: 'tf-synthetic',
+      object: 'chat.completion.chunk',
+      created: 0,
+      model: 'nvidia/nemotron-3-super-120b-a12b',
+      choices: [{ index: 0, delta, finish_reason: reason }],
+    })}\n\n`;
+  const body = [
+    frame({ role: 'assistant' }, null),
+    ...pieces.map(piece => frame({ content: piece }, null)),
+    frame({}, finishReason),
+  ].join('');
+  jest
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(() =>
+      Promise.resolve(new Response(`${body}data: [DONE]\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } })),
+    );
+}
+
+/** Mocks fetch to stream these raw SSE frames, in order. */
+function mockFrames(frames: string[]): void {
+  jest
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(() =>
+      Promise.resolve(
+        new Response(frames.join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+      ),
+    );
+}
+
+function sseFrame(delta: Record<string, unknown>, finishReason: string | null): string {
+  return `data: ${JSON.stringify({
+    id: 'tf-synthetic',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'nvidia/nemotron-3-super-120b-a12b',
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  })}\n\n`;
+}
+
+const DONE_FRAME = 'data: [DONE]\n\n';
+
+function toolCallFrame(): string {
+  return sseFrame(
+    {
+      tool_calls: [
+        { index: 0, id: 'call-1', type: 'function', function: { name: 'get_event', arguments: '{"event_id":"evt-1"}' } },
+      ],
+    },
+    null,
+  );
+}
+
+describe('Token Factory replies cut off at the output limit', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([
+    ['<tool_call>'],
+    ['<tool_call'],
+    ['<tool_calls>'],
+    ['<invoke name="get_event">'],
+  ])('shows no markup when the limit cuts the reply at %s', async opener => {
+    mockContentStreamEndingWith(['Working on it.\n', opener], 'length');
+    const result = await modelClient().createNonStream(request({ reasoning: false }));
+    expect(result.finish_reason).toBe('length');
+    expect(result.output.content).toBe('Working on it.\n');
+    expect(result.output.tool_calls).toBeUndefined();
+    for (const marker of RAW_MARKERS) {
+      expect(result.output.content ?? '').not.toContain(marker);
+    }
+  });
+
+  it('keeps a parsed tool call and drops the stray closing tag glued to the answer', async () => {
+    mockFrames([
+      sseFrame({ role: 'assistant' }, null),
+      sseFrame({ content: 'Checking the calendar.' }, null),
+      toolCallFrame(),
+      sseFrame({ content: '</tool_call>' }, null),
+      sseFrame({}, 'tool_calls'),
+      DONE_FRAME,
+    ]);
+    const result = await modelClient().createNonStream(request({ reasoning: false }));
+    expect(result.output.content).toBe('Checking the calendar.');
+    expect(result.tool_markup).toBeUndefined();
+    expect(result.output.tool_calls).toHaveLength(1);
+    expect(result.output.tool_calls?.[0]?.function.name).toBe('get_event');
+    expect(result.output.tool_calls?.[0]?.function.arguments).toBe('{"event_id":"evt-1"}');
+  });
+});
+
+describe('Token Factory repetition stops', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const paragraph =
+    'The dentist appointment is booked for Monday at half past two in the afternoon. ' +
+    'You will get a reminder one hour before the visit starts that day. ' +
+    'Bring your insurance card and the list of medicines you take now.';
+
+  it('stops a reply repeating a paragraph and names the guard and channel that stopped it', async () => {
+    mockContentStream([paragraph, `\n\n${paragraph}`, `\n\n${paragraph}`]);
+    const result = await modelClient().createNonStream(request({ reasoning: false }));
+    expect(result.repetition_stopped).toBe(true);
+    expect(result.repetition_stop).toEqual({ guard: 'answer_units', channel: 'answer' });
+    expect(result.output.content).toContain('Stopped: the reply was repeating itself.');
+    expect(result.output.content?.match(/dentist appointment is booked/g)).toHaveLength(2);
+  });
+
+  it('stops reasoning that goes in circles and names the guard and channel on the error', async () => {
+    const loop = Array.from({ length: 20 }, () => paragraph).join(' ');
+    mockFrames([
+      sseFrame({ role: 'assistant' }, null),
+      sseFrame({ reasoning_content: loop }, null),
+      sseFrame({ content: 'Done.' }, null),
+      sseFrame({}, 'stop'),
+      DONE_FRAME,
+    ]);
+    const caught = await modelClient()
+      .createNonStream(request({ reasoning: true }))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(caught).toBeInstanceOf(ModelOutputRepetitionError);
+    if (caught instanceof ModelOutputRepetitionError) {
+      expect(caught.stop.guard).toBe('streaming_shingles');
+      expect(caught.stop.channel).toBe('reasoning');
+      expect(caught.stop.words).toBeGreaterThanOrEqual(512);
+      expect(caught.message).toBe(
+        "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
+      );
+    }
+  });
+
+  it('lets a long reply with real tool calls and some repeated sentences finish whole', async () => {
+    const opening =
+      'Your dentist visit is on Monday at half past two. The office is on the second floor of the clinic building on Pine Street.';
+    mockFrames([
+      sseFrame({ role: 'assistant' }, null),
+      sseFrame({ content: `${opening} ${opening}` }, null),
+      toolCallFrame(),
+      sseFrame({ content: ' I checked the visit against your calendar while you read this.' }, null),
+      sseFrame({}, 'tool_calls'),
+      DONE_FRAME,
+    ]);
+    const result = await modelClient().createNonStream(request({ reasoning: false }));
+    expect(result.repetition_stopped).toBeUndefined();
+    expect(result.repetition_stop).toBeUndefined();
+    expect(result.output.content).toBe(
+      `${opening} ${opening} I checked the visit against your calendar while you read this.`,
+    );
+    expect(result.output.tool_calls).toHaveLength(1);
+    expect(result.output.tool_calls?.[0]?.function.name).toBe('get_event');
+    expect(result.output.tool_calls?.[0]?.function.arguments).toBe('{"event_id":"evt-1"}');
   });
 });
 

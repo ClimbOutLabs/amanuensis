@@ -239,6 +239,7 @@ import {
   REPEATED_ACTION_RESULT,
   stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
+  type UnbackedClaimKind,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
 } from './replyActionChecks';
@@ -3644,6 +3645,9 @@ export class AgentThread {
           if (!isContextLengthError(error)) {
             this.logger.warn('Model stream fault; retrying the call once with the same history', {
               ...extractErrorLogFields(error),
+              ...(error instanceof ModelOutputRepetitionError
+                ? { guard: error.stop.guard, channel: error.stop.channel, words: error.stop.words ?? null }
+                : {}),
               attempt,
             });
             continue;
@@ -3742,22 +3746,40 @@ export class AgentThread {
     }
 
     if (result.value.repetition_stopped === true) {
-      this.logger.info('Stopped a reply that was repeating itself', { threadId: this.threadId });
+      this.logger.info('Stopped a reply that was repeating itself', {
+        threadId: this.threadId,
+        guard: result.value.repetition_stop?.guard ?? 'unknown',
+        channel: result.value.repetition_stop?.channel ?? 'unknown',
+      });
     }
 
     // The person is told about leaked markup only when no write succeeded in the turn; an earlier
     // success means the reply's claim is not what this line is for.
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
+    // A step that carries tool calls is not the turn's last word, so its prose is kept for the
+    // claim check at the final step: a claim made in an early step is checked against the whole
+    // turn, the same way the final step's own prose is.
+    if (result.value.output.tool_calls !== undefined && replyText.trim() !== '') {
+      this.toolCallMemo.turn.stepTextsThisTurn.push(replyText);
+    }
     if (result.value.output.tool_calls === undefined) {
       // The reply has already streamed, so it stays as written and the note corrects it. The note is
       // saved with the reply, so the model reads the correction on its next turn.
-      const unbackedClaim = findUnbackedClaim({
-        text: replyText,
-        successfulWrites,
-        stepKinds: this.toolCallMemo.turn.stepKindsThisTurn,
-        sandboxOn: this.sandbox !== undefined,
-      });
+      const claimIn = (text: string): UnbackedClaimKind | undefined =>
+        findUnbackedClaim({
+          text,
+          successfulWrites,
+          stepKinds: this.toolCallMemo.turn.stepKindsThisTurn,
+          sandboxOn: this.sandbox !== undefined,
+        });
+      let unbackedClaim = claimIn(replyText);
+      for (const stepText of this.toolCallMemo.turn.stepTextsThisTurn) {
+        if (unbackedClaim !== undefined) {
+          break;
+        }
+        unbackedClaim = claimIn(stepText);
+      }
       // The model is told why a reply did not finish and says so in its own words. The host adds a line
       // only when the reply has none, so the person is never left with nothing; a reply with words
       // still gets the checks below, so it cannot claim the step that did not run as done.
