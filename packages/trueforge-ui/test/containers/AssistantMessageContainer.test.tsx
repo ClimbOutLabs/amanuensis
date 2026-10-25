@@ -520,7 +520,7 @@ describe('AssistantMessageContainer', () => {
       ]);
 
       expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
-      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow it' })).toBeVisible();
+      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow' })).toBeVisible();
     });
 
     it('shows the answer after a tool call while the message is still running', async () => {
