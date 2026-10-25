@@ -6,7 +6,7 @@ import {
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { dayInZone, parseDemoDay, STORY, weekdayOffset } from '../../../../src/cli/demoSeed/storyDays.mjs';
-import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
+import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_USER_PROFILE } from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
 import { SpaceContentSchema } from '../../../../src/schemas/space';
@@ -179,9 +179,15 @@ describe('buildDemoWorld content', () => {
     expect(PersonalizationProfileContentSchema.safeParse(world.profile).success).toBe(true);
     for (const space of world.spaces) {
       expect(SpaceContentSchema.safeParse(space.content).success).toBe(true);
-      expect(space.id.startsWith('demo-synthetic-')).toBe(true);
+      expect(space.id.startsWith('maya-')).toBe(true);
     }
-    expect(world.profile.user_profile).toContain(DEMO_MARKER);
+    expect(world.profile.user_profile).toBe(DEMO_USER_PROFILE);
+  });
+
+  it('never tells the assistant that Maya or her world is made up', () => {
+    const world = buildDemoWorld({ today: MONDAY, timeZone: 'Europe/Lisbon', modelName: 'provider/model' });
+
+    expect(JSON.stringify(world)).not.toMatch(/demo|synthetic|fictional|invented|made up|not real/i);
   });
 
   it('turns the sandbox on for the agent and tells every voice to degrade to plain text', () => {
