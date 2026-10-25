@@ -89,16 +89,18 @@ describe('AmanWelcome on an ordinary new chat', () => {
     renderWelcome({ heading: 'Repo Reviewer', setup: firstRun });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Productivity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: "I'm behind" })).not.toBeInTheDocument();
   });
 
-  it('chooses Productivity without sending, and a card puts the morning brief in the composer for the person to send', async () => {
+  it('chooses a pill without sending, and the morning brief card puts only the brief in the composer for the person to send', async () => {
+    server.grantedFeatures = ['gmail_read', 'calendar_read'];
     renderWelcome({ setup: firstRun });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Productivity' }));
+    fireEvent.click(await screen.findByRole('button', { name: "I'm behind" }));
     expect(composer.send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: "I'm behind" }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
     expect(composer.send).not.toHaveBeenCalled();
   });
@@ -115,8 +117,8 @@ describe('AmanWelcome on an ordinary new chat', () => {
   it('drops the prompt line, the ticket and Skip once the first chat is sent, and keeps the pills and cards', async () => {
     renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    expect(await screen.findByRole('button', { name: 'Productivity' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Draft a reply/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Everything's in my head/ })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
   });
@@ -124,7 +126,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
   it('hides the first-run lines once the owner has skipped them', async () => {
     renderWelcome({ setup: { ...firstRun, firstRunGuide: { dismissed: true, dismiss: () => {} } } });
 
-    expect(await screen.findByRole('button', { name: 'Productivity' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
     expect(screen.queryByText(/What would help you most\? Pick one/)).not.toBeInTheDocument();
   });

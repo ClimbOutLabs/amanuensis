@@ -49,7 +49,6 @@ function AmanHome() {
       capabilities={capabilities}
       userName={personName}
       assistantName={profile.assistant_name}
-      hasBrief={setup?.hasBrief === true}
       firstRun={firstRun}
       setupTicket={<AmanSetupTicket />}
       onSkip={firstRun ? dismiss : undefined}

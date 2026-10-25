@@ -6,7 +6,7 @@ import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useHomeTopic } from './homeTopic.js';
-import { HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
+import { composerTextFor, HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
 
 /** Morning, afternoon or evening, by the local hour. */
 function greetingFor(now: Date): string {
@@ -74,8 +74,6 @@ export type AmanTourProps = {
   assistantName?: string | null;
   /** The clock the greeting reads; the host's clock when omitted. */
   now?: Date;
-  /** Whether a morning brief exists yet; the Productivity pill is gold once it does. */
-  hasBrief: boolean;
   /** On a first run the prompt line, the setup ticket and Skip show; otherwise they do not. */
   firstRun: boolean;
   /** The setup ticket, shown on a first run. */
@@ -97,7 +95,6 @@ export function AmanTour({
   userName,
   assistantName,
   now = new Date(),
-  hasBrief,
   firstRun,
   setupTicket,
   onSkip,
@@ -111,7 +108,7 @@ export function AmanTour({
 
   return (
     <>
-      <h1 className="aman-home-greeting aui-face-serif order-0 m-0 pt-[clamp(3rem,12vh,8rem)] text-left text-[1.75rem] leading-[1.2] font-normal text-text-primary">
+      <h1 className="aman-home-greeting aui-face-serif order-0 m-0 pt-[clamp(3rem,8vh,8rem)] text-left text-[1.75rem] leading-[1.2] font-normal text-text-primary">
         {hello}
         {firstName === null ? null : (
           <>
@@ -149,9 +146,6 @@ export function AmanTour({
                   onClick={() => setTopic(chosen ? null : id)}
                   className={cn(PILL_CLASS, chosen ? 'border-gold-line bg-gold-soft' : 'border-border bg-card-bg')}
                 >
-                  {id === 'productivity' && hasBrief ? (
-                    <span className="size-1.5 rounded-full bg-gold" aria-hidden="true" />
-                  ) : null}
                   {HOME_TOPICS[id].label}
                 </button>
               </li>
@@ -167,8 +161,12 @@ export function AmanTour({
           </h2>
           <ul className="m-0 grid list-none grid-cols-2 gap-2.5 p-0">
             {cards.map(card => (
-              <li key={card.key}>
-                <button type="button" className={cn(CARD_CLASS, 'h-full w-full')} onClick={() => onFill(card.prompt)}>
+              <li key={card.title}>
+                <button
+                  type="button"
+                  className={cn(CARD_CLASS, 'h-full w-full')}
+                  onClick={() => onFill(composerTextFor(card))}
+                >
                   <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
                     <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
                       {card.icon === 'map-pin' ? (

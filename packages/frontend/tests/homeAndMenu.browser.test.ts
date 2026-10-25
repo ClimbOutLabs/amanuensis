@@ -32,6 +32,7 @@ async function homeFit(page: Page) {
     });
     return {
       cards: cards.length,
+      titles: cards.map(card => card.querySelector('[data-role="home-card-title"]')?.textContent ?? ''),
       lowest: Math.max(...cards.map(card => card.getBoundingClientRect().bottom)),
       scrollers: scrollers.map(
         el =>
@@ -44,6 +45,11 @@ async function homeFit(page: Page) {
 
 function assertFits(fit: Awaited<ReturnType<typeof homeFit>>, label: string): void {
   assert.equal(fit.cards, 4, `${label}: home shows four cards`);
+  assert.deepEqual(
+    fit.titles,
+    ["Everything's in my head", "I can't get started", 'Say it kindly', "What's for dinner this week?"],
+    `${label}: a fresh install shows the cards that need nothing connected`,
+  );
   assert.ok(fit.lowest <= 900, `${label}: every card is on screen (lowest edge ${fit.lowest}px)`);
   assert.deepEqual(fit.scrollers, [], `${label}: nothing on home needs scrolling`);
   assert.equal(fit.pageScrolls, false, `${label}: the page does not scroll`);
