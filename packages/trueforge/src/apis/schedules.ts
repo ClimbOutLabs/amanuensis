@@ -68,6 +68,7 @@ import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { scheduleRunsAs } from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { deliverReminder, ReminderAgentNotFoundError } from '../runtime/reminderDelivery';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -136,6 +137,17 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   deps: ScheduleTurnExecutionDeps<TTransaction>;
 }): Promise<void> {
   const { c, item, deps } = params;
+  if (item.schedule.manifest.kind === 'reminder') {
+    // A reminder needs no model: the host writes its line into the Reminders chat itself.
+    await deliverReminder({
+      item,
+      sessions: deps.sessions,
+      sessionStore: deps.sessionStore,
+      agentStore: deps.agentStore,
+      now: new Date(),
+    });
+    return;
+  }
   const prepared = await startScheduleRun({
     item,
     sessions: deps.sessions,
@@ -268,7 +280,8 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError
+        error instanceof SchedulePersonaNotFoundError ||
+        error instanceof ReminderAgentNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -414,7 +427,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError
+        error instanceof SchedulePersonaNotFoundError ||
+        error instanceof ReminderAgentNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }

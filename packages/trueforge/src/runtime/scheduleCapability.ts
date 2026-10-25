@@ -83,23 +83,15 @@ const ListSchedulesToolSchema = z.object({}).strict();
 
 export const SetReminderToolSchema = z
   .object({
-    what: z
-      .string()
-      .trim()
-      .min(1)
-      .max(300)
-      .describe('The words to show the user when it is due, like "Take the medicine".'),
-    at: RunAtSchema.describe(
-      'When it is due, ISO 8601 with the UTC offset in the user time zone. For a repeat, its time of day sets the repeat time.',
-    ),
-    repeat: z.enum(['daily', 'weekdays', 'weekly']).optional().describe('Leave out for a one-time reminder.'),
-    days: z.array(WeekdaySchema).optional().describe('Days for a weekly repeat.'),
-    time_zone: TimezoneSchema.optional(),
+    what: z.string().trim().min(1).max(300).describe('Words to show when due.'),
+    at: RunAtSchema.describe('Due time, ISO 8601 with offset. A repeat keeps its time of day.'),
+    repeat: z.enum(['daily', 'weekdays', 'weekly']).optional(),
+    days: z.array(WeekdaySchema).optional(),
   })
   .strict();
 
 export const CancelReminderToolSchema = z
-  .object({ reminder: z.string().trim().min(1).describe('Reminder id from list_reminders, or its exact words.') })
+  .object({ reminder: z.string().trim().min(1).describe('Id or exact words.') })
   .strict();
 
 export type CreateScheduleToolInput = z.infer<typeof CreateScheduleToolSchema>;
@@ -235,7 +227,7 @@ function upcomingRuns(input: { cron: string; timezone: string; from: Date; count
 }
 
 /** One instant in the schedule's own zone, in plain words, e.g. "Monday, October 19 at 8:00 AM". */
-function formatRunTime(input: { at: Date; timezone: string }): string {
+export function formatRunTime(input: { at: Date; timezone: string }): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: input.timezone,
     weekday: 'long',
@@ -363,21 +355,21 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: SET_REMINDER_TOOL_NAME,
         description:
-          "Set a reminder for the user: the words to show and when. It only reaches the user, never anyone else, and runs without asking. Use it for 'remind me', not for work the assistant should do. Never say it is set unless this succeeded. Times use the user's time zone.",
+          'Set a reminder for the user. It only reaches them and needs no approval. For work you should do, use create_schedule.',
         schema: SetReminderToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: input => this.#setReminder(input),
       }),
       defineTool({
         name: LIST_REMINDERS_TOOL_NAME,
-        description: "List the user's upcoming reminders: id, words, when, and whether it repeats.",
+        description: 'List upcoming reminders.',
         schema: ListSchedulesToolSchema,
         annotations: { readOnlyHint: true, openWorldHint: false },
         handler: () => this.#listReminders(),
       }),
       defineTool({
         name: CANCEL_REMINDER_TOOL_NAME,
-        description: 'Cancel one reminder by id or exact words. Runs without asking.',
+        description: 'Cancel a reminder.',
         schema: CancelReminderToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: input => this.#cancelReminder(input),
@@ -700,7 +692,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       return { ok: false, message: `Nothing was set. ${plainIssues(parsed.error)} Fix this and try again.` };
     }
     const input = parsed.data;
-    const timezone = input.time_zone ?? this.#options.timeZone;
+    const timezone = this.#options.timeZone;
     if (timezone === undefined || !TimezoneSchema.safeParse(timezone).success) {
       return {
         ok: false,
@@ -918,7 +910,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
 const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
 const SCHEDULE_INSTRUCTION =
-  'Repeating tasks can only be made with create_schedule. For "remind me" use set_reminder (once, or with repeat): it only reaches the user, never anyone else, and needs no approval. Never tell the user something is scheduled, set, or will run later unless create_schedule or set_reminder succeeded in this chat. If it did not, say so plainly.';
+  'Repeating tasks need create_schedule. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat. If not, say so plainly.';
 
 function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);
