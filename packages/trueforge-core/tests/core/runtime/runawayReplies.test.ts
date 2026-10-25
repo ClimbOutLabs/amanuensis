@@ -206,8 +206,14 @@ describe('repetition stop logging', () => {
       replyStream({ text: 'The visit is on Monday.', repetitionStopped: true }),
     );
     await drain(makeThread({ toolSet, create, logger }));
-    const stopLog = info.mock.calls.find(([message]) => message === 'Stopped a reply that was repeating itself');
-    expect(stopLog).toBeDefined();
-    expect(stopLog?.[1]).toMatchObject({ guard: 'answer_units', channel: 'answer' });
+    const calls: unknown[][] = info.mock.calls;
+    const stopCall = calls.find(call => call[0] === 'Stopped a reply that was repeating itself');
+    expect(stopCall).toBeDefined();
+    const meta = stopCall?.[1];
+    expect(isRecord(meta)).toBe(true);
+    if (isRecord(meta)) {
+      expect(meta['guard']).toBe('answer_units');
+      expect(meta['channel']).toBe('answer');
+    }
   });
 });

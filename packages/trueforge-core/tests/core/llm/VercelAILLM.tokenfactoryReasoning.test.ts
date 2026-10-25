@@ -208,8 +208,9 @@ describe('Token Factory repetition stops', () => {
     const result = await modelClient().createNonStream(request({ reasoning: false }));
     expect(result.repetition_stopped).toBe(true);
     expect(result.repetition_stop).toEqual({ guard: 'answer_units', channel: 'answer' });
-    expect(result.output.content).toContain('Stopped: the reply was repeating itself.');
-    expect(result.output.content?.match(/dentist appointment is booked/g)).toHaveLength(2);
+    const content = typeof result.output.content === 'string' ? result.output.content : '';
+    expect(content).toContain('Stopped: the reply was repeating itself.');
+    expect(content.match(/dentist appointment is booked/g)).toHaveLength(2);
   });
 
   it('stops reasoning that goes in circles and names the guard and channel on the error', async () => {
