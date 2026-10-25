@@ -15,8 +15,15 @@ import ts from 'typescript';
 
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// The exported constants that hold every Tour card, in the order they are read.
-const TOUR_CARD_EXPORTS = ['MORNING_BRIEF', 'GENERAL_DAY_PROMPTS', 'HELP_AREAS', 'CAPABILITY_PROMPTS'];
+// The exports that hold every Tour card, in the order they are read. A function holds its cards in its return list.
+const TOUR_CARD_EXPORTS = [
+  'MORNING_BRIEF',
+  'KEEP_PAGES_IN_SPACES',
+  'WATCHING_PROMPT',
+  'WAITING_PROMPT',
+  'HELP_AREAS',
+  'capabilityPrompts',
+];
 
 export class AmanGuideBuildError extends Error {
   constructor(message, options) {
@@ -39,6 +46,14 @@ function literalText(node, where) {
     return node.text;
   }
   throw new AmanGuideBuildError(`${where} must be a plain string.`);
+}
+
+/** A label is plain text, or a template that fills in the assistant's name; only its presence is checked. */
+function labelText(node, where) {
+  if (node !== undefined && ts.isTemplateExpression(node)) {
+    return node.getText();
+  }
+  return literalText(node, where);
 }
 
 function propertyMap(objectLiteral) {
@@ -65,10 +80,22 @@ function readTour(source, fileName) {
         }
       }
     }
+    const isExported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+    if (ts.isFunctionDeclaration(statement) && statement.name !== undefined && statement.body !== undefined) {
+      const returned = statement.body.statements.find(
+        item => ts.isReturnStatement(item) && item.expression !== undefined,
+      );
+      if (returned !== undefined && ts.isReturnStatement(returned) && returned.expression !== undefined) {
+        declarations.set(statement.name.text, returned.expression);
+        if (isExported) {
+          exported.add(statement.name.text);
+        }
+      }
+      continue;
+    }
     if (!ts.isVariableStatement(statement)) {
       continue;
     }
-    const isExported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
     for (const declaration of statement.declarationList.declarations) {
       if (declaration.initializer === undefined) {
         continue;
@@ -87,7 +114,7 @@ function readTour(source, fileName) {
   function addCard(node) {
     const props = propertyMap(node);
     const key = literalText(props.get('key'), 'A Tour card key');
-    const label = literalText(props.get('label'), `Tour card "${key}" label`);
+    const label = labelText(props.get('label'), `Tour card "${key}" label`);
     const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
     const existing = cards.get(key);
     if (existing !== undefined) {

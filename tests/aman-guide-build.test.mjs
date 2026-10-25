@@ -14,14 +14,18 @@ export type TourCapabilities = {
   sandbox: boolean;
 };
 export const MORNING_BRIEF: TourPrompt = { key: 'brief', label: 'Your morning brief', prompt: BRIEF_PROMPT };
+export const KEEP_PAGES_IN_SPACES: TourPrompt = { key: 'spaces', label: 'Keep pages in Spaces', prompt: 'Make a space.' };
+export const WATCHING_PROMPT: TourPrompt = { key: 'watching', label: 'Quietly watching', prompt: 'What changed?' };
+export const WAITING_PROMPT: TourPrompt = { key: 'waiting', label: 'Needs you', prompt: 'What is waiting?' };
 const ADD_NUMBERS: TourPrompt = { key: 'code', label: 'Run code', prompt: 'Add numbers.', needs: ['sandbox'] };
-export const GENERAL_DAY_PROMPTS: readonly TourPrompt[] = [];
 export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly TourPrompt[] }> = {
   focus: { label: 'Focus', cards: [ADD_NUMBERS] },
 };
-export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
-  { key: 'email', label: 'Handle your email', prompt: 'Read my mail.', needs: ['email'] },
-];
+export function capabilityPrompts(assistantName: string): readonly TourPrompt[] {
+  return [
+    { key: 'email', label: \`Get to know \${assistantName}\`, prompt: 'Read my mail.', needs: ['email'] },
+  ];
+}
 `;
 
 async function fixture({ tour = TOUR_FIXTURE, topics, requiredCards = [] }) {
@@ -77,10 +81,12 @@ test('the real repo build writes the pack and every required card has a page', a
 });
 
 test('reads Tour cards through the constants and help areas that hold them', async () => {
-  const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
+  const fx = await fixture({
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email' }) },
+  });
   try {
     const result = await buildAmanGuide(fx.options);
-    assert.deepEqual(result.tourKeys, ['brief', 'code', 'email']);
+    assert.deepEqual(result.tourKeys, ['brief', 'spaces', 'watching', 'waiting', 'code', 'email']);
     assert.deepEqual(result.uncoveredKeys, []);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
@@ -91,7 +97,7 @@ test('a Tour card with no guide page is a warning, not a failure', async () => {
   const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief' }) } });
   try {
     const result = await buildAmanGuide(fx.options);
-    assert.deepEqual(result.uncoveredKeys, ['code', 'email']);
+    assert.deepEqual(result.uncoveredKeys, ['spaces', 'watching', 'waiting', 'code', 'email']);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
   }
@@ -124,7 +130,7 @@ test('the build fails when the required list names a card that does not exist', 
 test('the build fails when a page names a card that does not exist', async () => {
   const fx = await fixture({
     topics: {
-      'a.md': topic({ id: 'a', covers: 'brief, code, email' }),
+      'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email' }),
       'b.md': topic({ id: 'b', covers: 'flying-cars' }),
     },
   });
@@ -137,7 +143,10 @@ test('the build fails when a page names a card that does not exist', async () =>
 
 test('the build fails when a Tour card needs a capability the type does not declare', async () => {
   const tour = TOUR_FIXTURE.replace("needs: ['sandbox']", "needs: ['teleport']");
-  const fx = await fixture({ tour, topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
+  const fx = await fixture({
+    tour,
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email' }) },
+  });
   try {
     await assert.rejects(buildAmanGuide(fx.options), /needs "teleport", which TourCapabilities does not declare/);
   } finally {
@@ -146,10 +155,13 @@ test('the build fails when a Tour card needs a capability the type does not decl
 });
 
 test('the build fails when a card constant is not exported from tourPrompts.ts', async () => {
-  const tour = TOUR_FIXTURE.replace('export const GENERAL_DAY_PROMPTS', 'const GENERAL_DAY_PROMPTS');
-  const fx = await fixture({ tour, topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) } });
+  const tour = TOUR_FIXTURE.replace('export const WATCHING_PROMPT', 'const WATCHING_PROMPT');
+  const fx = await fixture({
+    tour,
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email' }) },
+  });
   try {
-    await assert.rejects(buildAmanGuide(fx.options), /must export GENERAL_DAY_PROMPTS/);
+    await assert.rejects(buildAmanGuide(fx.options), /must export WATCHING_PROMPT/);
   } finally {
     await rm(fx.dir, { recursive: true, force: true });
   }
@@ -157,9 +169,14 @@ test('the build fails when a card constant is not exported from tourPrompts.ts',
 
 test('the build fails on a duplicate topic id or an empty body', async () => {
   const dupe = await fixture({
-    topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }), 'b.md': topic({ id: 'a' }) },
+    topics: {
+      'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email' }),
+      'b.md': topic({ id: 'a' }),
+    },
   });
-  const empty = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email', body: '' }) } });
+  const empty = await fixture({
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, spaces, watching, waiting, code, email', body: '' }) },
+  });
   try {
     await assert.rejects(buildAmanGuide(dupe.options), /Duplicate guide topic id "a"/);
     await assert.rejects(buildAmanGuide(empty.options), /has an empty body/);
