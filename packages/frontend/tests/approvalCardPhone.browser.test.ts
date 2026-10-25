@@ -53,7 +53,7 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
     const ticketChoices = ['Allow', 'Not now', 'Always allow this here'];
     const plainChoices = ['Allow', 'Not now', 'Always allow this here'];
     await ticket
-      .getByRole('button', { name: ticketChoices[0] })
+      .getByRole('button', { name: ticketChoices[0], exact: true })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
 
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
