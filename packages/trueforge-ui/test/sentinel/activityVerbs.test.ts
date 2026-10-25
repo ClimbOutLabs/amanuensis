@@ -57,6 +57,24 @@ describe('receiptRowsOf', () => {
     expect(rows.map(row => row.state)).toEqual(['approved', 'declined']);
   });
 
+  it('reads a feed line for an unnamed persona check and switch as a persona, never a specialist', () => {
+    const rows = receiptRowsOf([
+      entry({ id: '1', action_type: 'persona_read', outcome: 'ran', created_at: '2026-10-21T08:00:00.000Z' }),
+      entry({ id: '2', action_type: 'use_persona', outcome: 'ran', created_at: '2026-10-21T09:00:00.000Z' }),
+      entry({ id: '3', action_type: 'list_personas', outcome: 'ran', created_at: '2026-10-21T10:00:00.000Z' }),
+    ]);
+    expect(rows.map(row => row.verb)).toEqual(['Checked a persona', 'Switched persona']);
+    for (const row of rows) expect(row.verb).not.toMatch(/specialist/i);
+  });
+
+  it('keeps schedule lines about schedules, with no persona wording', () => {
+    const rows = receiptRowsOf([
+      entry({ id: '1', action_type: 'list_schedules', outcome: 'ran', created_at: '2026-10-21T08:00:00.000Z' }),
+      entry({ id: '2', action_type: 'create_schedule', outcome: 'ran', created_at: '2026-10-21T09:00:00.000Z' }),
+    ]);
+    expect(rows.map(row => row.verb)).toEqual(['Changed a schedule', 'Checked a schedule']);
+  });
+
   it('lists the newest row first', () => {
     const rows = receiptRowsOf([
       entry({ id: '1', action_type: 'exec', outcome: 'ran', created_at: '2026-10-21T08:00:00.000Z' }),

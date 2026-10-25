@@ -5,6 +5,7 @@ import { useRef, useState, type FC } from 'react';
 import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { StubTear } from '../atoms/Reward.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
@@ -163,6 +164,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   disabled = false,
   outboundOpen = false,
 }) => {
+  const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
   const [tearing, setTearing] = useState(false);
@@ -348,7 +350,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               <AlwaysAllowToolControl
                 size="small"
                 disabled={disabled || sentAt !== null}
-                description="The agent will run this kind of action on this connector without asking, in every chat."
+                description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
                 onConfirm={markSent(onApproveAlways)}
               />
             )}
