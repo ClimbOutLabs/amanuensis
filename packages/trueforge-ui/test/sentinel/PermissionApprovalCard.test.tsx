@@ -284,6 +284,16 @@ describe('PermissionApprovalCard always allow this tool', () => {
     expect(onApproveAlways).not.toHaveBeenCalled();
   });
 
+  it('says who will run this kind of action in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({}, { onApproveAlways: vi.fn() });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+
+    expect(
+      screen.getByText('Aman will run this kind of action on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
   it('calls nothing when the owner cancels the confirm step', () => {
     const onApproveAlways = vi.fn();
     const { onApprove } = renderCard({}, { onApproveAlways });

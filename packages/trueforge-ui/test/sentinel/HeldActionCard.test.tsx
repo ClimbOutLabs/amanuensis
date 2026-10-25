@@ -91,6 +91,16 @@ describe('HeldActionCard', () => {
     expect(onAlwaysAllow).not.toHaveBeenCalled();
   });
 
+  it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(
+      screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
     const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
     fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
