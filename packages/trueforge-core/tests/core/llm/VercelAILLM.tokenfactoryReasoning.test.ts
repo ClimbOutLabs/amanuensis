@@ -117,7 +117,9 @@ function mockContentStreamEndingWith(pieces: string[], finishReason: 'length' | 
   jest
     .spyOn(globalThis, 'fetch')
     .mockImplementation(() =>
-      Promise.resolve(new Response(`${body}data: [DONE]\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } })),
+      Promise.resolve(
+        new Response(`${body}data: [DONE]\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+      ),
     );
 }
 
@@ -126,9 +128,7 @@ function mockFrames(frames: string[]): void {
   jest
     .spyOn(globalThis, 'fetch')
     .mockImplementation(() =>
-      Promise.resolve(
-        new Response(frames.join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } }),
-      ),
+      Promise.resolve(new Response(frames.join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } })),
     );
 }
 
@@ -148,7 +148,12 @@ function toolCallFrame(): string {
   return sseFrame(
     {
       tool_calls: [
-        { index: 0, id: 'call-1', type: 'function', function: { name: 'get_event', arguments: '{"event_id":"evt-1"}' } },
+        {
+          index: 0,
+          id: 'call-1',
+          type: 'function',
+          function: { name: 'get_event', arguments: '{"event_id":"evt-1"}' },
+        },
       ],
     },
     null,
@@ -158,21 +163,19 @@ function toolCallFrame(): string {
 describe('Token Factory replies cut off at the output limit', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it.each([
-    ['<tool_call>'],
-    ['<tool_call'],
-    ['<tool_calls>'],
-    ['<invoke name="get_event">'],
-  ])('shows no markup when the limit cuts the reply at %s', async opener => {
-    mockContentStreamEndingWith(['Working on it.\n', opener], 'length');
-    const result = await modelClient().createNonStream(request({ reasoning: false }));
-    expect(result.finish_reason).toBe('length');
-    expect(result.output.content).toBe('Working on it.\n');
-    expect(result.output.tool_calls).toBeUndefined();
-    for (const marker of RAW_MARKERS) {
-      expect(result.output.content ?? '').not.toContain(marker);
-    }
-  });
+  it.each([['<tool_call>'], ['<tool_call'], ['<tool_calls>'], ['<invoke name="get_event">']])(
+    'shows no markup when the limit cuts the reply at %s',
+    async opener => {
+      mockContentStreamEndingWith(['Working on it.\n', opener], 'length');
+      const result = await modelClient().createNonStream(request({ reasoning: false }));
+      expect(result.finish_reason).toBe('length');
+      expect(result.output.content).toBe('Working on it.\n');
+      expect(result.output.tool_calls).toBeUndefined();
+      for (const marker of RAW_MARKERS) {
+        expect(result.output.content ?? '').not.toContain(marker);
+      }
+    },
+  );
 
   it('keeps a parsed tool call and drops the stray closing tag glued to the answer', async () => {
     mockFrames([

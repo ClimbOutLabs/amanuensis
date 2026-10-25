@@ -239,9 +239,9 @@ import {
   REPEATED_ACTION_RESULT,
   stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
-  type UnbackedClaimKind,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
+  type UnbackedClaimKind,
 } from './replyActionChecks';
 import {
   clearUnfinished,

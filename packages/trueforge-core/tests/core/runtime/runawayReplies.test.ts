@@ -15,7 +15,6 @@ import type {
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
-import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { isRecord } from '../../../src/core/util/records';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
@@ -53,13 +52,15 @@ function makeToolSet(failCreates: boolean) {
       ...(params.name === 'get_event' ? { read_only_hint: true } : {}),
     }),
   );
-  jest.mocked(toolSet.callTool).mockImplementation((params: CallToolRequest['params']) =>
-    Promise.resolve(
-      params.name === 'create_event' && failCreates
-        ? toolResultResponse({ text: 'The calendar is unavailable.', isError: true })
-        : toolResultResponse({ text: '{"ok":true}' }),
-    ),
-  );
+  jest
+    .mocked(toolSet.callTool)
+    .mockImplementation((params: CallToolRequest['params']) =>
+      Promise.resolve(
+        params.name === 'create_event' && failCreates
+          ? toolResultResponse({ text: 'The calendar is unavailable.', isError: true })
+          : toolResultResponse({ text: '{"ok":true}' }),
+      ),
+    );
   return toolSet;
 }
 
@@ -131,7 +132,7 @@ function makeThread(input: { toolSet: IToolSet; create: ILLM['create']; logger?:
       instruction: 'test',
       toolSets: [input.toolSet],
     },
-    context: [{ role: 'user', content: 'Please add the appointment.' }] as ContextMessage[],
+    context: [{ role: 'user', content: 'Please add the appointment.' }],
   });
 }
 
