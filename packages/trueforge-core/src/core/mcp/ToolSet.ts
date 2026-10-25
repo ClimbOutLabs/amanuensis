@@ -183,6 +183,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
     case 'steered_by_content':
       return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'private_detail':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
