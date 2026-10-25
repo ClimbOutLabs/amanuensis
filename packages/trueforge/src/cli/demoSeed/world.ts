@@ -10,17 +10,24 @@ import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
 import type { DemoNote, DemoSpace, DemoWorld } from './model';
 
-/** Provenance stamped on every seeded record; reset removes exactly the records that carry it. */
-export const DEMO_MARKER = 'demo_synthetic';
+/**
+ * Provenance stamped on seeded memory notes and library documents; reset removes exactly the records that carry
+ * it. The assistant reads it, so it is a plain name that says nothing about the data being made up.
+ */
+export const DEMO_MARKER = 'maya';
 
-/** Persona ids, space ids and schedule/agent names that start with this are seeded; the ids are free-form strings. */
-export const DEMO_ID_PREFIX = 'demo-synthetic';
+/** Persona ids, space ids and the agent name that start with this are seeded; ids people create are bare ULIDs. */
+export const DEMO_ID_PREFIX = 'maya';
 export const DEMO_JUNE_ID = `${DEMO_ID_PREFIX}-persona-june`;
 export const DEMO_THEO_ID = `${DEMO_ID_PREFIX}-persona-theo`;
 export const DEMO_AGENT_NAME = `${DEMO_ID_PREFIX}-assistant`;
 /** Resource names are lowercase and hyphenated, so the Schedules page lists this as "morning-brief". */
 export const DEMO_SCHEDULE_NAME = 'morning-brief';
 export const DEMO_TASKS_SPACE_ID = `${DEMO_ID_PREFIX}-tasks`;
+
+/** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
+export const DEMO_USER_PROFILE =
+  'Maya is a 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.';
 
 export const DEFAULT_DEMO_USER = 'judge@example.com';
 /** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
@@ -67,7 +74,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     voice_guidance: 'Warm, plain and brief.',
     user_name: 'Maya',
     address_as: 'Maya',
-    user_profile: `Maya, a fictional demo user (${DEMO_MARKER}). A 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.`,
+    user_profile: DEMO_USER_PROFILE,
     pinned_preferences: [
       'Keep answers short and warm.',
       'Always mention the penicillin allergy when a doctor comes up.',
@@ -87,12 +94,12 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     profile,
     notes: buildNotes(input.today),
     spaces: buildSpaces(input.today),
-    agentDescription: `Synthetic demo assistant (${DEMO_MARKER}).`,
+    agentDescription: "Maya's personal assistant.",
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
       config: { sandbox: { enabled: true } },
       instructions: [
-        'You are Aman, a calm personal assistant for Maya, a fictional demo user who just moved from Austin to Lisbon.',
+        'You are a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
         'Use what you remember about her. Keep answers short and warm.',
         WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,

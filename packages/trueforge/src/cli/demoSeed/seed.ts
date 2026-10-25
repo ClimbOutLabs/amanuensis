@@ -16,14 +16,18 @@ import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
-import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME } from './world';
+import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME, DEMO_USER_PROFILE } from './world';
 
 const MEMORY_TIMEOUT_MS = 10_000;
 /** Indexing a library embeds every passage on the CPU; a first run may also load the search model. */
 const KNOWLEDGE_SETTLE_TIMEOUT_MS = 180_000;
 const SHARED_VAULT = 'default';
 const PAGE_SIZE = 100;
-const NOTE_MARKER_LINE = new RegExp(`^> ${DEMO_MARKER}:([a-z0-9-]+)$`);
+/** What earlier seeds stamped; their records are cleared or rewritten on the next seed or reset. */
+const EARLIER_MARKER = 'demo_synthetic';
+const EARLIER_ID_PREFIX = 'demo-synthetic';
+const EARLIER_AGENT_NAME = `${EARLIER_ID_PREFIX}-assistant`;
+const NOTE_MARKER_LINE = new RegExp(`^> (${DEMO_MARKER}|${EARLIER_MARKER}):([a-z0-9-]+)$`);
 
 export interface DemoSeedStores<TTransaction> {
   withTransaction: WithTransaction<TTransaction>;
@@ -58,6 +62,8 @@ export interface SeedReport {
   memory: { created: number; updated: number; unchanged: number; removed: number };
 }
 
+type EarlierReport = Pick<ResetReport, 'personas' | 'agent' | 'schedule' | 'sessions' | 'spaces'>;
+
 export interface ResetReport {
   personas: number;
   profile: number;
@@ -80,12 +86,22 @@ function isDemoId(id: string): boolean {
   return id.startsWith(`${DEMO_ID_PREFIX}-`);
 }
 
-/** A seeded memory entry as stored: `## <time>`, a blank line, the note, a blank line, `> demo_synthetic:<key>`. */
+function isEarlierId(id: string): boolean {
+  return id.startsWith(`${EARLIER_ID_PREFIX}-`);
+}
+
+function isSeededProfile(userProfile: string | null): boolean {
+  return userProfile === DEMO_USER_PROFILE || (userProfile ?? '').includes(EARLIER_MARKER);
+}
+
+/** A seeded memory entry as stored: `## <time>`, a blank line, the note, a blank line, `> <marker>:<key>`. */
 interface StoredNote {
   entryId: string;
   key: string;
   header: string;
   body: string;
+  /** False when an earlier seed's marker is on it, so the next seed rewrites it. */
+  current: boolean;
 }
 
 function noteText({ header, note }: { header: string; note: DemoNote }): string {
@@ -95,12 +111,12 @@ function noteText({ header, note }: { header: string; note: DemoNote }): string 
 function parseStoredNote({ entryId, text }: { entryId: string; text: string }): StoredNote | undefined {
   const lines = text.trimEnd().split('\n');
   const marker = lines.pop()?.match(NOTE_MARKER_LINE);
-  const key = marker?.[1];
+  const key = marker?.[2];
   if (key === undefined) {
     return undefined;
   }
   const [header = '', ...rest] = lines;
-  return { entryId, key, header, body: rest.join('\n').trim() };
+  return { entryId, key, header, body: rest.join('\n').trim(), current: marker?.[1] === DEMO_MARKER };
 }
 
 async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
@@ -148,7 +164,7 @@ async function seedMemory({
         throw new Error(`Could not write memory note "${note.key}": ${retained.reason ?? 'unknown error'}`);
       }
       report.created += 1;
-    } else if (existing.body === note.body) {
+    } else if (existing.current && existing.body === note.body) {
       report.unchanged += 1;
     } else {
       const updated = await memory.updateEntry({
@@ -288,7 +304,7 @@ async function seedProfile<TTransaction>({
 }): Promise<SeedOutcome> {
   const key = { tenant_id: scope.tenantId, created_by: scope.userId };
   const existing = await stores.personalizationStore.getProfile(key);
-  if (existing !== undefined && !(existing.user_profile ?? '').includes(DEMO_MARKER)) {
+  if (existing !== undefined && !isSeededProfile(existing.user_profile)) {
     // The user already wrote their own profile; the seed never overwrites a real one.
     return 'kept_existing';
   }
@@ -382,28 +398,47 @@ async function findSchedule<TTransaction>({
   return data.find(schedule => schedule.name === DEMO_SCHEDULE_NAME);
 }
 
-/** Schedules and chats an earlier version of the seed wrote under names or markers this one no longer uses. */
+/**
+ * What earlier versions of the seed wrote under names or markers this one no longer uses: their agent and its
+ * schedules, personas with their libraries, spaces and chats. Runs before seeding, so the new personas do not
+ * clash with the old ones by name.
+ */
 async function removeEarlierSeeds<TTransaction>({
   stores,
   scope,
 }: {
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
-}): Promise<{ schedules: number; sessions: number }> {
-  const removed = { schedules: 0, sessions: 0 };
+}): Promise<EarlierReport> {
+  const removed: EarlierReport = { personas: 0, agent: 0, schedule: 0, sessions: 0, spaces: 0 };
+  const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
   const { data: schedules } = await stores.scheduleStore.listSchedules({
     tenant_id: scope.tenantId,
     limit: PAGE_SIZE,
     page_token: undefined,
-    agent_names: [DEMO_AGENT_NAME],
+    agent_names: [EARLIER_AGENT_NAME],
     created_by_or_agent_ids: undefined,
   });
-  for (const schedule of schedules) {
-    if (isDemoId(schedule.name) && schedule.created_by_subject.subject_id === scope.userId) {
-      await stores.scheduleStore.deleteSchedule({ tenant_id: scope.tenantId, id: schedule.id });
-      removed.schedules += 1;
-    }
+  for (const schedule of schedules.filter(candidate => candidate.created_by_subject.subject_id === scope.userId)) {
+    await stores.scheduleStore.deleteSchedule({ tenant_id: scope.tenantId, id: schedule.id });
+    removed.schedule += 1;
   }
+  removed.agent += await removeAgentWhenUnused({ stores, scope, agentName: EARLIER_AGENT_NAME });
+
+  for (const persona of (await stores.personaStore.listPersonas(owner)).filter(candidate =>
+    isEarlierId(candidate.id),
+  )) {
+    await stores.personaStore.deletePersona({ ...owner, id: persona.id });
+    await stores.knowledge.deleteLibrary({ personaId: persona.id });
+    removed.personas += 1;
+  }
+
+  const spaces = await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: SPACE_LIST_LIMIT });
+  for (const space of spaces.filter(candidate => isEarlierId(candidate.id))) {
+    await stores.spaceStore.deleteSpace({ ...owner, space_id: space.id, expected_revision: space.revision });
+    removed.spaces += 1;
+  }
+
   // Deleting a chat leaves its audit rows in place.
   for (;;) {
     const { data: sessions } = await stores.sessionStore.listSessions({
@@ -415,7 +450,7 @@ async function removeEarlierSeeds<TTransaction>({
       end_timestamp: undefined,
       agent_id: undefined,
       created_by_or_agent_ids: { created_by_subject_id: scope.userId, agent_ids: [] },
-      metadata: { [DEMO_MARKER]: 'true' },
+      metadata: { [EARLIER_MARKER]: 'true' },
       source_type: undefined,
       source_id: undefined,
       folder_id: undefined,
@@ -429,6 +464,34 @@ async function removeEarlierSeeds<TTransaction>({
       removed.sessions += 1;
     }
   }
+}
+
+/** The agent is shared by name, so it goes only once no schedule is left on it. */
+async function removeAgentWhenUnused<TTransaction>({
+  stores,
+  scope,
+  agentName,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+  agentName: string;
+}): Promise<number> {
+  const agent = await stores.agentStore.getAgent({ tenant_id: scope.tenantId, name: agentName });
+  if (agent === undefined) {
+    return 0;
+  }
+  const { data: remaining } = await stores.scheduleStore.listSchedules({
+    tenant_id: scope.tenantId,
+    limit: 1,
+    page_token: undefined,
+    agent_names: [agentName],
+    created_by_or_agent_ids: undefined,
+  });
+  if (remaining.length > 0) {
+    return 0;
+  }
+  await stores.agentStore.deleteAgent({ tenant_id: scope.tenantId, id: agent.id });
+  return 1;
 }
 
 async function seedSchedule<TTransaction>({
@@ -545,7 +608,7 @@ function isSameSpaceContent({
   );
 }
 
-/** Writes (or refreshes) one synthetic world. Safe to run again: unchanged records are left alone. */
+/** Writes (or refreshes) one demo world. Safe to run again: unchanged records are left alone. */
 export async function seedDemoWorld<TTransaction>({
   stores,
   scope,
@@ -557,11 +620,11 @@ export async function seedDemoWorld<TTransaction>({
   world: DemoWorld;
   now: Date;
 }): Promise<SeedReport> {
+  await removeEarlierSeeds({ stores, scope });
   const memory = await seedMemory({ memory: stores.memory, notes: world.notes, now });
   const { personas, knowledge } = await seedPersonas({ stores, scope, world });
   const profile = await seedProfile({ stores, scope, world });
   const agent = await seedAgent({ stores, scope, world });
-  await removeEarlierSeeds({ stores, scope });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
   const spaces = await seedSpaces({ stores, scope, world });
   return {
@@ -575,7 +638,7 @@ export async function seedDemoWorld<TTransaction>({
   };
 }
 
-/** Removes only what carries the synthetic marker; everything the user made themselves stays. */
+/** Removes only what the seed wrote; everything the user made themselves stays. */
 export async function resetDemoWorld<TTransaction>({
   stores,
   scope,
@@ -583,20 +646,8 @@ export async function resetDemoWorld<TTransaction>({
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
 }): Promise<ResetReport> {
-  const report: ResetReport = {
-    personas: 0,
-    profile: 0,
-    agent: 0,
-    schedule: 0,
-    sessions: 0,
-    spaces: 0,
-    memory: 0,
-  };
+  const report: ResetReport = { ...(await removeEarlierSeeds({ stores, scope })), profile: 0, memory: 0 };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
-
-  const earlier = await removeEarlierSeeds({ stores, scope });
-  report.schedule += earlier.schedules;
-  report.sessions += earlier.sessions;
 
   const schedule = await findSchedule({ stores, scope });
   if (schedule?.created_by_subject.subject_id === scope.userId) {
@@ -604,21 +655,7 @@ export async function resetDemoWorld<TTransaction>({
     report.schedule += 1;
   }
 
-  // The agent is shared by name, so it goes only once no schedule is left on it.
-  const agent = await stores.agentStore.getAgent({ tenant_id: scope.tenantId, name: DEMO_AGENT_NAME });
-  if (agent !== undefined) {
-    const { data: remaining } = await stores.scheduleStore.listSchedules({
-      tenant_id: scope.tenantId,
-      limit: 1,
-      page_token: undefined,
-      agent_names: [DEMO_AGENT_NAME],
-      created_by_or_agent_ids: undefined,
-    });
-    if (remaining.length === 0) {
-      await stores.agentStore.deleteAgent({ tenant_id: scope.tenantId, id: agent.id });
-      report.agent += 1;
-    }
-  }
+  report.agent += await removeAgentWhenUnused({ stores, scope, agentName: DEMO_AGENT_NAME });
 
   for (const persona of (await stores.personaStore.listPersonas(owner)).filter(candidate => isDemoId(candidate.id))) {
     await stores.personaStore.deletePersona({ ...owner, id: persona.id });
@@ -628,7 +665,7 @@ export async function resetDemoWorld<TTransaction>({
 
   const profileKey = owner;
   const profile = await stores.personalizationStore.getProfile(profileKey);
-  if (profile !== undefined && (profile.user_profile ?? '').includes(DEMO_MARKER)) {
+  if (profile !== undefined && isSeededProfile(profile.user_profile)) {
     await stores.personalizationStore.deleteProfile(profileKey);
     report.profile += 1;
   }
