@@ -80,8 +80,10 @@ export type AmanTourProps = {
   setupTicket: ReactNode;
   /** Puts the first-run lines away for good. Omitted when the host cannot remember that. */
   onSkip?: () => void;
-  /** Puts the prompt in the composer so the person can change it before sending. */
-  onFill: (prompt: string) => void;
+  /** Sends the text as the first message of a turn. */
+  onSend: (text: string) => void;
+  /** Puts the text in the composer instead, when no model is set and nothing can run. */
+  onFill: (text: string) => void;
   /** False until the host reports a model; a chat cannot run without one. */
   canSend: boolean;
 };
@@ -98,6 +100,7 @@ export function AmanTour({
   firstRun,
   setupTicket,
   onSkip,
+  onSend,
   onFill,
   canSend,
 }: AmanTourProps) {
@@ -165,7 +168,7 @@ export function AmanTour({
                 <button
                   type="button"
                   className={cn(CARD_CLASS, 'h-full w-full')}
-                  onClick={() => onFill(composerTextFor(card))}
+                  onClick={() => (canSend ? onSend : onFill)(composerTextFor(card))}
                 >
                   <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
                     <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">

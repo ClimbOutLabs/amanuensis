@@ -17,6 +17,7 @@ function renderTour(overrides: Partial<AmanTourProps> = {}) {
     now: morning,
     firstRun: false,
     setupTicket: <p>Setup ticket</p>,
+    onSend: vi.fn(),
     onFill: vi.fn(),
     canSend: true,
     ...overrides,
@@ -92,7 +93,7 @@ describe('AmanTour home', () => {
     expect(family).toHaveClass('bg-gold-soft');
     expect(cardTitles()).toEqual([CARDS.care.title, CARDS.meds.title, CARDS.chores.title, CARDS.hard_talk.title]);
     expect(screen.getByText('Mannie helps you find the words')).toBeInTheDocument();
-    expect(props.onFill).not.toHaveBeenCalled();
+    expect(props.onSend).not.toHaveBeenCalled();
 
     // Pressing the chosen pill again goes back to the default set.
     fireEvent.click(family);
@@ -136,29 +137,30 @@ describe('AmanTour home', () => {
     }
   });
 
-  it('fills the composer, without sending, with the card prompt and the shared rules under it', () => {
+  it('sends the card prompt with the shared rules under it, and fills nothing', () => {
     const { props } = renderTour();
 
     expect(screen.getByRole('heading', { name: 'Some things Mannie can do' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
-    expect(props.onFill).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onSend).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onFill).not.toHaveBeenCalled();
   });
 
-  it('fills only the morning brief prompt, with no rules, from the brief card', () => {
+  it('sends only the morning brief prompt, with no rules, from the brief card', () => {
     const { props } = renderTour({ capabilities: connected });
 
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
-    expect(props.onFill).toHaveBeenCalledTimes(1);
-    expect(props.onFill).toHaveBeenLastCalledWith(MORNING_BRIEF_PROMPT);
+    expect(props.onSend).toHaveBeenCalledTimes(1);
+    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_PROMPT);
   });
 
-  it('puts the same card under two pills, filled the same way', () => {
+  it('puts the same card under two pills, sent the same way', () => {
     const { props } = renderTour();
     const filled: string[] = [];
     for (const topic of ['behind', 'help_me_think'] as const) {
       fireEvent.click(screen.getByRole('button', { name: HOME_TOPICS[topic].label }));
       fireEvent.click(screen.getByRole('button', { name: /Everything's in my head/ }));
-      filled.push(String(vi.mocked(props.onFill).mock.lastCall?.[0]));
+      filled.push(String(vi.mocked(props.onSend).mock.lastCall?.[0]));
     }
     expect(filled[0]).toBe(filled[1]);
   });
@@ -176,6 +178,14 @@ describe('AmanTour home', () => {
     expect(screen.queryByText(/What would help you most\? Pick one/)).not.toBeInTheDocument();
     expect(screen.queryByText('Setup ticket')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
+  });
+
+  it('only fills the composer from a card when no model is set, so nothing is sent', () => {
+    const { props } = renderTour({ canSend: false });
+
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(props.onFill).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onSend).not.toHaveBeenCalled();
   });
 
   it('says what to do when no model is set, and the pills still switch the cards', () => {

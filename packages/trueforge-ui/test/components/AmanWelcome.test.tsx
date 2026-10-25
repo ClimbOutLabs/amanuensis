@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
 import { AmanWelcome } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
+import { CARDS, SHARED_RULES } from '@/components/tourPrompts.js';
 
 const { composer, server } = vi.hoisted(() => {
   const server: { grantedFeatures: string[]; hasCatalog: boolean } = { grantedFeatures: [], hasCatalog: true };
@@ -92,16 +93,33 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(screen.queryByRole('button', { name: "I'm behind" })).not.toBeInTheDocument();
   });
 
-  it('chooses a pill without sending, and the morning brief card puts only the brief in the composer for the person to send', async () => {
+  it('chooses a pill without sending, then a card tap starts a turn with the prompt and the shared rules', async () => {
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Help me think' }));
+    expect(composer.send).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    const text = `${CARDS.start.prompt}\n\n${SHARED_RULES}`;
+    expect(composer.setText).toHaveBeenCalledWith(text);
+    expect(composer.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends only the morning brief prompt from the brief card', async () => {
     server.grantedFeatures = ['gmail_read', 'calendar_read'];
     renderWelcome({ setup: firstRun });
 
-    fireEvent.click(await screen.findByRole('button', { name: "I'm behind" }));
-    expect(composer.send).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: "I'm behind" }));
-
     fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
+    expect(composer.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('with no model only fills the composer from a card and shows the model line', async () => {
+    renderWelcome({ setup: { ...firstRun, modelName: null } });
+
+    expect(await screen.findByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(composer.setText).toHaveBeenCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
     expect(composer.send).not.toHaveBeenCalled();
   });
 
