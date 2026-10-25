@@ -83,7 +83,7 @@ upgrade_health_gate() {
       die "Instance $name worked before but has a problem now, so the upgrade did not start: $flat See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
     fi
     if [ "$rc" != 0 ] || [ -z "$out" ]; then
-      die "Instance $name could not be checked, so the upgrade did not start. See it with: aman doctor. Or upgrade anyway with: aman upgrade --force"
+      die "Instance $name could not be checked, so the upgrade did not start. Run the check itself to see why: aman doctor. Or upgrade anyway with: aman upgrade --force"
     fi
   done
 }

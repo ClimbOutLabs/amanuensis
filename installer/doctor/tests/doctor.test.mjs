@@ -1526,6 +1526,23 @@ describe('https on the network', () => {
     assert.equal(tlsCheck(), undefined);
   });
 
+  it('pays no attention to the https settings an instance kept after it was closed back to this computer', () => {
+    make();
+    world.tls('main', { origins: '', healthz: 0 });
+    const result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(find(result.doc.machine, 'tls'), undefined);
+  });
+
+  it('does not renew the certificate of an instance closed back to this computer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { origins: '', endsInSeconds: 59 * 86400 });
+    world.shim(['doctor', '--json']);
+    assert.ok(!world.calls().includes(`install.sh --home ${world.home} tls`));
+  });
+
   it('is ok while the certificate lasts, lists every address, and answers over https', () => {
     make();
     world.tls('main');

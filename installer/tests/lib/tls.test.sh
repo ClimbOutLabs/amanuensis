@@ -491,6 +491,45 @@ test_an_authority_from_before_it_had_limits_is_replaced_once() {
   sandbox_drop
 }
 
+test_https_settings_left_in_the_record_count_for_nothing() {
+  t_begin "https settings left in the record of an instance closed back to this computer count for nothing: its certificate is not renewed and no front end is rendered"
+  sandbox_new
+  lan
+  install_machine
+  # The record the owner's machine was left with: closed back to this computer, but the https settings stayed.
+  sed -i 's/^origins=.*/origins=/' "$AMAN_HOME/state/instances/main.conf"
+  assert_eq "$(reg_value main tls)" local "the record still says https"
+  assert_eq "$(reg_value main tls_port)" 8443 "the record still holds the https port"
+  rm -f "$AMAN_HOME/tls/leaf/main/leaf.crt" "$AMAN_HOME/tls/leaf/main/leaf.key"
+  : >"$STUB_LOG"
+  run_install tls
+  assert_rc 0
+  assert_flat_contains "$OUT" "The https certificates are up to date"
+  assert_no_path "$AMAN_HOME/tls/leaf/main/leaf.crt"
+  assert_log_lacks "restart tls"
+  run_install instance refresh main
+  assert_rc 0
+  assert_not_contains "$(compose)" "caddy" "no front end is rendered for it"
+  sandbox_drop
+}
+
+test_a_service_dropped_from_the_compose_file_is_removed_on_the_next_apply() {
+  t_begin "when the compose file drops a service, the next whole-project start removes its container as an orphan"
+  sandbox_new
+  lan
+  install_machine
+  assert_contains "$(compose)" "caddy" "the front end is in the file while the instance is open"
+  sed -i 's/^origins=.*/origins=/' "$AMAN_HOME/state/instances/main.conf"
+  : >"$STUB_LOG"
+  run_install instance refresh main
+  assert_rc 0
+  assert_not_contains "$(compose)" "caddy" "closed back to this computer, the file drops the front end"
+  local up_line
+  up_line=$(grep 'aman-main.* up -d' "$STUB_LOG" | tail -n 1)
+  assert_contains "$up_line" "--remove-orphans"
+  sandbox_drop
+}
+
 test_a_default_install_is_served_over_https
 test_the_front_end_configuration
 test_the_front_end_is_locked_down
@@ -515,4 +554,6 @@ test_renewal_issues_what_is_due
 test_the_daily_backup_renews
 test_a_failed_certificate_is_said_with_the_one_fix
 test_the_front_end_is_a_listed_download
+test_https_settings_left_in_the_record_count_for_nothing
+test_a_service_dropped_from_the_compose_file_is_removed_on_the_next_apply
 tests_finish

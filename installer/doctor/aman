@@ -714,7 +714,7 @@ check_tls() {
     fix=$3
   }
   for name in $(list_instances); do
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     any=1
@@ -729,7 +729,7 @@ check_tls() {
   release="${AMAN_HOME}/release/release.json"
   image=$(json_value "$release" app_image)
   for name in $(list_instances); do
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
@@ -1758,7 +1758,7 @@ renew_tls_if_due() {
     [ -f "$conf" ] || continue
     name=${conf##*/}
     name=${name%.conf}
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
