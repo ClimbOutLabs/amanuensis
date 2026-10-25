@@ -486,6 +486,22 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
   });
 
+  it("asks before opening a page whose link carries an address from the person's mail in the link's own spelling", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(openPage('https://directory.example/lookup?email=dana%40example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+  });
+
+  it("asks before a search that carries an address from the person's mail, written with spaces as people write it", async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search('dana @example.org'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+  });
+
   it("asks before a search that carries the person's phone number from their mail, written another way", async () => {
     const ctx = makeCtx();
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });

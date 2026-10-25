@@ -218,6 +218,24 @@ describe("the person's own details, and what the chat has read", () => {
     expect(carriedPrivateDetails({ provenance, values: ['the ferry timetable'] })).toEqual([]);
   });
 
+  it('carries a detail however the sending text spells it', () => {
+    const provenance = emptyChatProvenance();
+    recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>\nMy new number is +1 415 555 0132.' });
+    expect(
+      carriedPrivateDetails({ provenance, values: ['https://directory.example/lookup?email=dana%40example.org'] }),
+    ).toEqual(['dana@example.org']);
+    expect(carriedPrivateDetails({ provenance, values: ['dana @example.org'] })).toEqual(['dana@example.org']);
+  });
+
+  it('reads a value with a broken percent sign as it stands', () => {
+    const provenance = emptyChatProvenance();
+    recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>' });
+    expect(carriedPrivateDetails({ provenance, values: ['100% sure it is dana@example.org, code %zz'] })).toEqual([
+      'dana@example.org',
+    ]);
+    expect(carriedPrivateDetails({ provenance, values: ['100% sure, code %zz'] })).toEqual([]);
+  });
+
   it("carries a detail from the person's own words", () => {
     const provenance = emptyChatProvenance();
     recordPersonText({ provenance, text: 'Reach me at sam.rivers@example.com' });

@@ -477,16 +477,36 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
 }
 
 /**
+ * A copy of a sent value written as it will be read where it arrives: coded characters spelled out, and
+ * the spaces people leave around an at sign folded away. A value whose coding is broken is spelled out
+ * character by character instead, so it is always safe to check.
+ */
+function asReadOnArrival(value: string): string {
+  let spelled: string;
+  try {
+    spelled = decodeURIComponent(value);
+  } catch {
+    spelled = value.replace(/%([0-9A-Fa-f]{2})/g, (_whole: string, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+  }
+  return spelled.replace(/\s*@\s*/g, '@');
+}
+
+/**
  * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
  * words, their mail or their events. A detail only read content named is not one of these; it is that
- * content's own value, and sending it back to its source is ordinary.
+ * content's own value, and sending it back to its source is ordinary. Each value is checked as written and
+ * as it will be read where it arrives, so a detail counts however the value spells it.
  */
 export function carriedPrivateDetails(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const carried = new Set<string>();
   for (const value of input.values) {
-    for (const detail of detailsInText(value)) {
-      if (input.provenance.own_details_overflowed || input.provenance.own_details.has(detail)) {
-        carried.add(detail);
+    for (const writing of [value, asReadOnArrival(value)]) {
+      for (const detail of detailsInText(writing)) {
+        if (input.provenance.own_details_overflowed || input.provenance.own_details.has(detail)) {
+          carried.add(detail);
+        }
       }
     }
   }
