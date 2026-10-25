@@ -16,6 +16,7 @@ import {
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { SPACE_PICTURE_DATA_MAX_CHARS } from '../../../src/runtime/spaceLinks';
+import { isRecord } from '../../fixtures/jsonGuards';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -54,10 +55,6 @@ function textOf(response: CallToolResponse): string {
 }
 
 /** Guards for tool-result JSON, so the tests never lean on an assertion escape. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function parsedObject(text: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(text);
   if (!isRecord(parsed)) {

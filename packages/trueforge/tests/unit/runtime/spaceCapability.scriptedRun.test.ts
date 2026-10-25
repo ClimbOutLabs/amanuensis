@@ -11,9 +11,11 @@ import {
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
+  UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { isRecord } from '../../fixtures/jsonGuards';
 
 /**
  * The owner's Oct 21 request, run as a scripted model: the calls a well-behaved model makes,
@@ -83,10 +85,6 @@ function isErrorResponse(response: CallToolResponse): boolean {
 }
 
 /** Guards for tool-result JSON, so the test never leans on an assertion escape. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function parsedObject(text: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(text);
   if (!isRecord(parsed)) {
@@ -172,7 +170,7 @@ function makeStore(): SpaceToolStore {
 }
 
 describe('scripted run: top ten dog breeds', () => {
-  it('creates a skeleton, keeps the name and link from the create result, fills each block first try, and reads it back by name', async () => {
+  it('creates a skeleton, fills each block first try, reads it back, then replaces it with a full table first try', async () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: AUTHORITY,
@@ -239,11 +237,51 @@ describe('scripted run: top ten dog breeds', () => {
     });
     expect(stringField(read, 'body')).not.toContain('(to fill)');
 
-    // Step 5: the final reply is plain prose with no markup in it.
+    // Step 5: read the space, then replace it wholesale with a full table, first try:
+    // no refusal, no retry. A full-body update_space call carries the whole new body
+    // as one string, with name, purpose, and status required.
+    const tableBody = [
+      '# Dog breeds',
+      '',
+      'Top ten by working and obedience intelligence.',
+      '',
+      '| Rank | Breed |',
+      '| --- | --- |',
+      ...BREEDS.map((breed, index) => `| ${String(index + 1)} | ${breed} |`),
+    ].join('\n');
+    const replacedResponse = await call(UPDATE_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      name: 'Dog breeds',
+      purpose: 'Top ten dog breeds by intelligence, with other traits.',
+      status: 'active',
+      format: 'markdown',
+      body: tableBody,
+    });
+    expect(isErrorResponse(replacedResponse)).toBe(false);
+    const replacedText = textOf(replacedResponse);
+    const replaced = parsedObject(replacedText);
+    expect(stringField(replaced, 'summary')).toBe('Updated space "Dog breeds" (revision 12).');
+    expect(replacedText).not.toContain('"id"');
+    expect(replacedText).not.toContain('(id:');
+
+    // Step 6: read it back again: the table is the whole body now.
+    const reread = fieldObject(
+      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
+      'space',
+    );
+    expect(numberField(reread, 'revision')).toBe(BREEDS.length + 2);
+    expect(stringField(reread, 'body')).toBe(tableBody);
+    BREEDS.forEach((breed, index) => {
+      expect(stringField(reread, 'body')).toContain(`| ${String(index + 1)} | ${breed} |`);
+    });
+    expect(stringField(reread, 'body')).not.toContain('(to fill)');
+    expect(stringField(reread, 'body')).not.toContain('<!-- @block:');
+
+    // Step 7: the final reply is plain prose with no markup in it.
     const finalReply = `I made "Dog breeds" with the top ten by intelligence. The Border Collie ranks first.`;
     for (const marker of RAW_MARKERS) {
       expect(finalReply).not.toContain(marker);
-      expect(stringField(read, 'body')).not.toContain(marker);
+      expect(stringField(reread, 'body')).not.toContain(marker);
     }
   });
 });

@@ -16,6 +16,7 @@ import {
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { SpaceAggregateRevisionConflictError, SpaceRevisionConflictError } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { isRecord } from '../../fixtures/jsonGuards';
 
 /**
  * The simplified contract: body is one string everywhere, partial changes go through
@@ -60,10 +61,6 @@ function isErrorResponse(response: CallToolResponse): boolean {
 }
 
 /** Guards for tool-result JSON, so the tests never lean on an assertion escape. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function parsedObject(text: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(text);
   if (!isRecord(parsed)) {
