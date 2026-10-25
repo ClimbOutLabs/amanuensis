@@ -44,10 +44,19 @@ async function send(page: Page, text: string): Promise<void> {
   await composer(page).press('Enter');
 }
 
+/** Allows the card a turn is waiting on; without it the turn never reaches its reply. */
+async function allowFirstUse(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Allow it' }).first().click({ timeout: RENDER_TIMEOUT_MS });
+}
+
 /** With agent details off, no turn on the page shows its steps or tool cards. */
 async function checkFolded(page: Page, label: string): Promise<void> {
   const internals = await page.getByTestId('assistant-message-agent-internals').count();
-  const main = await page.locator('main').innerText();
+  // The person's own messages name the tool ("run:inert_echo"); only other text can be a tool card.
+  const main = (await page.locator('main').innerText())
+    .split('\n')
+    .filter(line => !line.startsWith('run:'))
+    .join('\n');
   assert.equal(internals, 0, `${label}: an agent internals row is shown while details are off`);
   assert.ok(!main.includes('inert_echo'), `${label}: a finished turn's tool card shows while details are off`);
   assert.ok(!main.includes('inert_write'), `${label}: the running turn's tool card shows while details are off`);
@@ -84,10 +93,13 @@ test(
       await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await composer(page).waitFor({ timeout: RENDER_TIMEOUT_MS });
 
-      // Turns 1 and 2: one tool call each, then a plain answer. They finish.
+      // Turns 1 and 2: one tool call each, then a plain answer. Even a read-only tool from a new
+      // connector waits for a first allow, so each turn is allowed before it can finish.
       await send(page, 'run:inert_echo please');
+      await allowFirstUse(page);
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       await send(page, 'run:inert_echo again please');
+      await allowFirstUse(page);
       await page.locator('main').getByText(FINAL_TEXT).nth(1).waitFor({ timeout: RENDER_TIMEOUT_MS });
 
       const toggle = page.getByRole('button', { name: 'Show agent details' });
@@ -109,6 +121,10 @@ test(
         .waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.waitForTimeout(5_000);
       await checkFolded(page, 'after reload mid-turn');
+
+      // End the long turn so nothing keeps running once the test is over.
+      const cancelled = await api.request(`/api/v1/sessions/${String(sessionId)}/cancel`, jsonInit({}));
+      assert.equal(cancelled.status, 200, await cancelled.text());
     } finally {
       await browser?.close();
       await vite.close();
