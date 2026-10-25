@@ -262,6 +262,11 @@ const SANDBOX_SECTIONS: Record<string, string[]> = {
 };
 
 describe('system prompt sections follow the tools a chat has', () => {
+  it.each(PERSONAL_INSTANCE_NAMES)('sends %s no email-password row when no Email connector is set up', async name => {
+    const report = await measurePersonalInstance({ name, turn: 'core-only' });
+    expect(report.sections.map(row => row.name)).not.toContain('agent-capabilities/email-passwords');
+  });
+
   it('sends the sandbox-off line, and no sandbox tools, when the sandbox is off for the chat', async () => {
     const on = await measurePersonalInstance({ name: 'personal', turn: 'core-only' });
     const off = await measurePersonalInstance({ name: 'personal-no-sandbox', turn: 'core-only' });

@@ -48,7 +48,15 @@ describe('source discovery contract at the model request boundary', () => {
     expect(systemMessage?.content).not.toContain('Add-ons');
     expect(systemMessage?.content).not.toContain('turn on the Sandbox switch');
     expect(systemMessage?.content).not.toContain('Work on a repo');
-    expect(systemMessage?.content).not.toContain('Settings');
+    // The contract itself must not steer the person to Settings; other host sections may name
+    // Settings for their own rules (the email password section does, on purpose), so this one
+    // assertion is scoped to the contract's own section.
+    const promptText = String(systemMessage?.content ?? '');
+    const contractSection = promptText.slice(
+      promptText.indexOf('<source-discovery>'),
+      promptText.indexOf('</source-discovery>'),
+    );
+    expect(contractSection).not.toContain('Settings');
     expect(systemMessage?.content).toContain('URLs');
     expect(systemMessage?.content).not.toContain('already identified source');
     // Without a sandbox the contract names no sandbox at all, guessed URLs included.

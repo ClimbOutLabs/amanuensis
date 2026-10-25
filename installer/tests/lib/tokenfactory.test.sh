@@ -319,6 +319,7 @@ test_a_key_on_a_rerun_replaces_the_old_one() {
   assert_eq "$(env_value main TOKEN_FACTORY_DAILY_TOKEN_CAP)" 5000
   assert_eq "$(env_value main MY_OWN_SETTING)" kept "a line below the managed block"
   assert_eq "$(grep -c '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" 1
+  # The mail account lives in the connector's volume, so no account file is expected here; any .env. name is a leftover.
   assert_not_contains "$(dir_names "$AMAN_HOME/instances/main")" ".env." "no temporary file is left"
   assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 app"
   assert_contains "$(grep 'force-recreate' "$STUB_LOG")" "aman-main"
