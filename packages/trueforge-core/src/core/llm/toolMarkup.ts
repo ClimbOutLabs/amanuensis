@@ -23,7 +23,8 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
  * and chat-template tokens use a fullwidth bar (U+FF5C) inside the brackets; that character is data
  * the detector matches, never text Aman writes itself. A closing tag is a candidate too: it is a
  * stray marker and is hidden when nothing but blanks follows it on its line, and prose when words
- * follow it there, wherever on the line it sits.
+ * follow it there, wherever on the line it sits. A run of closing tags with only blanks between
+ * them is judged as one, by what follows the last of them.
  */
 const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_calls',
@@ -295,30 +296,50 @@ function judgeOwnShape(text: string, startsLine: boolean, endOfStream: boolean):
 }
 
 /**
- * Judges a closing tag that starts a candidate. Nothing but blanks after it on its line makes
- * it a stray marker, hidden together with those blanks; words after it on the line make it
- * prose named in a sentence, released as text, wherever on the line the tag sits. While the
- * rest of the line has not arrived the tag waits, since either outcome is still possible;
- * the end of the stream settles it with whatever line it got.
+ * Judges a closing tag that starts a candidate. A run of closing tags on the line, with only
+ * blanks between them, is judged together: they arrive as the tail of one call written as
+ * text, so what follows the last of them decides, not what follows the first. Nothing but
+ * blanks after the run on its line makes it stray markers, hidden together with those blanks;
+ * words after the run on the line make it prose named in a sentence, released as text,
+ * wherever on the line the run sits. While the rest of the line has not arrived the run waits,
+ * since either outcome is still possible; the end of the stream settles it with whatever line
+ * it got.
  */
 function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean): CandidateVerdict {
   const tag = STRAY_CLOSING_TAGS.find(candidate => text.startsWith(candidate));
   if (tag === undefined) {
     return { verdict: 'undecided' };
   }
-  const rest = text.slice(tag.length);
+  // The end of the run: a closing tag the line adds after blanks alone joins the run.
+  let runEnd = tag.length;
+  for (;;) {
+    let at = runEnd;
+    while (at < text.length && (text.charAt(at) === ' ' || text.charAt(at) === '\t' || text.charAt(at) === '\r')) {
+      at++;
+    }
+    const next = STRAY_CLOSING_TAGS.find(candidate => text.startsWith(candidate, at));
+    if (next === undefined) {
+      break;
+    }
+    runEnd = at + next.length;
+  }
+  const rest = text.slice(runEnd);
   const newlineAt = rest.indexOf('\n');
   const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
   if (/[^ \t\r]/.test(lineRest)) {
+    // One more tag of the run may still be arriving: while it can, the run waits.
+    if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(lineRest))) {
+      return { verdict: 'undecided' };
+    }
     return { verdict: 'dead', deadLength: tag.length };
   }
   if (newlineAt === -1 && !endOfStream) {
     return { verdict: 'undecided' };
   }
-  // The line break goes with the tag when the tag was the whole line. When words came before
+  // The line break goes with the run when the run was the whole line. When words came before
   // it on the line the break stays, so the line after it keeps its own line.
   const throughLineBreak = startsLine && newlineAt !== -1 ? 1 : 0;
-  return { verdict: 'stray', length: tag.length + lineRest.length + throughLineBreak };
+  return { verdict: 'stray', length: runEnd + lineRest.length + throughLineBreak };
 }
 
 /**
