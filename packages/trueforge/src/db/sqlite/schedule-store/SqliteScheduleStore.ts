@@ -8,7 +8,7 @@ import {
   paginateOffsetRows,
 } from '@truefoundry/trueforge-core/agent-session/store/OffsetPageToken';
 import { sql, type ExpressionBuilder, type Kysely, type Transaction } from 'kysely';
-import { nextTriggerAfter } from '../../../runtime/cron';
+import { firstRunAfter } from '../../../runtime/cron';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../../schemas/schedule';
 import { newId } from '../../../utils/id';
 import {
@@ -255,11 +255,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
     if (schedule.status !== 'active') {
       return undefined;
     }
-    const nextTrigger = nextTriggerAfter({
-      cron: schedule.manifest.cron,
-      timezone: schedule.manifest.timezone,
-      from,
-    });
+    const nextTrigger = firstRunAfter({ manifest: schedule.manifest, from });
     return this.createRun(
       {
         tenant_id: schedule.tenant_id,

@@ -36,10 +36,14 @@ import {
   USE_PERSONA_TOOL_NAME,
 } from '../personas/toolContract';
 import {
+  CANCEL_REMINDER_TOOL_NAME,
+  isReminderToolName,
   isScheduleStatusToolName,
   isScheduleWriteToolName,
+  LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
   SCHEDULE_SERVER_ID,
+  SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import {
@@ -225,6 +229,14 @@ export interface SentinelAction {
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
   persona_write?: Tier3Persona | undefined;
+  /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
+  reminder?: ReminderLine | undefined;
+}
+
+/** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
+export interface ReminderLine {
+  when: string | null;
+  what: string | null;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -2591,6 +2603,9 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
  * listing, pausing and resuming run without asking. Any other name fails closed.
  */
 async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (isReminderToolName(action.tool_name)) {
+    return classifyReminderTool(action);
+  }
   if (isScheduleWriteToolName(action.tool_name)) {
     if (action.schedule_write === undefined) {
       return autoDenyDecision({
@@ -2621,6 +2636,37 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
 }
 
 /**
+ * A reminder is the person's own note on their own machine and only ever reaches them, so setting, listing and
+ * cancelling one runs without asking. The activity line is the only trace.
+ */
+function classifyReminderTool(action: SentinelAction): TierDecision {
+  const what = displayLineText(action.reminder?.what ?? null);
+  const when = displayLineText(action.reminder?.when ?? null);
+  switch (action.tool_name) {
+    case SET_REMINDER_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_write',
+        reason_detail: when !== null && what !== null ? `Set a reminder for ${when}: ${what}` : 'Set a reminder.',
+        sensitive_read: false,
+      });
+    case CANCEL_REMINDER_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_write',
+        reason_detail: what === null ? 'Cancelled a reminder.' : `Cancelled a reminder: ${what}`,
+        sensitive_read: false,
+      });
+    case LIST_REMINDERS_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_read',
+        reason_detail: 'Looked at your reminders.',
+        sensitive_read: false,
+      });
+    default:
+      return failClosedDecision({ reason_detail: 'Unknown reminder tool.' });
+  }
+}
+
+/**
  * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
  * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
  * that revert_space can restore. Any other name fails closed.
@@ -2636,15 +2682,15 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
 
-/** Most characters of a space's name the line in the chat shows. */
-const SPACE_NAME_MAX_CHARS = 80;
+/** Most characters of a name or note the line in the chat shows. */
+const LINE_TEXT_MAX_CHARS = 80;
 
 /**
- * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, made safe
- * to show, then capped the way the Gmail card caps a subject. Null when the call carries no name, or
- * the name is only whitespace, so the line falls back to naming no space.
+ * A name or note as an activity line shows it: whitespace runs folded to one space, ends trimmed, made safe
+ * to show, then capped the way the Gmail card caps a subject. Null when there is none, or it is only
+ * whitespace, so the line falls back to naming nothing.
  */
-function spaceDisplayName(name: string | null): string | null {
+function displayLineText(name: string | null): string | null {
   if (name === null) {
     return null;
   }
@@ -2653,7 +2699,7 @@ function spaceDisplayName(name: string | null): string | null {
     return null;
   }
   const chars = Array.from(escapeDisplayText(oneLine));
-  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : chars.join('');
+  return chars.length > LINE_TEXT_MAX_CHARS ? `${chars.slice(0, LINE_TEXT_MAX_CHARS - 1).join('')}…` : chars.join('');
 }
 
 /**
@@ -2665,7 +2711,7 @@ function spaceToolLine(action: SentinelAction): string | null {
   if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
     return null;
   }
-  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
+  const name = displayLineText(stringParam(action.canonical_params, 'name'));
   switch (action.tool_name) {
     case LIST_SPACES_TOOL_NAME:
       return 'Looked at your spaces.';

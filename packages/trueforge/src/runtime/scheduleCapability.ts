@@ -4,6 +4,7 @@ import type {
   AgentCapability,
   AgentTracing,
   InstructionBuilder,
+  ReminderLine,
   SentinelHostContext,
   Tier3Schedule,
 } from '@truefoundry/trueforge-core/core';
@@ -20,14 +21,19 @@ import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/Tool
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import {
+  CANCEL_REMINDER_TOOL_NAME,
   CREATE_SCHEDULE_TOOL_NAME,
   DELETE_SCHEDULE_TOOL_NAME,
+  isReminderToolName,
   isScheduleWriteToolName,
+  LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
   PAUSE_SCHEDULE_TOOL_NAME,
   RESUME_SCHEDULE_TOOL_NAME,
   SCHEDULE_SERVER_ID,
+  SET_REMINDER_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/schedules/toolContract';
+import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentRecord } from '../db/agentStore';
@@ -36,14 +42,16 @@ import type { WithTransaction } from '../db/transaction';
 import { NameSchema } from '../schemas/common';
 import {
   InvalidCronError,
+  RunAtSchema,
   ScheduleManifestSchema,
   ScheduleTaskSchema,
   TimezoneSchema,
+  type ScheduleKind,
   type ScheduleManifest,
   type ScheduleStatus,
 } from '../schemas/schedule';
 import { ChatAssistantUnavailableError, type ChatAssistant } from './chatAssistant';
-import { nextTriggerAfter, validateManifest } from './cron';
+import { firstRunAfter, nextTriggerAfter, validateManifest } from './cron';
 
 /** Cron day-of-week order: index 0 is Sunday. */
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
@@ -73,8 +81,31 @@ export const ScheduleRefToolSchema = z
 
 const ListSchedulesToolSchema = z.object({}).strict();
 
+export const SetReminderToolSchema = z
+  .object({
+    what: z
+      .string()
+      .trim()
+      .min(1)
+      .max(300)
+      .describe('The words to show the user when it is due, like "Take the medicine".'),
+    at: RunAtSchema.describe(
+      'When it is due, ISO 8601 with the UTC offset in the user time zone. For a repeat, its time of day sets the repeat time.',
+    ),
+    repeat: z.enum(['daily', 'weekdays', 'weekly']).optional().describe('Leave out for a one-time reminder.'),
+    days: z.array(WeekdaySchema).optional().describe('Days for a weekly repeat.'),
+    time_zone: TimezoneSchema.optional(),
+  })
+  .strict();
+
+export const CancelReminderToolSchema = z
+  .object({ reminder: z.string().trim().min(1).describe('Reminder id from list_reminders, or its exact words.') })
+  .strict();
+
 export type CreateScheduleToolInput = z.infer<typeof CreateScheduleToolSchema>;
 type ScheduleRefToolInput = z.infer<typeof ScheduleRefToolSchema>;
+export type SetReminderToolInput = z.infer<typeof SetReminderToolSchema>;
+type CancelReminderToolInput = z.infer<typeof CancelReminderToolSchema>;
 
 /** Keys the host adds to an approved call: what the card was settled on, so a later change ends the approval. */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
@@ -174,6 +205,14 @@ export function describeScheduleTiming(cron: string): string {
     return `Every ${joinedWithAnd(names)} at ${at}`;
   }
   return custom;
+}
+
+/** When a schedule runs, in plain words: one time for a one-time schedule, else its repeating timing. */
+export function describeManifestTiming(manifest: Pick<ScheduleManifest, 'cron' | 'run_at' | 'timezone'>): string {
+  if (manifest.run_at !== null) {
+    return `Once, on ${formatRunTime({ at: new Date(manifest.run_at), timezone: manifest.timezone })}`;
+  }
+  return manifest.cron === null ? 'At no set time' : describeScheduleTiming(manifest.cron);
 }
 
 /** How many upcoming runs the create card lists. */
@@ -287,7 +326,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task; it runs as the assistant here. It cannot make a one-time reminder: say so instead of making a repeating one. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
+          "The only way to make a recurring task; it runs as the assistant here. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -321,6 +360,28 @@ export class ScheduleToolSet extends LocalToolMCP {
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
         handler: (input, approval) => this.#delete({ input, approval }),
       }),
+      defineTool({
+        name: SET_REMINDER_TOOL_NAME,
+        description:
+          "Set a reminder for the user: the words to show and when. It only reaches the user, never anyone else, and runs without asking. Use it for 'remind me', not for work the assistant should do. Never say it is set unless this succeeded. Times use the user's time zone.",
+        schema: SetReminderToolSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        handler: input => this.#setReminder(input),
+      }),
+      defineTool({
+        name: LIST_REMINDERS_TOOL_NAME,
+        description: "List the user's upcoming reminders: id, words, when, and whether it repeats.",
+        schema: ListSchedulesToolSchema,
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        handler: () => this.#listReminders(),
+      }),
+      defineTool({
+        name: CANCEL_REMINDER_TOOL_NAME,
+        description: 'Cancel one reminder by id or exact words. Runs without asking.',
+        schema: CancelReminderToolSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        handler: input => this.#cancelReminder(input),
+      }),
     ];
   }
 
@@ -352,6 +413,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       // the turn's "tool not allowed here" stop.
       return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
+    const reminder = isReminderToolName(call.name) ? await this.#reminderLine(call) : undefined;
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -367,6 +429,7 @@ export class ScheduleToolSet extends LocalToolMCP {
           open_world_hint: info.open_world_hint,
         },
         ...(prepared === undefined ? {} : { schedule_write: prepared.value.review }),
+        ...(reminder === undefined ? {} : { reminder }),
       },
     });
     return {
@@ -430,7 +493,14 @@ export class ScheduleToolSet extends LocalToolMCP {
         message: 'Nothing was saved because the time zone is not known. Ask the user which time zone they are in.',
       };
     }
-    const manifest = ScheduleManifestSchema.parse({ task, cron: timing.cron, timezone, status: 'active' });
+    const manifest = ScheduleManifestSchema.parse({
+      task,
+      cron: timing.cron,
+      run_at: null,
+      timezone,
+      status: 'active',
+      kind: 'task',
+    });
     const now = this.#options.now();
     try {
       validateManifest(manifest, now);
@@ -481,7 +551,7 @@ export class ScheduleToolSet extends LocalToolMCP {
         review: {
           action: 'delete',
           name: plainScheduleName(schedule.name),
-          when: describeScheduleTiming(schedule.manifest.cron),
+          when: describeManifestTiming(schedule.manifest),
           time_zone: schedule.manifest.timezone,
           task: schedule.manifest.task,
           runs_as: await this.#options.runsAs(schedule),
@@ -492,8 +562,8 @@ export class ScheduleToolSet extends LocalToolMCP {
     };
   }
 
-  /** The owner's own schedules, newest first, up to the lookup limit. */
-  async #ownSchedules(): Promise<ScheduleRecord[]> {
+  /** The owner's own schedules or reminders, newest first, up to the lookup limit. */
+  async #ownSchedules(kind: ScheduleKind): Promise<ScheduleRecord[]> {
     const schedules: ScheduleRecord[] = [];
     let pageToken: string | undefined;
     do {
@@ -504,7 +574,7 @@ export class ScheduleToolSet extends LocalToolMCP {
         agent_names: undefined,
         created_by_or_agent_ids: { created_by_subject_id: this.#options.owner.subject_id, agent_ids: [] },
       });
-      schedules.push(...page.data);
+      schedules.push(...page.data.filter(schedule => schedule.manifest.kind === kind));
       pageToken = page.pagination.next_page_token;
     } while (pageToken !== undefined && schedules.length < SCHEDULE_LOOKUP_LIMIT);
     return schedules;
@@ -512,7 +582,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
   /** One of the owner's schedules by id, else by name. Names can repeat, so a shared name asks for the id. */
   async #find(ref: ScheduleRefToolInput): Promise<Prepared<ScheduleRecord>> {
-    const schedules = await this.#ownSchedules();
+    const schedules = await this.#ownSchedules('task');
     const byId = schedules.find(schedule => schedule.id === ref.schedule);
     if (byId !== undefined) {
       return { ok: true, value: byId };
@@ -553,7 +623,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     return {
       id: schedule.id,
       name: schedule.name,
-      when: describeScheduleTiming(schedule.manifest.cron),
+      when: describeManifestTiming(schedule.manifest),
       time_zone: schedule.manifest.timezone,
       status: schedule.status,
       next_run: await this.#nextRun(schedule),
@@ -563,7 +633,7 @@ export class ScheduleToolSet extends LocalToolMCP {
   }
 
   async #list() {
-    const schedules = await this.#ownSchedules();
+    const schedules = await this.#ownSchedules('task');
     return jsonResult({ schedules: await Promise.all(schedules.map(schedule => this.#summary(schedule))) });
   }
 
@@ -575,28 +645,35 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (!prepared.ok) {
       return errorResult(prepared.message);
     }
-    const { manifest } = prepared.value;
+    const saved = await this.#save({ name: input.input.name, manifest: prepared.value.manifest });
+    if (!saved.ok) {
+      return errorResult(saved.message);
+    }
+    return jsonResult({ created: await this.#summary(saved.value) });
+  }
+
+  /** Saves a schedule that runs as this chat's assistant, with its first run queued. */
+  async #save(input: { name: string; manifest: ScheduleManifest }): Promise<Prepared<ScheduleRecord>> {
     const { chatAssistant } = this.#options;
     let agent: AgentRecord;
     try {
       agent = await chatAssistant.agent();
     } catch (error) {
       if (error instanceof ChatAssistantUnavailableError) {
-        return errorResult(error.message);
+        return { ok: false, message: error.message };
       }
       throw error;
     }
-    let schedule: ScheduleRecord;
     try {
-      schedule = await this.#options.withTransaction(async transaction => {
+      const schedule = await this.#options.withTransaction(async transaction => {
         const result = await this.#options.store.createScheduleAndRun(
           {
             tenant_id: this.#options.tenant_id,
             agent_id: agent.id,
             agent_name: agent.name,
-            name: input.input.name,
+            name: input.name,
             persona_id: chatAssistant.persona_id,
-            manifest,
+            manifest: input.manifest,
             created_by_subject: this.#options.owner,
             runFrom: this.#options.now(),
           },
@@ -604,15 +681,158 @@ export class ScheduleToolSet extends LocalToolMCP {
         );
         return result.schedule;
       });
+      return { ok: true, value: schedule };
     } catch (error) {
       if (error instanceof ScheduleNameConflictError) {
-        return errorResult(
-          `Nothing was saved because the user already has a schedule named "${input.input.name}". Try again with another name.`,
-        );
+        return {
+          ok: false,
+          message: `Nothing was saved because the user already has a schedule named "${input.name}". Try again with another name.`,
+        };
       }
       throw error;
     }
-    return jsonResult({ created: await this.#summary(schedule) });
+  }
+
+  /** A reminder's words, due time and repeat, checked against the clock; the same check runs for the activity line and the save. */
+  #prepareReminder(args: Record<string, unknown>): Prepared<{ manifest: ScheduleManifest; line: ReminderLine }> {
+    const parsed = SetReminderToolSchema.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, message: `Nothing was set. ${plainIssues(parsed.error)} Fix this and try again.` };
+    }
+    const input = parsed.data;
+    const timezone = input.time_zone ?? this.#options.timeZone;
+    if (timezone === undefined || !TimezoneSchema.safeParse(timezone).success) {
+      return {
+        ok: false,
+        message: 'Nothing was set because the time zone is not known. Ask the user which time zone they are in.',
+      };
+    }
+    const now = this.#options.now();
+    const due = new Date(input.at);
+    let cron: string | null = null;
+    if (input.repeat !== undefined) {
+      // The wall-clock time written in `at` is the time of day the repeat keeps.
+      const timing = cronFromRecurrence({
+        repeat: input.repeat,
+        days: input.days,
+        time: /T(\d{2}:\d{2})/.exec(input.at)?.[1],
+      });
+      if (!timing.ok) {
+        return {
+          ok: false,
+          message: `Nothing was set because the repeat is not clear. Ask the user: ${timing.question}`,
+        };
+      }
+      cron = timing.cron;
+    } else if (due.getTime() <= now.getTime()) {
+      return {
+        ok: false,
+        message: 'Nothing was set because that time has already passed. Ask the user for a later time.',
+      };
+    }
+    const manifest = ScheduleManifestSchema.parse({
+      task: input.what,
+      cron,
+      run_at: cron === null ? input.at : null,
+      timezone,
+      status: 'active',
+      kind: 'reminder',
+    });
+    try {
+      validateManifest(manifest, now);
+    } catch (error) {
+      if (error instanceof InvalidCronError) {
+        return { ok: false, message: 'Nothing was set because that timing cannot run. Ask the user for another time.' };
+      }
+      throw error;
+    }
+    const first = firstRunAfter({ manifest, from: now });
+    return { ok: true, value: { manifest, line: { when: formatRunTime({ at: first, timezone }), what: input.what } } };
+  }
+
+  /** What the activity line says about a reminder call: read from the call itself, never from the model's claim of success. */
+  async #reminderLine(params: CallToolRequest['params']): Promise<ReminderLine | undefined> {
+    const args = params.arguments ?? {};
+    if (params.name === SET_REMINDER_TOOL_NAME) {
+      const prepared = this.#prepareReminder(args);
+      return prepared.ok ? prepared.value.line : undefined;
+    }
+    if (params.name === CANCEL_REMINDER_TOOL_NAME) {
+      const parsed = CancelReminderToolSchema.safeParse(args);
+      const found = parsed.success ? await this.#findReminder(parsed.data) : undefined;
+      return found?.ok === true ? { when: null, what: found.value.manifest.task } : undefined;
+    }
+    return undefined;
+  }
+
+  async #setReminder(input: SetReminderToolInput) {
+    const prepared = this.#prepareReminder(input);
+    if (!prepared.ok) {
+      return errorResult(prepared.message);
+    }
+    const saved = await this.#save({ name: `reminder-${randomUUID().slice(0, 8)}`, manifest: prepared.value.manifest });
+    if (!saved.ok) {
+      return errorResult(saved.message);
+    }
+    await this.#audit({
+      tool_name: SET_REMINDER_TOOL_NAME,
+      description: `Set a reminder for ${prepared.value.line.when ?? ''}: ${input.what}`,
+    });
+    return jsonResult({ set: await this.#reminderSummary(saved.value) });
+  }
+
+  async #reminderSummary(schedule: ScheduleRecord) {
+    return {
+      id: schedule.id,
+      what: schedule.manifest.task,
+      when: describeManifestTiming(schedule.manifest),
+      time_zone: schedule.manifest.timezone,
+      repeats: schedule.manifest.cron !== null,
+      next: await this.#nextRun(schedule),
+    };
+  }
+
+  async #listReminders() {
+    const reminders = (await this.#ownSchedules('reminder')).filter(reminder => reminder.status === 'active');
+    return jsonResult({ reminders: await Promise.all(reminders.map(reminder => this.#reminderSummary(reminder))) });
+  }
+
+  /** One of the owner's active reminders by id, else by its exact words. */
+  async #findReminder(ref: CancelReminderToolInput): Promise<Prepared<ScheduleRecord>> {
+    const reminders = (await this.#ownSchedules('reminder')).filter(reminder => reminder.status === 'active');
+    const byId = reminders.find(reminder => reminder.id === ref.reminder);
+    if (byId !== undefined) {
+      return { ok: true, value: byId };
+    }
+    const wanted = ref.reminder.toLowerCase();
+    const named = reminders.filter(reminder => reminder.manifest.task.toLowerCase() === wanted);
+    if (named.length === 1 && named[0] !== undefined) {
+      return { ok: true, value: named[0] };
+    }
+    if (named.length > 1) {
+      return {
+        ok: false,
+        message: `More than one reminder says "${ref.reminder}". Try again with its id from list_reminders.`,
+      };
+    }
+    return {
+      ok: false,
+      message: `There is no upcoming reminder like "${ref.reminder}". Call list_reminders to see the user's reminders.`,
+    };
+  }
+
+  async #cancelReminder(input: CancelReminderToolInput) {
+    const found = await this.#findReminder(input);
+    if (!found.ok) {
+      return errorResult(found.message);
+    }
+    const reminder = found.value;
+    await this.#options.store.deleteSchedule({ tenant_id: this.#options.tenant_id, id: reminder.id });
+    await this.#audit({
+      tool_name: CANCEL_REMINDER_TOOL_NAME,
+      description: `Cancelled a reminder: ${reminder.manifest.task}`,
+    });
+    return jsonResult({ cancelled: { id: reminder.id, what: reminder.manifest.task } });
   }
 
   async #setStatus(input: { input: ScheduleRefToolInput; status: ScheduleStatus }) {
@@ -621,6 +841,20 @@ export class ScheduleToolSet extends LocalToolMCP {
       return errorResult(found.message);
     }
     const existing = found.value;
+    if (existing.status === 'done') {
+      return errorResult(
+        `Nothing was changed because the schedule "${existing.name}" has already run and will not run again. Make a new one if the user wants it again.`,
+      );
+    }
+    if (
+      input.status === 'active' &&
+      existing.manifest.run_at !== null &&
+      new Date(existing.manifest.run_at).getTime() <= this.#options.now().getTime()
+    ) {
+      return errorResult(
+        `Nothing was changed because the time for "${existing.name}" has passed. Make a new one for a later time.`,
+      );
+    }
     const verb = input.status === 'paused' ? 'Paused' : 'Resumed';
     if (existing.status !== input.status) {
       const updated = await this.#options.withTransaction(transaction =>
@@ -684,7 +918,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
 const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
 const SCHEDULE_INSTRUCTION =
-  'Schedules can only be made with create_schedule, and only repeating ones: a one-time reminder or check-in later cannot be set. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
+  'Repeating tasks can only be made with create_schedule. For "remind me" use set_reminder (once, or with repeat): it only reaches the user, never anyone else, and needs no approval. Never tell the user something is scheduled, set, or will run later unless create_schedule or set_reminder succeeded in this chat. If it did not, say so plainly.';
 
 function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);
