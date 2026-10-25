@@ -1574,6 +1574,20 @@
   font-family: var(--font-serif);
 }
 
+/* The new-chat home is one 40rem column: greeting, composer, pills, label and cards share both edges. */
+[data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+  max-width: 40rem;
+  padding-inline: 0;
+  gap: 1.25rem;
+}
+
+@media (max-width: 42rem) {
+  [data-slot='aui_thread-viewport'] > div:has(> .aman-home-greeting) {
+    max-width: 100%;
+    padding-inline: 1rem;
+  }
+}
+
 .aui-name-underline {
   position: absolute;
   left: 0;
