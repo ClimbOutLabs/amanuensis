@@ -825,6 +825,7 @@ container_words() { # instance service
     app) printf 'the %s app' "$1" ;;
     dex) printf 'the %s sign-in service' "$1" ;;
     loopback) printf 'the %s network link' "$1" ;;
+    tls) printf 'the %s secure connection' "$1" ;;
     *) printf 'the %s %s' "$1" "$2" ;;
   esac
 }

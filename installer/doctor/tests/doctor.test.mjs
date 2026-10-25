@@ -850,6 +850,26 @@ describe('instance service health', () => {
     assert.ok(!world.calls().some(call => call.startsWith('exec')));
   });
 
+  it('names the https part in plain words when it is down', () => {
+    make();
+    containers([
+      app(),
+      dex(),
+      world.psLine({
+        id: 'c3',
+        name: 'aman-main-tls-1',
+        state: 'exited',
+        status: 'Exited (1) 3 minutes ago',
+        service: 'tls',
+      }),
+    ]);
+    const result = world.json();
+    assert.match(
+      find(result.doc.instances.main, 'containers').detail,
+      /The main secure connection is not running\./,
+    );
+  });
+
   it('ignores a one-shot container that exited cleanly', () => {
     make();
     containers([
