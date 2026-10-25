@@ -1,11 +1,11 @@
 /**
- * The one check on links a space body adds: a picture or a link must come from the person or a search
- * result in this chat, be https when it is a picture, and never name a placeholder domain. A space
- * page loads its pictures from the host itself, so a made up or mail-borne link would send the
- * person's browser to that host. Links already in the body before a write are left alone, so an
- * unrelated edit never trips over an older picture.
+ * The one check on links a space body adds. A new picture or link must pass the same check a web lookup
+ * of that URL passes before it runs without asking: the outbound secret guard, and no read content chose
+ * its link. It must also be https when it is a picture and never name a placeholder domain. A space page
+ * loads its pictures from the host itself, so a link the person never chose would send their browser there.
+ * Links already in the body before a write are left alone, so an unrelated edit never trips over an older picture.
  */
-import { isTrustedLink, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { checkLookup, collectOutboundStrings, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
 import type { SpaceFormatSchema } from '../schemas/space';
 import { bodyLinks, type BodyLink } from './spaceBodyLinks';
@@ -22,6 +22,9 @@ export class SpaceLinkRefusedError extends Error {
     this.name = 'SpaceLinkRefusedError';
   }
 }
+
+const LOOKUP_RULE_MESSAGE =
+  'This link was changed from what the page or message showed, or it would carry private details. Use the link exactly as it appeared, or search for it first.';
 
 const UNSTABLE_MARKUP_MESSAGE =
   'This page has markup that cannot be checked for links safely. Simplify the markup, then try again.';
@@ -42,7 +45,10 @@ export function isPlaceholder(host: string): boolean {
  * with the URL parser the browser uses, so a spelling a browser reads as a remote address is
  * checked as one, whatever its scheme separators look like.
  */
-function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+function refusalFor(
+  { kind, value, tag }: BodyLink,
+  input: { web_search: WebSearchTurnState; secrets: readonly string[] },
+): string | undefined {
   // Scripts never run on a space page, whatever their source, so a script source is refused
   // outright rather than checked against the chat's results and then stripped at render.
   if (tag === 'script') {
@@ -75,13 +81,16 @@ function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnSta
   if (isPlaceholder(url.hostname)) {
     return `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`;
   }
-  // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
+  // The lookup check compares the text the model wrote; a value the parser only resolved is checked as resolved.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
-  if (!isTrustedLink({ provenance: web_search.provenance, url: candidate })) {
-    if (kind === 'picture') {
-      return "Open the picture's page first, then use the image link from that page.";
-    }
-    return `This ${noun}'s link did not come from the person or a search in this chat. Search for the ${noun} first, then use a link from the results.`;
+  const { verdict, steered } = checkLookup({
+    strings: collectOutboundStrings({ url: candidate }),
+    secrets: input.secrets,
+    earlier: input.web_search.sentText,
+    provenance: input.web_search.provenance,
+  });
+  if (!verdict.ok || steered.length > 0) {
+    return LOOKUP_RULE_MESSAGE;
   }
   return undefined;
 }
@@ -95,6 +104,8 @@ export function refuseNewSpaceLinks(input: {
   previousBody: string;
   format: z.infer<typeof SpaceFormatSchema>;
   web_search: WebSearchTurnState;
+  /** Exact secret values the host holds for this person, read by the outbound secret guard. */
+  secrets: readonly string[];
 }): void {
   const links = bodyLinks({ body: input.body, format: input.format });
   if (links === undefined) {
@@ -109,7 +120,7 @@ export function refuseNewSpaceLinks(input: {
     if (previous.has(`${link.kind}\u0000${link.value}`)) {
       continue;
     }
-    const refusal = refusalFor(link, input.web_search);
+    const refusal = refusalFor(link, { web_search: input.web_search, secrets: input.secrets });
     if (refusal !== undefined) {
       throw new SpaceLinkRefusedError(refusal);
     }

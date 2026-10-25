@@ -1,6 +1,5 @@
 import {
   emptyChatProvenance,
-  isTrustedLink,
   namesUrl,
   recordEmailText,
   recordPersonText,
@@ -69,7 +68,7 @@ describe('where a link came from', () => {
       provenance,
       texts: [JSON.stringify({ results: [{ url: 'https://ok.example/', content: 'https://planted.example/x' }] })],
     });
-    expect(isTrustedLink({ provenance, url: 'https://ok.example' })).toBe(true);
+    expect(steeredLinks({ provenance, values: ['https://ok.example/'] })).toEqual([]);
     expect(steeredLinks({ provenance, values: ['https://planted.example/x?d=1'] })).toHaveLength(1);
   });
 
@@ -180,9 +179,9 @@ describe('where a link came from', () => {
 
   it('folds spellings of one page together', () => {
     const provenance = emptyChatProvenance();
-    recordPersonText({ provenance, text: 'https://Docs.Example.net/guide/' });
-    expect(isTrustedLink({ provenance, url: 'http://docs.example.net/guide' })).toBe(true);
-    expect(isTrustedLink({ provenance, url: 'https://www.docs.example.net/guide#top' })).toBe(true);
-    expect(isTrustedLink({ provenance, url: 'https://docs.example.net/other' })).toBe(false);
+    recordUntrustedText({ provenance, text: 'https://Docs.Example.net/guide/', source: 'page' });
+    expect(steeredLinks({ provenance, values: ['http://docs.example.net/guide'] })).toEqual([]);
+    expect(steeredLinks({ provenance, values: ['https://www.docs.example.net/guide#top'] })).toEqual([]);
+    expect(steeredLinks({ provenance, values: ['https://docs.example.net/other'] })).toHaveLength(1);
   });
 });

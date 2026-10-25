@@ -261,6 +261,7 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
+      outboundSecrets: () => Promise.resolve([]),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

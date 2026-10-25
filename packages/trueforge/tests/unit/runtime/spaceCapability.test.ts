@@ -91,6 +91,7 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
     authority: { tenantId: 'default', userRef: 'user-a' },
     tracing: NOOP_TRACING,
     webSearch: createWebSearchTurnState(),
+    outboundSecrets: () => Promise.resolve([]),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
@@ -106,6 +107,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     expect(capability.instructionBuilders?.length).toBe(1);
     expect(capability.preLLMProcessors).toBeUndefined();
@@ -117,6 +119,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     capability.instructionBuilders?.[0]?.(builder);
@@ -136,6 +139,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -153,6 +157,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     const firstBuilder = capability.instructionBuilders?.[0];
@@ -174,6 +179,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const builder = InstructionBuilder.createSystemPrompt('test');
     capability.instructionBuilders?.[0]?.(builder);
@@ -215,6 +221,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -251,6 +258,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -304,6 +312,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -342,6 +351,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -387,6 +397,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -432,6 +443,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -478,6 +490,7 @@ describe('space capability', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
@@ -926,6 +939,7 @@ describe('space tool model-facing schemas', () => {
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
+      outboundSecrets: () => Promise.resolve([]),
     });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {

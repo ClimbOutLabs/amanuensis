@@ -1,15 +1,21 @@
 import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
-import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { recordEmailText } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { recordToolResultProvenance } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
 
 const SEEN = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
 const UNSEEN = 'https://upload.wikimedia.org/wikipedia/commons/4/4d/Invented_Fox.jpg';
 
-function webSearchWith(urls: string[]): WebSearchTurnState {
+const FOX_PAGE = 'https://commons.wikimedia.org/wiki/File:Red_Fox.jpg';
+
+/** A turn whose only read content is a page the assistant opened, which shows the picture as `<img>`. */
+function webSearchAfterOpeningPage(tool_name: string): WebSearchTurnState {
   const state = createWebSearchTurnState();
-  recordSearchResults({
-    provenance: state.provenance,
-    texts: [JSON.stringify({ results: urls.map(url => ({ title: 'Result', url })) })],
+  recordToolResultProvenance({
+    state,
+    tool_name,
+    argument_values: [FOX_PAGE],
+    texts: [`# File:Red Fox.jpg\n<img src="${SEEN}" alt="Red fox">`],
   });
   return state;
 }
@@ -19,13 +25,15 @@ function refusalOf({
   body,
   format,
   previousBody = '',
+  web_search = webSearchAfterOpeningPage('browse_page'),
 }: {
   body: string;
   format: 'html' | 'markdown';
   previousBody?: string;
+  web_search?: WebSearchTurnState;
 }) {
   try {
-    refuseNewSpaceLinks({ body, previousBody, format, web_search: webSearchWith([SEEN]) });
+    refuseNewSpaceLinks({ body, previousBody, format, web_search, secrets: [] });
     return undefined;
   } catch (error) {
     if (error instanceof SpaceLinkRefusedError) {
@@ -144,11 +152,11 @@ const MARKDOWN_SPELLINGS: Spelling[] = [
 
 describe('space links are checked from a real parse of the body', () => {
   describe.each([...HTML_SPELLINGS, ...MARKDOWN_SPELLINGS])('$name', ({ format, body }) => {
-    it('refuses a link the chat never returned', () => {
+    it('refuses a link the chat never read', () => {
       expect(refusalOf({ body: body(UNSEEN), format })).toBeDefined();
     });
 
-    it('keeps a link that a search result returned', () => {
+    it('keeps a link exactly as an opened page showed it', () => {
       expect(refusalOf({ body: body(SEEN), format })).toBeUndefined();
     });
   });
@@ -174,5 +182,58 @@ describe('space links are checked from a real parse of the body', () => {
   it('checks only links a write adds, so an unrelated edit keeps a link from an earlier turn', () => {
     const previousBody = `<img src="${UNSEEN}" alt="Fox"><p>Old text</p>`;
     expect(refusalOf({ body: `${previousBody}<p>New text</p>`, format: 'html', previousBody })).toBeUndefined();
+  });
+});
+
+describe('a space picture or link follows the rule a lookup of it follows', () => {
+  it('allows a picture link copied exactly from a page the assistant opened, though no page reader ran', () => {
+    // On main this is refused: the page reader's pictures are the only ones counted as seen.
+    const web_search = webSearchAfterOpeningPage('browse_page');
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('allows a picture link copied exactly from an email, as a lookup would', () => {
+    const web_search = createWebSearchTurnState();
+    recordEmailText({ provenance: web_search.provenance, text: `Photo: ${SEEN}` });
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('refuses a link from read content with an added query', () => {
+    const web_search = webSearchAfterOpeningPage('browse_page');
+    expect(refusalOf({ body: `<img src="${SEEN}?size=2" alt="Fox">`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+
+  it('refuses a link from read content with a changed path', () => {
+    const web_search = webSearchAfterOpeningPage('browse_page');
+    const changed = SEEN.replace('Red_Fox.jpg', 'Red_Fox_large.jpg');
+    expect(refusalOf({ body: `<img src="${changed}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+
+  it('refuses a copied link that carries text the outbound guard rejects', () => {
+    const encodedRun = 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldY';
+    const link = `${SEEN}?blob=${encodedRun}`;
+    const web_search = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state: web_search,
+      tool_name: 'browse_page',
+      argument_values: [FOX_PAGE],
+      texts: [`<img src="${link}" alt="Fox">`],
+    });
+    expect(refusalOf({ body: `<img src="${link}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+
+  it('refuses a placeholder domain even when it was copied from read content', () => {
+    const link = 'https://example.com/fox.jpg';
+    const web_search = createWebSearchTurnState();
+    recordEmailText({ provenance: web_search.provenance, text: link });
+    expect(refusalOf({ body: `<img src="${link}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'placeholder domain',
+    );
   });
 });

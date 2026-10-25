@@ -161,6 +161,7 @@ describe('a web search after the chat read mail', () => {
       undefined,
       undefined,
       {
+        outboundSecrets: () => Promise.resolve([]),
         store: STORE,
         googleConnections: connections,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },

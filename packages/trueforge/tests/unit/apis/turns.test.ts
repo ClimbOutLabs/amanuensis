@@ -182,6 +182,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -270,6 +271,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -491,6 +493,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -630,6 +633,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -736,6 +740,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -863,6 +868,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -956,6 +962,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          outboundSecrets: () => Promise.resolve([]),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,

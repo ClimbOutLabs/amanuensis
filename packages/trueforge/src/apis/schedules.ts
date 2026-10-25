@@ -8,6 +8,7 @@ import {
   type Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
@@ -106,6 +107,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   repositoryStore: IRepositoryStore<TTransaction>;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
+  /** Exact secret values the host holds, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -171,6 +174,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
+      outboundSecrets: deps.outboundSecrets,
       googleConnectionStore: deps.googleConnectionStore,
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,

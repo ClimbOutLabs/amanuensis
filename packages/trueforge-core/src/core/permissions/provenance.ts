@@ -395,9 +395,3 @@ export function steeredDestinations(input: {
   }
   return steered;
 }
-
-/** Whether a link is exactly one the person gave or a search returned. */
-export function isTrustedLink(input: { provenance: ChatProvenance; url: string }): boolean {
-  const key = urlKey(input.url);
-  return key !== undefined && input.provenance.trusted.urls.has(key);
-}

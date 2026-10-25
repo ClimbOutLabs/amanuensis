@@ -239,6 +239,7 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
     authority: { tenantId: 'default', userRef: 'user-a' },
     tracing: NOOP_TRACING,
     webSearch: createWebSearchTurnState(),
+    outboundSecrets: () => Promise.resolve([]),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {

@@ -15,6 +15,7 @@ import type {
   AgentTracing,
   InstructionBuilder,
   Sandbox,
+  SentinelServices,
   WebSearchTurnState,
 } from '@truefoundry/trueforge-core/core';
 import {
@@ -429,6 +430,8 @@ export interface SpaceCapabilityOptions {
   logger?: Logger;
   /** This turn's search record: the links a search or page result returned, the only links a space may add. */
   webSearch: WebSearchTurnState;
+  /** Exact secret values the host holds for this person, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
 /**
@@ -748,7 +751,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and update_space, never by editing files in the sandbox. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Pictures come from a page you opened or a search result. Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and update_space, never by editing files in the sandbox. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Copy each picture link exactly as a page, a message, or a search result showed it. Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
@@ -757,7 +760,7 @@ class SpaceTool extends LocalToolMCP {
       name: UPDATE_SPACE_TOOL_NAME,
       description:
         'Update one space by space_id or exact space_name. Provide exactly one of body, edits or block_edits. ' +
-        'Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Pictures come from a page you opened or a search result. ' +
+        'Scripts never run on a space page, so use plain HTML and CSS (for example a scroll-snap row for a slideshow). Copy each picture link exactly as a page, a message, or a search result showed it. ' +
         'body replaces the whole space: name, purpose and status are required; pass it as lines. ' +
         'edits: up to 50 search/replace pairs applied in order; copy each search verbatim from a recent get_space. A search that matches nothing fails the whole update. Check each replacement count; call revert_space if wrong. Combine interacting changes into one edit. ' +
         'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; empty new_content deletes. ' +
@@ -799,6 +802,13 @@ class SpaceTool extends LocalToolMCP {
     return { spaces: result.records, aggregate_revision: result.aggregate_revision, has_more: result.has_more };
   }
 
+  private linkSecrets(): Promise<readonly string[]> {
+    return this.options.outboundSecrets({
+      tenant_id: this.options.authority.tenantId,
+      created_by: this.options.authority.userRef,
+    });
+  }
+
   private async get(
     input: z.infer<typeof GET_SPACE_INPUT_SCHEMA>,
   ): Promise<{ space: SpaceRecord; aggregate_revision: number; include_body: boolean }> {
@@ -828,6 +838,7 @@ class SpaceTool extends LocalToolMCP {
       previousBody: '',
       format: input.format,
       web_search: this.options.webSearch,
+      secrets: await this.linkSecrets(),
     });
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
@@ -896,6 +907,7 @@ class SpaceTool extends LocalToolMCP {
       previousBody: current.body,
       format: input.format ?? current.format,
       web_search: this.options.webSearch,
+      secrets: await this.linkSecrets(),
     });
     this.checkShrink(input.space_id, current, body ?? '', input.confirm_shrink);
     const mutation = await this.options.store.updateSpace({
@@ -1389,6 +1401,8 @@ export interface SpaceTurnContext {
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
   authority: SpaceTurnAuthority;
+  /** Exact secret values the host holds for this person, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
   /** Operational log for delta-edit failures. */

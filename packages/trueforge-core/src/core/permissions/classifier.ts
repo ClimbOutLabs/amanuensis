@@ -78,6 +78,7 @@ import {
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
+import { checkLookup, type LookupCheck } from './lookupCheck';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import {
   isMapsToolName,
@@ -96,7 +97,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { namesUrl, steeredDestinations, steeredLinks } from './provenance';
+import { namesUrl, steeredDestinations } from './provenance';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -1789,14 +1790,16 @@ function searchSummaryText(strings: OutboundStrings): string {
 async function outboundGuard(input: {
   ctx: ClassifyContext;
   strings: OutboundStrings | undefined;
-}): Promise<{ secrets: readonly string[]; verdict: OutboundGuardVerdict }> {
+}): Promise<{ secrets: readonly string[]; check: LookupCheck }> {
   const { ctx, strings } = input;
   const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  const verdict: OutboundGuardVerdict =
-    strings === undefined
-      ? { ok: false, rule: 'uninspectable' }
-      : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
-  return { secrets, verdict };
+  const check = checkLookup({
+    strings,
+    secrets,
+    earlier: ctx.web_search.sentText,
+    provenance: ctx.web_search.provenance,
+  });
+  return { secrets, check };
 }
 
 /**
@@ -1964,7 +1967,8 @@ async function classifySearchProviderTool(input: {
   };
 
   // A held key is masked whether or not searches are set to ask.
-  const { secrets, verdict } = await outboundGuard({ ctx, strings });
+  const { secrets, check } = await outboundGuard({ ctx, strings });
+  const { verdict } = check;
   if (!verdict.ok && verdict.rule === 'server_secret') {
     return heldWithoutKey(secrets);
   }
@@ -1983,7 +1987,7 @@ async function classifySearchProviderTool(input: {
       sensitive_read: false,
     });
   }
-  if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+  if (check.steered.length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
   return tier1Decision({
@@ -2073,9 +2077,9 @@ async function classifyMapsSilently(input: {
 }): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
   const { action, ctx } = input;
   const strings = collectOutboundStrings(action.canonical_params);
-  const { verdict } = await outboundGuard({ ctx, strings });
-  if (!verdict.ok) {
-    return { held: verdict };
+  const { check } = await outboundGuard({ ctx, strings });
+  if (!check.verdict.ok) {
+    return { held: check.verdict };
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
