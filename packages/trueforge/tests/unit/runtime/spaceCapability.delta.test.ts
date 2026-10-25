@@ -1,6 +1,6 @@
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 /**
- * User journey test for update_space delta edits.
+ * User journey test for edit_space delta edits.
  *
  * This is not a unit test with mocked stores. It uses a stateful in-memory
  * store and drives the real tool sequence the way Mannie would: create a
@@ -18,7 +18,9 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
@@ -207,8 +209,9 @@ interface SpaceWireSpace {
 
 interface SpaceWireResult {
   space?: SpaceWireSpace;
+  spaces?: { id: string; name: string }[];
   aggregate_revision?: number;
-  /** Per-edit replacement counts, reported by the update_space edits path. */
+  /** Per-edit replacement counts, reported by the edit_space path. */
   edit_replacements?: number[];
   error?: string;
   revision?: number;
@@ -247,12 +250,21 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
   return await toolSet.callTool({ name, arguments: args });
 }
 
-function expectSpaceId(response: CallToolResponse): string {
-  const id = resultJson(response).space?.id;
-  if (id === undefined) {
-    throw new Error(`expected a space id in tool result: ${resultText(response)}`);
+/**
+ * The id of the space a create call just made, recovered the way the model does: the
+ * create result carries the name and link, never an id, so list_spaces is the one place
+ * that still hands an id out. Every store in this file holds exactly one space per test.
+ */
+async function expectSpaceId(store: SpaceToolStore, created: CallToolResponse): Promise<string> {
+  if (isErrorResponse(created)) {
+    throw new Error(`expected the create call to succeed: ${resultText(created)}`);
   }
-  return id;
+  const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
+  const spaces = resultJson(listed).spaces ?? [];
+  if (spaces.length !== 1 || spaces[0] === undefined) {
+    throw new Error(`expected exactly one space in list_spaces result: ${resultText(listed)}`);
+  }
+  return spaces[0].id;
 }
 
 function expectBody(response: CallToolResponse): string {
@@ -291,7 +303,7 @@ const BOARD_META = {
 
 async function createBoard(store: SpaceToolStore): Promise<string> {
   const created = await callTool(store, CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body: MADRID_BOARD });
-  return expectSpaceId(created);
+  return expectSpaceId(store, created);
 }
 
 async function readBody(store: SpaceToolStore, spaceId: string): Promise<string> {
@@ -299,17 +311,17 @@ async function readBody(store: SpaceToolStore, spaceId: string): Promise<string>
   return expectBody(read);
 }
 
-describe('update_space delta edits: Madrid board journey', () => {
+describe('edit_space delta edits: Madrid board journey', () => {
   it('a small price change via edits leaves the rest of the board untouched', async () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
     // The hotel confirms a lower rate: update just that cell via edits,
     // without resending the whole board.
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
-      edits: [{ search: '€1,646.91', replace: '€1,590.00' }],
+      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
     });
     expect(isErrorResponse(updated)).toBe(false);
 
@@ -326,10 +338,10 @@ describe('update_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const failed = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
-      edits: [{ search: '€1,646.92', replace: '€1,590.00' }],
+      edits: [{ type: 'search', search: '€1,646.92', replace: '€1,590.00' }],
     });
     const parsed = resultJson(failed);
     expect(isErrorResponse(failed)).toBe(true);
@@ -352,12 +364,12 @@ describe('update_space delta edits: Madrid board journey', () => {
     const beforeBody = beforeSpace.body;
 
     // Edit #1 would succeed; edit #2 misses. Nothing may persist.
-    const failed = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       edits: [
-        { search: '€1,646.91', replace: '€1,590.00' },
-        { search: '€9,999.99', replace: '€0.00' },
+        { type: 'search', search: '€1,646.91', replace: '€1,590.00' },
+        { type: 'search', search: '€9,999.99', replace: '€0.00' },
       ],
     });
     expect(isErrorResponse(failed)).toBe(true);
@@ -375,12 +387,12 @@ describe('update_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       edits: [
-        { search: '€1,646.91', replace: 'PRICE_PLACEHOLDER' },
-        { search: 'PRICE_PLACEHOLDER', replace: '€1,590.00' },
+        { type: 'search', search: '€1,646.91', replace: 'PRICE_PLACEHOLDER' },
+        { type: 'search', search: 'PRICE_PLACEHOLDER', replace: '€1,590.00' },
       ],
     });
     expect(isErrorResponse(updated)).toBe(false);
@@ -399,15 +411,15 @@ describe('update_space delta edits: Madrid board journey', () => {
       format: 'markdown',
       body: 'apples and apples',
     });
-    const spaceId = expectSpaceId(created);
+    const spaceId = await expectSpaceId(store, created);
 
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
       name: 'Fruit',
       purpose: 'Track fruit.',
       status: 'active',
       format: 'markdown',
-      edits: [{ search: 'apples', replace: 'oranges' }],
+      edits: [{ type: 'search', search: 'apples', replace: 'oranges' }],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const parsed = resultJson(updated);
@@ -421,9 +433,9 @@ describe('update_space delta edits: Madrid board journey', () => {
     const spaceId = await createBoard(store);
 
     // No metadata fields: the edit applies and metadata is preserved from the current record.
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
-      edits: [{ search: '€1,646.91', replace: '€1,590.00' }],
+      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: spaceId });
@@ -440,10 +452,10 @@ describe('update_space delta edits: Madrid board journey', () => {
 
     // A buggy edit replacing the entire board with a stub: the shrink guard
     // applies to delta-computed bodies too.
-    const wiped = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const wiped = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
-      edits: [{ search: MADRID_BOARD, replace: '<p>oops</p>' }],
+      edits: [{ type: 'search', search: MADRID_BOARD, replace: '<p>oops</p>' }],
     });
     const parsed = resultJson(wiped);
     expect(isErrorResponse(wiped)).toBe(true);
@@ -458,39 +470,53 @@ describe('update_space delta edits: Madrid board journey', () => {
     const spaceId = await createBoard(store);
 
     // Same destructive edit, but the caller explicitly confirms the shrink.
-    const wiped = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const wiped = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       confirm_shrink: true,
-      edits: [{ search: MADRID_BOARD, replace: '<p>oops</p>' }],
+      edits: [{ type: 'search', search: MADRID_BOARD, replace: '<p>oops</p>' }],
     });
     expect(isErrorResponse(wiped)).toBe(false);
     expect(await readBody(store, spaceId)).toBe('<p>oops</p>');
   });
 
-  it('providing both body and edits is rejected', async () => {
+  it("update_space and edit_space each reject the other tool's fields", async () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const rejected = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    // update_space takes a full body only: an edits list is not one of its fields.
+    const fullBodyCall = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       body: MADRID_BOARD,
-      edits: [{ search: 'a', replace: 'b' }],
+      edits: [{ type: 'search', search: 'a', replace: 'b' }],
     });
     // Schema validation rejects the call before the handler runs, naming the bad field.
-    const parsed = resultJson(rejected);
-    expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toContain('Invalid space call');
-    expect(parsed.error).toContain('Provide exactly one of body');
+    const fullBodyError = resultJson(fullBodyCall);
+    expect(isErrorResponse(fullBodyCall)).toBe(true);
+    expect(fullBodyError.error).toContain('Invalid space call');
+    expect(fullBodyError.error).toContain('edits');
+    expect(fullBodyError.error).toContain('Fix the listed fields and send the call again.');
+
+    // edit_space takes an edits list only: a body is not one of its fields.
+    const editCall = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      body: MADRID_BOARD,
+      edits: [{ type: 'search', search: 'a', replace: 'b' }],
+    });
+    const editError = resultJson(editCall);
+    expect(isErrorResponse(editCall)).toBe(true);
+    expect(editError.error).toContain('Invalid space call');
+    expect(editError.error).toContain('body');
+    expect(editError.error).toContain('Fix the listed fields and send the call again.');
   });
 
   it('more than 50 edits are rejected by schema validation', async () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const edits = Array.from({ length: 51 }, () => ({ search: 'a', replace: 'b' }));
-    const rejected = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const edits = Array.from({ length: 51 }, () => ({ type: 'search', search: 'a', replace: 'b' }));
+    const rejected = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       edits,
@@ -512,10 +538,10 @@ describe('update_space delta edits: Madrid board journey', () => {
       format: 'markdown',
       body: tokens.join(' '),
     });
-    const spaceId = expectSpaceId(created);
+    const spaceId = await expectSpaceId(store, created);
 
-    const edits = tokens.map(t => ({ search: t, replace: `u${t.slice(1)}` }));
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const edits = tokens.map(t => ({ type: 'search', search: t, replace: `u${t.slice(1)}` }));
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
       name: 'Tokens',
       purpose: 'Boundary probe.',
@@ -539,7 +565,7 @@ describe('update_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const rejected = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const rejected = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       edits: [],
@@ -558,17 +584,17 @@ describe('update_space delta edits: Madrid board journey', () => {
       format: 'markdown',
       body: 'a'.repeat(60_000),
     });
-    const spaceId = expectSpaceId(created);
+    const spaceId = await expectSpaceId(store, created);
 
     // One edit doubles every character, pushing the computed body (120,000
     // chars) past the 65,536 cap the body path enforces at the boundary.
-    const failed = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
       name: 'Big',
       purpose: 'Size-limit probe.',
       status: 'active',
       format: 'markdown',
-      edits: [{ search: 'a', replace: 'aa' }],
+      edits: [{ type: 'search', search: 'a', replace: 'aa' }],
     });
     const parsed = resultJson(failed);
     expect(isErrorResponse(failed)).toBe(true);
@@ -586,16 +612,16 @@ describe('update_space delta edits: Madrid board journey', () => {
     const moved = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
-      body: [MADRID_BOARD, '<p>Extra line.</p>'],
+      body: `${MADRID_BOARD}\n<p>Extra line.</p>`,
     });
     expect(isErrorResponse(moved)).toBe(false);
 
     // A delta edit fenced at the now-stale revision 1 fails before persisting.
-    const stale = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const stale = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
       expected_revision: 1,
-      edits: [{ search: '€1,646.91', replace: '€1,590.00' }],
+      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
     });
     const parsed = resultJson(stale);
     expect(isErrorResponse(stale)).toBe(true);
@@ -609,10 +635,10 @@ describe('update_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    const updated = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       ...BOARD_META,
       space_id: spaceId,
-      edits: [{ search: '€1,646.91', replace: '€1,590.00' }],
+      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
     });
     expect(isErrorResponse(updated)).toBe(false);
 
