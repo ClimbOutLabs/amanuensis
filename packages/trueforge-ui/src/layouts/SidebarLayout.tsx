@@ -132,7 +132,7 @@ function SidebarRail({
       ref={railRef}
       className={cn(
         railWidthClassName,
-        'flex min-h-0 shrink-0 flex-col border-r border-border bg-sidebar-bg',
+        'flex min-h-0 shrink-0 flex-col bg-sidebar-bg md:relative md:z-3 md:border-r-0 md:shadow-[0_0_0.875rem_color-mix(in_srgb,var(--shadow-color)_8%,transparent)] border-r border-border',
         className,
       )}
       onClick={event => {
@@ -331,7 +331,7 @@ export function SidebarLayout({ className }: { className?: string }) {
           singleLine
           menu={!overlayOpen ? <ChatHeaderMenu /> : null}
           className={cn(
-            'bg-topbar-bg',
+            'bg-paper',
             // An open overlay (Settings, Library, Sessions, ...) brings its own header and this bar
             // has no menu button or title there, so hide it at every width rather than leave a blank band.
             overlayOpen && 'hidden',
@@ -375,7 +375,7 @@ export function SidebarLayout({ className }: { className?: string }) {
             <aside
               ref={chatListRef}
               aria-label="Recent chats"
-              className="hidden min-h-0 w-64 shrink-0 border-r border-border bg-sidebar-bg md:flex"
+              className="relative z-1 hidden min-h-0 w-64 shrink-0 bg-sidebar-bg md:flex"
             >
               <ThreadListContainer
                 variant="recent-history"
@@ -384,7 +384,7 @@ export function SidebarLayout({ className }: { className?: string }) {
             </aside>
           ) : null}
 
-          <div ref={mainRef} className="min-h-0 min-w-0 flex-1">
+          <div ref={mainRef} className="relative z-2 min-h-0 min-w-0 flex-1 bg-paper shadow-[var(--shadow-raise)]">
             {settingsOpen ? (
               <Suspense
                 fallback={
