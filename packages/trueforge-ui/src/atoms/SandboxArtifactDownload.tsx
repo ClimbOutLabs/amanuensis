@@ -11,6 +11,8 @@ export type SandboxArtifactDownloadProps = {
   fileDownloadBaseUrl?: string;
   onDownloadArtifact?: (path: string, filename: string) => Promise<void>;
   onFetchFile?: (path: string) => Promise<Blob>;
+  /** Builds the host picture-proxy URL for one external picture on a chat page; see HtmlArtifactPreview. */
+  pictureProxyUrl?: (url: string) => string;
   readOnly?: boolean;
 };
 
@@ -33,6 +35,7 @@ export function SandboxArtifactDownload({
   fileDownloadBaseUrl,
   onDownloadArtifact,
   onFetchFile,
+  pictureProxyUrl,
   readOnly,
 }: SandboxArtifactDownloadProps) {
   const ChatFileDownload = useSlot('ChatFileDownload');
@@ -57,6 +60,7 @@ export function SandboxArtifactDownload({
               artifact={artifact}
               onDownloadArtifact={onDownloadArtifact}
               onFetchFile={onFetchFile}
+              pictureProxyUrl={pictureProxyUrl}
               readOnly={readOnly}
             />
           ))}
@@ -90,11 +94,13 @@ function HtmlArtifactPreviewWrapper({
   artifact,
   onDownloadArtifact,
   onFetchFile,
+  pictureProxyUrl,
   readOnly,
 }: {
   artifact: SandboxArtifact;
   onDownloadArtifact: (path: string, filename: string) => Promise<void>;
   onFetchFile: (path: string) => Promise<Blob>;
+  pictureProxyUrl?: (url: string) => string;
   readOnly?: boolean;
 }) {
   const HtmlArtifactPreview = useSlot('HtmlArtifactPreview');
@@ -141,6 +147,7 @@ function HtmlArtifactPreviewWrapper({
       content={blob}
       filename={artifact.name}
       onFetchRelatedFile={onFetchFile}
+      pictureProxyUrl={pictureProxyUrl}
       onDownload={() => {
         onDownloadArtifact(artifact.path, artifact.name).catch((err: unknown) => {
           setError(err instanceof Error ? err.message : 'Failed to download HTML artifact');

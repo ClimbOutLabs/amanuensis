@@ -7,9 +7,9 @@ import { extractSentinelFromEvent, type SentinelApprovalCard } from '@/sentinel/
 
 const INSTRUCTIONS = 'Plans trips in detail, with a day-by-day route.\n\nFocus on routes, timing and local food.';
 
-/** The card the server sends when the chat asks to add a travel planner specialist. */
+/** The card the server sends when the chat asks to add a travel planner persona. */
 const TRAVEL_PLANNER_CARD = {
-  plain_what: 'Add a specialist: Travel planner. Plans trips in detail, with a day-by-day route.',
+  plain_what: 'Add a persona: Travel planner. Plans trips in detail, with a day-by-day route.',
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -43,11 +43,12 @@ function renderCard(card: SentinelApprovalCard) {
   );
 }
 
-describe('the specialist approval card', () => {
-  it('asks the question in plain words, and the stub says it is a new specialist', () => {
+describe('the persona approval card', () => {
+  it('asks the question in plain words, and the stub says it is a new persona', () => {
     renderCard(TRAVEL_PLANNER_CARD);
-    expect(screen.getByRole('heading', { name: 'Add the specialist "Travel planner"?' })).toBeInTheDocument();
-    expect(screen.getByText('New specialist')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Add the persona "Travel planner"?' })).toBeInTheDocument();
+    expect(screen.getByText('New persona')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/specialist|\bagents?\b/i);
   });
 
   it('shows the name and what it is for, and keeps the instructions under Details', () => {
@@ -58,15 +59,15 @@ describe('the specialist approval card', () => {
     expect(region).toHaveTextContent('For: Plans trips in detail, with a day-by-day route.');
     expect(region).toHaveTextContent('Answers with: openai/gpt-5.2');
 
-    const details = screen.getByRole('region', { name: 'Specialist instructions' }).closest('details');
+    const details = screen.getByRole('region', { name: 'Persona instructions' }).closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
-    expect(screen.getByRole('region', { name: 'Specialist instructions' })).toHaveTextContent(
+    expect(screen.getByRole('region', { name: 'Persona instructions' })).toHaveTextContent(
       'Focus on routes, timing and local food.',
     );
   });
 
-  it('reads the specialist from the server event, and drops one with a missing field', () => {
+  it('reads the persona from the server event, and drops one with a missing field', () => {
     const event = (persona: Record<string, unknown>) => ({
       type: 'tool.approval_required',
       tool_call_id: 'call-1',

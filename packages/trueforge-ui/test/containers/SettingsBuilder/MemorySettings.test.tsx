@@ -91,7 +91,7 @@ describe('MemorySettings (backend honesty)', () => {
 
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Markdown (local files)')).toBeInTheDocument();
-    expect(screen.getByText(/Aman saves memories as local Markdown files on the server/)).toBeInTheDocument();
+    expect(screen.getByText(/Aman saves memories as notes on this computer/)).toBeInTheDocument();
     expect(screen.getByText('How memory works')).toBeInTheDocument();
     expect(screen.queryByText('Checking memory status…')).not.toBeInTheDocument();
     expect(screen.queryByText('Memory status unavailable')).not.toBeInTheDocument();
@@ -159,9 +159,7 @@ describe('MemorySettings (backend honesty)', () => {
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Hindsight (experimental)')).toBeInTheDocument();
     expect(screen.getByText(/Markdown file memory.*does not apply here/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/uses the experimental Hindsight memory instead of note files/)).toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
     expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
     expect(screen.queryByText(/Memories live in/)).not.toBeInTheDocument();

@@ -242,7 +242,7 @@ export function AgentSearchPicker({
           disabled={disabled}
           placeholder={placeholder}
           value={inputValue}
-          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-text-secondary/70 disabled:cursor-not-allowed"
+          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-text-muted disabled:cursor-not-allowed"
           onFocus={() => {
             if (!disabled) setOpen(true);
           }}

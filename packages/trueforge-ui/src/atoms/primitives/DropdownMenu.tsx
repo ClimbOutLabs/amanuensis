@@ -24,6 +24,11 @@ export function isSurfaceClick(event: React.MouseEvent<HTMLElement>): boolean {
   return event.target === event.currentTarget;
 }
 
+// Returns true if the click was on an action in the menu, so a click on its text, a heading or a separator keeps it open.
+function isActionClick(event: React.MouseEvent<HTMLElement>): boolean {
+  return event.target instanceof Element && event.target.closest('button, a, [role="menuitem"]') !== null;
+}
+
 export function DropdownMenu({
   trigger,
   children,
@@ -83,6 +88,8 @@ export function DropdownMenu({
       if (!(target instanceof Node)) return;
       if (containerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
+      // A dialog opened from the menu (a confirm, a form) lives outside it and must keep the menu's action alive.
+      if (target instanceof Element && target.closest('[role="dialog"]') !== null) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -191,7 +198,7 @@ export function DropdownMenu({
             onClick={
               closeOnClick
                 ? event => {
-                    if (isSurfaceClick(event)) return;
+                    if (isSurfaceClick(event) || !isActionClick(event)) return;
                     setOpen(false);
                   }
                 : undefined

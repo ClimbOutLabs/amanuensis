@@ -10,7 +10,7 @@ const SCHEDULE_AWAY_NOTE =
 
 function Line({ label, value }: { label: string; value: string }) {
   return (
-    <p className="break-words text-sm text-text-primary">
+    <p className="break-words text-text-primary">
       <span className="text-text-secondary">{label}: </span>
       {value}
     </p>
@@ -28,8 +28,8 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
     </div>
     {schedule.next_runs.length > 0 && (
       <div>
-        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Next runs</p>
-        <ul className="list-disc pl-5 text-sm text-text-primary">
+        <p className="mb-1 font-medium text-text-secondary">Next runs</p>
+        <ul className="list-disc pl-5 text-text-primary">
           {schedule.next_runs.map(run => (
             <li key={run}>{run}</li>
           ))}
@@ -37,18 +37,18 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
       </div>
     )}
     <div>
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">What it will do each time</p>
+      <p className="mb-1 font-medium text-text-secondary">What it will do each time</p>
       <div
         role="region"
         aria-label="Schedule instruction"
         tabIndex={0}
         className="max-h-60 overflow-auto rounded border border-border bg-card-bg px-3 py-2"
       >
-        <p className="whitespace-pre-wrap break-words text-sm text-text-primary">{schedule.task}</p>
+        <p className="whitespace-pre-wrap break-words text-text-primary">{schedule.task}</p>
       </div>
     </div>
     {schedule.action === 'create' && (
-      <p className="text-sm text-text-secondary" data-role="schedule-away">
+      <p className="text-text-secondary" data-role="schedule-away">
         {SCHEDULE_AWAY_NOTE}
       </p>
     )}

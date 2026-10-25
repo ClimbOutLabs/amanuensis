@@ -110,7 +110,7 @@ export function createRepositoryWorkApi(fetcher: typeof fetch): RepositoryWorkAp
       if (isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string') {
         throw new Error(body.error.message);
       }
-      throw new Error('Aman could not reach the repository service. Try again.');
+      throw new Error('Could not reach the repository service. Try again.');
     }
     if (!isRecord(body) || !('data' in body)) {
       throw new Error('Repository response is not readable. Reload the page and try again.');
@@ -128,7 +128,7 @@ export function createRepositoryWorkApi(fetcher: typeof fetch): RepositoryWorkAp
     if (isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string') {
       throw new Error(body.error.message);
     }
-    throw new Error('Aman could not reach the repository service. Try again.');
+    throw new Error('Could not reach the repository service. Try again.');
   }
 
   function jsonInit(method: string, payload: unknown): RequestInit {

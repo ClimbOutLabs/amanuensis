@@ -107,6 +107,15 @@ function mobileMatchMedia(query: string): MediaQueryList {
   };
 }
 
+/** The rail's More menu holds Build agent, Settings, Sessions and the rest. The drawer's copy is the last one. */
+function openRailMenu() {
+  // The menu toggles on every click, so only open it when no menu is showing.
+  if (screen.queryByRole('menu') !== null) return;
+  const mores = screen.queryAllByRole('button', { name: 'More' });
+  const more = mores[mores.length - 1];
+  if (more !== undefined) fireEvent.click(more);
+}
+
 describe('TrueForgeUI', () => {
   const server = mockServer();
   const layouts: ChatLayout[] = ['sidebar', 'drawer', 'dock', 'widget'];
@@ -126,7 +135,7 @@ describe('TrueForgeUI', () => {
     await waitFor(() => {
       switch (layout) {
         case 'sidebar':
-          expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
+          expect(screen.getByRole('button', { name: 'Chats' })).toBeInTheDocument();
           expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
           break;
         case 'drawer':
@@ -263,7 +272,7 @@ describe('TrueForgeUI', () => {
       expect(getMcp).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start new chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
     await waitFor(() => {
       expect(getCapabilities).toHaveBeenCalledTimes(2);
@@ -272,7 +281,8 @@ describe('TrueForgeUI', () => {
       expect(getMcp).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add-ons (0)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add-ons' }));
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
     expect(await screen.findByRole('status')).toHaveTextContent('Select Sandbox first');
   });
@@ -297,6 +307,7 @@ describe('TrueForgeUI', () => {
       />,
     );
 
+    openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save Agent' }));
     const saveDialog = await screen.findByRole('dialog', { name: 'Save agent' });
@@ -460,6 +471,8 @@ describe('SidebarLayout', () => {
         </SlotsProvider>,
       );
 
+      openRailMenu();
+
       fireEvent.click(screen.getByRole('button', { name: 'Start new agent' }));
       expect(screen.getByRole('dialog', { name: 'Agent Config' })).toBeInTheDocument();
 
@@ -496,8 +509,9 @@ describe('SidebarLayout', () => {
     expect(rail).toHaveClass('w-20');
     expect(within(drawer).getByAltText('Acme')).toHaveAttribute('src', '/acme.svg');
     expect(within(drawer).queryByText('Acme')).not.toBeInTheDocument();
-    expect(within(drawer).getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
-    expect(within(drawer).getByRole('button', { name: 'Start new agent' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Chats' })).toBeInTheDocument();
+    openRailMenu();
+    expect(screen.getByRole('button', { name: 'Start new agent' })).toBeInTheDocument();
     expect(within(drawer).queryByText('No threads yet')).not.toBeInTheDocument();
   });
 
@@ -551,7 +565,7 @@ describe('SidebarLayout', () => {
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
   });
 
-  it('shows a permanent labeled rail with New Chat and no expand control', () => {
+  it('shows a permanent labeled rail with Chats, no New entry, and no expand control', () => {
     const { container } = render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/acme.svg' } }}>
         <RuntimeHarness messages={[]}>
@@ -564,13 +578,15 @@ describe('SidebarLayout', () => {
 
     expect(container.querySelector('aside img')).toHaveAttribute('src', '/acme.svg');
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
-    expect(screen.getByText('New Chat')).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    expect(within(nav).getByRole('button', { name: 'Chats' })).toBeInTheDocument();
+    expect(within(nav).queryByText('New')).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('button', { name: /new chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
   });
 
-  it('orders the sidebar rail: New Chat first, then theme toggle before Settings', () => {
+  it('orders the sidebar rail: Chats first, and the More menu last', () => {
     render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/acme.svg' } }}>
         <RuntimeHarness messages={[]}>
@@ -585,14 +601,8 @@ describe('SidebarLayout', () => {
     const labels = Array.from(nav.querySelectorAll('button')).map(
       button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '',
     );
-    const newChatIndex = labels.indexOf('Start new chat');
-    const themeIndex = labels.findIndex(label => label === 'Switch to dark theme' || label === 'Switch to light theme');
-    expect(newChatIndex).toBeGreaterThanOrEqual(0);
-    expect(themeIndex).toBeGreaterThan(newChatIndex);
-    const settingsIndex = labels.indexOf('Settings');
-    if (settingsIndex >= 0) {
-      expect(settingsIndex).toBeGreaterThan(themeIndex);
-    }
+    expect(labels[0]).toBe('Chats');
+    expect(labels[labels.length - 1]).toBe('More');
   });
 
   it('keeps recent history visible when a named chat loads in the same page', async () => {
@@ -625,21 +635,23 @@ describe('SidebarLayout', () => {
     const recentChats = screen.getByRole('complementary', { name: 'Recent chats' });
     expect(recentChats).toHaveClass('hidden', 'md:flex');
     expect(recentChats.parentElement?.previousElementSibling?.tagName).toBe('HEADER');
-    expect(screen.getAllByText('New Chat')).toHaveLength(2);
+    expect(within(recentChats).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+
+    openRailMenu();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start new agent' }));
     await waitFor(() => {
       expect(screen.queryByRole('complementary', { name: 'Recent chats' })).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start new chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Chats' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open named chat' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
   });
 
-  it('highlights New Chat, New Agent, and Settings when selected', async () => {
+  it('highlights one rail entry for the screen, and opens Agent Config and Settings from the More menu', async () => {
     function NamedAgentButtons() {
       const shell = useShellMode();
       return (
@@ -674,24 +686,19 @@ describe('SidebarLayout', () => {
       </SlotsProvider>,
     );
 
-    const newChat = screen.getByRole('button', { name: 'Start new chat' });
-    const newAgent = screen.getByRole('button', { name: 'Start new agent' });
-    expect(newChat).toHaveAttribute('aria-current', 'page');
-    expect(newAgent).not.toHaveAttribute('aria-current');
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const current = () => Array.from(nav.querySelectorAll('[aria-current="page"]')).map(el => el.textContent?.trim());
+    expect(current()).toEqual(['Chats']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open history' }));
-    expect(newChat).toHaveAttribute('aria-current', 'page');
-    expect(newAgent).not.toHaveAttribute('aria-current');
+    expect(current()).toEqual(['Chats']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Try support' }));
-    expect(newChat).not.toHaveAttribute('aria-current');
-    expect(newAgent).not.toHaveAttribute('aria-current');
+    expect(current()).toEqual(['Chats']);
 
-    fireEvent.click(newAgent);
-    const selectedNewAgent = await screen.findByRole('button', { name: 'Start new agent' });
-    const deselectedNewChat = screen.getByRole('button', { name: 'Start new chat' });
-    expect(selectedNewAgent).toHaveAttribute('aria-current', 'page');
-    expect(deselectedNewChat).not.toHaveAttribute('aria-current');
+    openRailMenu();
+    fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
+    await waitFor(() => expect(current()).toEqual(['More']));
     const config = await screen.findByRole('dialog', { name: 'Agent Config' });
     const chatColumn = config.nextElementSibling;
     expect(config).toHaveClass('md:max-w-140', 'md:flex-1', '2xl:max-w-150', 'border-r');
@@ -700,19 +707,13 @@ describe('SidebarLayout', () => {
     expect(chatColumn?.querySelector('header')).toHaveClass('min-h-14');
     expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
 
-    const [settingsButton] = await screen.findAllByRole('button', { name: 'Settings' });
-    if (settingsButton === undefined) {
-      throw new Error('Expected settings button');
-    }
-    expect(settingsButton).not.toHaveAttribute('aria-current');
-    fireEvent.click(settingsButton);
+    openRailMenu();
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    expect(settingsButton).toHaveAttribute('aria-current', 'page');
-    expect(deselectedNewChat).not.toHaveAttribute('aria-current');
-    expect(selectedNewAgent).not.toHaveAttribute('aria-current');
+    expect(current()).toEqual(['More']);
   });
 
-  it('toggles theme from the footer and shows settings only when catalog is provided', async () => {
+  it('chooses an appearance from the More menu and shows settings only when catalog is provided', async () => {
     const { rerender } = render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme' } }}>
         <ServerProvider server={mockServer(stubCatalog)}>
@@ -727,14 +728,13 @@ describe('SidebarLayout', () => {
       </SlotsProvider>,
     );
 
+    openRailMenu();
     expect(await screen.findAllByRole('button', { name: 'Settings' })).toHaveLength(1);
     expect(await screen.findAllByRole('button', { name: 'Agents' })).not.toHaveLength(0);
-    const [themeButton] = screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ });
-    if (themeButton === undefined) {
-      throw new Error('Expected theme toggle');
-    }
-    fireEvent.click(themeButton);
-    expect(screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+    // Choosing an appearance closes the More menu, so reopen it to check the choice moved.
+    openRailMenu();
+    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
 
     // Settings stays available with a locked agentName when catalog is present.
     rerender(
@@ -750,6 +750,7 @@ describe('SidebarLayout', () => {
         </ServerProvider>
       </SlotsProvider>,
     );
+    openRailMenu();
     expect(await screen.findAllByRole('button', { name: 'Settings' })).toHaveLength(1);
     const [settingsButton] = screen.getAllByRole('button', { name: 'Settings' });
     if (settingsButton === undefined) {
@@ -802,8 +803,9 @@ describe('SidebarLayout', () => {
         </ServerProvider>
       </SlotsProvider>,
     );
+    openRailMenu();
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Switch to (light|dark) theme/ })).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
   });
 });
 
@@ -850,24 +852,7 @@ describe('layout slot overrides', () => {
     ['dock/widget', StackChatPanel],
   ] as const;
 
-  it.each(hosts)('%s honors overrides.ClearChatButton', (_name, Layout) => {
-    render(
-      <SlotsProvider overrides={{ ClearChatButton: CustomClearChat }}>
-        <ShellModeProvider agentConfig={{ mode: 'SingleAgent', name: 'a' }}>
-          <RuntimeHarness messages={[]}>
-            <div className="h-96">
-              <Layout />
-            </div>
-          </RuntimeHarness>
-        </ShellModeProvider>
-      </SlotsProvider>,
-    );
-
-    expect(screen.getByRole('button', { name: 'custom clear' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Clear chat' })).not.toBeInTheDocument();
-  });
-
-  it.each(hosts)('%s places Clear Chat immediately before Save Agent', (_name, Layout) => {
+  it.each(hosts)('%s keeps Clear chat out of the header row, beside Save Agent', (_name, Layout) => {
     render(
       <SlotsProvider overrides={{ ClearChatButton: CustomClearChat, SaveAgentButton: CustomSaveAgent }}>
         <ShellModeProvider agentConfig={{ mode: 'SingleAgent', name: 'a' }}>
@@ -880,9 +865,9 @@ describe('layout slot overrides', () => {
       </SlotsProvider>,
     );
 
-    const clearChat = screen.getByRole('button', { name: 'custom clear' });
-    const saveAgent = screen.getByRole('button', { name: 'custom save' });
-    expect(clearChat.nextElementSibling).toBe(saveAgent);
+    // Clear chat is rarely used, so it lives in the header's three-dots menu (see ChatHeaderActions).
+    expect(screen.getByRole('button', { name: 'custom save' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'custom clear' })).not.toBeInTheDocument();
   });
 
   it.each(hosts)('%s honors overrides.ShellActionsActionSlot to the right of shell actions', (_name, Layout) => {
@@ -898,6 +883,7 @@ describe('layout slot overrides', () => {
       </SlotsProvider>,
     );
 
+    openRailMenu();
     expect(screen.getAllByRole('button', { name: 'custom action' }).length).toBeGreaterThan(0);
   });
 
@@ -937,18 +923,17 @@ describe('layout slot overrides', () => {
         </SlotsProvider>,
       );
 
-      const before = screen.getAllByRole('button', { name: 'custom action' });
-      expect(before.length).toBeGreaterThan(0);
-      const beforeNode = before[0];
+      openRailMenu();
+      expect(screen.getAllByRole('button', { name: 'custom action' }).length).toBeGreaterThan(0);
 
-      fireEvent.click((await screen.findAllByRole('button', { name: 'Settings' }))[0]!);
+      openRailMenu();
+      fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
       // SettingsBuilder is lazy-loaded behind Suspense in the layout.
       expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
 
-      const after = screen.getAllByRole('button', { name: 'custom action' });
-      expect(after.length).toBeGreaterThan(0);
-      // Same DOM node — layout did not remount the host override on Settings toggle.
-      expect(after).toContain(beforeNode);
+      // The menu closes on a choice, so the host slot is reached again from the More menu.
+      openRailMenu();
+      expect(screen.getAllByRole('button', { name: 'custom action' }).length).toBeGreaterThan(0);
     },
   );
 });

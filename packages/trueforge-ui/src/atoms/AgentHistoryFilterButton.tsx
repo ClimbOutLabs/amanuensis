@@ -172,7 +172,7 @@ export function AgentHistoryFilterButton() {
           variant: 'ghost',
           size: 'icon',
           className: cn(
-            'relative size-7 shrink-0 text-text-secondary hover:bg-ghost-button-hover hover:text-ghost-button-text',
+            'relative size-7 shrink-0 border border-transparent text-text-secondary hover:bg-ghost-button-hover hover:text-ghost-button-text',
             selected != null && 'text-text-primary',
           ),
         })}

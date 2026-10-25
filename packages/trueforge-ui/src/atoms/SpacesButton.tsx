@@ -3,12 +3,19 @@
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalSpaces } from '../server/SpaceContext.js';
-import { auiButtonClass, sidebarButtonRadiusClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
+import {
+  auiButtonClass,
+  railSelectedClassName,
+  sidebarButtonRadiusClassName,
+  sidebarRailButtonClassName,
+} from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
 export type SpacesButtonProps = {
   className?: string;
   compact?: boolean;
+  /** Whether this is the current screen. The rail decides this in one place; on its own the button follows its page. */
+  selected?: boolean;
 };
 
 /**
@@ -19,7 +26,7 @@ export type SpacesButtonProps = {
  * `useShellMode().openSpaces()`, so without that provider a click would otherwise do nothing with
  * no visible cause. Render disabled with an explanatory title instead of a silently dead button.
  */
-export function SpacesButton({ className, compact = false }: SpacesButtonProps) {
+export function SpacesButton({ className, compact = false, selected }: SpacesButtonProps) {
   const spaces = useOptionalSpaces();
   const shell = useOptionalShellMode();
 
@@ -27,6 +34,7 @@ export function SpacesButton({ className, compact = false }: SpacesButtonProps) 
 
   const shellAvailable = shell !== null;
   const open = shell?.spacesOpen === true;
+  const highlighted = selected ?? open;
   const title = !shellAvailable
     ? 'Spaces requires TrueForgeUIShell (no ShellModeProvider found)'
     : compact
@@ -40,15 +48,17 @@ export function SpacesButton({ className, compact = false }: SpacesButtonProps) 
         disabled={!shellAvailable}
         aria-label={compact ? 'Spaces' : undefined}
         title={title}
-        aria-current={open ? 'page' : undefined}
+        aria-current={highlighted ? 'page' : undefined}
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
             sidebarButtonRadiusClassName,
             'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
             compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
-            open &&
-              'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
+            highlighted &&
+              (compact
+                ? railSelectedClassName
+                : 'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text'),
           ),
         })}
         onClick={() => shell?.openSpaces()}

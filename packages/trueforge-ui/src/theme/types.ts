@@ -26,6 +26,8 @@ export type SemanticTokens = {
   inputBorder: string;
   textPrimary: string;
   textSecondary: string;
+  /** Hints such as placeholders: lighter than secondary text, still AA against the input background. */
+  textMuted: string;
   // Type scale
   textXs: string;
   textSm: string;
@@ -259,6 +261,7 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   inputBorder: '--input-border',
   textPrimary: '--text-primary',
   textSecondary: '--text-secondary',
+  textMuted: '--text-muted',
   textXs: '--text-xs',
   textSm: '--text-sm',
   textBase: '--text-base',

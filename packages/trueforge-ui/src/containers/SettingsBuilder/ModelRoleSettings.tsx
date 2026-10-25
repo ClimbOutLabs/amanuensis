@@ -5,6 +5,7 @@ import { DraftModelSelector } from '@/atoms/draft/DraftModelSelector.js';
 import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import PersonaSettings from './PersonaSettings.js';
 
 /**
@@ -17,6 +18,7 @@ import PersonaSettings from './PersonaSettings.js';
  * them can be given a setting that changes anything.
  */
 const ModelRoleSettings = () => {
+  const assistant = useAssistantDisplayName();
   const personas = useOptionalPersonas();
   const { specError } = useTrueFoundryAgentSpec();
 
@@ -54,8 +56,8 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Coding / subagent model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Runs sub-agent threads, the delegated work Aman hands off. A sub-agent that asks for a specific model
-                  still gets it.
+                  Runs sub-agent threads, the delegated work {assistant} hands off. A sub-agent that asks for a specific
+                  model still gets it.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">

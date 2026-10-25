@@ -744,8 +744,8 @@ describe('Phase 2: semantic block anchors', () => {
     });
     const parsed = resultJson(rejected);
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toBe('Validation failed');
-    expect(JSON.stringify(parsed.details)).toContain('Provide exactly one of body');
+    expect(parsed.error).toContain('Invalid space call');
+    expect(parsed.error).toContain('Provide exactly one of body');
   });
 
   it('edits and block_edits together are rejected by schema validation', async () => {
@@ -759,7 +759,7 @@ describe('Phase 2: semantic block anchors', () => {
     });
     const parsed = resultJson(rejected);
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(parsed.error).toBe('Validation failed');
+    expect(parsed.error).toContain('Provide exactly one of body');
   });
 
   it('a reverted block edit restores the previous body', async () => {
@@ -1069,7 +1069,7 @@ describe('fix-pass: reliability hardening', () => {
       block_edits: [{ anchor: `a${'x'.repeat(300)}`, new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(rejected)).toBe(true);
-    expect(resultJson(rejected).error).toBe('Validation failed');
+    expect(resultJson(rejected).error).toBe('Invalid space call: block_edits.0.anchor: is too long.');
     expect(await readBody(callTool, spaceId)).toBe(ANCHORED_BOARD);
   });
 

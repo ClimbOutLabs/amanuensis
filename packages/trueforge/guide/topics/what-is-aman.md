@@ -1,7 +1,7 @@
 ---
 id: what-is-aman
 title: What Aman is
-covers: get-to-know
+covers:
 ---
 
 Aman is your personal assistant. It keeps track of your life and helps you with it: your day, your email, your calendar, your tasks, and the things you want to remember.

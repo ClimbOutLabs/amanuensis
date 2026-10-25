@@ -179,11 +179,11 @@ describe('AgentDetailsPreferenceContext', () => {
       </ServerProvider>,
     );
 
-    // The earlier turn keeps its details, and the running turn shows its live row.
+    // The earlier turn keeps its details, and the running turn shows its own row too.
     await waitFor(() => expect(screen.getAllByTestId('assistant-message-agent-internals')).toHaveLength(2), {
       timeout: 3000,
     });
-    expect(screen.getAllByTestId('assistant-message-agent-internals')[1]?.textContent).toContain('Waiting for model');
+    expect(screen.getAllByTestId('assistant-message-agent-internals')[1]?.textContent).toContain('Details');
   });
 
   it('a slow first read does not undo the switch the person turned on meanwhile', async () => {

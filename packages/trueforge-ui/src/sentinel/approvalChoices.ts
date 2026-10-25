@@ -46,7 +46,7 @@ export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
 export const ALWAYS_ALLOW_TOOL_OPTION_ID = 'allow-standing';
 
 /**
- * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new specialist, or a
+ * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new persona, or a
  * held web search, whose words they may want to change before it is sent.
  */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {
