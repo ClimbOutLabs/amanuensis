@@ -50,8 +50,10 @@ import {
   clearSummaryPending,
   entryMetadata,
   entryOccurredAt,
+  entryRecallText,
   estimateTokens,
   formatRetainEntry,
+  isFromSession,
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
@@ -66,7 +68,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
-  withoutSessionMarker,
+  withOriginalSessionMarker,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -209,6 +211,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    currentSessionId?: string | undefined;
   }): Promise<RecallOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
@@ -247,14 +250,20 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Curated memory first: it is the model's own long-term store.
       for (const { namespace, scan } of vaults) {
         if (scan.curated !== undefined) {
-          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated, type: 'markdown' });
+          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated });
         }
       }
 
       // Each vault ranks on its own corpus and index; the lists then interleave.
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
-          this.rankVault({ namespace, scan, query: params.query, timeoutMs: params.timeoutMs }),
+          this.rankVault({
+            namespace,
+            scan,
+            query: params.query,
+            timeoutMs: params.timeoutMs,
+            currentSessionId: params.currentSessionId,
+          }),
         ),
       );
       for (const item of interleaveRanked(rankedLists)) {
@@ -263,8 +272,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
-          text: withoutSessionMarker(item.text),
-          type: 'markdown',
+          text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
           ...(metadata && { metadata }),
         });
@@ -279,15 +287,21 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. */
+  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. The chat being answered is left out of both. */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
     query: string;
     timeoutMs: number;
+    currentSessionId: string | undefined;
   }): Promise<RankedMemory[]> {
+    const ownEntries = input.scan.entries.filter(entry =>
+      isFromSession({ metadata: entryMetadata(entry.text), sessionId: input.currentSessionId }),
+    );
+    const excludeIds = new Set(ownEntries.map(entry => entry.id));
+    const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
-    const scored = input.scan.entries
+    const scored = entries
       .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
       .filter(candidate => candidate.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
@@ -304,7 +318,8 @@ export class MarkdownMemoryClient implements MemoryClient {
     const fused = await embeddings.fusedRank({
       query: input.query,
       keywordHits: keywordRanked,
-      entryTexts: new Map(input.scan.entries.map(entry => [entry.id, entry.text])),
+      entryTexts: new Map(entries.map(entry => [entry.id, entry.text])),
+      excludeIds,
       timeoutMs: input.timeoutMs,
     });
     return fused ?? keywordRanked;
@@ -451,7 +466,7 @@ export class MarkdownMemoryClient implements MemoryClient {
   private async lookupVaultEntry(
     entryId: string,
     timeoutMs: number,
-  ): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> {
+  ): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> {
     const match = MarkdownMemoryClient.VAULT_ENTRY_ID_PATTERN.exec(entryId);
     const filesystemNamespace = match?.[1] ?? '';
     if (match === null || !this.vaultTenantScope(filesystemNamespace)) {
@@ -459,13 +474,14 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
     // One budget for the whole lookup: the scan and the marker read share it.
     return withTimeout(
-      (async (): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> => {
+      (async (): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> => {
         const scan = await scanNamespaceEntries({
           baseDir: this.baseDir,
           namespace: filesystemNamespace,
           maxDailyFiles: Number.POSITIVE_INFINITY,
         });
-        if (!scan.entries.some(entry => entry.id === entryId)) {
+        const original = scan.entries.find(entry => entry.id === entryId);
+        if (original === undefined) {
           return undefined;
         }
         const tombstones = await readVaultTombstones({
@@ -473,7 +489,7 @@ export class MarkdownMemoryClient implements MemoryClient {
           namespace: filesystemNamespace,
         });
         const deleted = latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted';
-        return { filesystemNamespace, deleted };
+        return { filesystemNamespace, deleted, text: original.text };
       })(),
       timeoutMs,
       `markdown vault lookup ${entryId}`,
@@ -569,7 +585,9 @@ export class MarkdownMemoryClient implements MemoryClient {
       // The edit re-indexes in the vault that owns the entry, never in another vault's store.
       const embeddings = this.embeddings?.(target.filesystemNamespace);
       embeddings?.ensureWarmed();
-      embeddings?.indexNewEntries([{ id: params.entryId, text: clean }]);
+      embeddings?.indexNewEntries([
+        { id: params.entryId, text: withOriginalSessionMarker({ original: target.text, edited: clean }) },
+      ]);
       return {
         ok: true,
         entry: {

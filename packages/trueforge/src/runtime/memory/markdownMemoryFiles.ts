@@ -85,6 +85,21 @@ export function dailyLogEntries(input: { safeNamespace: string; file: string; co
 /** Metadata key naming the chat an entry came from; stored as a hidden trailer line, never in the fact text. */
 export const SESSION_ID_METADATA_KEY = 'session_id';
 
+/**
+ * Whether a recalled note was written in the given chat. The chat's full history is already in the
+ * conversation, so an older copy can only mislead. A note with no recorded chat (written before notes
+ * recorded one) is judged to be from another chat: a chat title is not unique, so it is never used to guess.
+ */
+export function isFromSession({
+  metadata,
+  sessionId,
+}: {
+  metadata: Readonly<Record<string, string>> | undefined;
+  sessionId: string | undefined;
+}): boolean {
+  return sessionId !== undefined && sessionId !== '' && metadata?.[SESSION_ID_METADATA_KEY] === sessionId;
+}
+
 /** What a chat id may hold so it can ride in a hidden closing line; the one owner of that rule. */
 const SESSION_ID_CHARACTERS = '[A-Za-z0-9_-]{1,128}';
 
@@ -177,13 +192,43 @@ export function withoutSessionMarker(text: string): string {
   return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
 }
 
+/** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
+function headingInstant(text: string): string | undefined {
+  const heading = text.startsWith('## ') ? (text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
+  return /^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())
+    ? new Date(heading).toISOString()
+    : undefined;
+}
+
+/**
+ * An edited entry's text with the hidden chat id of the original put back (the Memories page sends the
+ * text without it), so editing a note never makes it forget which chat it came from.
+ */
+export function withOriginalSessionMarker({ original, edited }: { original: string; edited: string }): string {
+  const sessionId = splitEntryTrailers(original).metadata[SESSION_ID_METADATA_KEY];
+  const { body, metadata } = splitEntryTrailers(edited);
+  if (sessionId === undefined || metadata[SESSION_ID_METADATA_KEY] !== undefined) {
+    return edited;
+  }
+  const trailers = [`<!-- session_id: ${sessionId} -->`];
+  if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
+    trailers.push(READ_CONTENT_SOURCE_LINE);
+  }
+  return [body, ...trailers].join('\n\n');
+}
+
 /** When an entry was written: its `## ` heading instant, else the day in its daily file name. */
 export function entryOccurredAt(entry: { id: string; text: string }): string | undefined {
-  const heading = entry.text.startsWith('## ') ? (entry.text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
-  if (/^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())) {
-    return new Date(heading).toISOString();
-  }
-  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
+  return headingInstant(entry.text) ?? /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
+}
+
+/**
+ * What recall shows the model for an entry: the text alone. The timestamp heading, the hidden chat id
+ * and the read-content marker are left out because recall reports them as the item's date and origin.
+ */
+export function entryRecallText(text: string): string {
+  const { body } = splitEntryTrailers(text);
+  return headingInstant(body) === undefined ? body : body.slice(body.indexOf('\n') + 1 || body.length).trim();
 }
 
 /** Curated long-term memory file inside a namespace directory. */
@@ -527,7 +572,7 @@ export function applyVaultTombstones(
     if (tombstone === undefined) {
       resolved.push(entry);
     } else if (tombstone.action === 'updated' && tombstone.text !== undefined) {
-      resolved.push({ ...entry, text: tombstone.text });
+      resolved.push({ ...entry, text: withOriginalSessionMarker({ original: entry.text, edited: tombstone.text }) });
     }
     // Deleted entries (and updates without text) are dropped.
   }

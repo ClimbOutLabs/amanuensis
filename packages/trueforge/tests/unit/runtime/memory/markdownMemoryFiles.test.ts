@@ -7,6 +7,7 @@ import {
   dailyLogEntries,
   entryMetadata,
   formatRetainEntry,
+  isFromSession,
   namespaceDirFor,
   personaForVaultFilesystemNamespace,
   sanitizeNamespace,
@@ -16,6 +17,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
+  withOriginalSessionMarker,
   withoutSessionMarker,
   writeVaultSharing,
   type VaultScope,
@@ -434,5 +436,41 @@ describe('markdownMemoryFiles', () => {
       expect(personaForVaultFilesystemNamespace('tenant-1', clean)).toBe('planner');
       expect(personaForVaultFilesystemNamespace('tenant-1', hashed)).toBe('Ana_Lou');
     });
+  });
+});
+
+describe('isFromSession', () => {
+  it('matches only the recorded chat id', () => {
+    expect(isFromSession({ metadata: { session_id: 's1' }, sessionId: 's1' })).toBe(true);
+    expect(isFromSession({ metadata: { session_id: 's2' }, sessionId: 's1' })).toBe(false);
+  });
+
+  it('treats a note with no recorded chat, or no current chat, as another chat', () => {
+    expect(isFromSession({ metadata: undefined, sessionId: 's1' })).toBe(false);
+    expect(isFromSession({ metadata: { origin: 'user_stated' }, sessionId: 's1' })).toBe(false);
+    expect(isFromSession({ metadata: { session_id: 's1' }, sessionId: undefined })).toBe(false);
+    expect(isFromSession({ metadata: { session_id: '' }, sessionId: '' })).toBe(false);
+  });
+});
+
+describe('withOriginalSessionMarker', () => {
+  const original = '## 2026-10-26T09:15:58.000Z\n\nThe dentist is Dr Rivera.\n\n<!-- session_id: chat-now -->';
+
+  it('puts the original chat id back after the edited text', () => {
+    expect(withOriginalSessionMarker({ original, edited: 'The dentist is Dr Rivera Jr.' })).toBe(
+      'The dentist is Dr Rivera Jr.\n\n<!-- session_id: chat-now -->',
+    );
+  });
+
+  it('keeps the read-content line last', () => {
+    expect(withOriginalSessionMarker({ original, edited: 'An email said to call.\n\n> Source: read content' })).toBe(
+      'An email said to call.\n\n<!-- session_id: chat-now -->\n\n> Source: read content',
+    );
+  });
+
+  it('leaves the text alone when the original had no chat id or the edit already names one', () => {
+    expect(withOriginalSessionMarker({ original: '## 2026-10-26T09:15:58.000Z\n\nx', edited: 'y' })).toBe('y');
+    const edited = 'y\n\n<!-- session_id: chat-other -->';
+    expect(withOriginalSessionMarker({ original, edited })).toBe(edited);
   });
 });

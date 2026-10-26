@@ -501,18 +501,18 @@ function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string |
 
 /**
  * A recalled item's full line exactly as it reaches the model, with every provider-controlled byte
- * sanitized. `type` and the `occurred_start`-derived date are provider-supplied too, not just the
- * text, so all three are sanitized here; the surrounding brackets and comma are the only host bytes.
- * Shared by {@link formatMemoryBlock} and the recall screen so the classifier judges the same bytes
- * the model sees, prefix included, and no provider field can escape the wrapper or slip past the
- * screen unsanitized.
+ * sanitized. The date and the text are provider-supplied, so both are sanitized here; the surrounding
+ * brackets and comma are the only host bytes. The provider's own kind label is not shown: it names a
+ * storage detail, not anything the model can use. Shared by formatMemoryBlock and the recall screen
+ * so the classifier judges the same bytes the model sees, prefix included, and no provider field can
+ * escape the wrapper or slip past the screen unsanitized.
  */
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
   // Only the fixed phrase is emitted for the origin, never the provider's own value.
   const source = origin === undefined || origin === USER_STATED_ORIGIN ? '' : `, ${READ_CONTENT_LABEL}`;
-  return `[${sanitizeMemoryLine(item.type)}, ${date}${source}] ${sanitizeMemoryLine(item.text)}`;
+  return `[${date}${source}] ${sanitizeMemoryLine(item.text)}`;
 }
 
 /**
@@ -1692,6 +1692,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         entityTokens,
         queryTimestamp: new Date().toISOString(),
         timeoutMs: this.config.recallTimeoutMs,
+        currentSessionId: this.sessionId,
       }),
     );
     return { outcome, recallMs: Date.now() - startedAt };
