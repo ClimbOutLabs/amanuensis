@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { access, mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -201,4 +201,118 @@ test('the real remove script also takes over a dead holder lock', async () => {
   const result = spawnSync('sh', ['-c', volumeRemoveScript(home), 'sh', 'state/instances/main.conf']);
   assert.equal(result.status, 0, result.stderr.toString());
   await assert.rejects(access(join(home, 'state', 'instances', 'main.conf')));
+});
+
+// The takeover tests below start real runs of the script at the same
+// moment, because the takeover only has to be safe when several runs find
+// the same dead holder's lock together.
+
+interface RunningWrite {
+  child: ChildProcessWithoutNullStreams;
+  done: Promise<{ status: number | null; stderr: string }>;
+}
+
+// A write run left blocked on its input, the way a run holds the lock
+// while it works: the script takes the lock first, then reads the tar
+// from stdin, so a run whose stdin never closes is a run still holding.
+function startWrite(home: string): RunningWrite {
+  const child = spawn('sh', ['-c', volumeWriteScript(home)]);
+  child.stdin.on('error', () => undefined);
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const done = new Promise<{ status: number | null; stderr: string }>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', status => resolve({ status, stderr }));
+  });
+  return { child, done };
+}
+
+async function lockToken(home: string): Promise<string> {
+  try {
+    return (await readFile(join(home, 'state', 'lock', 'token'), 'utf8')).trim();
+  } catch {
+    return '';
+  }
+}
+
+async function waitFor(check: () => Promise<boolean>, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (await check()) {
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+test('when many runs find a dead holder lock together, exactly one writes and the rest are told another install is running', async () => {
+  const writers = 6;
+  const rounds = 10;
+  for (let round = 0; round < rounds; round += 1) {
+    const home = await homeWithLock(3600, '1\n');
+    const runs = Array.from({ length: writers }, () => startWrite(home));
+    // The losers leave on their own with exit 3; whoever holds the lock
+    // waits at its input. Wait for the round to settle before feeding
+    // anyone, so a second run can never slip in after the winner has
+    // finished and count as a second success.
+    let exited = 0;
+    const tracked = runs.map(run =>
+      run.done.then(result => {
+        exited += 1;
+        return result;
+      }),
+    );
+    try {
+      await waitFor(async () => exited >= writers - 1, 'the round to settle');
+    } catch (error) {
+      for (const run of runs) {
+        run.child.kill();
+      }
+      throw error;
+    }
+    for (const run of runs) {
+      run.child.stdin.end(Buffer.from(buildTar(ONE_FILE)));
+    }
+    const results = await Promise.all(tracked);
+    const codes = results.map(result => result.status).sort((a, b) => (a ?? -1) - (b ?? -1));
+    assert.deepEqual(
+      codes,
+      [0, ...Array.from({ length: writers - 1 }, () => 3)],
+      `round ${String(round)}: ${results.map(result => result.stderr).join(' | ')}`,
+    );
+    assert.equal(await readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'), 'name=main\n');
+    assert.equal((await readdir(join(home, 'state'))).includes('lock'), false);
+  }
+});
+
+test('a holder whose lock was taken over cannot take the new holder lock away when it exits', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'aman-volume-lock-'));
+  const first = startWrite(home);
+  let second: RunningWrite | undefined;
+  try {
+    await waitFor(async () => (await lockToken(home)) !== '', 'the first run to take the lock');
+    const firstToken = await lockToken(home);
+    // The first run is still going, but its lock now reads as a dead
+    // holder's: old enough that a second run may take it over.
+    const when = new Date(Date.now() - 3600 * 1000);
+    await utimes(join(home, 'state', 'lock'), when, when);
+    second = startWrite(home);
+    const secondRun = second;
+    await waitFor(async () => {
+      const token = await lockToken(home);
+      return token !== '' && token !== firstToken;
+    }, 'the second run to take the lock over');
+    const secondToken = await lockToken(home);
+    first.child.stdin.end();
+    await first.done;
+    assert.equal(await lockToken(home), secondToken);
+    secondRun.child.stdin.end();
+    await secondRun.done;
+    await assert.rejects(access(join(home, 'state', 'lock')));
+  } finally {
+    first.child.kill();
+    second?.child.kill();
+  }
 });

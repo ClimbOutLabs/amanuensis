@@ -104,15 +104,29 @@ folder tells a live holder from a leftover lock depends on where the home
 lives. On a folder on the computer itself, the run reads the pid: if that
 process is still alive, the run stops and says another install is
 running; if it is gone, the run removes the folder and takes the lock
-itself. In the `aman_home` volume, writes run inside a short-lived
-container whose own shell is process 1, so a pid written there names that
-container's processes, not the holder, and cannot say whether the holder
-is still running. There the run reads the lock folder's age instead: a
-lock younger than fifteen minutes is a run still going, and an older one
-is a holder that stopped without removing it, so the run removes the
-folder and takes the lock itself. Writes under this lock take seconds, so
-fifteen minutes only ever means a holder that died. The holder removes
-the folder when it finishes.
+itself. The holder removes the folder when it finishes. In the
+`aman_home` volume, writes run inside a short-lived container whose own
+shell is process 1, so a pid written there names that container's
+processes, not the holder, and cannot say whether the holder is still
+running. There the run reads the lock folder's age instead: a lock
+younger than fifteen minutes is a run still going, and an older one is
+a holder that stopped without removing it. Writes under this lock take
+seconds, so fifteen minutes only ever means a holder that died. A run
+that takes over in the volume first takes the folder `state/takeover`,
+also with `mkdir`, and only the run holding it may move a lock folder;
+a takeover folder left behind is judged by the same age rule. Under it,
+the run reads the lock's age again, moves the old folder aside to
+`state/lock.stale-` plus a mark of its own in one rename, checks the
+folder it moved is the one it read, and only then takes a fresh lock,
+removing the folder it moved aside and the takeover folder. Each run
+in the volume also writes a mark of its own into a `token` file inside
+its lock folder. Before it writes, the run reads the mark back and
+stops if the mark in place is no longer its own, and when it finishes
+it removes the folder only while the mark inside is still its own, so
+a holder whose lock was taken over cannot remove the new holder's lock
+when it finally exits. A `state/lock.stale-` or `state/takeover.stale-`
+folder left in the volume is the remains of a takeover that stopped
+midway; nothing reads it, and it can be removed by hand.
 
 ## Rules every writer follows
 

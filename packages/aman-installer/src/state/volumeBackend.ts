@@ -20,9 +20,6 @@ const MOUNT_READ_ONLY = `${MOUNT}:ro`;
 // than this is one whose holder stopped without removing it.
 const LOCK_STALE_SECONDS = 900;
 
-// The lock folder's age evidence: when it was last changed, in seconds.
-const LOCK_TIME = 'stat -c %Y state/lock 2>/dev/null';
-
 // The shell's lock folder and write shape, as one script: take state/lock
 // or take it over from a dead holder, then do the write. Exit 3 is the
 // shell's "another install is running". On a host folder the pid decides
@@ -34,19 +31,41 @@ const LOCK_TIME = 'stat -c %Y state/lock 2>/dev/null';
 // lock folder's age is the evidence that works here, because the holder
 // and the checker read the same clock: younger than LOCK_STALE_SECONDS is
 // a run still going, and older is a holder that died. The pid file is
-// still written, as the lock keeps it. The trap removes the folder only
-// while its stamp is still the one this run took, so a holder whose lock
-// was taken over cannot remove the new holder's lock when it finally
-// exits.
+// still written, as the lock keeps it.
+//
+// A takeover goes through a second folder, state/takeover, taken with
+// mkdir like the lock itself: only the run holding it may move a lock
+// folder aside, so two runs that both find a dead holder's lock cannot
+// both rename, and the rename can only ever move the folder that stands
+// in the lock place while the takeover runs. The takeover folder is
+// judged by the same age rule when a run finds it left behind. Under
+// the takeover folder, the run judges the lock's age again, then moves
+// the folder aside with one rename to a name only this run uses, checks
+// the folder it moved is the folder it judged (the token inside still
+// matches the one it read before the rename, and the folder is still
+// old), and only then takes a fresh lock; if the check fails it puts
+// the folder back when the lock place is empty. Every way out of a
+// takeover that does not hold the lock stops with exit 3. Each run
+// writes a token of its own into its lock folder (the token file).
+// Before it writes, the run reads that token back: while the lock place
+// stands empty during a takeover, another run can take it, so a run
+// whose token is not the one in place stops with exit 3 instead of
+// writing under a lock it does not hold; it waits a second first, in
+// case the folder it lost is being put back. The trap removes the
+// folder only while the run's token is still the one inside, so a
+// holder whose lock was taken over cannot remove the new holder's lock
+// when it finally exits.
 function lockSteps(home: string): readonly string[] {
   return [
     `cd ${home} || exit 1`,
     'mkdir -p state',
     'chmod 700 state',
-    `if ! mkdir state/lock 2>/dev/null; then taken=$(${LOCK_TIME}); now=$(date +%s); if [ -z "$taken" ] || [ $((now - taken)) -lt ${String(LOCK_STALE_SECONDS)} ]; then exit 3; fi; rm -rf state/lock; mkdir state/lock || exit 1; fi`,
+    `token="$$-$(date +%s)-$(head -c 8 /dev/urandom 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \\n')"`,
+    `if ! mkdir state/lock 2>/dev/null; then taken=$(stat -c %Y state/lock 2>/dev/null); now=$(date +%s); if [ -z "$taken" ] || [ $((now - taken)) -lt ${String(LOCK_STALE_SECONDS)} ]; then exit 3; fi; if ! mkdir state/takeover 2>/dev/null; then gtaken=$(stat -c %Y state/takeover 2>/dev/null); if [ -z "$gtaken" ] || [ $((now - gtaken)) -lt ${String(LOCK_STALE_SECONDS)} ]; then exit 3; fi; if ! mv state/takeover "state/takeover.stale-$token" 2>/dev/null; then exit 3; fi; if ! mkdir state/takeover 2>/dev/null; then exit 3; fi; rm -rf "state/takeover.stale-$token"; fi; taken=$(stat -c %Y state/lock 2>/dev/null); now=$(date +%s); if [ -z "$taken" ] || [ $((now - taken)) -lt ${String(LOCK_STALE_SECONDS)} ]; then rmdir state/takeover 2>/dev/null; exit 3; fi; oldtoken=$(cat state/lock/token 2>/dev/null); aside="state/lock.stale-$token"; if ! mv state/lock "$aside" 2>/dev/null; then rmdir state/takeover 2>/dev/null; exit 3; fi; astamp=$(stat -c %Y "$aside" 2>/dev/null); if [ "$(cat "$aside/token" 2>/dev/null)" != "$oldtoken" ] || [ -z "$astamp" ] || [ $((now - astamp)) -lt ${String(LOCK_STALE_SECONDS)} ]; then if [ ! -e state/lock ]; then mv "$aside" state/lock 2>/dev/null; fi; rmdir state/takeover 2>/dev/null; exit 3; fi; if ! mkdir state/lock 2>/dev/null; then rm -rf "$aside"; rmdir state/takeover 2>/dev/null; exit 3; fi; rm -rf "$aside"; rmdir state/takeover 2>/dev/null; fi`,
     'printf \'%s\\n\' "$$" > state/lock/pid',
-    `stamp=$(${LOCK_TIME})`,
-    `trap 'if [ "$(${LOCK_TIME})" = "$stamp" ]; then rm -rf state/lock; fi' EXIT`,
+    'printf \'%s\\n\' "$token" > state/lock/token',
+    `trap 'if [ "$(cat state/lock/token 2>/dev/null)" = "$token" ]; then rm -rf state/lock; fi' EXIT`,
+    `if [ "$(cat state/lock/token 2>/dev/null)" != "$token" ]; then sleep 1; if [ "$(cat state/lock/token 2>/dev/null)" != "$token" ]; then exit 3; fi; fi`,
   ];
 }
 
