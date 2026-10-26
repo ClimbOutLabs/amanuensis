@@ -167,7 +167,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {card.plain_why !== null && (
           <p className="text-sm text-text-secondary" data-role="held-action-reason">
-            Agent says: {card.plain_why}
+            {assistant} says: {card.plain_why}
           </p>
         )}
 

@@ -26,6 +26,11 @@ export function blockedCallsStopMessage(assistantName: string): string {
   return `${assistantName} kept sending a request in a form the tool cannot take, so this reply stopped. Ask again in other words.`;
 }
 
+/** Ends the turn, shown to the person, when the model's reasoning kept going in circles. */
+export function repetitionStopMessage(assistantName: string): string {
+  return `${assistantName} was going in circles while thinking, so this reply stopped. Ask again in smaller parts.`;
+}
+
 /** The same stop for a helper, read by the model that started it. */
 export const BLOCKED_CALLS_PARENT_MESSAGE =
   'The helper kept sending a request in a form the tool cannot take, so it stopped. Do not send it the same task again. Try another way, or tell the person what could not be done.';

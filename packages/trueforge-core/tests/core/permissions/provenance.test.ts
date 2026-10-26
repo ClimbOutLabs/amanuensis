@@ -227,6 +227,42 @@ describe("the person's own details, and what the chat has read", () => {
     expect(carriedPrivateDetails({ provenance, values: ['dana @example.org'] })).toEqual(['dana@example.org']);
   });
 
+  it('folds every writing of one phone number to the same key, recorded and sent', () => {
+    const writings = ['(415) 555-0132', '+1 (415) 555-0132', '+1 415 555 0132', '415-555-0132', '415.555.0132'];
+    for (const recorded of writings) {
+      const provenance = emptyChatProvenance();
+      recordPersonText({ provenance, text: `My number is ${recorded}.` });
+      for (const sent of writings) {
+        expect(carriedPrivateDetails({ provenance, values: [`call ${sent}`] })).toEqual(['4155550132']);
+      }
+    }
+  });
+
+  it('folds every writing of one mailbox to the same key, recorded and sent', () => {
+    const writings = [
+      'dana@example.org',
+      'Dana@Example.org',
+      'dana+tag@example.org',
+      'dana%2540example.org',
+      'dana\uFF20example.org',
+      'dana\u200B@example.org',
+      'dana @ example.org',
+    ];
+    for (const recorded of writings) {
+      const provenance = emptyChatProvenance();
+      recordPersonText({ provenance, text: `Write to ${recorded}` });
+      for (const sent of writings) {
+        expect(carriedPrivateDetails({ provenance, values: [sent] })).toEqual(['dana@example.org']);
+      }
+    }
+  });
+
+  it('keeps a postal code and a date out of the details', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'Post to 94110 before 2026-10-25, or 10/25/2026.' });
+    expect(provenance.own_details.size).toBe(0);
+  });
+
   it('reads a value with a broken percent sign as it stands', () => {
     const provenance = emptyChatProvenance();
     recordEmailText({ provenance, text: 'From: Dana Wolfe <dana@example.org>' });
