@@ -51,10 +51,28 @@ export function splitEntries(content: string): string[] {
   return entries;
 }
 
+/**
+ * Older versions wrote a `Turn summary: ` prefix right after each entry heading and a closing
+ * `> Chat title: ...` line, which sits last in its entry (before a source line, if any). Neither is
+ * a fact, so both are dropped. A title-looking line inside an entry's text is left alone. Only
+ * whole lines are touched, so the entry count, and with it every entry id, stays the same, and
+ * running it again changes nothing.
+ */
+export function upgradeLegacyEntries(content: string): string {
+  const prefix = /(^|\n)(## [^\n]*\n\n)(?:Turn summary: ?)+/g;
+  const trailingTitle = /\n\n> Chat title: [^\n]*(?=(?:\n\n> Source: read content)?(?:\n*$|\n+## ))/g;
+  let upgraded = content;
+  for (let previous = ''; previous !== upgraded;) {
+    previous = upgraded;
+    upgraded = upgraded.replace(prefix, '$1$2').replace(trailingTitle, '');
+  }
+  return upgraded;
+}
+
 /** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
 export function dailyLogEntries(input: { safeNamespace: string; file: string; content: string }): ScannedMemoryEntry[] {
   const entries: ScannedMemoryEntry[] = [];
-  const parts = splitEntries(input.content);
+  const parts = splitEntries(upgradeLegacyEntries(input.content));
   for (let index = 0; index < parts.length; index++) {
     const text = parts[index];
     if (text !== undefined) {
@@ -64,40 +82,108 @@ export function dailyLogEntries(input: { safeNamespace: string; file: string; co
   return entries;
 }
 
+/** Metadata key naming the chat an entry came from; stored as a hidden trailer line, never in the fact text. */
+export const SESSION_ID_METADATA_KEY = 'session_id';
+
+/** What a chat id may hold so it can ride in a hidden closing line; the one owner of that rule. */
+const SESSION_ID_CHARACTERS = '[A-Za-z0-9_-]{1,128}';
+
+/** Hidden (Markdown comment) trailer carrying the chat id; it renders as nothing and holds no fact. */
+const SESSION_MARKER_PATTERN = new RegExp(`^<!-- session_id: (${SESSION_ID_CHARACTERS}) -->$`);
+
+/** Closing line marking an entry written after the assistant read an email, document, or web page. */
+const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
  * `${formatRetainEntry(item)}\n` per item with blank-line separators, so this must
  * stay byte-identical to what `splitEntries` yields when the file is read back —
  * the embedding indexer hashes this text, and a mismatch would re-embed entries
  * on every pass.
+ *
+ * Layout: heading, the text with its optional `> context` line, then optional trailer lines (the
+ * hidden chat id, then the read-content marker).
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
   const text = context !== undefined && context.length > 0 ? `${item.content}\n\n> ${context}` : item.content;
-  const entry = `## ${item.timestamp}\n\n${escapeEntryStructure(text)}`;
+  const parts = [`## ${item.timestamp}`, escapeEntryStructure(text)];
+  const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
+  if (sessionId !== undefined) {
+    const marker = `<!-- session_id: ${sessionId} -->`;
+    if (SESSION_MARKER_PATTERN.test(marker)) {
+      parts.push(marker);
+    }
+  }
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  return origin === undefined || origin === USER_STATED_ORIGIN ? entry : `${entry}\n\n${READ_CONTENT_SOURCE_LINE}`;
+  if (origin !== undefined && origin !== USER_STATED_ORIGIN) {
+    parts.push(READ_CONTENT_SOURCE_LINE);
+  }
+  return parts.join('\n\n');
 }
-
-/** Closing line marking an entry written after Aman read an email, document, or web page. */
-const READ_CONTENT_SOURCE_LINE = '> Source: read content';
 
 /**
  * Backslash-escapes body lines `splitEntries` or `entryMetadata` would read as structure (an
- * entry heading or the source marker), so retained text can neither split its entry, which drops
- * the marker from the earlier fragments, nor forge the marker. The escape stays readable Markdown.
+ * entry heading or a trailer line), so retained text can neither split its entry, which drops
+ * the trailers from the earlier fragments, nor forge a trailer. The escape stays readable Markdown.
  */
 function escapeEntryStructure(text: string): string {
   return text
     .split('\n')
-    .map(line => (line.startsWith('## ') || line.trimEnd() === READ_CONTENT_SOURCE_LINE ? `\\${line}` : line))
+    .map(line => {
+      const trimmed = line.trimEnd();
+      return line.startsWith('## ') || trimmed === READ_CONTENT_SOURCE_LINE || SESSION_MARKER_PATTERN.test(trimmed)
+        ? `\\${line}`
+        : line;
+    })
     .join('\n');
 }
 
-/** Metadata recall hands back for an entry, read from the marker line `formatRetainEntry` wrote. */
+/** An entry's text split into its body and the metadata its trailer lines carry. */
+function splitEntryTrailers(text: string): { body: string; metadata: Record<string, string> } {
+  const lines = text.split('\n');
+  const metadata: Record<string, string> = {};
+  while (lines.length > 0) {
+    const line = (lines[lines.length - 1] ?? '').trimEnd();
+    const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
+    if (line === '') {
+      lines.pop();
+    } else if (line === READ_CONTENT_SOURCE_LINE) {
+      metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+      lines.pop();
+    } else if (sessionId !== undefined) {
+      // Every closing marker is dropped; the one nearest the end is the one that counts.
+      metadata[SESSION_ID_METADATA_KEY] ??= sessionId;
+      lines.pop();
+    } else {
+      break;
+    }
+  }
+  return { body: lines.join('\n').trim(), metadata };
+}
+
+/** Metadata recall hands back for an entry, read from the trailer lines `formatRetainEntry` wrote. */
 export function entryMetadata(text: string): Record<string, string> | undefined {
-  const lastLine = text.slice(text.lastIndexOf('\n') + 1);
-  return lastLine === READ_CONTENT_SOURCE_LINE ? { [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN } : undefined;
+  const { metadata } = splitEntryTrailers(text);
+  return Object.keys(metadata).length === 0 ? undefined : metadata;
+}
+
+/** The entry text the Memories page shows and edits: the hidden chat id line is dropped. */
+export function withoutSessionMarker(text: string): string {
+  const { body, metadata } = splitEntryTrailers(text);
+  if (metadata[SESSION_ID_METADATA_KEY] === undefined) {
+    return text;
+  }
+  return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
+}
+
+/** When an entry was written: its `## ` heading instant, else the day in its daily file name. */
+export function entryOccurredAt(entry: { id: string; text: string }): string | undefined {
+  const heading = entry.text.startsWith('## ') ? (entry.text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())) {
+    return new Date(heading).toISOString();
+  }
+  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
 }
 
 /** Curated long-term memory file inside a namespace directory. */
@@ -497,7 +583,7 @@ export async function scanVaultEntries(options: { baseDir: string; namespace: st
     const tombstone = latest.get(entry.id);
     return {
       id: entry.id,
-      text: entry.text,
+      text: withoutSessionMarker(entry.text),
       timestamp: tombstone?.action === 'updated' ? tombstone.timestamp : vaultEntryTimestamp(entry),
     };
   });

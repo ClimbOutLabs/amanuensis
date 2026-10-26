@@ -23,6 +23,7 @@ import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
@@ -35,7 +36,6 @@ export interface MemoryTurnContext {
   config: MemoryConfig;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle: string | undefined;
   /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
@@ -44,6 +44,10 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
+  summarize: SummarizeTurnContext | undefined;
+  /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
+  clientTimezone?: string | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
    * the turn's tool policy can block web_search as a substitute for recall.
@@ -69,8 +73,9 @@ function memoryCapabilitiesForTurn(input: {
       logger: input.logger,
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
-      sessionTitle: memory.sessionTitle,
       recallEnabled: memory.recallEnabled,
+      keepsFullExchange: memory.summarize === undefined,
+      timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
     }),

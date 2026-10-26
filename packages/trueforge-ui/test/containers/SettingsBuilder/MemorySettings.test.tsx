@@ -348,8 +348,7 @@ describe('MemorySettings (backend honesty)', () => {
       renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true });
 
       expect(await screen.findByText('Turn summaries')).toBeInTheDocument();
-      expect(screen.getByText(/important details/)).toBeInTheDocument();
-      expect(screen.getByText(/full transcript/)).toBeInTheDocument();
+      expect(screen.getByText(/saves only the lasting facts/)).toBeInTheDocument();
       const toggle = screen.getByRole('switch', { name: SWITCH_NAME });
       expect(toggle).toBeChecked();
     });

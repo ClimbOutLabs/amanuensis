@@ -99,7 +99,7 @@ function memoryContext(
     config: MEMORY_CONFIG,
     sessionId: 'session-1',
     previousTurnId: null,
-    sessionTitle: undefined,
+    summarize: undefined,
     providerServerName,
     searchProviderServerName,
     ...chat,
