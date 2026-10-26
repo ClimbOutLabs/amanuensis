@@ -31,10 +31,10 @@ export const HOME_CARD_COUNT = 4;
 
 /** Appended under every card prompt, so the whole conversation stays short, one question at a time, and safe. */
 export const SHARED_RULES = `You are helping someone who is busy and may be tired. Rules for this whole conversation:
-- Ask one question at a time, and only for what is still missing. Never ask the same thing twice in different words. When you offer choices, offer two or three, not more.
+- Ask one question at a time, and only for what is still missing. Never send a list of questions. Never ask the same thing twice in different words. When you offer choices, offer two or three, not more.
 - Keep every reply under ten lines unless I ask for more. Plain words, no jargon.
 - If I give you less than you need, make a sensible assumption, say it in one line, and carry on. Do not stall.
-- If I ask for something new or different partway through, do that first. My latest message always wins over the plan for the conversation.
+- If I ask for something new or different partway through, do that first. My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first.
 - In any list or checklist, every line is a concrete action or a fact, never filler.
 - Never send, save, book, cancel, or change anything without asking me first, and ask with the exact thing you are about to do.
 - Offer to add something to my calendar only when you have a real date and time for it.
@@ -102,7 +102,7 @@ export const CARDS = {
     title: "What's for dinner this week?",
     detail: () => 'Seven dinners and one shopping list',
     prompt:
-      "Plan this week's dinners and give me one shopping list grouped by aisle. Start from what's already in the fridge and cupboards; if you don't know what's there, ask me that one thing. Keep weeknights under 30 minutes, use up anything that will spoil first, and save the plan where I can tick it off. Offer to do it again next weekend.",
+      "Plan this week's dinners and give me one shopping list grouped by aisle. Start from what's already in the fridge and cupboards; if you don't know what's there, ask me that one thing. If you don't know who is eating, ask me who is eating and whether anyone has an allergy or a food they won't eat. Keep weeknights under 30 minutes, use up anything that will spoil first. Offer to save the plan where I can tick it off, and save it only after I say yes. Offer to do it again next weekend.",
     icon: 'list-check',
   },
   waiting: {
@@ -163,7 +163,7 @@ export const CARDS = {
     title: 'A trip is coming',
     detail: () => 'What to book, pack and sort out, in the right order',
     prompt:
-      "Help me get ready for a trip. Ask me where I'm going and when, one question at a time, and who with only if it changes the plan. Take my answers as they are, even if they're short or joking, and never ask the same thing twice in different words. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack, scaled to the time I have left, each line one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line. When I ask you to do something, like find tickets, do that first. Ask before adding anything to my calendar, and only offer a date or a reminder for a time that is real and still in the future.",
+      "Help me get ready for a trip. Ask me where I'm going and when, one question at a time, and who with only if it changes the plan. Take my answers as they are, even if they're short or joking, and never ask the same thing twice in different words. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack. Scale it to the time I have left. Each line is one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line. When I ask you to do something, like find tickets, do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first. Ask before adding anything to my calendar, and only offer a date or a reminder for a time that is real and still in the future.",
     icon: 'list-check',
   },
   remember: {

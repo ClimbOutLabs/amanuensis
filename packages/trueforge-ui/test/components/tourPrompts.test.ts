@@ -204,8 +204,44 @@ describe('the prompt fixes from the live trip run', () => {
     expect(SHARED_RULES).toContain('Never ask the same thing twice in different words');
   });
 
-  it('lets the latest message win over the plan for the conversation', () => {
-    expect(SHARED_RULES).toContain('My latest message always wins over the plan for the conversation');
+  it('lets the latest message win over the plan, but sends, saves and bookings still need a yes first', () => {
+    expect(SHARED_RULES).toContain(
+      'My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first',
+    );
+  });
+
+  it('keeps the same ask-first exception on the trip card, right after do that first', () => {
+    expect(CARDS.trip.prompt).toContain(
+      'do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first',
+    );
+  });
+
+  it('never sends a list of questions', () => {
+    expect(SHARED_RULES).toContain('Never send a list of questions.');
+  });
+
+  it('keeps the ask-first rule for sends, saves, bookings and changes in the shared rules', () => {
+    expect(SHARED_RULES).toContain('Never send, save, book, cancel, or change anything without asking me first');
+  });
+
+  it('asks first on every card whose prompt sends, saves or books', () => {
+    for (const card of everyCard) {
+      if (card.sharedRules === false) continue;
+      if (/\b(save|saving|saved|send|sending|book|booking)\b/i.test(card.prompt)) {
+        expect(card.prompt, card.title).toMatch(/\bask/i);
+      }
+    }
+  });
+
+  it('asks before saving the dinner plan', () => {
+    expect(CARDS.dinner.prompt).toContain(
+      'Offer to save the plan where I can tick it off, and save it only after I say yes',
+    );
+  });
+
+  it('asks who is eating and about allergies on the dinner card, when that is not known', () => {
+    expect(CARDS.dinner.prompt).toContain("If you don't know who is eating");
+    expect(CARDS.dinner.prompt).toContain("an allergy or a food they won't eat");
   });
 
   it('keeps every list line a concrete action or a fact, never filler', () => {
@@ -229,7 +265,8 @@ describe('the prompt fixes from the live trip run', () => {
 
   it('builds the trip checklist from the answers and fits it to the time left', () => {
     expect(CARDS.trip.prompt).toContain('make my checklist from what I actually told you');
-    expect(CARDS.trip.prompt).toContain('each line one concrete thing to do');
+    expect(CARDS.trip.prompt).toContain('Scale it to the time I have left');
+    expect(CARDS.trip.prompt).toContain('Each line is one concrete thing to do');
     expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
   });
 
