@@ -70,6 +70,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
@@ -90,7 +91,6 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
-import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
@@ -140,7 +140,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -341,7 +341,6 @@ export type BeginTurnExecutionDeps = Pick<
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
   previousTurnId?: string | null;
-  sessionTitle?: string | undefined;
   /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
 };
@@ -384,7 +383,8 @@ function createTurnResolver(deps: {
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
-  sessionTitle?: string | undefined;
+  /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
+  memorySummarize: SummarizeTurnContext | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -437,7 +437,7 @@ function createTurnResolver(deps: {
     memoryProviderServerName,
     memorySettings,
     previousTurnId,
-    sessionTitle,
+    memorySummarize,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
@@ -499,6 +499,7 @@ function createTurnResolver(deps: {
             signal,
             streamTimeout: resolved.streamTimeout,
             toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
+            toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
           });
           return new UsageRecordingLLM({
             llm: client,
@@ -585,7 +586,7 @@ function createTurnResolver(deps: {
         };
       },
       setUpConnectorNames: async () =>
-        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+        setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
@@ -835,7 +836,6 @@ function createTurnResolver(deps: {
       }),
       sessionId,
       previousTurnId: previousTurnId ?? null,
-      sessionTitle,
       providerServerName: memoryProviderServerName,
       searchProviderServerName: async () => {
         const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
@@ -846,6 +846,8 @@ function createTurnResolver(deps: {
       turnedOffConnectorKeys: readTurnedOffConnectorKeys(session.record.metadata),
       // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
       recallEnabled: deps.unattended ? false : undefined,
+      summarize: memorySummarize,
+      clientTimezone,
       internalSourceState,
     },
     {
@@ -1135,7 +1137,8 @@ export interface DrainTurnEventsInput {
         userText: string;
         /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
         attachedFiles: boolean;
-        sessionTitle: string | undefined;
+        /** The person's IANA time zone, so a summary writes dates as the day they lived. */
+        timeZone?: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
          * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
@@ -1299,7 +1302,7 @@ async function runTurnFollowUp(params: {
         userText: memory.userText,
         assistantText: formatAssistantMessageText(state.output?.content),
         completedAt: state.completed_at,
-        sessionTitle: memory.sessionTitle,
+        timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
         summarize: memory.summarize,
@@ -1619,7 +1622,7 @@ async function beginAcceptedTurnExecution(
         memorySettings: effectiveMemorySettings,
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
-        sessionTitle: deps.sessionTitle,
+        memorySummarize,
         clientTimezone: deps.clientTimezone,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
@@ -1697,7 +1700,7 @@ async function beginAcceptedTurnExecution(
               client: deps.memoryClient,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
-              sessionTitle: deps.sessionTitle,
+              timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
     },
@@ -2367,23 +2370,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
-    // The title comes from the session's first message, so it may only ride along in the vault
-    // that first turn ran under; in any other vault it would carry that turn's text across.
-    const firstTurn =
-      session.record.last_turn_id === null ? undefined : (await session.listTurns({ limit: 1 })).data[0];
-    const titleSharesVault =
-      session.record.last_turn_id === null ||
-      (firstTurn !== undefined &&
-        (firstTurn.custom?.persona?.persona_name ?? null) === (vaultScope?.personaName ?? null));
-    const sessionTitleForMemory = chatTitleContext({
-      title: titleSharesVault ? (session.record.title ?? deriveSessionTitle(body.input)) : undefined,
-      assistantNames: [
-        profile?.assistant_name,
-        ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
-          candidate => [candidate.display_name, ...candidate.aliases],
-        ),
-      ],
-    });
 
     // Resolved before the turn exists, like the memory provider above: the pass itself runs
     // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
@@ -2492,7 +2478,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
       previousTurnId: memoryPreviousTurnId,
-      sessionTitle: sessionTitleForMemory,
+      memorySummarize,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
@@ -2852,7 +2838,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   client: memoryClient,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
-                  sessionTitle: sessionTitleForMemory,
+                  timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,
                   outcomeLog: {

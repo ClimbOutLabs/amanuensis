@@ -203,6 +203,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
     ),
+  mail_send: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
@@ -416,6 +422,13 @@ export interface RawAssistantMessageWithUsage {
   repetition_stopped?: true;
   /** Which guard cut the answer short and on which channel, present when repetition_stopped is set. */
   repetition_stop?: RepetitionStop;
+  /**
+   * Ids of tool calls the stream stopped early because their arguments ran past the host's
+   * per-call size limit. Their arguments are partial and must never run: the reply guard
+   * refuses them with a plain message that tells the model to send the content in smaller
+   * parts. Absent when no call was cut.
+   */
+  size_cut_tool_calls?: string[];
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

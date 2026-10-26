@@ -54,6 +54,7 @@ import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
+  SPACE_WRITE_MAX_LENGTH,
   SpaceContentSchema,
   SpaceFormatSchema,
   SpaceSchema,
@@ -212,6 +213,45 @@ export class SpaceBodyTooLongError extends Error {
 }
 
 /**
+ * Thrown when one write call carries more new content than SPACE_WRITE_MAX_LENGTH. A
+ * tool-layer policy, not a store error: it never reaches the database. It exists because
+ * models stall while writing very long tool arguments, so a space is built in parts: the
+ * refusal names the limit and the next step, and nothing is persisted.
+ */
+export class SpaceWriteTooLongError extends Error {
+  readonly tool: string;
+  readonly new_length: number;
+
+  constructor(input: { tool: string; space_id: string | null; new_length: number }) {
+    const subject = input.space_id === null ? input.tool : `${input.tool} on "${input.space_id}"`;
+    const next =
+      input.tool === CREATE_SPACE_TOOL_NAME
+        ? 'Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.'
+        : 'Send the first part now, then send the rest in a follow-up edit_space call.';
+    super(
+      `Refusing ${subject}: this write carries ${input.new_length.toLocaleString('en-US')} characters of new content, ` +
+        `and one write may carry at most ${SPACE_WRITE_MAX_LENGTH.toLocaleString('en-US')}. Nothing was persisted. ${next}`,
+    );
+    this.name = 'SpaceWriteTooLongError';
+    this.tool = input.tool;
+    this.new_length = input.new_length;
+  }
+}
+
+/**
+ * Streamed-argument limits for the space write tools, derived from SPACE_WRITE_MAX_LENGTH.
+ * A valid call's arguments hold the new content plus the name, purpose, and JSON framing,
+ * so a multiple of the write cap passes every valid call and stops only a call that is
+ * already over the write cap or has run away. edit_space gets more room because one call
+ * may carry up to 50 entries whose search text is copied from the body.
+ */
+export const SPACE_WRITE_TOOL_ARGUMENT_LIMITS: ReadonlyMap<string, number> = new Map([
+  [CREATE_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 3],
+  [UPDATE_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 3],
+  [EDIT_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 6],
+]);
+
+/**
  * A `space_name` lookup that cannot pick one space: no match, several matches, or too many spaces
  * to be sure. Terminal tool error; the message lists what to pass instead.
  */
@@ -229,7 +269,7 @@ const SPACE_INSTRUCTION_SECTION = 'spaces';
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Build a large space in steps, not in one call. First create a short skeleton: a title and one section per part, each opened by a marker such as <!-- @block:pricing -->. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors. When you mention a space to the person, link its name to its link; never show an id.
+Build a large space in steps, not in one call: one write carries at most about 4,000 characters of new content, and a write past that is refused with nothing saved. For a space with sections, first create a short skeleton: a title and one section per part, each opened by a marker such as <!-- @block:pricing -->. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with edit_space search edits that extend the last row, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors. When you mention a space to the person, link its name to its link; never show an id.
 
 Pass body as one string with real line breaks: each table row on its own line, and a blank line as an empty line. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
@@ -770,7 +810,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks, at most about 4,000 characters; add the rest afterwards with edit_space. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
@@ -791,6 +831,7 @@ class SpaceTool extends LocalToolMCP {
         'Change part of one space by space_id or exact space_name, without resending the body. ' +
         'edits is a list of up to 50 entries, applied in order: a search entry {type: "search", search, replace} replaces every occurrence of an exact, case-sensitive substring copied verbatim from a recent get_space; a block entry {type: "block", anchor, new_content} replaces one <!-- @block:name --> section, and empty new_content deletes it. ' +
         'A search that matches nothing, or an unknown or duplicate anchor, fails the whole edit: do not retry it, send the full updated body via update_space instead. ' +
+        'The new content across one call may total at most about 4,000 characters; split a bigger change into several calls. ' +
         'Name, purpose, status, and format are optional. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: EDIT_SPACE_INPUT_SCHEMA,
@@ -854,12 +895,21 @@ class SpaceTool extends LocalToolMCP {
   }
 
   private async create(input: z.infer<typeof CREATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
+    // The link refusal is a safety check on the content, so it runs before the size policy:
+    // a write that breaks both rules gets the safety refusal.
     refuseNewSpaceLinks({
       body: input.body,
       previousBody: '',
       format: input.format,
       web_search: this.options.webSearch,
     });
+    if (input.body.length > SPACE_WRITE_MAX_LENGTH) {
+      throw new SpaceWriteTooLongError({
+        tool: CREATE_SPACE_TOOL_NAME,
+        space_id: null,
+        new_length: input.body.length,
+      });
+    }
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
       this.options.authority,
@@ -895,6 +945,14 @@ class SpaceTool extends LocalToolMCP {
       format: input.format,
       web_search: this.options.webSearch,
     });
+    // After the link refusal, as in create: a write that breaks both rules gets the safety refusal.
+    if (input.body.length > SPACE_WRITE_MAX_LENGTH) {
+      throw new SpaceWriteTooLongError({
+        tool: UPDATE_SPACE_TOOL_NAME,
+        space_id: input.space_id,
+        new_length: input.body.length,
+      });
+    }
     this.checkShrink(input.space_id, current, input.body, input.confirm_shrink, UPDATE_SPACE_TOOL_NAME);
     const mutation = await this.options.store.updateSpace({
       tenant_id: this.options.authority.tenantId,
@@ -921,6 +979,19 @@ class SpaceTool extends LocalToolMCP {
    */
   private async edit(request: z.infer<typeof EDIT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const input = { ...request, space_id: await this.resolveSpaceId(request) };
+    // The write cap counts only new content (a search entry's replace text, a block entry's
+    // new_content); the search text itself is copied from the body the model already read.
+    const new_content_length = input.edits.reduce(
+      (total, edit) => total + (edit.type === 'search' ? edit.replace.length : edit.new_content.length),
+      0,
+    );
+    if (new_content_length > SPACE_WRITE_MAX_LENGTH) {
+      throw new SpaceWriteTooLongError({
+        tool: EDIT_SPACE_TOOL_NAME,
+        space_id: input.space_id,
+        new_length: new_content_length,
+      });
+    }
     // Refuse a locked delta BEFORE any store I/O: the burn loop this guards against would
     // otherwise keep paying an aggregate-revision resolve plus a full-body read per refusal.
     // The lock check needs only authority/session/space id, so no read is required first.
@@ -1393,6 +1464,9 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyTooLongError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceWriteTooLongError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceEditNotFoundError) {

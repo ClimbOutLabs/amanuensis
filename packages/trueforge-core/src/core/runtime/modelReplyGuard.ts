@@ -2,8 +2,9 @@
  * Guards on one finished model reply, applied before any of its tool calls are classified or run.
  *
  * A reply from a struggling model can carry calls that must not be sent as they stand: arguments
- * that do not fit the tool's schema, the same call repeated many times, a read of something the
- * same reply is only just creating, or simply more calls than one reply may make. This module
+ * that do not fit the tool's schema, a call the stream stopped early for running past its size
+ * limit, the same call repeated many times, a read of something the same reply is only just
+ * creating, or simply more calls than one reply may make. This module
  * repairs what the argument check can repair, drops exact duplicates, flags the calls that must
  * not run (with a plain message the model can act on), and reports a reply that is over the call
  * cap so the runtime can stop the turn. Nothing here ever loosens a check: a flagged call resolves
@@ -31,6 +32,16 @@ export const TOO_MANY_TOOL_CALLS_MESSAGE =
 
 /** Shown to the person when a reply hits the output limit, which can leave a tool call half-written. */
 export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran long. Ask it to continue.";
+
+/**
+ * Shown to the model when one of its calls was stopped mid-stream for running past the host's
+ * per-call argument size limit. The arguments are partial by construction, so this is checked
+ * before the argument checks: "send the whole call again" would be wrong advice here, because
+ * the fix is a smaller call, not a resent one.
+ */
+export const TOOL_CALL_SIZE_CUT_MESSAGE =
+  'That call was stopped while it was still being written, because its arguments ran past the size limit for one call, so nothing was written. ' +
+  'Send the content in smaller parts instead: the first part now, then the rest in follow-up calls.';
 
 /**
  * Shown to the person for a call the guard stopped, if it is still undone at the end of the turn.
@@ -89,8 +100,10 @@ export function guardModelReply(input: {
   knownEventIds: ReadonlySet<string>;
   /** Tools whose reads the host vouches for; for these an optional true-or-false argument that cannot be repaired is dropped. */
   readOnlyTools: ReadonlySet<string>;
+  /** Calls the stream stopped early for running past their tool's argument size limit; their arguments are partial and never run. */
+  sizeCutCalls: ReadonlySet<string>;
 }): ModelReplyGuardOutcome {
-  const { message, tools, knownEventIds, readOnlyTools } = input;
+  const { message, tools, knownEventIds, readOnlyTools, sizeCutCalls } = input;
   const schemas = new Map<string, ToolParameterSchema>();
   for (const tool of tools) {
     if (tool.type === 'function') {
@@ -104,6 +117,11 @@ export function guardModelReply(input: {
   const cleaned: RawToolCall[] = [];
 
   for (const call of calls) {
+    if (sizeCutCalls.has(call.id)) {
+      invalidCalls.set(call.id, TOOL_CALL_SIZE_CUT_MESSAGE);
+      cleaned.push(call);
+      continue;
+    }
     const args = parseToolCallArguments(call);
     if (args === undefined) {
       invalidCalls.set(

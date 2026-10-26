@@ -147,6 +147,14 @@ describe('EmailSetupPanel', () => {
     expect(await screen.findByLabelText(/email provider/i)).toBeTruthy();
   });
 
+  it.each(['sign_in_stopped', 'not_working'] as const)('a %s account can still be removed', async state => {
+    const port = makePort(statusOf({ state, address: 'person@gmail.com' }));
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove account' }));
+    await waitFor(() => expect(port.removeEmailAccount).toHaveBeenCalledTimes(1));
+  });
+
   it('Other shows the server fields, and web.de shows its hint with no link', async () => {
     const port = makePort(statusOf());
     renderPanel(port);

@@ -129,6 +129,14 @@ export interface VercelAILLMConfig {
    */
   toolCallChunkMs?: number | undefined;
   /**
+   * Host-owned per-tool limits on streamed argument characters, keyed by tool name. A call
+   * whose arguments run past its limit is stopped mid-stream and named on the result's
+   * size_cut_tool_calls, so the reply guard can refuse it with a plain message instead of
+   * the turn buffering a call the tool layer would refuse anyway. Tools absent from the
+   * map have no limit. Undefined means no tool has one.
+   */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
+  /**
    * Optional secondary provider config. When set, a request that fails on the primary
    * before producing output is retried once on this provider (see `withFailover`).
    */
@@ -1233,6 +1241,8 @@ interface ToolCallState {
   id: string;
   name: string;
   arguments: string;
+  /** The host's streamed-argument limit for this call's tool, when it set one. */
+  argumentLimit: number | undefined;
   /** Gemini `thoughtSignature` from `providerMetadata.google` on the `tool-input-start` part. */
   thoughtSignature: string | undefined;
 }
@@ -1790,9 +1800,12 @@ export async function* enforceStreamDeadlines<T>({
 export async function* mapStreamToChunks({
   stream,
   chunkMeta,
+  toolArgumentLimits,
 }: {
   stream: AsyncIterable<TextStreamPart<ToolSet>>;
   chunkMeta: ChunkMeta;
+  /** Host-owned per-tool limits on streamed argument characters; absent means no tool has one. */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const makeBase = (): Omit<ExtendedChatCompletionChunk, 'choices' | 'usage'> => ({
     id: chunkMeta.id,
@@ -1811,6 +1824,9 @@ export async function* mapStreamToChunks({
   const answerUnits = new RepeatedUnitGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
   let repetitionStopped = false;
+  // Calls stopped mid-stream for running past their tool's argument size limit. Their partial
+  // arguments stay in the reply; the caller refuses them instead of running them.
+  const sizeCutToolCalls: string[] = [];
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1939,6 +1955,7 @@ export async function* mapStreamToChunks({
           id: part.id,
           name: part.toolName,
           arguments: '',
+          argumentLimit: toolArgumentLimits?.get(part.toolName),
           thoughtSignature,
         });
         yield {
@@ -1991,6 +2008,15 @@ export async function* mapStreamToChunks({
             },
           ],
         };
+        if (state.argumentLimit !== undefined && state.arguments.length > state.argumentLimit) {
+          // The call ran past its size limit: stop reading the stream here rather than
+          // buffering a call the tool layer would refuse anyway, or waiting on a server
+          // that may never finish it. The partial call stays in the reply and is named
+          // on the result, so the reply guard refuses it with a plain message and the
+          // model can send the content in smaller parts in the same turn.
+          sizeCutToolCalls.push(state.id);
+          break streamLoop;
+        }
         break;
       }
 
@@ -2181,6 +2207,7 @@ export async function* mapStreamToChunks({
     ...(repetitionStopped
       ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
       : {}),
+    ...(sizeCutToolCalls.length > 0 ? { size_cut_tool_calls: sizeCutToolCalls } : {}),
   };
 }
 
@@ -2206,6 +2233,11 @@ export class VercelAILLM implements ILLM {
     for (const value of [...Object.values(this.streamTimeout), config.toolCallChunkMs ?? this.streamTimeout.chunkMs]) {
       if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
         throw new Error('Model stream deadlines must be integer milliseconds between 1 and 2147483647');
+      }
+    }
+    for (const value of config.toolArgumentLimits?.values() ?? []) {
+      if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new Error('Tool argument limits must be positive integer character counts');
       }
     }
   }
@@ -2354,7 +2386,11 @@ export class VercelAILLM implements ILLM {
     });
 
     try {
-      const result = yield* mapStreamToChunks({ stream: deadlineGuardedStream, chunkMeta });
+      const result = yield* mapStreamToChunks({
+        stream: deadlineGuardedStream,
+        chunkMeta,
+        toolArgumentLimits: this.config.toolArgumentLimits,
+      });
       result.output.source = `${provider.type}/${provider.name}/${model.name}`;
       return result;
     } catch (error) {

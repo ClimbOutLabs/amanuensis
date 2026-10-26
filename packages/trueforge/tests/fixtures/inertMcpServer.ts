@@ -34,6 +34,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CALDAV_READ_TOOL_NAMES,
+  CALDAV_TOOL_NAMES,
+} from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -51,6 +55,9 @@ export const INERT_WEB_SEARCH_TOOL = 'web_search';
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
 export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
+
+/** Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads annotated read-only, answering with nothing. */
+export const INERT_CALENDAR_TOOLS = CALDAV_TOOL_NAMES;
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -228,6 +235,7 @@ function buildMcpServer({
   webSearch,
   searchProvider,
   mail,
+  calendar,
 }: {
   counters: Counters;
   gates: WriteGate[];
@@ -236,6 +244,7 @@ function buildMcpServer({
   webSearch: boolean;
   searchProvider: boolean;
   mail: boolean;
+  calendar: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -407,6 +416,23 @@ function buildMcpServer({
     }
   }
 
+  if (calendar) {
+    for (const name of INERT_CALENDAR_TOOLS) {
+      server.registerTool(
+        name,
+        {
+          description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a calendar.`,
+          inputSchema: {},
+          // The reads declare themselves read-only and closed-world; the changes publish nothing.
+          ...(CALDAV_READ_TOOL_NAMES.some(read => read === name)
+            ? { annotations: { readOnlyHint: true, openWorldHint: false } }
+            : {}),
+        },
+        () => textResult('[]'),
+      );
+    }
+  }
+
   return server;
 }
 
@@ -461,10 +487,13 @@ export async function startInertMcpServer(options?: {
   /** Adds `web_search` and `web_fetch` in the search provider's argument shape; excludes `webSearch`. */
   searchProvider?: boolean;
   mail?: boolean;
+  /** Adds the Calendar sidecar's tool names; the reads declare read-only and closed-world. */
+  calendar?: boolean;
 }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
   const searchProvider = options?.searchProvider === true;
   const mail = options?.mail === true;
+  const calendar = options?.calendar === true;
   if (webSearch && searchProvider) {
     throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
   }
@@ -544,9 +573,16 @@ export async function startInertMcpServer(options?: {
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider, mail }).connect(
-      asTransport(transport),
-    );
+    await buildMcpServer({
+      counters,
+      gates,
+      memoryModes,
+      searchResults,
+      webSearch,
+      searchProvider,
+      mail,
+      calendar,
+    }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
 

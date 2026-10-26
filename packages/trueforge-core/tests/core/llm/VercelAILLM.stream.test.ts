@@ -1033,6 +1033,77 @@ describe('mapStreamToChunks', () => {
 
 // ─────────── chunkHasSubstance ───────────
 
+describe('mapStreamToChunks tool argument size limits', () => {
+  it('stops reading the stream when a call runs past its limit, and names the call on the result', async () => {
+    let pulled = 0;
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+      { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"' },
+      { type: 'tool-input-delta', id: 'call-1', delta: 'a row of the table that keeps going well past the limit' },
+      { type: 'tool-input-delta', id: 'call-1', delta: ' and more rows after that' },
+      { type: 'text-delta', id: 't1', text: 'this text comes after the cut and must not appear' },
+      makeFinishStep('tool-calls'),
+    ];
+    async function* countingStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) {
+        pulled += 1;
+        yield part;
+      }
+    }
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: countingStream(),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toEqual(['call-1']);
+    // The stream was abandoned at the cut: the parts after it were never pulled.
+    expect(pulled).toBe(3);
+    const toolCalls = final.output.tool_calls;
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls?.[0]?.function.name).toBe('create_space');
+    // The partial arguments stay on the call, so it can resolve as never ran.
+    expect(toolCalls?.[0]?.function.arguments.length).toBeGreaterThan(30);
+    expect(final.output.content ?? '').not.toContain('must not appear');
+  });
+
+  it('lets a call under its limit finish untouched', async () => {
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+          { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"short"}' },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe('{"body":"short"}');
+  });
+
+  it('applies no limit to a tool the host did not list', async () => {
+    const bigArguments = `{"body":"${'x'.repeat(5_000)}"}`;
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'some_other_tool' },
+          { type: 'tool-input-delta', id: 'call-1', delta: bigArguments },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe(bigArguments);
+  });
+});
+
 describe('isContextLengthError', () => {
   it.each([
     "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens.",

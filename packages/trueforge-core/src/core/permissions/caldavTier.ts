@@ -6,6 +6,7 @@ import {
   type CaldavToolName,
 } from '../calendar/caldav/toolContract';
 import type { SentinelAction } from './classifier';
+import { CALDAV_PRIVATE_READ_REASON } from './connectorTrust';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
@@ -51,7 +52,7 @@ export async function classifyCaldavTool({
   }
   if (tool === 'list_calendars' || tool === 'list_events' || tool === 'get_event' || tool === 'search_events') {
     return tier1Decision({
-      reason: 'caldav_private_read',
+      reason: CALDAV_PRIVATE_READ_REASON,
       reason_detail: 'Read your calendar.',
       sensitive_read: true,
     });

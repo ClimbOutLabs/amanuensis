@@ -1,3 +1,5 @@
+import type { AccountConnectionState } from './accountSetup.js';
+
 /**
  * The email account port the Harness adds on top of the runtime's connector port.
  * Hand-written wire types: the generated SDK has no email settings routes yet, so the
@@ -23,7 +25,7 @@ export interface EmailProviderInfo {
 export interface EmailAccountStatus {
   /** Whether this instance has the Email connector at all; when false, no card is shown. */
   available: boolean;
-  state: 'connected' | 'not_connected' | 'sign_in_stopped';
+  state: AccountConnectionState;
   address: string | null;
   providerKey: string;
   providers: EmailProviderInfo[];

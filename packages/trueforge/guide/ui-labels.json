@@ -95,5 +95,13 @@
   "Always allow this here": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Save as draft": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Add and send": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
-  "Send message": "packages/trueforge-ui/src/atoms/ComposerSections.tsx"
+  "Send message": "packages/trueforge-ui/src/atoms/ComposerSections.tsx",
+  "Calendar": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "Calendar provider": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "Calendar address": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "Email address": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "App password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "How to make an app password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
+  "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
+  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx"
 }
