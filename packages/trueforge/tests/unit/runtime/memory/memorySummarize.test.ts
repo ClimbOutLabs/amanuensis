@@ -177,6 +177,14 @@ describe('parseSummaryReply', () => {
   });
 
   it.each([
+    '> User: hi',
+    '**Assistant:** hello',
+    '"User: hi"',
+    '- User: thanks',
+    '• assistant : ok',
+    'User： hi',
+    '\u200bAssistant: hello',
+    'The person said thanks.\n> Assistant: you are welcome',
     'User: hi',
     'Assistant: Sure, here you go.',
     '  user : thanks',
@@ -379,17 +387,35 @@ describe('summarizeTurnContent', () => {
     expect(sent).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
   });
 
-  it('fails, so the vault is marked, when part of the text was left out and no fact came back', async () => {
+  it('accepts a valid empty list for a long turn, without a warning for the person', async () => {
     const result = await summarizeTurnContent({
       ...base,
       userText: 'x'.repeat(9000),
       resolveLlm: async () => fakeSummarizer('{"facts": []}'),
     });
-    expect(result).toEqual({
-      status: 'failed',
-      reason: 'summary-text-left-out',
-      fallback: 'summary_text_left_out',
+    expect(result).toEqual({ status: 'nothing_to_keep' });
+  });
+
+  it('still fails an unreadable reply for a long turn', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'x'.repeat(9000),
+      resolveLlm: async () => fakeSummarizer('Nothing to keep.'),
     });
+    expect(result.status).toBe('failed');
+  });
+
+  it('cuts a huge paste without splitting all of it into characters', async () => {
+    const llm = fakeSummarizer('{"facts": []}');
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const started = Date.now();
+    await summarizeTurnContent({
+      ...base,
+      userText: `Please remember my wife is Ana.${'😀'.repeat(10_000_000)}`,
+      resolveLlm: async () => llm,
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages).length).toBeLessThan(40_000);
   });
 
   it('caps the generation with max_tokens so output cost is bounded', async () => {
@@ -612,16 +638,19 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
   async function setup(options: {
     efforts: ModelProperties['reasoning_efforts'];
     refuse?: (body: Record<string, unknown>) => { status: number; message: string } | undefined;
+    providerName?: string;
+    tenantId?: string;
   }) {
     modelCount += 1;
-    const providerName = `local-vllm-${String(modelCount)}`;
+    const providerName = options.providerName ?? `local-vllm-${String(modelCount)}`;
+    const tenantId = options.tenantId ?? TENANT_ID;
     const stub = await startModelEndpointStub({ content: FACTS, refuse: options.refuse });
     servers.push(stub.server);
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const modelProviderStore = new SqliteModelProviderStore(db);
     await modelProviderStore.upsertProvider({
-      tenant_id: TENANT_ID,
+      tenant_id: tenantId,
       name: providerName,
       manifest: {
         type: 'custom',
@@ -641,14 +670,14 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
         userText: 'My robot is named Bleep-Bloop.',
         assistantText: 'Got it.',
         turnDate: TURN_DATE,
-        tenantId: TENANT_ID,
+        tenantId,
         modelProviderStore,
         summarizationModelFqn: `${providerName}/local-model`,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,
         logger: makeLogger(),
       });
-    return { run, requests: stub.requests };
+    return { run, requests: stub.requests, providerName };
   }
 
   const refuseReasoningField = (body: Record<string, unknown>) =>
@@ -683,6 +712,22 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
     expect((await run()).status).toBe('summarized');
     expect(requests).toHaveLength(3);
     expect(requests[2]).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('keeps the refusal of one model from reaching another model or another tenant', async () => {
+    const refusing = await setup({ efforts: ['low'], refuse: refuseReasoningField });
+    expect((await refusing.run()).status).toBe('summarized');
+    expect(refusing.requests).toHaveLength(2);
+
+    // Another model, with its own name, still gets the field.
+    const other = await setup({ efforts: ['low'] });
+    expect((await other.run()).status).toBe('summarized');
+    expect(other.requests[0]).toHaveProperty('reasoning_effort');
+
+    // The same model name under another tenant still gets the field.
+    const twin = await setup({ efforts: ['low'], providerName: refusing.providerName, tenantId: 'tenant-b' });
+    expect((await twin.run()).status).toBe('summarized');
+    expect(twin.requests[0]).toHaveProperty('reasoning_effort');
   });
 
   it('does not retry a 400 that is about something else', async () => {
