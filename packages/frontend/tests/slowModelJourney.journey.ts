@@ -1189,6 +1189,60 @@ journey('21. make a space after several searches', SCENARIO_LIMIT_MS, async () =
   );
 });
 
+journey('21b. make a 40-row space in parts, one write at a time', SCENARIO_LIMIT_MS, async () => {
+  const breedRow = (index: number): string =>
+    `| Breed ${String(index).padStart(2, '0')} | Group ${String(index)} | Note ${String(index)} |`;
+  const breedRows = (from: number, to: number): string =>
+    Array.from({ length: to - from + 1 }, (_, offset) => breedRow(from + offset)).join('\n');
+  const { page, sessionId, cards } = await askAsThePerson({
+    message: 'Make a space with a table of 40 dog breeds',
+    plan: results => {
+      if (results.length === 0) {
+        return {
+          match: 'create_space',
+          argumentsJson: JSON.stringify({
+            name: 'Dog breeds table',
+            purpose: 'Compare 40 dog breeds',
+            status: 'active',
+            format: 'markdown',
+            body: `# Dog breeds\n\n| Breed | Group | Note |\n| --- | --- | --- |\n${breedRows(1, 10)}`,
+          }),
+        };
+      }
+      // Each follow-up edit extends the last row: the parts flow a large write takes now,
+      // one small call per part instead of one call carrying the whole table.
+      const parts: [number, number][] = [
+        [11, 20],
+        [21, 30],
+        [31, 40],
+      ];
+      const part = parts[results.length - 1];
+      if (part === undefined) return undefined;
+      const lastRow = breedRow(part[0] - 1);
+      return {
+        match: 'edit_space',
+        argumentsJson: JSON.stringify({
+          space_name: 'Dog breeds table',
+          edits: [{ type: 'search', search: lastRow, replace: `${lastRow}\n${breedRows(part[0], part[1])}` }],
+        }),
+      };
+    },
+  });
+  assert.deepEqual(cards, [], '"Make a space with a table of 40 dog breeds" showed an approval card');
+  await waitForReplyText(page, '"Make a space with a table of 40 dog breeds"', 1);
+  await waitForIdle(page, '"Make a space with a table of 40 dog breeds"');
+  assert.equal(await lastTurnStatus(sessionId), 'done', 'the server stores the reply as done');
+  const spaces = readField(await apiJson('/api/v1/spaces'), 'data', 'spaces');
+  const mine = Array.isArray(spaces)
+    ? spaces.find(space => readField(space, 'name') === 'Dog breeds table')
+    : undefined;
+  assert.ok(mine !== undefined, 'the Dog breeds table space exists');
+  const body = String(readField(mine, 'body') ?? '');
+  const rows = body.split('\n').filter(line => line.startsWith('| Breed '));
+  assert.equal(rows.length, 40, 'the space holds exactly 40 breed rows');
+  assert.ok(rows[39]?.includes('Breed 40') ?? false, 'the last part landed');
+});
+
 journey(
   '22. agent details off: earlier turns stay folded while a long turn runs, and after a reload',
   SCENARIO_LIMIT_MS,
