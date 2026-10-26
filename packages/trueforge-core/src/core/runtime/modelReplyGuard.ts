@@ -102,7 +102,8 @@ export function guardModelReply(input: {
       invalidCalls.set(
         call.id,
         `The ${call.function.name} call was not sent because its arguments were not complete, so nothing was done with it. ` +
-          'Send the whole call again, with all of its arguments finished.',
+          'A call that is very long can be cut off before it ends. Do not send the same long call again: send a shorter one, ' +
+          'and put long content into several smaller calls.',
       );
       cleaned.push(call);
       continue;

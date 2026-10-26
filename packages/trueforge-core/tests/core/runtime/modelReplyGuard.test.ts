@@ -92,6 +92,15 @@ describe('guardModelReply', () => {
     );
   });
 
+  it('tells the model a very long call can be cut off, so it sends a shorter one in parts instead of the same call', () => {
+    const outcome = guard([call('a', 'create_space', '{"name":"Plan","body":"# Day one\\n')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('arguments were not complete');
+    expect(message).toContain('cut off');
+    expect(message).toContain('several smaller calls');
+    expect(message).not.toContain('Send the whole call again');
+  });
+
   it('drops an unusable optional true-or-false value from a read-only tool and lets the call through', () => {
     const outcome = guard(
       [call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '> ' })],

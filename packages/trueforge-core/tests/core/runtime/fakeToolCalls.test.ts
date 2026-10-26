@@ -655,7 +655,7 @@ describe('what the person reads when a call is refused', () => {
         message: `${shown} couldn't finish one of the steps in this reply. Ask again to try once more.`,
         suggested_action: 'contact_user',
       });
-      expect(refusalError(content)).toContain('Send the whole call again');
+      expect(refusalError(content)).toContain('put long content into several smaller calls');
       expect(refusalError(content)).toContain('create_event');
     },
   );

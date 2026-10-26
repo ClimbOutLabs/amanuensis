@@ -770,7 +770,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks. Mark updatable sections with <!-- @block:name --> markers. A call that is too long is cut off and does nothing, so when the content is long, create the space with a short outline (a title and one marker per section), then fill each section with edit_space. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
@@ -778,7 +778,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
-        'Replace one space wholesale by space_id or exact space_name. Name, purpose, and status are required; body is the full new body as one string with real line breaks. ' +
+        'Replace one space wholesale by space_id or exact space_name. Name, purpose, and status are required; body is the full new body as one string with real line breaks; a body that is too long is cut off and does nothing, so add long content with edit_space. ' +
         'For a partial change without resending the body, use edit_space. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: UPDATE_SPACE_INPUT_SCHEMA,
