@@ -280,6 +280,8 @@ export function toUiConnectorFromReadEntry(server: TrueForgeApi.AvailableMcpServ
     auth,
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
+    // The chat list names the search provider; the SDK type does not declare the field yet.
+    ...(Reflect.get(server, 'searchProvider') === true ? { searchProvider: true } : {}),
   };
 }
 

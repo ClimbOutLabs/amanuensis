@@ -288,6 +288,10 @@ export const AvailableMcpServerSchema = z
     url: z.url().describe('URL of the remote MCP server.'),
     auth: McpServerAuthPublicSchema.optional(),
     auth_status: McpAuthStatusSchema,
+    search_provider: z
+      .boolean()
+      .optional()
+      .describe('True for the connector chosen for web search. Every chat uses it unless the person turns it off.'),
   })
   .strict()
   .openapi('AvailableMCPServer');
