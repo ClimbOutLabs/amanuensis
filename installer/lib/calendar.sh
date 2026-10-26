@@ -188,7 +188,7 @@ calendar_collect() { # install|instance
   CAL_PROVIDER=$(calendar_provider_key "$CAL_PROVIDER")
   ask_valid CAL_EMAIL "Email address of the calendar account" "" "The address you sign in to the calendar with." email_problem
   if calendar_is_gmail "$CAL_EMAIL"; then
-    ui_line "Google Calendar is already connected through the Google connector. CalDAV is not used for Gmail addresses, so no calendar is set up here."
+    ui_line "Google Calendar is already connected through the Google connector. A Gmail address does not need this step, so no calendar is set up here."
     CAL_SKIP=gmail
     return 0
   fi
