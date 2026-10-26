@@ -1,5 +1,7 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import { DEFAULT_ON_SOURCE_CONNECTOR_NAMES } from '../connectors/chatConnectorChoice';
+import { connectorUnavailableLine } from '../connectors/connectorAvailability';
 import type { ApprovalDecision } from '../events/schema';
 import {
   EventType,
@@ -115,6 +117,38 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 export const EMAIL_PASSWORD_PROMPT = dedent`
 Email is connected only in Settings, under Connectors, Email, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect email with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, Email instead.
 `;
+
+/**
+ * Mail and calendar come only from their connectors. A model asked for an appointment with no calendar
+ * attached will otherwise hunt for a stand-in: a guidance topic, helpers, or a schedule. The fix is one plain
+ * line to the person for any source that is off, not a per-tool special case. Undefined when every source is
+ * attached, and when the host does not report what is set up, since nothing can then be said about it.
+ */
+export function createSourceOffPrompt({
+  attachedConnectorNames,
+  setUpConnectorNames,
+}: {
+  attachedConnectorNames: readonly string[];
+  setUpConnectorNames: readonly string[] | undefined;
+}): string | undefined {
+  if (setUpConnectorNames === undefined) {
+    return undefined;
+  }
+  const lines = DEFAULT_ON_SOURCE_CONNECTOR_NAMES.filter(name => !attachedConnectorNames.includes(name)).map(name =>
+    connectorUnavailableLine({
+      connector: name,
+      availability: setUpConnectorNames.includes(name) ? 'turned-off' : 'not-set-up',
+    }),
+  );
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return dedent`
+Email and calendar are available only through the connectors below, and these are not attached to this chat.
+${lines.join('\n')}
+When a request needs one of them, say so in one plain line with the next step above, then stop. Never offer a schedule, a helper, a search, or another tool in its place, and do not look for the connector under another name.
+`;
+}
 
 /**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
