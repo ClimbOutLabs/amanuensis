@@ -191,6 +191,10 @@ describe('connectors that are on by default in the composer', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/not saved/);
     expect(row(/Email/)).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await openConnectors();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('turns a connector with a very long name off and back on without a rejected write', async () => {
@@ -217,13 +221,5 @@ describe('connectors that are on by default in the composer', () => {
     await waitFor(() => expect(sessions.updateSession).toHaveBeenCalledTimes(2));
     expect(sessions.stored.metadata).toEqual({});
     expect(row(/Long search provider/)).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('reads the name list an older chat stored', async () => {
-    draftSessionId = 'older-chat-2';
-    renderPicker({ setUp: [SEARCH, EMAIL], sessions: fakeSessions({ connectors_off: '["Email"]' }) });
-    await openConnectors();
-    await waitFor(() => expect(row(/Email/)).toHaveAttribute('aria-checked', 'false'));
-    expect(row(/Web search/)).toHaveAttribute('aria-checked', 'true');
   });
 });

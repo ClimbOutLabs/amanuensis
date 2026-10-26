@@ -23,8 +23,9 @@ import type { AgentUIServer, UpdateSessionRequest } from './types.js';
 const NO_KEYS: readonly string[] = [];
 
 /**
- * The off keys (connectorOffKey) of the connectors turned off per chat, shared by the composer and the shell. A chat that has no
- * server session yet keeps its choice as pending, and the shell sends it with the session create.
+ * The off keys (connectorOffKey) of the connectors turned off per chat, shared by the
+ * composer and the shell. A chat that has no server session yet keeps its choice as
+ * pending, and the shell sends it with the session create.
  */
 export type ChatConnectorChoiceStore = {
   get(sessionId: string | undefined): readonly string[] | undefined;

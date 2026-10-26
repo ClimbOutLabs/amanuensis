@@ -580,6 +580,8 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     clearFlushTimer();
     setPinnedMcpIds(new Set(selectedMcp.map(m => m.id)));
     setPinnedSkillIds(new Set(specSkills.map(skill => skillFamilyId(skill.id))));
+    // A failed save from an earlier visit is stale once the list shows the stored choice again.
+    setChoiceNotSaved(false);
     setOpen(true);
   };
 

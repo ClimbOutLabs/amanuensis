@@ -13,9 +13,6 @@ import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract.js';
 /** The built-in sources on by default beside the search provider, each only when set up. */
 export const DEFAULT_ON_SOURCE_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME];
 
-/** Older chats kept one JSON list of connector names under this key; it is still read. */
-const LEGACY_CONNECTORS_OFF_METADATA_KEY = 'connectors_off';
-
 /** Prefix of the per-connector flag keys. Metadata keys are capped at 32 characters. */
 const CONNECTOR_OFF_KEY_PREFIX = 'connector_off_';
 
@@ -36,61 +33,30 @@ export function connectorOffKey(name: string): string {
   return `${CONNECTOR_OFF_KEY_PREFIX}${nameDigest(name)}`;
 }
 
-function legacyTurnedOffNames(metadata: Record<string, string>): string[] {
-  const raw = Reflect.get(metadata, LEGACY_CONNECTORS_OFF_METADATA_KEY);
-  if (typeof raw !== 'string') {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-  const names: string[] = [];
-  for (const entry of parsed) {
-    if (typeof entry === 'string' && entry.length > 0) {
-      names.push(entry);
-    }
-  }
-  return names;
-}
-
-/**
- * The off keys of a chat, from its session metadata: its flag keys, plus the keys of any
- * names an older chat stored in the single list. Anything unreadable reads as "nothing
- * turned off", so a damaged value falls back to the default, which is on.
- */
+/** The off keys of a chat, from its session metadata. No flag means the default, which is on. */
 export function readTurnedOffConnectorKeys(metadata: Record<string, string> | null | undefined): string[] {
   if (metadata == null) {
     return [];
   }
-  const flags = Object.keys(metadata).filter(key => key.startsWith(CONNECTOR_OFF_KEY_PREFIX));
-  return [...new Set([...flags, ...legacyTurnedOffNames(metadata).map(connectorOffKey)])];
+  return Object.keys(metadata).filter(key => key.startsWith(CONNECTOR_OFF_KEY_PREFIX));
 }
 
 /**
  * The session metadata with the chat's off keys stored, merged into the metadata the chat
  * already has. A chat with nothing turned off carries no flag. Every flag is a short key
  * with a one-character value, so no connector name can push a value past its 128-character
- * cap. The older single list is dropped here because its names are now flags.
+ * cap. Only keys made by connectorOffKey are accepted, so a raw name cannot slip in.
  */
 export function withTurnedOffConnectorKeys(
   metadata: Record<string, string> | null | undefined,
   keys: readonly string[],
 ): Record<string, string> {
+  const notAKey = keys.find(key => !key.startsWith(CONNECTOR_OFF_KEY_PREFIX));
+  if (notAKey !== undefined) {
+    throw new Error(`"${notAKey}" is not a connector off key. Pass the key from connectorOffKey instead.`);
+  }
   const rest = Object.fromEntries(
-    Object.entries(metadata ?? {}).filter(
-      ([key]) => key !== LEGACY_CONNECTORS_OFF_METADATA_KEY && !key.startsWith(CONNECTOR_OFF_KEY_PREFIX),
-    ),
+    Object.entries(metadata ?? {}).filter(([key]) => !key.startsWith(CONNECTOR_OFF_KEY_PREFIX)),
   );
   return { ...rest, ...Object.fromEntries([...new Set(keys)].map(key => [key, '1'])) };
-}
-
-/** Moves an older chat's single name list into flags, for data an older export carries. */
-export function upgradeConnectorChoiceMetadata(metadata: Record<string, string>): Record<string, string> {
-  return withTurnedOffConnectorKeys(metadata, readTurnedOffConnectorKeys(metadata));
 }

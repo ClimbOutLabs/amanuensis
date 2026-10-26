@@ -1,7 +1,6 @@
 import {
   connectorOffKey,
   readTurnedOffConnectorKeys,
-  upgradeConnectorChoiceMetadata,
   withTurnedOffConnectorKeys,
 } from '../../../src/core/connectors/chatConnectorChoice';
 
@@ -27,17 +26,6 @@ describe('readTurnedOffConnectorKeys', () => {
     expect(readTurnedOffConnectorKeys(undefined)).toEqual([]);
     expect(readTurnedOffConnectorKeys(null)).toEqual([]);
     expect(readTurnedOffConnectorKeys({ other: 'kept' })).toEqual([]);
-  });
-
-  it('still reads the single name list that older chats stored', () => {
-    const older = { connectors_off: '["Email","Calendar","Email"]', other: 'kept' };
-    expect(readTurnedOffConnectorKeys(older)).toEqual([connectorOffKey('Email'), connectorOffKey('Calendar')]);
-  });
-
-  it('reads nothing from a damaged older value, so the chat falls back to on', () => {
-    expect(readTurnedOffConnectorKeys({ connectors_off: 'not json' })).toEqual([]);
-    expect(readTurnedOffConnectorKeys({ connectors_off: '{"Email":true}' })).toEqual([]);
-    expect(readTurnedOffConnectorKeys({ connectors_off: '["Email", 7, ""]' })).toEqual([connectorOffKey('Email')]);
   });
 });
 
@@ -68,17 +56,7 @@ describe('withTurnedOffConnectorKeys', () => {
     expect(readTurnedOffConnectorKeys(on)).not.toContain(key);
   });
 
-  it('drops the older name list once its names are flags', () => {
-    const next = withTurnedOffConnectorKeys({ connectors_off: '["Email"]' }, [connectorOffKey('Email')]);
-    expect(next).not.toHaveProperty('connectors_off');
-  });
-});
-
-describe('upgradeConnectorChoiceMetadata', () => {
-  it('turns an older name list into flags and keeps other keys', () => {
-    const upgraded = upgradeConnectorChoiceMetadata({ connectors_off: `["${LONG_NAME}"]`, other: 'kept' });
-    expect(upgraded).not.toHaveProperty('connectors_off');
-    expect(upgraded['other']).toBe('kept');
-    expect(readTurnedOffConnectorKeys(upgraded)).toEqual([connectorOffKey(LONG_NAME)]);
+  it('refuses a raw connector name, so only short keys are stored', () => {
+    expect(() => withTurnedOffConnectorKeys({}, ['Email'])).toThrow('connectorOffKey');
   });
 });
