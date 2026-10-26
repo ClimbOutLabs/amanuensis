@@ -128,7 +128,13 @@ export function createScheduleServer(options: { client: TrueForge }): ScheduleSe
         ...(req?.pageToken === undefined || req.pageToken === '' ? {} : { pageToken: req.pageToken }),
         ...(agentNames === undefined ? {} : { agentNames }),
       });
-      return toListResult({ ...page, data: page.data.filter(isRepeatingTask) }, row => toUiSchedule(row, index));
+      // Reminders share this list and are dropped here, so a page of only reminders would hide every task behind it.
+      let tasks = page.data.filter(isRepeatingTask);
+      while (tasks.length === 0 && page.hasNextPage()) {
+        await page.getNextPage();
+        tasks = page.data.filter(isRepeatingTask);
+      }
+      return toListResult({ ...page, data: tasks }, row => toUiSchedule(row, index));
     },
 
     async getSchedule({ id }): Promise<Schedule> {

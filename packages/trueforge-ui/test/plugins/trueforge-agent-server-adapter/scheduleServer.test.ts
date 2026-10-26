@@ -231,4 +231,50 @@ describe('createScheduleServer.listSchedules with one-time schedules and reminde
     const result = await server.listSchedules();
     expect(result.data.map(schedule => schedule.id)).toEqual(['repeating']);
   });
+
+  /** Pages the way the SDK does: one object that moves to the next server page when asked. */
+  function pagedList(pages: ReturnType<typeof row>[][]) {
+    return vi.fn(async () => {
+      let at = 0;
+      const page = {
+        data: pages[0] ?? [],
+        response: { pagination: { limit: 25, nextPageToken: pages.length > 1 ? 'page-1' : undefined } },
+        hasNextPage: () => at < pages.length - 1,
+        getNextPage: async () => {
+          at += 1;
+          page.data = pages[at] ?? [];
+          page.response = {
+            pagination: { limit: 25, nextPageToken: at < pages.length - 1 ? `page-${String(at + 1)}` : undefined },
+          };
+          return page;
+        },
+      };
+      return page;
+    });
+  }
+
+  it('still lists a morning brief made in a chat when newer reminders fill the first page', async () => {
+    const reminders = Array.from({ length: 25 }, (_, index) =>
+      row(`reminder-${String(index)}`, { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' }),
+    );
+    const morningBrief = row('morning-brief', { cron: '0 8 * * 1-5', kind: 'task' });
+    const server = createScheduleServer({ client: mockClient({ list: pagedList([reminders, [morningBrief]]) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data.map(schedule => schedule.id)).toEqual(['morning-brief']);
+    expect(result.nextPageToken).toBeUndefined();
+  });
+
+  it('keeps the token to the next page after the page it stopped on', async () => {
+    const reminder = row('reminder', { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+    const first = row('first', { cron: '0 8 * * *' });
+    const second = row('second', { cron: '0 9 * * *' });
+    const server = createScheduleServer({ client: mockClient({ list: pagedList([[reminder], [first], [second]]) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data.map(schedule => schedule.id)).toEqual(['first']);
+    expect(result.nextPageToken).toBe('page-2');
+  });
 });
