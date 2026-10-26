@@ -49,6 +49,7 @@ import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool
 import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
+import { stepNotFinishedNotice } from './ownerRefusalNotice';
 import type { MappedMCPTool } from './convertMCPServers';
 import { isGithubFileContentUnavailable, isGithubFileRead } from './githubFileContents';
 import {
@@ -2155,7 +2156,7 @@ export async function executeToolCalls({
               {
                 toolName: toolCall.tool_info.original_tool_name,
                 tier: toolCall.tool_info.tier,
-                message: failure.owner_message ?? failure.message,
+                message: failure.owner_message ?? stepNotFinishedNotice(sentinel.web_search.assistantName),
               },
             ];
       }),
