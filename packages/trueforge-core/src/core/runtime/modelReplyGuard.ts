@@ -32,6 +32,13 @@ export const TOO_MANY_TOOL_CALLS_MESSAGE =
 /** Shown to the person when a reply hits the output limit, which can leave a tool call half-written. */
 export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran long. Ask it to continue.";
 
+/**
+ * Shown to the person for a call the guard stopped, if it is still undone at the end of the turn.
+ * The model gets its own retry instruction instead, so the two never share words.
+ */
+export const REPLY_CALL_NOT_RUN_OWNER_MESSAGE =
+  'I could not finish one of the steps in this reply. Ask me to try again.';
+
 interface ModelReplyGuardOutcome {
   /** The reply with arguments repaired and exact duplicate calls removed. */
   message: RawAssistantMessage;

@@ -498,6 +498,7 @@ function createTurnResolver(deps: {
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
+            toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
           });
           return new UsageRecordingLLM({
             llm: client,
@@ -776,6 +777,7 @@ function createTurnResolver(deps: {
       searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
       modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
+      modelToolCallIdleTimeoutMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.

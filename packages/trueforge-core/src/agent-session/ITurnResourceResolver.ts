@@ -76,6 +76,12 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    */
   readonly modelIdleTimeoutMs?: number | undefined;
   /**
+   * Host instance-wide bound in milliseconds on silence between a model call's
+   * chunks while one of its tool calls is open. Undefined falls back to the core
+   * default (see DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS).
+   */
+  readonly modelToolCallIdleTimeoutMs?: number | undefined;
+  /**
    * Per-run host policy over tool calls, consulted synchronously during
    * assistant-message enrichment before any provider dispatch. A block resolves
    * the call as `policy_blocked` with the host message as the tool error.

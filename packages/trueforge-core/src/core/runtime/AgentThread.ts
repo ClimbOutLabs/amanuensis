@@ -73,7 +73,11 @@ import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { streamDeadlineDetailsOf, type StreamDeadlineDetails } from '../llm/streamDeadline';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  streamDeadlineDetailsOf,
+  type StreamDeadlineDetails,
+} from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -225,6 +229,7 @@ import {
   guardModelReply,
   LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
+  REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
 import {
@@ -1661,6 +1666,7 @@ export class AgentThread {
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly modelIdleTimeoutMs: number;
+  private readonly modelToolCallIdleTimeoutMs: number;
   private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
@@ -1714,6 +1720,10 @@ export class AgentThread {
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.modelIdleTimeoutMs = input.modelIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
+    this.modelToolCallIdleTimeoutMs = Math.max(
+      input.modelToolCallIdleTimeoutMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+      this.modelIdleTimeoutMs,
+    );
     this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
@@ -3528,6 +3538,9 @@ export class AgentThread {
           // goes quiet ends the step with a plain message instead of holding the turn open.
           // Which bound the pending wait is on, so a silence can name the deadline that fired.
           let awaitedDeadline: 'first_chunk' | 'chunk' = 'first_chunk';
+          // A tool call is open from its first piece until the step finishes. A server may hold a
+          // call's arguments back and send them in a few large pieces, so this wait is longer.
+          let toolCallOpen = false;
           let attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
@@ -3539,7 +3552,14 @@ export class AgentThread {
             attemptResult !== MODEL_STREAM_SILENT &&
             !attemptResult.done
           ) {
-            const chunk = attemptResult.value;
+            const chunk = forcedAnswer !== null ? chunkWithoutToolCalls(attemptResult.value) : attemptResult.value;
+            const choice = chunk.choices[0];
+            if (choice?.delta.tool_calls?.length) {
+              toolCallOpen = true;
+            }
+            if (choice?.finish_reason) {
+              toolCallOpen = false;
+            }
             if (chunk.usage) {
               modelMessageUsage = this.computeAssistantMessageUsage({
                 requestBody,
@@ -3549,7 +3569,7 @@ export class AgentThread {
             }
             // On the forced answer no tool call is shown, since none of its calls will run.
             const event = await buildModelMessageDeltaEvent({
-              chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
+              chunk,
               threadId: this.threadId,
               toolMapping,
               usage: modelMessageUsage,
@@ -3571,7 +3591,7 @@ export class AgentThread {
               iterator: llmStream,
               signal,
               requestClose: requestLLMStreamClose,
-              timeoutMs: this.modelIdleTimeoutMs,
+              timeoutMs: toolCallOpen ? this.modelToolCallIdleTimeoutMs : this.modelIdleTimeoutMs,
             });
           }
           if (attemptResult === ASYNC_ITERATOR_ABORTED) {
@@ -3891,7 +3911,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: `One of the actions in this reply could not run: ${problem} Ask again to try it once more.`,
+                owner_message: REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             },
           };

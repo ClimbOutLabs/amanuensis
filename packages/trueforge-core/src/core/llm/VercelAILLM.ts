@@ -51,7 +51,12 @@ import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
-import { recordStreamDeadlineDetails, type StreamDeadlineDetails, streamDeadlineDetailsOf } from './streamDeadline';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  recordStreamDeadlineDetails,
+  type StreamDeadlineDetails,
+  streamDeadlineDetailsOf,
+} from './streamDeadline';
 import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
@@ -118,6 +123,11 @@ export interface VercelAILLMConfig {
   signal?: AbortSignal;
   /** Host-owned deadlines, fully resolved (no field left to default); never supplied by model-generated request parameters. */
   streamTimeout?: Required<StreamTimeout> | undefined;
+  /**
+   * Host-owned bound on silence between pieces while a tool call is open. Never shorter than the
+   * ordinary per-chunk deadline. Undefined falls back to DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS.
+   */
+  toolCallChunkMs?: number | undefined;
   /**
    * Optional secondary provider config. When set, a request that fails on the primary
    * before producing output is retried once on this provider (see `withFailover`).
@@ -1629,12 +1639,35 @@ export function chunkSubstanceField(part: TextStreamPart<ToolSet>): string | und
   }
 }
 
+/** What a stream part says about a tool call: it opened, it completed, or the step ended. */
+export type ToolCallPiece = { kind: 'opened' | 'completed'; id: string } | { kind: 'step_ended' };
+
+/** The tool-call piece a stream part carries, or undefined for any other part. */
+export function toolCallPieceOf(part: TextStreamPart<ToolSet>): ToolCallPiece | undefined {
+  switch (part.type) {
+    case 'tool-input-start':
+      return { kind: 'opened', id: part.id };
+    case 'tool-input-end':
+      return { kind: 'completed', id: part.id };
+    case 'tool-call':
+      return { kind: 'completed', id: part.toolCallId };
+    case 'finish-step':
+    case 'finish':
+      return { kind: 'step_ended' };
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Re-arms the first-chunk and per-chunk deadlines from inside the harness rather than trusting the
  * SDK's own `timeout` option end to end. A chunk only satisfies the first-chunk deadline, and only
  * a chunk resets the per-chunk deadline, when {@link chunkHasSubstance} says it carries something —
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
- * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
+ * while prefilling a large prompt) keeps both timers exactly where they were. While a tool call is
+ * open (its first piece arrived and it has not completed), the per-chunk deadline is the tool-call
+ * allowance instead, because a server may hold a call's arguments back and send them in a few large
+ * pieces. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
  * so downstream error handling is unchanged, and rejects the pending read at once. The firing is
  * recorded as StreamDeadlineDetails (which deadline, and the last progress before it) so the
@@ -1645,6 +1678,7 @@ export async function* enforceStreamDeadlines<T>({
   timeout,
   hasSubstance,
   substanceField,
+  toolCalls,
   deadlineController,
 }: {
   stream: AsyncIterable<T>;
@@ -1652,9 +1686,12 @@ export async function* enforceStreamDeadlines<T>({
   hasSubstance: (part: T) => boolean;
   /** Names the field that carried a part's progress, for the deadline record; defaults to the part's kind. */
   substanceField?: ((part: T) => string | undefined) | undefined;
+  /** The per-chunk allowance while a tool call is open, and how a part opens or completes one. */
+  toolCalls?: { chunkMs: number; pieceOf: (part: T) => ToolCallPiece | undefined } | undefined;
   deadlineController: AbortController;
 }): AsyncGenerator<T, void, unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const openToolCalls = new Set<string>();
   let lastProgress: { field: string; atMs: number } | undefined;
   let firedDetails: StreamDeadlineDetails | undefined;
 
@@ -1682,9 +1719,13 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.firstChunkMs);
   };
   const armChunkTimer = () => {
+    const chunkMs =
+      toolCalls !== undefined && openToolCalls.size > 0
+        ? Math.max(toolCalls.chunkMs, timeout.chunkMs)
+        : timeout.chunkMs;
     timer = setTimeout(() => {
-      abortWithTimeout('Chunk', timeout.chunkMs);
-    }, timeout.chunkMs);
+      abortWithTimeout('Chunk', chunkMs);
+    }, chunkMs);
   };
 
   // A provider stream does not always end when its request is aborted, so an expired deadline
@@ -1718,6 +1759,14 @@ export async function* enforceStreamDeadlines<T>({
         return;
       }
       const part = result.value;
+      const piece = toolCalls?.pieceOf(part);
+      if (piece?.kind === 'opened') {
+        openToolCalls.add(piece.id);
+      } else if (piece?.kind === 'completed') {
+        openToolCalls.delete(piece.id);
+      } else if (piece?.kind === 'step_ended') {
+        openToolCalls.clear();
+      }
       const field = substanceField === undefined ? undefined : substanceField(part);
       if (field !== undefined || hasSubstance(part)) {
         lastProgress = { field: field ?? 'chunk', atMs: Date.now() };
@@ -2154,7 +2203,7 @@ export class VercelAILLM implements ILLM {
     // chunks hold an unfinished proposal open indefinitely. The SDK counts
     // nonempty text, reasoning and tool-input chunks as progress.
     this.streamTimeout = { ...(config.streamTimeout ?? { firstChunkMs: 300_000, chunkMs: 60_000 }) };
-    for (const value of Object.values(this.streamTimeout)) {
+    for (const value of [...Object.values(this.streamTimeout), config.toolCallChunkMs ?? this.streamTimeout.chunkMs]) {
       if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
         throw new Error('Model stream deadlines must be integer milliseconds between 1 and 2147483647');
       }
@@ -2297,6 +2346,10 @@ export class VercelAILLM implements ILLM {
       timeout: this.streamTimeout,
       hasSubstance: chunkHasSubstance,
       substanceField: chunkSubstanceField,
+      toolCalls: {
+        chunkMs: this.config.toolCallChunkMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+        pieceOf: toolCallPieceOf,
+      },
       deadlineController,
     });
 

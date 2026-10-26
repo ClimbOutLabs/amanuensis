@@ -24,6 +24,7 @@ import {
   ModelStreamFault,
   normalizeUsage,
   rawChunkProgressField,
+  toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
 
@@ -1288,6 +1289,87 @@ describe('enforceStreamDeadlines', () => {
       message: expect.stringMatching(/^chunk/i),
     });
     await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  describe('while a tool call is open', () => {
+    const toolCalls = { chunkMs: 180, pieceOf: toolCallPieceOf };
+    const opened = { type: 'tool-input-start', id: 'c1', toolName: 'update_space' } as TextStreamPart<ToolSet>;
+    const argumentsArrived = { type: 'tool-input-delta', id: 'c1', delta: '{"a":1}' } as TextStreamPart<ToolSet>;
+    const completed = { type: 'tool-input-end', id: 'c1' } as TextStreamPart<ToolSet>;
+
+    function guarded({ gapMs, first }: { gapMs: number; first: TextStreamPart<ToolSet> }): {
+      deadlineController: AbortController;
+      outcome: Promise<unknown>;
+    } {
+      async function* stream() {
+        yield first;
+        await new Promise(resolve => setTimeout(resolve, gapMs));
+        yield argumentsArrived;
+        yield completed;
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        parts => parts,
+        (error: unknown) => error,
+      );
+      return { deadlineController, outcome };
+    }
+
+    it('waits the tool-call allowance for the next piece, not the ordinary bound', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: opened });
+      await jest.advanceTimersByTimeAsync(160);
+      await expect(outcome).resolves.toHaveLength(3);
+      expect(deadlineController.signal.aborted).toBe(false);
+    });
+
+    it('still times out once the silence passes the tool-call allowance', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 500, first: opened });
+      await jest.advanceTimersByTimeAsync(190);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('180ms') });
+    });
+
+    it('keeps the ordinary bound when the silence comes before any tool piece', async () => {
+      const text = { type: 'text-delta', id: 't1', text: 'a' } as TextStreamPart<ToolSet>;
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: text });
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('60ms') });
+    });
+
+    it('goes back to the ordinary bound once the call has completed', async () => {
+      async function* stream() {
+        yield opened;
+        yield completed;
+        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'update_space', input: {} } as TextStreamPart<ToolSet>;
+        await new Promise(() => undefined);
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        () => 'finished',
+        (error: unknown) => error,
+      );
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+    });
   });
 });
 
