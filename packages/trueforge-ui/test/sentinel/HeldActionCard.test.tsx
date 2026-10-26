@@ -2,6 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { HeldActionCard, type HeldActionCardProps } from '@/sentinel/HeldActionCard.js';
 import { HELD_EXPIRED_TEXT } from '@/sentinel/heldActionErrors.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
@@ -50,10 +51,36 @@ describe('HeldActionCard', () => {
     expect(text.indexOf('ana@example.com')).toBeGreaterThan(-1);
     expect(text.indexOf('Full request')).toBeGreaterThan(text.indexOf('ana@example.com'));
     expect(screen.getByText(/Lunch at noon\?/)).toBeInTheDocument();
-    const reason = screen.getByText('Agent says: It was on the Monday list.');
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Full request'));
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf("can't be unsent"));
+    const reason = screen.getByText('Aman says: It was on the Monday list.');
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf('Full request'));
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf("can't be unsent"));
     expect(reason).toBeInTheDocument();
+    expect(screen.queryByText(/Agent says/)).not.toBeInTheDocument();
+  });
+
+  it('names the assistant by the name the person gave it when it says why', async () => {
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Mira' }),
+          updateProfile: async profile => profile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <ul>
+          <HeldActionCard
+            card={card()}
+            status={{ kind: 'waiting' }}
+            alwaysAllowOffered={false}
+            onApprove={vi.fn()}
+            onAlwaysAllow={vi.fn()}
+            onDeny={vi.fn()}
+          />
+        </ul>
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText('Mira says: It was on the Monday list.')).toBeInTheDocument();
+    expect(screen.queryByText(/Aman says|Agent says/)).not.toBeInTheDocument();
   });
 
   it('shows plainly when part of the text is cut off', () => {

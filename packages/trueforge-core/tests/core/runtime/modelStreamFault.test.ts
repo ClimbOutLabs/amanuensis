@@ -303,50 +303,64 @@ describe('ModelStreamFault retry', () => {
     );
   });
 
-  it('surfaces the repetition stop message instead of the generic stream-broke text', async () => {
-    async function* repetitionFaultStream(): AsyncGenerator<
-      ExtendedChatCompletionChunk,
-      RawAssistantMessageWithUsage,
-      unknown
-    > {
-      await Promise.resolve();
-      throw new ModelOutputRepetitionError();
-    }
-    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
-      repetitionFaultStream(),
-    );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
-    const thread = new AgentThread({
-      threadId: 'main',
-      title: 'Main',
-      toolCallMemo: undefined,
-      turnToolCallLedger: undefined,
-      taskState: undefined,
-      isRequestContinuation: undefined,
-      tracing: NOOP_AGENT_TRACING,
-      logger: makeSilentLogger(),
-      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
-      context: [{ role: 'user', content: 'A question.' }],
-      capabilities: [],
-    });
-
-    let doneEvent: InternalThreadDoneEvent | undefined;
-    for await (const event of thread.execute({ signal: new AbortController().signal })) {
-      if (event.type === InternalEventType.AGENT_DONE) {
-        doneEvent = event;
+  it.each([
+    ['the default name', undefined, 'Aman'],
+    ['the name the person gave', 'Mannie', 'Mannie'],
+  ])(
+    'surfaces the repetition stop message with %s instead of the generic stream-broke text',
+    async (_label, given, shown) => {
+      async function* repetitionFaultStream(): AsyncGenerator<
+        ExtendedChatCompletionChunk,
+        RawAssistantMessageWithUsage,
+        unknown
+      > {
+        await Promise.resolve();
+        throw new ModelOutputRepetitionError();
       }
-    }
+      const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+        repetitionFaultStream(),
+      );
+      const modelClient: ILLM = { create, createNonStream: jest.fn() };
+      const thread = new AgentThread({
+        threadId: 'main',
+        title: 'Main',
+        toolCallMemo: undefined,
+        turnToolCallLedger: undefined,
+        taskState: undefined,
+        isRequestContinuation: undefined,
+        tracing: NOOP_AGENT_TRACING,
+        logger: makeSilentLogger(),
+        definition: {
+          modelClient,
+          modelId: undefined,
+          configuredModels: undefined,
+          instruction: 'test',
+          toolSets: [],
+          identity: { assistantName: given },
+        },
+        context: [{ role: 'user', content: 'A question.' }],
+        capabilities: [],
+      });
 
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(doneEvent?.status).toBe('error');
-    expect(doneEvent?.handoff_cause).toBe('model_stream_fault');
-    if (doneEvent?.status !== 'error') {
-      throw new Error('expected an error-status AGENT_DONE event');
-    }
-    // The user gets the actionable guidance, not the misleading context-too-long text.
-    expect(doneEvent.error).toBe(new ModelOutputRepetitionError().message);
-    expect(doneEvent.error).toMatch(/smaller parts/);
-  });
+      let doneEvent: InternalThreadDoneEvent | undefined;
+      for await (const event of thread.execute({ signal: new AbortController().signal })) {
+        if (event.type === InternalEventType.AGENT_DONE) {
+          doneEvent = event;
+        }
+      }
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(doneEvent?.status).toBe('error');
+      expect(doneEvent?.handoff_cause).toBe('model_stream_fault');
+      if (doneEvent?.status !== 'error') {
+        throw new Error('expected an error-status AGENT_DONE event');
+      }
+      // The user gets the actionable guidance, not the misleading context-too-long text.
+      expect(doneEvent.error).toBe(
+        `${shown} was going in circles while thinking, so this reply stopped. Ask again in smaller parts.`,
+      );
+    },
+  );
 
   it('surfaces a definite provider error immediately without compaction or retry', async () => {
     // The provider error shape (a definite status, not a broken stream): must not trigger the
