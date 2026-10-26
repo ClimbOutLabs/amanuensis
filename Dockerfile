@@ -53,14 +53,6 @@ RUN groupadd --gid 10001 trueforge \
 RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
   && chown -R 10001:10001 /data
 
-# The package mirror volumes mount at /run/aman-slots/<n>/mirror, and the server binds one mirror
-# socket per slot there as 10001. A fresh named volume takes the ownership of the image dir it mounts
-# over (the same reason as the data dirs above), so these dirs are created with that ownership; without
-# them a fresh mirror volume starts out owned by root and the socket bind fails, which turns package
-# downloads off.
-RUN mkdir -p /run/aman-slots/1/mirror /run/aman-slots/2/mirror /run/aman-slots/3/mirror /run/aman-slots/4/mirror \
-  && chown -R 10001:10001 /run/aman-slots
-
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own
 # values (compose, runbook templates) override these.

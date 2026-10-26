@@ -2,7 +2,7 @@ import { SLOT_MIRROR_GUEST_PORT } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import {
   createServer,
   request as httpRequest,
@@ -293,6 +293,17 @@ export class PackageMirrorGateway {
           resolve();
         });
       });
+      // The socket is created with the process umask, which leaves it closed to anyone but the app
+      // user; the slot agent runs as another user and connecting to a socket needs write permission
+      // on it. The folder around the socket is mounted only by the app and that one slot, so the
+      // folder is what limits who can reach the socket; open the socket itself the way the slot
+      // agent opens its control socket to the app.
+      try {
+        await chmod(socketPath, 0o666);
+      } catch (error: unknown) {
+        server.close();
+        throw error;
+      }
       this.#servers.push(server);
     }
   }

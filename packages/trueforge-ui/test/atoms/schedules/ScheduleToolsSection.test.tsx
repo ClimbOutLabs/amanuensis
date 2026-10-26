@@ -55,7 +55,14 @@ const ownTools: ScheduleTools = {
   sandboxEnabled: false,
 };
 
-function renderEdit(input: { port: ScheduleToolsCatalog; onOpenChange?: () => void; target?: Schedule }) {
+const calendarSetUp = [{ id: 'calendar', name: 'calendar', authenticated: true }];
+
+function renderEdit(input: {
+  port: ScheduleToolsCatalog;
+  onOpenChange?: () => void;
+  target?: Schedule;
+  setUp?: { id: string; name: string; authenticated: boolean; searchProvider?: boolean }[];
+}) {
   const schedules: ScheduleServer = {
     listSchedules: vi.fn(async () => ({ data: [] })),
     getSchedule: vi.fn(),
@@ -78,7 +85,7 @@ function renderEdit(input: { port: ScheduleToolsCatalog; onOpenChange?: () => vo
         disconnectConnector: vi.fn(),
       },
     }),
-    getMcp: vi.fn(async () => [{ id: 'calendar', name: 'calendar', authenticated: true }]),
+    getMcp: vi.fn(async () => input.setUp ?? calendarSetUp),
   });
   const server = { ...agentServer, schedules, scheduleTools: input.port };
   return render(
@@ -134,6 +141,28 @@ describe('the Tools section of a schedule', () => {
     renderEdit({ port });
     const row = await screen.findByRole('menuitemcheckbox', { name: /calendar/i });
     expect(row).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('does not tick the connectors a chat has on by default, so a schedule runs only with what it lists', async () => {
+    const port: ScheduleToolsCatalog = {
+      getScheduleTools: vi.fn(async () => ownTools),
+      setScheduleTools: vi.fn(),
+    };
+    renderEdit({
+      port,
+      setUp: [
+        { id: 'parallel-web', name: 'parallel-web', authenticated: true, searchProvider: true },
+        { id: 'Email', name: 'Email', authenticated: true },
+        { id: 'Calendar', name: 'Calendar', authenticated: true },
+        { id: 'github', name: 'github', authenticated: true },
+      ],
+    });
+    await screen.findByRole('menuitemcheckbox', { name: /Email/ });
+
+    for (const name of [/Web search/, /Email/, /Calendar/, /GitHub/]) {
+      expect(screen.getByRole('menuitemcheckbox', { name })).toHaveAttribute('aria-checked', 'false');
+    }
+    expect(screen.getByRole('button', { name: 'Save tools' })).toBeDisabled();
   });
 
   it('says what to do when the tools cannot be saved', async () => {

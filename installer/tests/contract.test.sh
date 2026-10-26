@@ -171,19 +171,24 @@ test_image_creates_the_send_list_dir() {
   assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- mail-policy:/policy:ro" "the connector mounts the same volume read-only"
 }
 
-test_images_create_the_mirror_dirs() {
-  t_begin "the images create the package mirror dirs owned by the server user, so a fresh mirror volume lets the server bind its socket"
+test_slot_image_creates_the_mirror_dir() {
+  t_begin "the slot image creates the package mirror dir owned by the server user, so a fresh mirror volume lets the server bind its socket"
   local repo=$INSTALLER_DIR/.. dockerfile slot
-  # Docker gives a fresh named volume the ownership of the image dir it mounts over. The server runs as
-  # 10001 and binds one package mirror socket per slot inside that slot's mirror volume, so the volume
-  # must start out owned by 10001. The slots start before the app, so the slot image carries the dir
-  # with the server's ownership; both app images carry theirs the same way, as with the send list dir.
-  for dockerfile in "$repo/Dockerfile.dev" "$repo/Dockerfile"; do
-    assert_contains "$(cat "$dockerfile")" "mkdir -p /run/aman-slots/1/mirror /run/aman-slots/2/mirror /run/aman-slots/3/mirror /run/aman-slots/4/mirror" "$dockerfile creates the mirror dirs"
-    assert_contains "$(cat "$dockerfile")" "chown -R 10001:10001 /run/aman-slots" "$dockerfile gives the mirror dirs to the server user"
-  done
+  # Docker gives a fresh named volume the ownership of the image dir it mounts over. The slots project
+  # creates the mirror volumes and the installer starts the slots before the app, so the slot image is
+  # the one a fresh mirror volume takes its ownership from; the server runs as 10001 and binds one
+  # package mirror socket per slot inside that slot's mirror volume, so the dir must start out owned
+  # by 10001. The app images carry nothing for the mirrors: the instance mounts these volumes but
+  # never creates them, so a dir in the app image would never take effect. Mirror volumes that
+  # already exist are handed to 10001 by the slot setup itself when the slots start (slots.ts).
   assert_contains "$(cat "$repo/ops/sandbox-slot/Dockerfile")" "mkdir -p /run/aman/mirror" "the slot image creates the mirror dir its volume takes ownership from"
   assert_contains "$(cat "$repo/ops/sandbox-slot/Dockerfile")" "chown 10001:10001 /run/aman/mirror" "the slot image gives the mirror dir to the server user, not the slot user"
+  for dockerfile in "$repo/Dockerfile.dev" "$repo/Dockerfile"; do
+    assert_not_contains "$(cat "$dockerfile")" "/run/aman-slots" "$dockerfile carries no mirror dirs; the instance never creates the mirror volumes"
+    assert_contains "$(cat "$dockerfile")" "useradd --uid 10001" "$dockerfile creates the server user with uid 10001, the uid the slot image gives the mirror dir to"
+    assert_contains "$(cat "$dockerfile")" "USER 10001:10001" "$dockerfile runs as the server user the mirror dir belongs to"
+  done
+  assert_contains "$(cat "$repo/docker-compose.slots.yml")" "user: '65532:65532'" "the slots run as 65532, the user who connects through the mirror socket"
   for slot in 1 2 3 4; do
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- slot_mirror_$slot:/run/aman-slots/$slot/mirror" "the instance mounts mirror volume $slot where the server binds its socket"
     assert_contains "$(cat "$repo/docker-compose.slots.yml")" "- slot_mirror_$slot:/run/aman/mirror" "slot $slot mounts the same volume at the dir its image creates"
@@ -204,7 +209,7 @@ test_token_factory_settings_match_the_server
 test_sign_in_settings_match_the_server
 test_image_keeps_app_data_on_the_data_volume
 test_image_creates_the_send_list_dir
-test_images_create_the_mirror_dirs
+test_slot_image_creates_the_mirror_dir
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented

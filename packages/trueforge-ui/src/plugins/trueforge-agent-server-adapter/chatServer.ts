@@ -158,6 +158,8 @@ export type HarnessUiSession = Session<HarnessAgentSpec> & {
   isCreateAgent: boolean;
   /** "Agent details" preference (session metadata `agent_details`); undefined = unset. */
   agentDetails?: AgentDetailsVisibility;
+  /** The session's metadata, so a write that replaces it can keep every key it does not change. */
+  metadata: Record<string, string>;
   /** Set only on the Reminders chat: what it last received and when. */
   reminders?: RemindersMarker;
 };
@@ -229,6 +231,7 @@ function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
     id: session.id,
     isMutable: session.agent.type === 'inline',
     isCreateAgent: readSessionIsCreateAgent(session.metadata),
+    metadata: { ...session.metadata },
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     ...(session.title === null ? {} : { title: session.title }),
