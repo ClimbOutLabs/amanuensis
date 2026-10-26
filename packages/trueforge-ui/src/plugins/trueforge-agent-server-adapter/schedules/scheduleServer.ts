@@ -14,10 +14,12 @@ import type {
   UpdateScheduleRequest,
 } from '../../../server/types.js';
 import { drainAgentsList } from '../agentsList.js';
-import { toListResult } from '../chatServer.js';
 
 /** Matches API PAGE_LIMIT for schedules list. */
 const SCHEDULES_PAGE_LIMIT = 25;
+
+/** Most server pages one list call reads while looking past reminders. */
+const MAX_PAGES_PER_LIST = 10;
 
 type AgentIndex = {
   idToName: ReadonlyMap<string, string>;
@@ -129,12 +131,26 @@ export function createScheduleServer(options: { client: TrueForge }): ScheduleSe
         ...(agentNames === undefined ? {} : { agentNames }),
       });
       // Reminders share this list and are dropped here, so a page of only reminders would hide every task behind it.
+      // The reading is bounded; past the bound the page returns empty with its next token and the person pages on.
+      let usedToken = req?.pageToken === '' ? undefined : req?.pageToken;
+      let pagesRead = 1;
       let tasks = page.data.filter(isRepeatingTask);
-      while (tasks.length === 0 && page.hasNextPage()) {
+      while (
+        tasks.length === 0 &&
+        page.hasNextPage() &&
+        pagesRead < MAX_PAGES_PER_LIST &&
+        page.response.pagination.nextPageToken !== usedToken
+      ) {
+        usedToken = page.response.pagination.nextPageToken;
         await page.getNextPage();
+        pagesRead += 1;
         tasks = page.data.filter(isRepeatingTask);
       }
-      return toListResult({ ...page, data: tasks }, row => toUiSchedule(row, index));
+      const { nextPageToken } = page.response.pagination;
+      // A token that repeats the one just used would send the reader round in a circle.
+      const hasMore = page.hasNextPage() && nextPageToken !== usedToken;
+      const data = tasks.map(row => toUiSchedule(row, index));
+      return hasMore && nextPageToken !== undefined ? { data, nextPageToken } : { data };
     },
 
     async getSchedule({ id }): Promise<Schedule> {

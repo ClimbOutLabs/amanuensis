@@ -266,6 +266,68 @@ describe('createScheduleServer.listSchedules with one-time schedules and reminde
     expect(result.nextPageToken).toBeUndefined();
   });
 
+  function reminderRows(count: number, prefix: string) {
+    return Array.from({ length: count }, (_, index) =>
+      row(`${prefix}-${String(index)}`, { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' }),
+    );
+  }
+
+  it('stops after ten pages of reminders and hands back the token to read on', async () => {
+    const pages = Array.from({ length: 30 }, (_, index) => reminderRows(2, `page-${String(index)}`));
+    const server = createScheduleServer({ client: mockClient({ list: pagedList(pages) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBe('page-10');
+  });
+
+  it('stops when the next token repeats the one just used, and offers no token', async () => {
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'loop'),
+      response: { pagination: { limit: 25, nextPageToken: 'same' } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => page);
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules({ pageToken: 'same' });
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).not.toHaveBeenCalled();
+  });
+
+  it('stops a token that comes back after one more page', async () => {
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'loop'),
+      response: { pagination: { limit: 25, nextPageToken: 'a' } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => page);
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns nothing and no token when every page is reminders', async () => {
+    const server = createScheduleServer({
+      client: mockClient({ list: pagedList([reminderRows(3, 'a'), reminderRows(3, 'b'), reminderRows(1, 'c')]) }),
+    });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+  });
+
   it('keeps the token to the next page after the page it stopped on', async () => {
     const reminder = row('reminder', { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
     const first = row('first', { cron: '0 8 * * *' });

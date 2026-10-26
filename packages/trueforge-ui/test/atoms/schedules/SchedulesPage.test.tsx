@@ -239,6 +239,22 @@ describe('SchedulesPage', () => {
     expect(await screen.findByText('weekly-digest')).toBeInTheDocument();
   });
 
+  it('keeps Next when a page has no schedules but more pages follow', async () => {
+    const listSchedules = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [], nextPageToken: 'page-2' })
+      .mockResolvedValueOnce({ data: [{ ...sampleSchedules[0], id: 's2', name: 'morning-brief' }] });
+    renderPage([], {}, listSchedules);
+
+    expect(await screen.findByRole('heading', { name: 'No Schedules Found' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    await waitFor(() => {
+      expect(listSchedules).toHaveBeenLastCalledWith(expect.objectContaining({ pageToken: 'page-2' }));
+    });
+    expect(await screen.findByText('morning-brief')).toBeInTheDocument();
+  });
+
   it('ignores run history returned for a stale schedules page', async () => {
     let resolveFirstRuns: (runs: ScheduleRun[]) => void = () => undefined;
     const listSchedules = vi

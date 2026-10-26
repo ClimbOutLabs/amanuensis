@@ -445,7 +445,30 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
         ) : error != null ? (
           <p className="text-failure-bg px-3 py-8 text-center text-sm">{error}</p>
         ) : schedules.length === 0 ? (
-          <EmptyScreen title="No Schedules Found" description="Create one to get started." className="min-h-full" />
+          <div className="flex min-h-full flex-col">
+            <EmptyScreen
+              title="No Schedules Found"
+              description={hasPageNav ? 'None on this page. Try the next page.' : 'Create one to get started.'}
+              className="flex-1"
+            />
+            {hasPageNav ? (
+              <TableTokenPagination
+                pageSize={pageSize}
+                rowCount={0}
+                canPrev={prevTokenStack.length > 0}
+                canNext={nextPageToken != null}
+                onPrev={goPrev}
+                onNext={goNext}
+                pageSizeOptions={SCHEDULES_PAGE_SIZE_OPTIONS}
+                onPageSizeChange={size => {
+                  const next = clampPageSize(size);
+                  setPageSize(next);
+                  setPageToken(undefined);
+                  setPrevTokenStack([]);
+                }}
+              />
+            ) : null}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex min-h-full flex-col">
             <EmptyScreen title="No Schedules Found" description="No schedules match your filters." className="flex-1" />
