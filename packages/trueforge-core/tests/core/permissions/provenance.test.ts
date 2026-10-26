@@ -9,6 +9,7 @@ import {
   recordUntrustedText,
   steeredDestinations,
   steeredLinks,
+  unchosenLinks,
 } from '../../../src/core/permissions/provenance';
 
 // Invented hosts and people only.
@@ -185,6 +186,30 @@ describe('where a link came from', () => {
     expect(steeredLinks({ provenance, values: ['http://docs.example.net/guide'] })).toEqual([]);
     expect(steeredLinks({ provenance, values: ['https://www.docs.example.net/guide#top'] })).toEqual([]);
     expect(steeredLinks({ provenance, values: ['https://docs.example.net/other'] })).toHaveLength(1);
+  });
+
+  it('keeps the scheme and the host as written apart for a picture, where the page key folds them', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'My fox picture: https://docs.example.net/fox.png' });
+    expect(unchosenLinks({ provenance, values: ['https://docs.example.net/fox.png'] })).toEqual([]);
+    expect(unchosenLinks({ provenance, values: ['https://www.docs.example.net/fox.png'] })).toEqual([
+      'https://www.docs.example.net/fox.png',
+    ]);
+    expect(unchosenLinks({ provenance, values: ['http://docs.example.net/fox.png'] })).toEqual([
+      'http://docs.example.net/fox.png',
+    ]);
+  });
+
+  it('keeps a closing bracket that balances an opening one inside a link the person pasted', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'The fox: https://docs.example.net/wiki/Fox_(animal)' });
+    expect(unchosenLinks({ provenance, values: ['https://docs.example.net/wiki/Fox_(animal)'] })).toEqual([]);
+  });
+
+  it('still drops a closing bracket that is only the prose around a link', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: '(https://docs.example.net/guide)' });
+    expect(unchosenLinks({ provenance, values: ['https://docs.example.net/guide'] })).toEqual([]);
   });
 });
 

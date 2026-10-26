@@ -34,6 +34,9 @@ const STEERED_LINK_MESSAGE =
 const UNCHOSEN_PICTURE_MESSAGE =
   "This picture did not come from the person, a search result, or a page this chat opened. Open the picture's page first, then use the image link from that page.";
 
+const USERINFO_PICTURE_MESSAGE =
+  "This picture's link carries a user name or password, so it cannot be used. Search for the picture, then use a link from the results.";
+
 const PRIVATE_DETAIL_MESSAGE =
   "This link would carry one of the person's own private details. Take the detail out of the link, or search for the page first.";
 
@@ -91,6 +94,11 @@ function refusalFor(
   }
   if (isPlaceholder(url.hostname)) {
     return `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`;
+  }
+  // A picture is fetched as written, and the picture fetch refuses a link that carries a user
+  // name or password, so such a picture could never load even where the clean link was chosen.
+  if (kind === 'picture' && (url.username !== '' || url.password !== '')) {
+    return USERINFO_PICTURE_MESSAGE;
   }
   // The lookup check compares the text the model wrote; a value the parser only resolved is checked as resolved.
   // A picture is an embed the person's browser loads, a link is a lookup the person chooses to open.

@@ -434,3 +434,50 @@ describe('a space link carrying a private detail of the person', () => {
     expect(refusalOf({ body: `<a href="${CARRYING}">Route</a>`, format: 'html', web_search })).toBeUndefined();
   });
 });
+
+describe('a space picture is compared as it would be fetched', () => {
+  const WWW_SEEN = 'https://www.upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+
+  function searchReturned(url: string): WebSearchTurnState {
+    const web_search = createWebSearchTurnState();
+    recordSearchResults({
+      provenance: web_search.provenance,
+      texts: [JSON.stringify({ results: [{ url }] })],
+    });
+    return web_search;
+  }
+
+  it('refuses a picture whose link carries a user name and password, though a search returned the clean link', () => {
+    const withCredentials = 'https://name:pass@upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+    const web_search = searchReturned(SEEN);
+    expect(refusalOf({ body: `<img src="${withCredentials}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'user name or password',
+    );
+  });
+
+  it('refuses a picture on the www host when a search returned the host without it', () => {
+    const web_search = searchReturned(SEEN);
+    expect(refusalOf({ body: `<img src="${WWW_SEEN}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a picture on the plain host when a search returned the www host', () => {
+    const web_search = searchReturned(WWW_SEEN);
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('keeps a picture on the www host when a search returned that very link', () => {
+    const web_search = searchReturned(WWW_SEEN);
+    expect(refusalOf({ body: `<img src="${WWW_SEEN}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('keeps a link that carries a user name and password the person gave, since a link opens only when followed', () => {
+    const link = 'https://name:pass@upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+    const web_search = createWebSearchTurnState();
+    recordPersonText({ provenance: web_search.provenance, text: `My fox picture: ${link}` });
+    expect(refusalOf({ body: `<a href="${link}">Fox</a>`, format: 'html', web_search })).toBeUndefined();
+  });
+});

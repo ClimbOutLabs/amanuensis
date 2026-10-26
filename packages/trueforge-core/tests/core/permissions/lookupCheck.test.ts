@@ -93,6 +93,53 @@ describe('checkLookup for an embed, which a browser loads on its own', () => {
   });
 });
 
+describe('checkLookup for an embed compares the picture as it would be fetched', () => {
+  const WWW_PICTURE = 'https://www.upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+
+  function searchReturned(url: string): ChatProvenance {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url }] })] });
+    return provenance;
+  }
+
+  it('reports an embed link on the www host when a search returned the host without it', () => {
+    const check = checkOf({ provenance: searchReturned(PAGE_LINK), url: WWW_PICTURE, use: 'embed' });
+    expect(check.steered).toEqual([WWW_PICTURE]);
+  });
+
+  it('passes an embed link on the www host when a search returned that very link', () => {
+    const check = checkOf({ provenance: searchReturned(WWW_PICTURE), url: WWW_PICTURE, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+
+  it('reports an embed link on the plain host when a search returned the www host', () => {
+    const check = checkOf({ provenance: searchReturned(WWW_PICTURE), url: PAGE_LINK, use: 'embed' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('reports an embed link on the www host when a page the chat opened showed the picture on the plain host', () => {
+    const provenance = emptyChatProvenance();
+    recordPageImageUrls({ provenance, urls: [PAGE_LINK] });
+    const check = checkOf({ provenance, url: WWW_PICTURE, use: 'embed' });
+    expect(check.steered).toEqual([WWW_PICTURE]);
+  });
+
+  it('reports an embed link spelled https when the person gave the http spelling', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `My fox picture: ${PAGE_LINK.replace('https://', 'http://')}` });
+    const check = checkOf({ provenance, url: PAGE_LINK, use: 'embed' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('passes an embed link spelled http when the person gave that very spelling', () => {
+    const spelled = PAGE_LINK.replace('https://', 'http://');
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `My fox picture: ${spelled}` });
+    const check = checkOf({ provenance, url: spelled, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+});
+
 describe('checkLookup when a value carries more than the link itself', () => {
   function searchReturnedPicture(): ChatProvenance {
     const provenance = emptyChatProvenance();
