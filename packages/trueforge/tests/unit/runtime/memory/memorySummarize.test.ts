@@ -99,6 +99,14 @@ describe('buildSummarizationMessages', () => {
     expect(system).toContain('Never write "User" or "Assistant"');
   });
 
+  it('tells the model to keep facts from anywhere in the text, and that one request to remember never crowds out the rest', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('from the first line to the last');
+    expect(system).toContain('A fact at the start of a long message counts as much as one at the end');
+    expect(system).toContain('A request to remember never crowds out the rest');
+  });
+
   it('gives the date of the chat in the time zone of the person', () => {
     const user = buildSummarizationMessages({
       userText: 'hi',
@@ -368,6 +376,32 @@ describe('summarizeTurnContent', () => {
     expect(sent).toContain('my cat is named Miso.');
     expect(sent).toContain('Part of this long turn was left out.');
     expect(sent.length).toBeLessThan(20000);
+  });
+
+  it('sends a long paste with the rule to keep the fact at its start as well as the one it ends by asking to remember', async () => {
+    const llm = fakeSummarizer(
+      '{"facts": ["The person\'s neighbour Ana waters their plants every Tuesday while they are away.", "The person\'s dentist is Dr Patel."]}',
+    );
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const paste = [
+      'My neighbour Ana waters my plants every Tuesday while I am away.',
+      'The committee notes ran long again this week. '.repeat(260),
+      'Remember: my dentist is Dr Patel.',
+    ].join('\n');
+    const result = await summarizeTurnContent({ ...base, userText: paste, resolveLlm: async () => llm });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: [
+        "The person's neighbour Ana waters their plants every Tuesday while they are away.",
+        "The person's dentist is Dr Patel.",
+      ],
+    });
+    const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain('A fact at the start of a long message counts as much as one at the end');
+    expect(sent).toContain('A request to remember never crowds out the rest');
+    expect(sent).toContain('My neighbour Ana waters my plants every Tuesday while I am away.');
+    expect(sent).toContain('Remember: my dentist is Dr Patel.');
+    expect(sent).toContain('Part of this long turn was left out.');
   });
 
   it('cuts a long emoji paste on whole characters and still sees a request at its start', async () => {
