@@ -265,5 +265,12 @@ describe('Email connector classifier', () => {
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'unrecognized_tool' });
       expect(decision.card).not.toBeNull();
     });
+
+    it('the card for a tool it does not know claims no permanence and shows plain argument labels', async () => {
+      const decision = await classifyTier(mailCall('empty_trash', { mailbox: 'Trash', ids: ['1'] }, {}), makeCtx());
+      expect(decision.card?.cannot_be_undone).toBe('This tool is new to me, so I am checking with you first.');
+      expect(decision.card?.outbound_text).toContain('ids (list): ["1"]');
+      expect(decision.card?.outbound_text).not.toContain('(array)');
+    });
   });
 });

@@ -1,3 +1,5 @@
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { McpServerManifest } from '../schemas/mcpServer';
 
 /**
@@ -60,4 +62,33 @@ export function firstPartyAfterSave({
     manifest.memory_provider === true &&
     isFirstPartyOrigin({ url: manifest.url, origins })
   );
+}
+
+/**
+ * Whether a stored connector is the host's own Email or Calendar sidecar. Trust follows the address
+ * the host configured for that sidecar, never the name alone: a connector someone names "Email" at any
+ * other address is just a connector. An import or a Settings save can leave such a record without its
+ * mark, so the mark alone is not what decides.
+ */
+export function isHostSidecar({
+  name,
+  url,
+  mailUrl,
+  calendarUrl,
+}: {
+  name: string;
+  url: string;
+  mailUrl: string | undefined;
+  calendarUrl: string | undefined;
+}): boolean {
+  const hostUrl = name === MAIL_CONNECTOR_NAME ? mailUrl : name === CALDAV_SERVER_NAME ? calendarUrl : undefined;
+  return hostUrl !== undefined && sameAddress({ a: url, b: hostUrl });
+}
+
+function sameAddress({ a, b }: { a: string; b: string }): boolean {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return false;
+  }
 }

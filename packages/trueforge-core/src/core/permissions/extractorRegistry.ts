@@ -228,7 +228,17 @@ function typeHint(value: unknown): string | null {
   if (value === null) {
     return 'null';
   }
-  return Array.isArray(value) ? 'array' : typeof value;
+  if (Array.isArray(value)) {
+    return 'list';
+  }
+  switch (typeof value) {
+    case 'object':
+      return 'group';
+    case 'boolean':
+      return 'yes or no';
+    default:
+      return typeof value;
+  }
 }
 
 function leadingCodePoints(text: string, count: number): { head: string; rest: number } {

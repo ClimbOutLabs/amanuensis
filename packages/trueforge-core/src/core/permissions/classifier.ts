@@ -3064,9 +3064,10 @@ function connectorApprovalCard(input: {
       extraction.connector_what ??
       `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
     plain_why: plainWhy(input.agent_intent),
+    // A tool the host has no rule for may only read, so it never claims to be permanent.
     cannot_be_undone:
       extraction.connector_what === null
-        ? 'This might change something for good.'
+        ? 'This tool is new to me, so I am checking with you first.'
         : "Once this is sent, it can't be unsent.",
     why_asked_again: null,
     destination: fields.destination,

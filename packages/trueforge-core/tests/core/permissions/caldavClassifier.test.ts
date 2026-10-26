@@ -180,11 +180,11 @@ describe('CalDAV changes', () => {
       'timezone: ',
       'description: ',
       'location: ',
-      'categories (array)',
+      'categories (list)',
       'status: ',
-      'transparent (boolean)',
+      'transparent (yes or no)',
       'recurrence: ',
-      'alarms (array)',
+      'alarms (list)',
     ]) {
       expect(text).toContain(field);
     }

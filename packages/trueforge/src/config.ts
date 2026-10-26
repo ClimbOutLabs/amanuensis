@@ -293,6 +293,17 @@ export function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string
   }
 }
 
+/** The mail sidecar's MCP endpoint this host owns: the installer's link, else the one derived from its account agent. */
+export function hostMailMcpUrl({
+  mailMcpUrl,
+  mailAccountUrl,
+}: {
+  mailMcpUrl: string | undefined;
+  mailAccountUrl: string | undefined;
+}): string | undefined {
+  return mailMcpUrl ?? mailMcpUrlFromAccountUrl(mailAccountUrl);
+}
+
 /**
  * Parses `CALENDAR_CONNECTOR_URL`: the Calendar connector's MCP endpoint. Unset or blank means no calendar
  * sidecar. Anything else that is not an http(s) URL fails the boot.
@@ -2037,9 +2048,10 @@ const shared: SharedServerConfiguration = {
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
       calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
     }),
-    mailUrl:
-      parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')) ??
-      mailMcpUrlFromAccountUrl(parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'))),
+    mailUrl: hostMailMcpUrl({
+      mailMcpUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+      mailAccountUrl: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
+    }),
   }),
   MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
   MAIL_EMAIL_ACCOUNT_URL: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),

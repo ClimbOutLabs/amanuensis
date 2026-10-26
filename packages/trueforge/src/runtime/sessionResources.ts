@@ -24,7 +24,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
-import configuration, { type TokenFactoryMode } from '../config';
+import configuration, { hostMailMcpUrl, type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
@@ -33,7 +33,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { isFirstPartyOrigin } from '../mcp/firstParty';
+import { isFirstPartyOrigin, isHostSidecar } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -494,10 +494,20 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
-  // The stored mark is what setup decided at save time. It counts only while the operator still
-  // lists the origin, so dropping an origin from the configuration takes effect on the next turn.
+  // The stored mark is what setup decided at save time. The host's own Email and Calendar sidecars count
+  // without it, since an import or an edit in Settings clears the mark. Either way the operator must still
+  // list the origin, so dropping an origin from the configuration takes effect on the next turn.
   const firstParty =
-    record.first_party &&
+    (record.first_party ||
+      isHostSidecar({
+        name: record.name,
+        url: record.manifest.url,
+        mailUrl: hostMailMcpUrl({
+          mailMcpUrl: configuration.MAIL_EMAIL_MCP_URL,
+          mailAccountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+        }),
+        calendarUrl: configuration.CALENDAR_CONNECTOR_URL,
+      })) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   const searchProvider =
     record.manifest.type === 'remote' && record.manifest.search_provider === true

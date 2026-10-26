@@ -351,6 +351,85 @@ describe('getMcpConnection', () => {
     });
   });
 
+  describe("the host's own Email and Calendar sidecars", () => {
+    const MAIL_URL = 'http://mail-email:9557/mcp';
+    const CALENDAR_URL = 'http://calendar-caldav:9558/mcp';
+    const original = {
+      origins: configuration.FIRST_PARTY_MCP_ORIGINS,
+      mail: configuration.MAIL_EMAIL_MCP_URL,
+      mailAccount: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      calendar: configuration.CALENDAR_CONNECTOR_URL,
+    };
+
+    beforeEach(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://mail-email:9557', 'http://calendar-caldav:9558'];
+      configuration.MAIL_EMAIL_MCP_URL = MAIL_URL;
+      configuration.MAIL_EMAIL_ACCOUNT_URL = undefined;
+      configuration.CALENDAR_CONNECTOR_URL = CALENDAR_URL;
+    });
+
+    afterAll(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = original.origins;
+      configuration.MAIL_EMAIL_MCP_URL = original.mail;
+      configuration.MAIL_EMAIL_ACCOUNT_URL = original.mailAccount;
+      configuration.CALENDAR_CONNECTOR_URL = original.calendar;
+    });
+
+    async function save({ name, url }: { name: string; url: string }) {
+      // A record the way an import or a Settings save leaves it: no first-party mark.
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name,
+        manifest: { type: 'remote', name, url, description: 'A connector.' },
+        first_party: false,
+      });
+      const connection = await getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+      return connection?.first_party;
+    }
+
+    it('trusts the Email connector at the sidecar address the host owns even when its record has no mark', async () => {
+      expect(await save({ name: 'Email', url: MAIL_URL })).toBe(true);
+    });
+
+    it('finds the sidecar address from the account agent when no mail address is set', async () => {
+      configuration.MAIL_EMAIL_MCP_URL = undefined;
+      configuration.MAIL_EMAIL_ACCOUNT_URL = 'http://mail-email:9559';
+      expect(await save({ name: 'Email', url: MAIL_URL })).toBe(true);
+    });
+
+    it('trusts the Calendar connector at the sidecar address the host owns even when its record has no mark', async () => {
+      expect(await save({ name: 'Calendar', url: CALENDAR_URL })).toBe(true);
+    });
+
+    it('does not trust a connector someone named Email or Calendar at another address', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'https://other.example.com'];
+      expect(await save({ name: 'Email', url: 'https://other.example.com/mcp' })).toBe(false);
+      expect(await save({ name: 'Calendar', url: 'http://mail-email:9557/mcp' })).toBe(false);
+      expect(await save({ name: 'Email', url: 'http://mail-email:9557/other' })).toBe(false);
+    });
+
+    it('does not trust the sidecar address under another name', async () => {
+      expect(await save({ name: 'My mail', url: MAIL_URL })).toBe(false);
+    });
+
+    it('stops trusting the sidecar once the operator no longer lists its origin', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [];
+      expect(await save({ name: 'Email', url: MAIL_URL })).toBe(false);
+    });
+
+    it('trusts nothing when the host has no sidecar configured', async () => {
+      configuration.MAIL_EMAIL_MCP_URL = undefined;
+      configuration.CALENDAR_CONNECTOR_URL = undefined;
+      expect(await save({ name: 'Email', url: MAIL_URL })).toBe(false);
+      expect(await save({ name: 'Calendar', url: CALENDAR_URL })).toBe(false);
+    });
+  });
+
   describe('first_party marker', () => {
     const LISTED_ORIGIN = 'https://hindsight.example.com';
     const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman`;

@@ -7,6 +7,7 @@ import { AgentSpecSchema, TurnResourceResolver } from '@truefoundry/trueforge-co
 import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import type { IToolSet } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { createLogger } from 'winston';
+import configuration from '../../../src/config';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { registerMailConnector } from '../../../src/runtime/mailConnector';
 import { getMcpConnection, withGatewayMetadataHeaders } from '../../../src/runtime/sessionResources';
@@ -19,15 +20,18 @@ const OWNER = 'owner-1';
 describe('the Email connector on the real tool route', () => {
   let server: ApprovalTestServer;
   let sidecar: InertMcpServer;
+  const originalMailUrl = configuration.MAIL_EMAIL_MCP_URL;
 
   beforeAll(async () => {
     server = await startApprovalTestServer();
     sidecar = await startInertMcpServer({ mail: true });
     // A terminal install: config lists the sidecar's origin as the operator's own.
     server.setFirstPartyOrigins([sidecar.origin]);
+    configuration.MAIL_EMAIL_MCP_URL = sidecar.url;
   }, 120_000);
 
   afterAll(async () => {
+    configuration.MAIL_EMAIL_MCP_URL = originalMailUrl;
     await sidecar.close();
     await server.close();
   });
@@ -114,6 +118,18 @@ describe('the Email connector on the real tool route', () => {
       url: sidecar.url,
       mcpServerStore: new SqliteMcpServerStore(server.db()),
       tenant_id: TENANT,
+    });
+
+    await expectReadsRunAndSendsAsk();
+  });
+
+  it('reads with no card from an Email record an import or an edit left without its mark', async () => {
+    // Imports and Settings edits write the record with first_party false.
+    await new SqliteMcpServerStore(server.db()).upsertServer({
+      tenant_id: TENANT,
+      name: 'Email',
+      manifest: { type: 'remote', name: 'Email', url: sidecar.url, description: 'Imported.' },
+      first_party: false,
     });
 
     await expectReadsRunAndSendsAsk();
