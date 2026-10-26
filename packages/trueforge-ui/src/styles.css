@@ -1543,7 +1543,7 @@
 
 /*
  * Every approval card (email, calendar, shell, space, connector) reads like the chat around it: body
- * font at the chat's body size, the question a little larger in semibold, and only a command or a
+ * font at the chat's body size, the question at that same size in semibold, and only a command or a
  * message's own content in its own font. A card must never look louder than the chat.
  */
 .aui-approval-card {
@@ -1555,7 +1555,7 @@
 
 .aui-approval-card__title {
   font-family: var(--font-sans);
-  font-size: 1.125rem;
+  font-size: var(--text-base);
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: normal;

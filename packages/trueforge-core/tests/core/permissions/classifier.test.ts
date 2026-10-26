@@ -18,10 +18,11 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
 import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+import { createWebSearchTurnState, SEARCH_STEERED_REASON } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 /**
@@ -1400,5 +1401,43 @@ describe('a held server key is never shown raw on a card', () => {
     expect(decision.tier).toBe(3);
     expect(JSON.stringify(decision.card)).not.toContain(KEY);
     expect(decision.approval_token_id).not.toBeNull();
+  });
+});
+
+describe('a search follows the same whole-link rule as a lookup', () => {
+  const PAGE = 'https://photos.meadowbrook.net/fox.jpg';
+
+  function ctxWithPage(): ClassifyContext {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: `My fox photo: ${PAGE}` });
+    recordUntrustedText({
+      provenance: ctx.web_search.provenance,
+      text: 'More photos at photos.meadowbrook.net',
+      source: 'page',
+    });
+    return ctx;
+  }
+
+  function fetchOf(url: string): SentinelAction {
+    return {
+      tool_name: 'web_search',
+      canonical_params: { query: 'fox photo', urls: [url] },
+      tool_type: 'mcp',
+      mcp_server_name: 'search',
+      mcp_search_provider: true,
+      mcp_search_tool: true,
+      mcp_search_plumbing_fields: ['session_id'],
+      mcp_hints: { read_only_hint: true, open_world_hint: true },
+    };
+  }
+
+  it('runs silently for the link exactly as the person gave it', async () => {
+    const decision = await classifyTier(fetchOf(PAGE), ctxWithPage());
+    expect(decision.tier).toBe(1);
+  });
+
+  it('asks when the link carries words after it', async () => {
+    const decision = await classifyTier(fetchOf(`${PAGE} as shown`), ctxWithPage());
+    expect(decision).toMatchObject({ tier: 3, reason: SEARCH_STEERED_REASON });
   });
 });

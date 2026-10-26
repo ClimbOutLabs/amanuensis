@@ -87,10 +87,26 @@ function isWholeUrl(value: string): boolean {
   return WHOLE_HOST.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(value) || /^www\.\S+$/i.test(value);
 }
 
+/** A link an outbound value names, and whether it is the whole value, edge whitespace aside. */
+interface NamedLink {
+  url: string;
+  /**
+   * The value is this link and nothing else. Only a whole value may claim a recorded trust or an
+   * exact copy: a reader opens the whole value, so a link inside a longer one is a different link
+   * from the one that was recorded, whatever follows it.
+   */
+  whole: boolean;
+}
+
+/** The links an outbound value names: the value itself when it is one, else those written inside it. */
+function linksOf(value: string): NamedLink[] {
+  const trimmed = value.trim();
+  return isWholeUrl(trimmed) ? [{ url: trimmed, whole: true }] : urlsInText(value).map(url => ({ url, whole: false }));
+}
+
 /** The URLs an outbound value names: the value itself when it is one, else those written inside it. */
 function urlsOf(value: string): string[] {
-  const trimmed = value.trim();
-  return isWholeUrl(trimmed) ? [trimmed] : urlsInText(value);
+  return linksOf(value).map(link => link.url);
 }
 
 /** Whether any outbound value is, or contains, a URL: a call that opens a page rather than searches. */
@@ -425,9 +441,10 @@ function isBareSite(url: string): boolean {
  * Whether read content steered a link. A bare site is steered when only read content named it. A link that adds a
  * path or a query is trusted only as the exact link the person gave or a search returned, once read content named
  * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
- * does not vouch for a page on it that read content chose.
+ * does not vouch for a page on it that read content chose. Exact means the whole value: a recorded trust vouches
+ * only for a value that is the link itself, never for a longer value the link merely begins.
  */
-function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+function steeredUrl(input: { provenance: ChatProvenance; url: string; whole: boolean }): boolean {
   const { provenance } = input;
   const key = urlKey(input.url);
   const host = parsedUrl(input.url)?.hostname;
@@ -438,20 +455,28 @@ function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean
   if (!untrustedHas({ provenance, kind: 'hosts', value: site })) {
     return false;
   }
-  return isBareSite(input.url) ? !provenance.trusted.hosts.has(site) : !provenance.trusted.urls.has(key);
+  const vouched =
+    input.whole && (isBareSite(input.url) ? provenance.trusted.hosts.has(site) : provenance.trusted.urls.has(key));
+  return !vouched;
 }
 
 /**
  * Links a lookup names that read content steered and that carry something that content did not give. Opening a
  * link exactly as a page or a mail wrote it sends nothing of the person's, so it is not steered; adding to it is.
+ * Exact means the value is the link alone: a value that carries the link and then more opens as the longer
+ * value, not as the copy, so the copy's exemption does not hold for it either.
  */
 export function steeredLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const { provenance } = input;
   return input.values.flatMap(value =>
-    urlsOf(value).filter(url => {
-      const key = urlKey(url);
-      return key !== undefined && !provenance.untrusted.urls.has(key) && steeredUrl({ provenance, url });
-    }),
+    linksOf(value)
+      .filter(({ url, whole }) => {
+        const key = urlKey(url);
+        return (
+          key !== undefined && !(whole && provenance.untrusted.urls.has(key)) && steeredUrl({ provenance, url, whole })
+        );
+      })
+      .map(({ url }) => url),
   );
 }
 
@@ -459,15 +484,19 @@ export function steeredLinks(input: { provenance: ChatProvenance; values: readon
  * Links in values that nobody chose to load: not exactly a link the person gave, a search returned, or a
  * page the chat opened showed as a picture. A lookup runs once on the person's behalf, so read content may
  * name its links; an embed is loaded by the person's own browser every time it is shown, so only a chosen
- * link may be one. Copying a link exactly as read content wrote it is not a choice.
+ * link may be one. Copying a link exactly as read content wrote it is not a choice, and neither is a value
+ * that carries a chosen link and then more: the browser loads the whole value as one link, which is not
+ * the link that was chosen.
  */
 export function unchosenLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const { provenance } = input;
   return input.values.flatMap(value =>
-    urlsOf(value).filter(url => {
-      const key = urlKey(url);
-      return key === undefined || !provenance.trusted.urls.has(key);
-    }),
+    linksOf(value)
+      .filter(({ url, whole }) => {
+        const key = urlKey(url);
+        return key === undefined || !(whole && provenance.trusted.urls.has(key));
+      })
+      .map(({ url }) => url),
   );
 }
 
@@ -517,9 +546,9 @@ export function steeredDestinations(input: {
     for (const match of value.matchAll(EMAIL)) {
       addAddress(match[0]);
     }
-    for (const url of urlsOf(value.replace(EMAIL, ' '))) {
+    for (const { url, whole } of linksOf(value.replace(EMAIL, ' '))) {
       const host = parsedUrl(url)?.hostname;
-      if (host !== undefined && steeredUrl({ provenance, url })) {
+      if (host !== undefined && steeredUrl({ provenance, url, whole })) {
         steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${hostKey(host)}` }) });
       }
     }

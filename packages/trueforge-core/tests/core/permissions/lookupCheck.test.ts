@@ -93,6 +93,57 @@ describe('checkLookup for an embed, which a browser loads on its own', () => {
   });
 });
 
+describe('checkLookup when a value carries more than the link itself', () => {
+  function searchReturnedPicture(): ChatProvenance {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url: PAGE_LINK }] })] });
+    return provenance;
+  }
+
+  it('keeps an embed link with only whitespace after it, since every reader drops edge whitespace', () => {
+    const check = checkOf({ provenance: searchReturnedPicture(), url: `${PAGE_LINK} `, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+
+  it('reports an embed link with words after it', () => {
+    const check = checkOf({ provenance: searchReturnedPicture(), url: `${PAGE_LINK} as shown`, use: 'embed' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('reports an embed link with another link after it', () => {
+    const check = checkOf({
+      provenance: searchReturnedPicture(),
+      url: `${PAGE_LINK} ${UNSEEN_PICTURE}`,
+      use: 'embed',
+    });
+    expect(check.steered).toEqual([PAGE_LINK, UNSEEN_PICTURE]);
+  });
+
+  it('reports an embed link with another site named after it', () => {
+    const check = checkOf({
+      provenance: searchReturnedPicture(),
+      url: `${PAGE_LINK} picturestack.net`,
+      use: 'embed',
+    });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('reports a lookup link copied from read content with words after it', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: PAGE_LINK, source: 'page' });
+    const check = checkOf({ provenance, url: `${PAGE_LINK} as shown`, use: 'lookup' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('reports a lookup link the person gave with words after it, when read content named its site', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `My fox picture: ${PAGE_LINK}` });
+    recordUntrustedText({ provenance, text: 'More foxes at upload.wikimedia.org', source: 'page' });
+    const check = checkOf({ provenance, url: `${PAGE_LINK} as shown`, use: 'lookup' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+});
+
 describe('checkLookup private details', () => {
   const OWN_ADDRESS = 'sam@postbox.net';
   const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;

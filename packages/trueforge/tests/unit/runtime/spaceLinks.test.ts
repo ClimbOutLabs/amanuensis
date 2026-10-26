@@ -298,6 +298,27 @@ describe('a space picture must be one the person, a search, or an opened page ch
   });
 });
 
+describe('a space link value that carries more than the link itself', () => {
+  it('keeps a picture link with only a trailing space, which every reader drops', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN} " alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('refuses a picture link with words after it', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN} as shown" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a link with words after it', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<a href="${SEEN} as shown">Fox</a>`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+});
+
 describe('a space link carrying a private detail of the person', () => {
   const OWN_ADDRESS = 'sam@postbox.net';
   const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;
