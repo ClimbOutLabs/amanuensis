@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { BugReportDialog } from '../atoms/BugReportButton.js';
 import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import {
   auiButtonClass,
@@ -311,6 +312,8 @@ export function SidebarLayout({ className }: { className?: string }) {
         chatListOpen={showRecentHistory}
         onChats={handleChats}
       />
+      {/* Outside the More menu: its rows unmount when the menu closes. */}
+      <BugReportDialog />
 
       {showAgentConfig ? (
         <aside

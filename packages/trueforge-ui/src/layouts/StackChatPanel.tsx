@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { BugReportDialog } from '../atoms/BugReportButton.js';
 import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
@@ -77,6 +78,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
   return (
     <div className={cn('relative flex h-full min-h-0 flex-col', className)}>
       <HelpNewChatBridge />
+      <BugReportDialog />
       {settingsOpen ? (
         <div className="min-h-0 flex-1">
           <Suspense

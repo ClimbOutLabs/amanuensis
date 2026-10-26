@@ -230,10 +230,11 @@ function mockSpaceStore(): SpaceStore {
 
 /** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
  *  (it renders nothing without one — see `SpacesButton`). */
+const getBugReportHandoff = vi.fn(() => Promise.reject(new Error('not used')));
 const bugReportApi: BugReportApi = {
   generateBugReport: () => Promise.reject(new Error('not used')),
   generateAppBugReport: () => Promise.reject(new Error('not used')),
-  getBugReportHandoff: () => Promise.reject(new Error('not used')),
+  getBugReportHandoff,
 };
 
 function renderSidebarLayoutWithSpaces({
@@ -387,5 +388,34 @@ describe('SidebarLayout More menu', () => {
     expect(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' })).toHaveTextContent(
       'Report a bug',
     );
+  });
+
+  it('opens the bug report dialog from the More menu row and keeps it open after the menu closes', async () => {
+    renderSidebarLayoutWithSpaces({ withBugReport: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Report a bug' });
+    expect(dialog).toHaveAttribute('open');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toHaveAttribute('open');
+  });
+
+  it('looks up the issue tracker target each time the bug report dialog opens', async () => {
+    getBugReportHandoff.mockClear();
+    renderSidebarLayoutWithSpaces({ withBugReport: true });
+    const openFromMenu = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
+      return screen.findByRole('dialog', { name: 'Report a bug' });
+    };
+
+    const first = await openFromMenu();
+    fireEvent.click(within(first).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Report a bug' })).not.toBeInTheDocument());
+
+    await openFromMenu();
+    await waitFor(() => expect(getBugReportHandoff).toHaveBeenCalledTimes(2));
   });
 });
