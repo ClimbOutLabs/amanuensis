@@ -1251,7 +1251,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly logger: Logger;
   private readonly sessionId: string;
   private readonly previousTurnId: string | null;
-  private readonly sessionTitle: string | undefined;
   /** Undefined when the recall screen is disabled; then recall is lossless and unscreened. */
   private readonly screenClient: ScreenClient | undefined;
   /** When false, memory recall and retention are disabled by the user for this session. */
@@ -1281,7 +1280,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     logger: Logger;
     sessionId: string;
     previousTurnId: string | null;
-    sessionTitle?: string | undefined;
     screenClient?: ScreenClient | undefined;
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
@@ -1292,7 +1290,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.logger = input.logger;
     this.sessionId = input.sessionId;
     this.previousTurnId = input.previousTurnId;
-    this.sessionTitle = input.sessionTitle;
     this.screenClient = input.screenClient;
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
@@ -2077,7 +2074,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       userText: exchange.userText,
       assistantText: exchange.assistantText,
       completedAt: new Date().toISOString(),
-      sessionTitle: this.sessionTitle,
       origin: exchange.origin,
       logger: this.logger,
     });
@@ -2120,7 +2116,6 @@ export function hindsightMemoryCapability(input: {
   logger: Logger;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle?: string | undefined;
   /** Test override for the recall screen client; production builds one from `config.screen`. */
   screenClient?: ScreenClient | undefined;
   /** When false, memory recall is disabled by the user for this session. Default: true. */

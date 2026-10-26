@@ -64,6 +64,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
+  withoutSessionMarker,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -253,7 +254,13 @@ export class MarkdownMemoryClient implements MemoryClient {
       );
       for (const item of interleaveRanked(rankedLists)) {
         const metadata = entryMetadata(item.text);
-        const ok = take({ id: item.id, text: item.text, type: 'markdown', ...(metadata && { metadata }) });
+        // The chat id travels as metadata so recall can skip notes from the current chat; the model reads only the facts.
+        const ok = take({
+          id: item.id,
+          text: withoutSessionMarker(item.text),
+          type: 'markdown',
+          ...(metadata && { metadata }),
+        });
         if (!ok) {
           break;
         }

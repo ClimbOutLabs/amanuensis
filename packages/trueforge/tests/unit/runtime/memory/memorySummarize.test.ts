@@ -6,13 +6,20 @@ import { type IModelProviderStore } from '../../../../src/db/modelProviderStore'
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteTokenFactoryUsageStore } from '../../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
-import { buildSummarizationMessages, summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import {
+  buildSummarizationMessages,
+  lightReasoningRequestFields,
+  parseSummaryReply,
+  summarizeTurnContent,
+} from '../../../../src/runtime/memory/memorySummarize';
 import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
 import { TENANT_ID } from '../../../../src/tenancy';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
 import { startModelEndpointStub } from '../../../fixtures/modelEndpointStub';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
+
+const TURN_DATE = '2026-10-26T09:00:00.000Z';
 
 function makeLogger() {
   return winston.createLogger({ silent: true });
@@ -65,6 +72,7 @@ describe('buildSummarizationMessages', () => {
     const messages = buildSummarizationMessages({
       userText: 'My robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
+      turnDate: TURN_DATE,
     });
     expect(messages).toHaveLength(2);
     expect(messages[0]?.role).toBe('system');
@@ -73,11 +81,107 @@ describe('buildSummarizationMessages', () => {
     expect(messages[1]?.content).toContain('Assistant: Got it, Bleep-Bloop.');
   });
 
-  it('instructs the model to capture durable facts, not small talk', () => {
-    const messages = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello' });
-    const system = messages[0]?.content ?? '';
-    expect(system).toContain('durable facts');
-    expect(system).toContain('remember this');
+  it('tells the model that nothing is a valid answer, with an example of an empty result', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('{"facts": []}');
+    expect(system).toContain('Most turns hold nothing worth keeping');
+  });
+
+  it('names what to keep and what never to keep', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('anything they ask you to remember');
+    expect(system).toContain('anything the assistant said, asked, offered, or wrote');
+    expect(system).toContain('open questions');
+    expect(system).toContain('rules for how the assistant should act');
+    expect(system).toContain('Never write "User" or "Assistant"');
+  });
+
+  it('gives the date of the chat so relative dates can be written out', () => {
+    const user = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[1]
+      ?.content;
+    expect(user).toContain('Date of the chat: 2026-10-26 (Monday)');
+  });
+});
+
+describe('parseSummaryReply', () => {
+  it('reads a facts object', () => {
+    expect(parseSummaryReply('{"facts": ["The person has a dog named Rex.", "Harry has their book."]}')).toEqual({
+      kind: 'facts',
+      facts: ['The person has a dog named Rex.', 'Harry has their book.'],
+    });
+  });
+
+  it.each([
+    ['code fences', '```json\n{"facts": ["The person owns a bike."]}\n```'],
+    ['a lead-in sentence', 'Here is the result: {"facts": ["The person owns a bike."]}'],
+    ['a trailing comma', '{"facts": ["The person owns a bike.",]}'],
+    ['a bare list', '["The person owns a bike."]'],
+    ['bullet marks inside the facts', '{"facts": ["- The person owns a bike."]}'],
+  ])('tolerates %s', (_name, reply) => {
+    expect(parseSummaryReply(reply)).toEqual({ kind: 'facts', facts: ['The person owns a bike.'] });
+  });
+
+  it.each([
+    '',
+    '   ',
+    '{"facts": []}',
+    '```json\n{"facts": []}\n```',
+    'None',
+    'No durable facts were shared in this exchange.',
+    'Turn summary: - No durable facts were shared in this exchange.',
+    '(no content)',
+    '{"facts": ["No durable facts."]}',
+  ])('treats %j as nothing to keep', reply => {
+    expect(parseSummaryReply(reply)).toEqual({ kind: 'nothing' });
+  });
+
+  it('drops facts written as narration of the chat', () => {
+    expect(
+      parseSummaryReply(
+        '{"facts": ["Assistant asked whether to file it today.", "User wants the assistant to ask one item at a time.", "The person has a cat."]}',
+      ),
+    ).toEqual({ kind: 'facts', facts: ['The person has a cat.'] });
+  });
+
+  it('keeps nothing when every fact is narration', () => {
+    expect(parseSummaryReply('{"facts": ["Assistant drafted a note."]}')).toEqual({ kind: 'nothing' });
+  });
+
+  it('never stores prose or half a reply as a fact', () => {
+    expect(parseSummaryReply('The person talked about a robot.')).toEqual({ kind: 'unreadable' });
+    expect(parseSummaryReply('{"facts": ["The person owns')).toEqual({ kind: 'unreadable' });
+    expect(parseSummaryReply('{"facts": "The person owns a bike."}')).toEqual({ kind: 'unreadable' });
+  });
+
+  it('keeps at most eight facts', () => {
+    const facts = Array.from({ length: 12 }, (_, index) => `The person owns item number ${String(index)}.`);
+    const parsed = parseSummaryReply(JSON.stringify({ facts }));
+    expect(parsed.kind === 'facts' ? parsed.facts : []).toHaveLength(8);
+  });
+});
+
+describe('lightReasoningRequestFields', () => {
+  it('asks for no reasoning when the model lists it', () => {
+    expect(lightReasoningRequestFields({ reasoning_efforts: ['none', 'low', 'high'] })).toEqual({
+      enable_thinking: false,
+      reasoning_effort: 'none',
+    });
+  });
+
+  it('asks for the lightest effort the model lists', () => {
+    expect(lightReasoningRequestFields({ reasoning_efforts: ['high', 'low', 'medium'] })).toEqual({
+      reasoning_effort: 'low',
+    });
+    expect(lightReasoningRequestFields({ reasoning_efforts: ['minimal', 'low'] })).toEqual({
+      reasoning_effort: 'minimal',
+    });
+  });
+
+  it('asks for nothing when the model lists no light effort or no efforts', () => {
+    expect(lightReasoningRequestFields({ reasoning_efforts: ['high', 'max'] })).toEqual({});
+    expect(lightReasoningRequestFields({})).toEqual({});
   });
 });
 
@@ -85,6 +189,7 @@ describe('summarizeTurnContent', () => {
   const base = {
     userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
     assistantText: 'Got it — Bleep-Bloop is your synthetic test robot.',
+    turnDate: TURN_DATE,
     tenantId: 'tenant-1',
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'openai/gpt-4o',
@@ -96,11 +201,11 @@ describe('summarizeTurnContent', () => {
   it('returns a summarized result on success', async () => {
     const result = await summarizeTurnContent({
       ...base,
-      resolveLlm: async () => fakeSummarizer('- User has a synthetic test robot named Bleep-Bloop.'),
+      resolveLlm: async () => fakeSummarizer('{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}'),
     });
     expect(result).toEqual({
       status: 'summarized',
-      summary: '- User has a synthetic test robot named Bleep-Bloop.',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
     });
   });
 
@@ -137,12 +242,20 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'failed', reason: 'provider down', fallback: 'model_unresolved' });
   });
 
-  it('returns failed when the model returns an empty summary', async () => {
+  it.each(['   ', '{"facts": []}', 'No durable facts were shared in this exchange.', '(no content)'])(
+    'returns nothing_to_keep when the model says there is nothing: %j',
+    async reply => {
+      const result = await summarizeTurnContent({ ...base, resolveLlm: async () => fakeSummarizer(reply) });
+      expect(result).toEqual({ status: 'nothing_to_keep' });
+    },
+  );
+
+  it('returns failed, and keeps no text, when the reply is not the expected shape', async () => {
     const result = await summarizeTurnContent({
       ...base,
-      resolveLlm: async () => fakeSummarizer('   '),
+      resolveLlm: async () => fakeSummarizer('The person talked about a robot and a dog.'),
     });
-    expect(result).toEqual({ status: 'failed', reason: 'empty-summary', fallback: 'summary_empty' });
+    expect(result).toEqual({ status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' });
   });
 
   it('returns failed with model_timeout when the summarizer call times out', async () => {
@@ -185,7 +298,7 @@ describe('summarizeTurnContent', () => {
   });
 
   it('caps the generation with max_tokens so output cost is bounded', async () => {
-    const llm = fakeSummarizer('- User has a synthetic test robot named Bleep-Bloop.');
+    const llm = fakeSummarizer('{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}');
     const createNonStream = jest.spyOn(llm, 'createNonStream');
     const result = await summarizeTurnContent({
       ...base,
@@ -196,16 +309,74 @@ describe('summarizeTurnContent', () => {
     expect(createNonStream.mock.calls[0]?.[0]?.max_tokens).toBe(800);
   });
 
+  /** A reasoning model: it thinks until the cap when the cap is below `thinkingTokens`, and then has no text. */
+  function fakeReasoningSummarizer(options: { thinkingTokens: number; answer: string }): {
+    llm: ILLM;
+    caps: (number | null | undefined)[];
+  } {
+    const caps: (number | null | undefined)[] = [];
+    const llm: ILLM = {
+      create(): ReturnType<ILLM['create']> {
+        throw new Error('streaming is not used by memory summarization');
+      },
+      createNonStream: async body => {
+        const cap = body.max_tokens;
+        caps.push(cap);
+        const cutOff = (cap ?? 0) < options.thinkingTokens;
+        return {
+          output: { role: 'assistant', content: cutOff ? '' : options.answer },
+          usage: { input_tokens: 0, output_tokens: cutOff ? (cap ?? 0) : options.thinkingTokens, total_tokens: 0 },
+          finish_reason: cutOff ? 'length' : 'stop',
+        };
+      },
+    };
+    return { llm, caps };
+  }
+
+  it('retries once with more room when thinking used up the cap and left no answer', async () => {
+    const { llm, caps } = fakeReasoningSummarizer({
+      thinkingTokens: 2000,
+      answer: '{"facts": ["The person has a dog named Rex."]}',
+    });
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => llm });
+    expect(result).toEqual({ status: 'summarized', facts: ['The person has a dog named Rex.'] });
+    expect(caps).toEqual([800, 4000]);
+  });
+
+  it('fails, and stores no text, when the model is still cut off after the retry', async () => {
+    const { llm, caps } = fakeReasoningSummarizer({ thinkingTokens: 100_000, answer: '{"facts": []}' });
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => llm });
+    expect(result).toEqual({ status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' });
+    expect(caps).toEqual([800, 4000]);
+  });
+
+  it('retries a cut-off half answer, and does not retry a finished empty one', async () => {
+    const cutOff = fakeSummarizer('{"facts": ["The person ow');
+    jest.spyOn(cutOff, 'createNonStream').mockResolvedValueOnce({
+      output: { role: 'assistant', content: '{"facts": ["The person ow' },
+      usage: { input_tokens: 0, output_tokens: 800, total_tokens: 800 },
+      finish_reason: 'length',
+    });
+    const retried = await summarizeTurnContent({ ...base, resolveLlm: async () => cutOff });
+    expect(retried.status).toBe('failed');
+    expect(cutOff.createNonStream).toHaveBeenCalledTimes(2);
+
+    const finished = fakeSummarizer('');
+    jest.spyOn(finished, 'createNonStream');
+    await summarizeTurnContent({ ...base, resolveLlm: async () => finished });
+    expect(finished.createNonStream).toHaveBeenCalledTimes(1);
+  });
+
   it('flattens multi-part content responses', async () => {
     const result = await summarizeTurnContent({
       ...base,
       resolveLlm: async () =>
         fakeSummarizer([
-          { type: 'text', text: 'Fact: ' },
-          { type: 'text', text: 'Bleep-Bloop' },
+          { type: 'text', text: '{"facts": ["The person' },
+          { type: 'text', text: ' owns a robot."]}' },
         ]),
     });
-    expect(result).toEqual({ status: 'summarized', summary: 'Fact: Bleep-Bloop' });
+    expect(result).toEqual({ status: 'summarized', facts: ['The person owns a robot.'] });
   });
 
   it('never holds more than the bounded number of concurrent LLM calls', async () => {
@@ -251,7 +422,7 @@ describe('summarizeTurnContent on Token Factory', () => {
   async function setup(providerType: 'tokenfactory' | 'custom') {
     const stub = await startModelEndpointStub({
       usage: { prompt_tokens: 150, completion_tokens: 25 },
-      content: '- User has a synthetic test robot named Bleep-Bloop.',
+      content: '{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}',
     });
     servers.push(stub.server);
     const db = createSqliteDb(':memory:');
@@ -289,6 +460,7 @@ describe('summarizeTurnContent on Token Factory', () => {
       summarizeTurnContent({
         userText: 'My robot is named Bleep-Bloop.',
         assistantText: 'Got it.',
+        turnDate: TURN_DATE,
         tenantId: TENANT_ID,
         modelProviderStore,
         summarizationModelFqn,
@@ -307,7 +479,7 @@ describe('summarizeTurnContent on Token Factory', () => {
     expect((await usageStore.getUsage({ usage_date: TODAY }))?.used_tokens).toBe(175);
   });
 
-  it('falls back to the verbatim transcript, without a call, once the cap is reached', async () => {
+  it('fails without a call once the cap is reached', async () => {
     const { run, usageStore } = await setup('tokenfactory');
     await usageStore.addUsage({
       usage_date: TODAY,
