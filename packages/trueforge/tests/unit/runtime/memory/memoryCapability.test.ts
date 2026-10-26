@@ -493,7 +493,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
     const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
-    expect(passthroughEvent(events)['injected_block']).toContain('[markdown, 2026-09-20] fact');
+    expect(passthroughEvent(events)['injected_block']).toContain('[2026-09-20] fact');
   });
 
   it('inserts the block as a system message just before the current message, without mutating the input array', async () => {
