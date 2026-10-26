@@ -206,8 +206,8 @@ export function AssistantMessageContainer() {
   // without the JSON; a finished answer with no JSON shows as normal markdown.
   const readBrief = answersBrief ? parseMorningBrief(answerText) : null;
   const briefWriting = answersBrief && readBrief === null && isMessageRunning;
-  const unreadableText =
-    answersBrief && readBrief === null && !isMessageRunning ? unreadableBriefText(answerText) : null;
+  const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
+  const unreadableText = answersBrief && readBrief === null && settled ? unreadableBriefText(answerText) : null;
   const briefHidesText = briefWriting || unreadableText !== null;
 
   const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts);
@@ -215,7 +215,6 @@ export function AssistantMessageContainer() {
   // With agent details off the person sees their answer and what needs them, nothing of the work.
   // In-between lines hide; a settled reply with no text after its last step keeps its last line as
   // the answer, unless a step after that line failed, and then one plain line says it did not finish.
-  const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
   const lastInterim = interimTextIndices.at(-1);
   const failedAfterLastInterim = lastInterim !== undefined && parts.slice(lastInterim + 1).some(isToolPartErrored);
   const keptAsAnswer = settled && !hasFinal && !failedAfterLastInterim ? lastInterim : undefined;

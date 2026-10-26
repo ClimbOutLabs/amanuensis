@@ -257,6 +257,31 @@ describe('parseMorningBrief with a long digest', () => {
     expect(digest).toBe(`${'x'.repeat(BRIEF_LIMITS.digest - 1)}…`);
   });
 
+  it('never leaves half of an emoji before the ellipsis', () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (const glyph of ['\u{1F600}', '\u{20BB7}']) {
+      const digest = parseMorningBrief(answer({ digest: glyph.repeat(300), items: [] }))?.brief.digest ?? '';
+      expect(digest.endsWith('…')).toBe(true);
+      expect(digest.length).toBeLessThanOrEqual(BRIEF_LIMITS.digest);
+      expect(lone.test(digest)).toBe(false);
+      expect(digest.slice(0, -1)).toBe(glyph.repeat((digest.length - 1) / 2));
+    }
+  });
+
+  it('does not end the digest after an abbreviation such as Dr.', () => {
+    const filler = 'word '.repeat(30);
+    const digest = `${filler}Please ask Dr. Smith about the ${'word '.repeat(60)}end.`;
+    const shortened = parseMorningBrief(answer({ digest, items: [] }))?.brief.digest ?? '';
+    expect(shortened.endsWith('…')).toBe(true);
+    expect(shortened).toContain('Smith');
+    expect(shortened.length).toBeLessThanOrEqual(BRIEF_LIMITS.digest);
+  });
+
+  it('still ends the digest at a full stop that follows an ordinary word', () => {
+    const digest = `${'word '.repeat(30)}Please ask Dr. Smith about it. ${'word '.repeat(60)}end.`;
+    expect(parseMorningBrief(answer({ digest, items: [] }))?.brief.digest.endsWith('about it.')).toBe(true);
+  });
+
   it('keeps a digest that is exactly at the limit', () => {
     const digest = 'y'.repeat(BRIEF_LIMITS.digest);
     expect(parseMorningBrief(answer({ digest, items: [] }))?.brief.digest).toBe(digest);
@@ -288,7 +313,59 @@ describe('parseMorningBrief with items that do not fit', () => {
   });
 });
 
+describe('parseMorningBrief with other ways of writing the JSON', () => {
+  const json = JSON.stringify(VALID);
+
+  it.each([
+    ['an untagged fence', `Here.\n\n\`\`\`\n${json}\n\`\`\``],
+    ['an upper case tag', `Here.\n\n\`\`\`JSON\n${json}\n\`\`\``],
+    ['a different tag', `Here.\n\n\`\`\`js\n${json}\n\`\`\``],
+    ['a bare object after prose', `Here is your brief: ${json}\nHave a good day.`],
+  ])('reads the brief from %s', (_name, text) => {
+    expect(parseMorningBrief(text)).toEqual({ brief: VALID, omittedCount: 0 });
+  });
+
+  it('keeps a good brief when a later block is some other json', () => {
+    const text = `${answer(VALID)}\n\nExtra:\n\n\`\`\`json\n{"note": "done"}\n\`\`\``;
+    expect(parseMorningBrief(text)).toEqual({ brief: VALID, omittedCount: 0 });
+  });
+
+  it('keeps a good brief when a later block is cut off or broken', () => {
+    expect(parseMorningBrief(`${answer(VALID)}\n\n\`\`\`json\n{"digest": "Mor`)?.brief).toEqual(VALID);
+    expect(parseMorningBrief(`${answer(VALID)}\n\n\`\`\`json\n{ nope }\n\`\`\``)?.brief).toEqual(VALID);
+  });
+
+  it('takes the last block that is a brief when several are', () => {
+    const first = { ...VALID, digest: 'Old.' };
+    expect(parseMorningBrief(`${answer(first)}\n\n${answer(VALID)}`)?.brief.digest).toBe(VALID.digest);
+  });
+
+  it('is not fooled by braces inside strings or in the prose around the object', () => {
+    const tricky = { ...VALID, digest: 'Use } and { in text, "quoted" too.' };
+    expect(parseMorningBrief(`A { stray brace first. ${JSON.stringify(tricky)}`)?.brief.digest).toBe(tricky.digest);
+  });
+});
+
 describe('unreadableBriefText', () => {
+  it('drops an untagged, upper case or cut-off fence', () => {
+    expect(unreadableBriefText('Sorry.\n\n```\n{"digest": 5}\n```')).toBe('Sorry.');
+    expect(unreadableBriefText('Sorry.\n\n```JSON\n{"digest": 5}\n```')).toBe('Sorry.');
+    expect(unreadableBriefText('Sorry.\n\n```\n{"digest": "One", "ite')).toBe('Sorry.');
+    expect(unreadableBriefText('Sorry.\n\n```json\n{ "digest": \n```')).toBe('Sorry.');
+  });
+
+  it('drops a bare json object after prose, whole or cut off', () => {
+    expect(unreadableBriefText('Sorry. {"digest": 5, "items": []} Bye.')).toBe('Sorry.\nBye.');
+    expect(unreadableBriefText('Sorry. {"digest": "One", "items": [{"sec')).toBe('Sorry.');
+  });
+
+  it('keeps every word of an answer that only starts with a bracket or brace', () => {
+    expect(unreadableBriefText('[Note] I could not open your inbox.')).toBeNull();
+    expect(unreadableBriefText('[Open the inbox](https://mail.example.com) did not load.')).toBeNull();
+    expect(unreadableBriefText('{Draft} nothing came back.')).toBeNull();
+    expect(unreadableBriefText('[Note] Sorry.\n\n```json\n{"digest": 5}\n```')).toBe('Note Sorry.');
+  });
+
   it('drops a cut-off json block and keeps the words before it', () => {
     const text = unreadableBriefText('Here is **your** brief.\n\n```json\n{"digest": "One thing", "items": [{"sec');
     expect(text).toBe('Here is your brief.');

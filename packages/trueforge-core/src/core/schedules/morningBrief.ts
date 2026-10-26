@@ -87,7 +87,100 @@ export interface ReadBrief {
   omittedCount: number;
 }
 
-const JSON_BLOCK = /```json[^\S\n]*\n?([\s\S]*?)```/g;
+/** A code fence of any tag (json, JSON, or none), so the model's choice of tag never decides what is shown. */
+const FENCE = /```[^\S\n]*[A-Za-z0-9_-]*[^\S\n]*\n?([\s\S]*?)```/g;
+
+/** An opening fence that never closed and holds JSON, which is an answer cut off mid-brief. */
+const UNCLOSED_JSON_FENCE = /```[^\S\n]*(?:json\b[\s\S]*|\s*[{[][\s\S]*)$/i;
+
+/** A stretch of an answer that is JSON. `parsed` is null when it was cut off before it finished. */
+interface JsonSpan {
+  start: number;
+  end: number;
+  parsed: { value: unknown } | null;
+}
+
+/** The value of text that is a JSON object or list, or null when it is anything else, such as "[Note] hello". */
+function parseJsonContainer(text: string): { value: unknown } | null {
+  if (!/^\s*[{[]/.test(text)) {
+    return null;
+  }
+  try {
+    return { value: JSON.parse(text) };
+  } catch {
+    return null;
+  }
+}
+
+/** The index just after the `}` that closes the object opening at `start`, or null when it never closes. */
+function objectEnd({ text, start }: { text: string; start: number }): number | null {
+  let depth = 0;
+  let inString = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === '\\') {
+        index += 1;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Every piece of an answer that is JSON, in order: fenced blocks of any tag, a fence cut off mid-way, and a bare
+ * JSON object written after prose. Text counts only if it really parses (or is a cut-off start), so words that
+ * merely begin with "[" or "{" stay words.
+ */
+function findJsonSpans(answer: string): JsonSpan[] {
+  const spans: JsonSpan[] = [];
+  let fencedEnd = 0;
+  for (const match of answer.matchAll(FENCE)) {
+    const end = match.index + match[0].length;
+    fencedEnd = end;
+    const content = match[1] ?? '';
+    // JSON that does not parse is still JSON to hide, so a broken block never leaks its fence or its braces.
+    if (/^\s*[{[]/.test(content)) {
+      spans.push({ start: match.index, end, parsed: parseJsonContainer(content) });
+    }
+  }
+  const unclosed = UNCLOSED_JSON_FENCE.exec(answer.slice(fencedEnd));
+  if (unclosed !== null) {
+    spans.push({ start: fencedEnd + unclosed.index, end: answer.length, parsed: null });
+  }
+  for (let index = answer.indexOf('{'); index !== -1; index = answer.indexOf('{', index + 1)) {
+    const inside = spans.find(span => index >= span.start && index < span.end);
+    if (inside !== undefined) {
+      index = inside.end - 1;
+      continue;
+    }
+    const end = objectEnd({ text: answer, start: index });
+    if (end === null) {
+      if (/^\{\s*"/.test(answer.slice(index, index + 32))) {
+        spans.push({ start: index, end: answer.length, parsed: null });
+        break;
+      }
+      continue;
+    }
+    const parsed = parseJsonContainer(answer.slice(index, end));
+    if (parsed !== null) {
+      spans.push({ start: index, end, parsed });
+      index = end - 1;
+    }
+  }
+  return spans.sort((first, second) => first.start - second.start);
+}
 
 /** Sources the model sometimes writes as a bare subtitle part (often in italics) instead of the source field. */
 const SOURCE_WORDS = new Set(['email', 'mail', 'gmail', 'calendar', 'web', 'memory', 'space', 'spaces', 'notes']);
@@ -141,6 +234,9 @@ function plainItem(item: BriefItem): BriefItem | null {
 
 const SENTENCE_END = /[.!?]["')\]]?(?=\s|$)/g;
 
+/** A short title or initials before a full stop, such as "Dr." or "e.g.", which does not end a sentence. */
+const ABBREVIATION_BEFORE = /(?:^|[\s(])(?:[A-Z][a-z]{0,2}|(?:[a-z]\.)+[a-z])$/;
+
 /**
  * A digest cut to the display length at the end of a sentence, or else at a word with "…" after it. The digest is
  * a summary line, so a long one is shortened rather than refused: refusing it would hide the whole brief.
@@ -155,37 +251,23 @@ function shortenDigest(digest: string): string {
   let sentenceEnd = 0;
   for (const match of window.matchAll(SENTENCE_END)) {
     const end = match.index + match[0].length;
-    if (end <= max) {
+    const isAbbreviation = match[0].startsWith('.') && ABBREVIATION_BEFORE.test(window.slice(0, match.index));
+    if (end <= max && !isAbbreviation) {
       sentenceEnd = end;
     }
   }
   if (sentenceEnd >= max / 2) {
     return digest.slice(0, sentenceEnd);
   }
-  const room = digest.slice(0, max - 1);
+  // The cut must not split a two-unit character such as an emoji, which would leave half of it before the "…".
+  const room = digest.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, '');
   const lastSpace = room.search(/\s\S*$/);
   const cut = lastSpace > 0 ? room.slice(0, lastSpace) : room;
   return `${cut.replace(/[\s,;:-]+$/, '')}…`;
 }
 
-/**
- * The brief in an answer, from its last complete ```json block, with markdown stripped from what shows. Each item
- * is checked on its own: one that does not fit the shape is left out and counted in `omittedCount`, and a digest
- * over the display length is shortened. Null when the block is missing or unfinished, is not JSON, or has no usable
- * digest, so the caller shows the answer as plain text instead.
- */
-export function parseMorningBrief(answer: string): ReadBrief | null {
-  const blocks = [...answer.matchAll(JSON_BLOCK)];
-  const last = blocks.at(-1)?.[1];
-  if (last === undefined) {
-    return null;
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(last);
-  } catch {
-    return null;
-  }
+/** The brief in one parsed JSON value, or null when its outer shape or digest is unusable. */
+function readBriefFrom(raw: unknown): ReadBrief | null {
   const answerShape = BriefAnswerSchema.safeParse(raw);
   if (!answerShape.success) {
     return null;
@@ -206,17 +288,42 @@ export function parseMorningBrief(answer: string): ReadBrief | null {
 }
 
 /**
- * The words of an answer that holds a brief that could not be drawn, with the JSON removed and markdown stripped,
- * so a person never reads raw JSON. Null when the answer holds no JSON, which the caller shows as it is.
+ * The brief in an answer, with markdown stripped from what shows. It tries each piece of JSON in the answer, last
+ * first, and takes the first that is a brief. Each item is checked on its own: one that does not fit the shape is
+ * left out and counted in `omittedCount`, and a digest over the display length is shortened. Null when no piece is
+ * a usable brief (none, cut off, or not JSON), so the caller shows the answer as plain text instead.
+ */
+export function parseMorningBrief(answer: string): ReadBrief | null {
+  for (const span of findJsonSpans(answer).reverse()) {
+    const read = span.parsed === null ? null : readBriefFrom(span.parsed.value);
+    if (read !== null) {
+      return read;
+    }
+  }
+  return null;
+}
+
+/**
+ * The words of an answer that holds a brief that could not be drawn, with every piece of JSON removed and markdown
+ * stripped, so a person never reads raw JSON. Null when the answer holds no JSON, which the caller shows as it is.
  */
 export function unreadableBriefText(answer: string): string | null {
-  const withoutBlocks = answer.replace(JSON_BLOCK, '').replace(/```json[\s\S]*$/, '');
-  const bare = /^\s*[{[]/.test(withoutBlocks);
-  if (withoutBlocks === answer && !bare) {
+  const spans = findJsonSpans(answer);
+  if (spans.length === 0) {
     return null;
   }
-  const lines = bare ? [] : withoutBlocks.split('\n').map(plainBriefText);
-  return lines.filter(line => line !== '').join('\n');
+  let words = '';
+  let from = 0;
+  for (const span of spans) {
+    words += `${answer.slice(from, span.start)}\n`;
+    from = span.end;
+  }
+  words += answer.slice(from);
+  return words
+    .split('\n')
+    .map(plainBriefText)
+    .filter(line => line !== '')
+    .join('\n');
 }
 
 /**

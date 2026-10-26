@@ -1585,6 +1585,34 @@ describe('AssistantMessageContainer morning brief', () => {
     expect(document.body.textContent).not.toMatch(/[{}]|digest|"items"/);
   });
 
+  it.each([
+    ['an untagged fence', '```\n{"digest": "Nine things", "items": [{"sec'],
+    ['an upper case tag', '```JSON\n{"digest": 5, "items": []}\n```'],
+    ['bare JSON after prose', '{"digest": 5, "items": []}'],
+  ])('never shows raw JSON written as %s', (_name, json) => {
+    renderBriefTurn({ role: 'assistant', content: `Here is your brief.\n\n${json}` }, false);
+    expect(screen.getByTestId('brief-unreadable')).toHaveTextContent('Here is your brief.');
+    expect(document.body.textContent).not.toMatch(/[{}]|digest/);
+  });
+
+  it('keeps the words of an answer that merely starts with a bracket', () => {
+    renderBriefTurn({ role: 'assistant', content: '[Note] I could not open your inbox.' }, false);
+    expect(screen.getByText(/could not open your inbox/)).toBeInTheDocument();
+    expect(screen.queryByTestId('brief-unreadable')).not.toBeInTheDocument();
+  });
+
+  it('leaves a reply that is waiting for approval as it is', () => {
+    renderBriefTurn(
+      {
+        role: 'assistant',
+        status: { type: 'requires-action', reason: 'tool-calls' },
+        content: 'Checking.\n\n```json\n{"digest": "One',
+      },
+      false,
+    );
+    expect(screen.queryByTestId('brief-unreadable')).not.toBeInTheDocument();
+  });
+
   it('shows a plain line, not raw JSON, when the answer is only JSON that does not fit', () => {
     renderBriefTurn({ role: 'assistant', content: '```json\n{"digest": 5, "items": []}\n```' }, false);
     expect(screen.getByTestId('brief-unreadable')).toHaveTextContent(
