@@ -501,7 +501,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     async day => {
       const recall = jest.fn().mockResolvedValue({
         ok: true,
-        results: [{ id: '1', type: 'world', occurred_start: day, text: 'fact' }],
+        results: [{ id: '1', occurred_start: day, text: 'fact' }],
         entities: [],
       });
       const capability = hindsightMemoryCapability({
@@ -519,7 +519,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
       const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
-      expect(passthroughEvent(events)['injected_block']).toContain('[world, 2026-09-20] fact');
+      expect(passthroughEvent(events)['injected_block']).toContain('[2026-09-20] fact');
     },
   );
 

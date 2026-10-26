@@ -53,6 +53,7 @@ import {
   entryRecallText,
   estimateTokens,
   formatRetainEntry,
+  isFromSession,
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
@@ -67,6 +68,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
+  withOriginalSessionMarker,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -79,7 +81,6 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
-import { isFromSession } from './recallRelevance';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -465,7 +466,7 @@ export class MarkdownMemoryClient implements MemoryClient {
   private async lookupVaultEntry(
     entryId: string,
     timeoutMs: number,
-  ): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> {
+  ): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> {
     const match = MarkdownMemoryClient.VAULT_ENTRY_ID_PATTERN.exec(entryId);
     const filesystemNamespace = match?.[1] ?? '';
     if (match === null || !this.vaultTenantScope(filesystemNamespace)) {
@@ -473,13 +474,14 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
     // One budget for the whole lookup: the scan and the marker read share it.
     return withTimeout(
-      (async (): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> => {
+      (async (): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> => {
         const scan = await scanNamespaceEntries({
           baseDir: this.baseDir,
           namespace: filesystemNamespace,
           maxDailyFiles: Number.POSITIVE_INFINITY,
         });
-        if (!scan.entries.some(entry => entry.id === entryId)) {
+        const original = scan.entries.find(entry => entry.id === entryId);
+        if (original === undefined) {
           return undefined;
         }
         const tombstones = await readVaultTombstones({
@@ -487,7 +489,7 @@ export class MarkdownMemoryClient implements MemoryClient {
           namespace: filesystemNamespace,
         });
         const deleted = latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted';
-        return { filesystemNamespace, deleted };
+        return { filesystemNamespace, deleted, text: original.text };
       })(),
       timeoutMs,
       `markdown vault lookup ${entryId}`,
@@ -583,7 +585,9 @@ export class MarkdownMemoryClient implements MemoryClient {
       // The edit re-indexes in the vault that owns the entry, never in another vault's store.
       const embeddings = this.embeddings?.(target.filesystemNamespace);
       embeddings?.ensureWarmed();
-      embeddings?.indexNewEntries([{ id: params.entryId, text: clean }]);
+      embeddings?.indexNewEntries([
+        { id: params.entryId, text: withOriginalSessionMarker({ original: target.text, edited: clean }) },
+      ]);
       return {
         ok: true,
         entry: {

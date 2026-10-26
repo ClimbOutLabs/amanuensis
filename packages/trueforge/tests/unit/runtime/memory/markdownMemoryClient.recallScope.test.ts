@@ -111,6 +111,46 @@ describe('MarkdownMemoryClient recall scope', () => {
     }
   });
 
+  it('still skips a note from the current chat after it is edited on the Memories page', async () => {
+    const { client, dir } = await makeClient();
+    try {
+      await client.retain({
+        items: [
+          note({
+            content: 'Discussed sending a follow-up now or a reminder after a week.',
+            timestamp: '2026-10-26T09:15:58Z',
+            sessionId: 'chat-now',
+          }),
+        ],
+        operationId: 'op-edit',
+        timeoutMs: 5000,
+      });
+      const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+      const entry = listed.ok ? listed.entries[0] : undefined;
+      if (entry === undefined) {
+        throw new Error('expected one vault entry');
+      }
+      // The page shows the text without the hidden chat id and sends exactly that back.
+      expect(entry.text).not.toContain('session_id');
+      const edited = await client.updateEntry({
+        entryId: entry.id,
+        text: 'Discussed sending the follow-up now, or a reminder after two weeks.',
+        timeoutMs: 5000,
+      });
+      expect(edited.ok).toBe(true);
+
+      expect(await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-now' })).toEqual([]);
+      const elsewhere = await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-3' });
+      expect(elsewhere.map(item => item.text)).toEqual([expect.stringContaining('two weeks')]);
+      const relisted = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+      expect(relisted.ok && relisted.entries.map(item => item.text)).toEqual([
+        expect.not.stringContaining('session_id'),
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('still reads and recalls an older entry that has no chat id', async () => {
     const { client, dir } = await makeClient();
     try {

@@ -16,6 +16,7 @@ import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
 import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import { readBodyWithinCap } from './boundedBodyReader';
+import { isFromSession } from './markdownMemoryFiles';
 import type {
   DeleteMemoryVaultEntryOutcome,
   ListMemoryVaultEntriesOutcome,
@@ -23,7 +24,6 @@ import type {
   MemoryVaultFailure,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
-import { isFromSession } from './recallRelevance';
 
 /** Upper bound on the upstream error text carried into a reason line, a log field, or the UI. */
 const ERROR_DETAIL_MAX_CHARS = 200;
