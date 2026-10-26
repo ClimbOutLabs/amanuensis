@@ -317,6 +317,30 @@ describe('createScheduleServer.listSchedules with one-time schedules and reminde
     expect(getNextPage).toHaveBeenCalledTimes(1);
   });
 
+  it('stops a token that cycles A, B, A, and offers no token', async () => {
+    const tokens = ['A', 'B', 'A'];
+    let at = 0;
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'cycle'),
+      response: { pagination: { limit: 25, nextPageToken: tokens[0] } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => {
+      at += 1;
+      page.response = { pagination: { limit: 25, nextPageToken: tokens[at] ?? 'A' } };
+      return page;
+    });
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).toHaveBeenCalledTimes(2);
+  });
+
   it('returns nothing and no token when every page is reminders', async () => {
     const server = createScheduleServer({
       client: mockClient({ list: pagedList([reminderRows(3, 'a'), reminderRows(3, 'b'), reminderRows(1, 'c')]) }),

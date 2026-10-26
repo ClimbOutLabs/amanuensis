@@ -132,25 +132,22 @@ export function createScheduleServer(options: { client: TrueForge }): ScheduleSe
       });
       // Reminders share this list and are dropped here, so a page of only reminders would hide every task behind it.
       // The reading is bounded; past the bound the page returns empty with its next token and the person pages on.
-      let usedToken = req?.pageToken === '' ? undefined : req?.pageToken;
+      const seenTokens = new Set<string>(req?.pageToken === undefined || req.pageToken === '' ? [] : [req.pageToken]);
       let pagesRead = 1;
       let tasks = page.data.filter(isRepeatingTask);
-      while (
-        tasks.length === 0 &&
-        page.hasNextPage() &&
-        pagesRead < MAX_PAGES_PER_LIST &&
-        page.response.pagination.nextPageToken !== usedToken
-      ) {
-        usedToken = page.response.pagination.nextPageToken;
+      while (tasks.length === 0 && page.hasNextPage() && pagesRead < MAX_PAGES_PER_LIST) {
+        const { nextPageToken: token } = page.response.pagination;
+        if (token === undefined || seenTokens.has(token)) break;
+        seenTokens.add(token);
         await page.getNextPage();
         pagesRead += 1;
         tasks = page.data.filter(isRepeatingTask);
       }
       const { nextPageToken } = page.response.pagination;
-      // A token that repeats the one just used would send the reader round in a circle.
-      const hasMore = page.hasNextPage() && nextPageToken !== usedToken;
+      // A token seen before would send the reader round in a circle.
+      const hasMore = page.hasNextPage() && nextPageToken !== undefined && !seenTokens.has(nextPageToken);
       const data = tasks.map(row => toUiSchedule(row, index));
-      return hasMore && nextPageToken !== undefined ? { data, nextPageToken } : { data };
+      return hasMore ? { data, nextPageToken } : { data };
     },
 
     async getSchedule({ id }): Promise<Schedule> {
