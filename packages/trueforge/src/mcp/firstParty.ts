@@ -85,6 +85,7 @@ export function isHostSidecar({
   return hostUrl !== undefined && sameAddress({ a: url, b: hostUrl });
 }
 
+// Compared as whole addresses, so a trailing slash or a query string is a different address and fails closed.
 function sameAddress({ a, b }: { a: string; b: string }): boolean {
   try {
     return new URL(a).href === new URL(b).href;

@@ -72,7 +72,7 @@ describe('renderOutboundArguments', () => {
 
   test('a string that looks like a number is told apart from a number', () => {
     expect(rendered({ amount: '5', count: 5, flag: true, none: null }).text).toBe(
-      'amount: 5\ncount (number): 5\nflag (yes or no): true\nnone (null): null',
+      'amount: 5\ncount (number): 5\nflag (yes or no): true\nnone (empty): null',
     );
   });
 
@@ -534,7 +534,7 @@ describe('card copy', () => {
   test.each([
     ['delete_note', "Once deleted, it's gone for good."],
     ['install_package', "Once this runs, it can't be undone."],
-    ['frobnicate', 'This tool is new to me, so I am checking with you first.'],
+    ['frobnicate', 'It is not clear whether this can be undone.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);

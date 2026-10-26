@@ -356,22 +356,19 @@ describe('getMcpConnection', () => {
     const CALENDAR_URL = 'http://calendar-caldav:9558/mcp';
     const original = {
       origins: configuration.FIRST_PARTY_MCP_ORIGINS,
-      mail: configuration.MAIL_EMAIL_MCP_URL,
-      mailAccount: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      mail: configuration.MAIL_SIDECAR_MCP_URL,
       calendar: configuration.CALENDAR_CONNECTOR_URL,
     };
 
     beforeEach(() => {
       configuration.FIRST_PARTY_MCP_ORIGINS = ['http://mail-email:9557', 'http://calendar-caldav:9558'];
-      configuration.MAIL_EMAIL_MCP_URL = MAIL_URL;
-      configuration.MAIL_EMAIL_ACCOUNT_URL = undefined;
+      configuration.MAIL_SIDECAR_MCP_URL = MAIL_URL;
       configuration.CALENDAR_CONNECTOR_URL = CALENDAR_URL;
     });
 
     afterAll(() => {
       configuration.FIRST_PARTY_MCP_ORIGINS = original.origins;
-      configuration.MAIL_EMAIL_MCP_URL = original.mail;
-      configuration.MAIL_EMAIL_ACCOUNT_URL = original.mailAccount;
+      configuration.MAIL_SIDECAR_MCP_URL = original.mail;
       configuration.CALENDAR_CONNECTOR_URL = original.calendar;
     });
 
@@ -396,12 +393,6 @@ describe('getMcpConnection', () => {
       expect(await save({ name: 'Email', url: MAIL_URL })).toBe(true);
     });
 
-    it('finds the sidecar address from the account agent when no mail address is set', async () => {
-      configuration.MAIL_EMAIL_MCP_URL = undefined;
-      configuration.MAIL_EMAIL_ACCOUNT_URL = 'http://mail-email:9559';
-      expect(await save({ name: 'Email', url: MAIL_URL })).toBe(true);
-    });
-
     it('trusts the Calendar connector at the sidecar address the host owns even when its record has no mark', async () => {
       expect(await save({ name: 'Calendar', url: CALENDAR_URL })).toBe(true);
     });
@@ -411,6 +402,37 @@ describe('getMcpConnection', () => {
       expect(await save({ name: 'Email', url: 'https://other.example.com/mcp' })).toBe(false);
       expect(await save({ name: 'Calendar', url: 'http://mail-email:9557/mcp' })).toBe(false);
       expect(await save({ name: 'Email', url: 'http://mail-email:9557/other' })).toBe(false);
+    });
+
+    it.each([
+      ['a trailing slash', 'http://mail-email:9557/mcp/'],
+      ['a query string', 'http://mail-email:9557/mcp?x=1'],
+      ['a fragment', 'http://mail-email:9557/mcp#x'],
+      ['a double slash', 'http://mail-email:9557//mcp'],
+      ['a different path case', 'http://mail-email:9557/MCP'],
+      ['a trailing dot on the host', 'http://mail-email.:9557/mcp'],
+      ['another port', 'http://mail-email:9558/mcp'],
+      ['another scheme', 'https://mail-email:9557/mcp'],
+      ['credentials in the address', 'http://owner@mail-email:9557/mcp'],
+      ['a look-alike host', 'http://mail-emai1:9557/mcp'],
+    ])('does not trust an Email record at an address with %s', async (_label, url) => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, new URL(url).origin];
+      expect(await save({ name: 'Email', url })).toBe(false);
+    });
+
+    it.each([
+      ['lower case', 'email'],
+      ['upper case', 'EMAIL'],
+      ['a trailing space', 'Email '],
+      ['a zero-width character', 'Em\u200Bail'],
+      ['a look-alike letter', 'Emaіl'],
+    ])('does not trust the sidecar address under a name with %s', async (_label, name) => {
+      expect(await save({ name, url: MAIL_URL })).toBe(false);
+    });
+
+    it('does not trust Calendar at the Email address or Email at the Calendar address', async () => {
+      expect(await save({ name: 'Calendar', url: MAIL_URL })).toBe(false);
+      expect(await save({ name: 'Email', url: CALENDAR_URL })).toBe(false);
     });
 
     it('does not trust the sidecar address under another name', async () => {
@@ -423,7 +445,7 @@ describe('getMcpConnection', () => {
     });
 
     it('trusts nothing when the host has no sidecar configured', async () => {
-      configuration.MAIL_EMAIL_MCP_URL = undefined;
+      configuration.MAIL_SIDECAR_MCP_URL = undefined;
       configuration.CALENDAR_CONNECTOR_URL = undefined;
       expect(await save({ name: 'Email', url: MAIL_URL })).toBe(false);
       expect(await save({ name: 'Calendar', url: CALENDAR_URL })).toBe(false);

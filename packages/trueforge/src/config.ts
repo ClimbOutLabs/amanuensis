@@ -277,7 +277,7 @@ const MAIL_EMAIL_MCP_PORT = 9557;
  * MCP port, the /mcp path. Used when the installer has not linked the connector (no
  * MAIL_EMAIL_MCP_URL) but an account saved through Settings still needs the connector registered.
  */
-export function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
   if (accountUrl === undefined) {
     return undefined;
   }
@@ -1161,6 +1161,11 @@ export interface SharedServerConfiguration {
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
   /**
+   * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
+   * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
+   */
+  MAIL_SIDECAR_MCP_URL: string | undefined;
+  /**
    * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
    * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
    * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
@@ -2013,6 +2018,11 @@ const appDataDir = resolveAppDataDir({
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 
+const mailSidecarMcpUrl = hostMailMcpUrl({
+  mailMcpUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  mailAccountUrl: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
+});
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2048,12 +2058,10 @@ const shared: SharedServerConfiguration = {
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
       calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
     }),
-    mailUrl: hostMailMcpUrl({
-      mailMcpUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
-      mailAccountUrl: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
-    }),
+    mailUrl: mailSidecarMcpUrl,
   }),
   MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),

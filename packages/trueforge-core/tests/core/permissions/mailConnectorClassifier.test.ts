@@ -1,4 +1,9 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  approvalCardForGatedCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -266,11 +271,60 @@ describe('Email connector classifier', () => {
       expect(decision.card).not.toBeNull();
     });
 
-    it('the card for a tool it does not know claims no permanence and shows plain argument labels', async () => {
+    it('the card for an unknown Email tool keeps a plain warning and shows plain argument labels', async () => {
       const decision = await classifyTier(mailCall('empty_trash', { mailbox: 'Trash', ids: ['1'] }, {}), makeCtx());
-      expect(decision.card?.cannot_be_undone).toBe('This tool is new to me, so I am checking with you first.');
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+      expect(decision.card?.plain_what).toBe('Allow this new tool from Email?');
       expect(decision.card?.outbound_text).toContain('ids (list): ["1"]');
       expect(decision.card?.outbound_text).not.toContain('(array)');
+    });
+  });
+
+  describe('the card for a call that asks without a rule', () => {
+    it.each(['list_emails_metadata', 'get_emails_content', 'get_attachment_content', 'list_mailboxes'])(
+      'a gated %s read on the first-party Email sidecar is not called new and carries no warning',
+      tool => {
+        const card = approvalCardForGatedCall({
+          action: firstPartyMailCall(tool, { mailbox: 'INBOX' }),
+          agent_intent: null,
+        });
+        expect(card.plain_what).toBe('Allow reading your email?');
+        expect(card.cannot_be_undone).toBeNull();
+      },
+    );
+
+    it('a gated Email write keeps the warning, even on the first-party sidecar', () => {
+      const card = approvalCardForGatedCall({
+        action: firstPartyMailCall('archive_emails', { ids: ['1'] }),
+        agent_intent: null,
+      });
+      expect(card.cannot_be_undone).not.toBeNull();
+    });
+
+    it('a mail-read call on a connector named Email that is not first-party asks like any other connector', () => {
+      const card = approvalCardForGatedCall({
+        action: mailCall('list_emails_metadata', {}, CLOSED_WORLD_READ),
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Email?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a connector that only declares itself read-only still gets the warning', async () => {
+      const decision = await classifyTier(
+        mailCall('peek_trash', { mailbox: 'Trash' }, { read_only_hint: true, open_world_hint: true }),
+        makeCtx(),
+      );
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a mail-read name on another connector is still an unknown tool with the warning', () => {
+      const card = approvalCardForGatedCall({
+        action: { ...firstPartyMailCall('list_emails_metadata', {}), mcp_server_name: 'Mail Mirror' },
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Mail Mirror?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
     });
   });
 });

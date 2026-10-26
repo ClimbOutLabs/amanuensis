@@ -95,7 +95,7 @@ function makeFakeStore() {
 
 describe('the email settings endpoints', () => {
   const originalAccountUrl = configuration.MAIL_EMAIL_ACCOUNT_URL;
-  const originalMcpUrl = configuration.MAIL_EMAIL_MCP_URL;
+  const originalMcpUrl = configuration.MAIL_SIDECAR_MCP_URL;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
   let app: Hono;
@@ -106,7 +106,7 @@ describe('the email settings endpoints', () => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = ACCOUNT_URL;
     // An instantly refused address: the registration sync also tries a first send-list fill
     // against it, and a real sidecar name would hang the test on DNS and retries.
-    configuration.MAIL_EMAIL_MCP_URL = 'http://127.0.0.1:1/mcp';
+    configuration.MAIL_SIDECAR_MCP_URL = 'http://127.0.0.1:1/mcp';
     const router = createEmailAccountRouter({
       resolveRequestContext: () => ({
         tenant_id: 't1',
@@ -124,7 +124,7 @@ describe('the email settings endpoints', () => {
 
   afterEach(() => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = originalAccountUrl;
-    configuration.MAIL_EMAIL_MCP_URL = originalMcpUrl;
+    configuration.MAIL_SIDECAR_MCP_URL = originalMcpUrl;
   });
 
   async function call(input: {

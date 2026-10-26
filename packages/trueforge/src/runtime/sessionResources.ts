@@ -24,7 +24,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
-import configuration, { hostMailMcpUrl, type TokenFactoryMode } from '../config';
+import configuration, { type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
@@ -502,10 +502,7 @@ export async function getMcpConnection({
       isHostSidecar({
         name: record.name,
         url: record.manifest.url,
-        mailUrl: hostMailMcpUrl({
-          mailMcpUrl: configuration.MAIL_EMAIL_MCP_URL,
-          mailAccountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
-        }),
+        mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
         calendarUrl: configuration.CALENDAR_CONNECTOR_URL,
       })) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });

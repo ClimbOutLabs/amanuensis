@@ -3046,6 +3046,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/** A mail read the host itself vouched for: only the host's own Email sidecar carries the first-party mark. */
+function isHostMailRead(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' &&
+    action.mcp_first_party === true &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    isMailReadToolName(action.tool_name)
+  );
+}
+
 /**
  * The card for a call that has to ask but matched no more specific class. A connector call shows its
  * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
@@ -3058,17 +3068,23 @@ function connectorApprovalCard(input: {
 }): Tier3Card {
   const { action, extraction } = input;
   const { fields } = extraction;
+  // Only a read the host vouches for may say "your email"; a connector that merely shares the name asks like any other.
+  const hostMailRead = isHostMailRead(action);
   return {
     plain_what:
       spaceToolLine(action) ??
       extraction.connector_what ??
-      `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
+      (hostMailRead
+        ? 'Allow reading your email?'
+        : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
     plain_why: plainWhy(input.agent_intent),
-    // A tool the host has no rule for may only read, so it never claims to be permanent.
+    // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
     cannot_be_undone:
-      extraction.connector_what === null
-        ? 'This tool is new to me, so I am checking with you first.'
-        : "Once this is sent, it can't be unsent.",
+      extraction.connector_what !== null
+        ? "Once this is sent, it can't be unsent."
+        : hostMailRead
+          ? null
+          : 'It is not clear whether this can be undone.',
     why_asked_again: null,
     destination: fields.destination,
     recipient: fields.recipient,
@@ -3114,12 +3130,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
   }
-  if (
-    action.tool_type === 'mcp' &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    action.mcp_first_party === true &&
-    isMailReadToolName(action.tool_name)
-  ) {
+  if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {

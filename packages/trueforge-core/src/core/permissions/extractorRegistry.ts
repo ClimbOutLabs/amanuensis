@@ -226,7 +226,7 @@ function typeHint(value: unknown): string | null {
     return null;
   }
   if (value === null) {
-    return 'null';
+    return 'empty';
   }
   if (Array.isArray(value)) {
     return 'list';
