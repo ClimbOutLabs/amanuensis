@@ -198,6 +198,47 @@ describe('card text', () => {
   });
 });
 
+describe('the prompt fixes from the live trip run', () => {
+  it('asks only for what is still missing and never asks the same thing twice', () => {
+    expect(SHARED_RULES).toContain('only for what is still missing');
+    expect(SHARED_RULES).toContain('Never ask the same thing twice in different words');
+  });
+
+  it('lets the latest message win over the plan for the conversation', () => {
+    expect(SHARED_RULES).toContain('My latest message always wins over the plan for the conversation');
+  });
+
+  it('keeps every list line a concrete action or a fact, never filler', () => {
+    expect(SHARED_RULES).toContain('every line is a concrete action or a fact, never filler');
+  });
+
+  it('offers a calendar add only with a real date and time', () => {
+    expect(SHARED_RULES).toContain('only when you have a real date and time for it');
+  });
+
+  it('starts the dinner card with the plan, not a round of questions', () => {
+    expect(CARDS.dinner.prompt).toContain("Plan this week's dinners and give me one shopping list grouped by aisle");
+    expect(CARDS.dinner.prompt).not.toContain('Ask me how many people are eating');
+  });
+
+  it('asks only for what the trip checklist needs, one question at a time', () => {
+    expect(CARDS.trip.prompt).toContain('one question at a time');
+    expect(CARDS.trip.prompt).toContain('who with only if it changes the plan');
+    expect(CARDS.trip.prompt).not.toContain('sort out the week before');
+  });
+
+  it('builds the trip checklist from the answers and fits it to the time left', () => {
+    expect(CARDS.trip.prompt).toContain('make my checklist from what I actually told you');
+    expect(CARDS.trip.prompt).toContain('each line one concrete thing to do');
+    expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
+  });
+
+  it('offers trip dates and reminders only for real times still in the future', () => {
+    expect(CARDS.trip.prompt).toContain('a time that is real and still in the future');
+    expect(CARDS.trip.prompt).not.toContain('remind me a week before');
+  });
+});
+
 describe('help areas', () => {
   it('map to the pills in one table, one entry for each saved help area', () => {
     expect(HELP_AREA_TOPIC).toEqual({
