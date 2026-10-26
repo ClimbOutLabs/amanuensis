@@ -85,6 +85,16 @@ sandbox_node_ok() {
   [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
 }
 
+# ---- whether an instance is served over https -------------------------------------------------------------------
+# An instance is served over https when it is opened on the network (its record lists the addresses it answers at),
+# its record asks for https with a certificate made on this computer, and it has a port for it. This is the one
+# rule: the compose file, the doctor and the closing lines all decide by it, so the https settings an instance
+# keeps in its record after it was closed back to this computer alone count for nothing anywhere. The values come
+# from the instance's record; each program reads them with its own reader.
+serves_https() { # tls tls_port origins
+  [ "$1" = local ] && [ -n "$2" ] && [ -n "$3" ]
+}
+
 # ---- the folder the installer runs from -------------------------------------------------------------------------
 # aman backup, aman upgrade and the daily job run the installer of the folder Aman was installed from, often with more
 # rights than the person has otherwise, so that folder must be changeable by its owner alone.

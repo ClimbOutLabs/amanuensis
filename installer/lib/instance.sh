@@ -60,7 +60,7 @@ machine_up() {
   local name rc=0
   machine_render "$1"
   step_begin start-machine "Starting the speech-to-text service"
-  dcm up -d >"$STEP_LOG" 2>&1 || rc=$?
+  dcm up -d --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     step_fail "The speech-to-text service could not start" "Fix what the log says, then run install.sh again."
   fi
@@ -246,7 +246,10 @@ instance_up() {
   local name=$1 rc=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name and waiting until it answers"
-  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
+  # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
+  # so a service dropped from the file, like the https front end when an instance closes back to this computer,
+  # does not linger as an orphan. Every whole-project start follows this rule.
+  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     instance_unhealthy "$name"
     return 1
@@ -388,6 +391,15 @@ doctor_status() {
   else
     echo n/a
   fi
+}
+
+# The fail records of a doctor JSON document, one plain detail per line, in order. The doctor prints
+# records as {"id", "state", "detail", "fix"} in that order, and the pattern allows escaped characters
+# inside a detail, so a detail that quotes something is not cut short.
+doctor_fail_details() {
+  printf '%s' "$1" |
+    grep -oE '"state":"fail","detail":"(([^"\\]|\\.)*)"' |
+    sed -e 's/^"state":"fail","detail":"//' -e 's/"$//' -e 's/\\"/"/g' -e 's/\\\\/\\/g' || true
 }
 
 # ---- inputs -----------------------------------------------------------------------------------
