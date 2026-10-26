@@ -359,10 +359,10 @@ function MemorySummarizeCard() {
         Turn summaries
       </h4>
       <p className="mt-1 text-sm text-text-secondary">
-        When this is on, {assistant} condenses each finished chat into a short summary before saving it to the memory
-        log, instead of keeping the full word-for-word transcript. Summaries keep the important details and skip the
-        small talk, so the log stays compact and quick to search. If a summary can&rsquo;t be made for a turn,{' '}
-        {assistant} keeps the full transcript &mdash; a memory is never lost.
+        When this is on, {assistant} saves only the lasting facts from each finished chat, such as who people are,
+        plans, preferences, and anything you ask it to remember. It does not save the chat itself or small talk. If a
+        turn has no lasting facts, or a summary can&rsquo;t be made, nothing is saved for that turn. When this is off,{' '}
+        {assistant} saves each turn word for word.
       </p>
       <div className="mt-4 border-t border-border pt-4">
         <MemorySummarizeToggle setting={setting} />
