@@ -52,12 +52,16 @@ import {
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
+  entryMetadata,
   latestTombstonesByEntry,
   parseVaultTombstones,
   personaVaultNamespace,
+  SESSION_ID_METADATA_KEY,
+  upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
+  withoutSessionMarker,
 } from '../runtime/memory/markdownMemoryFiles';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -937,6 +941,8 @@ function buildRetainItems(
         const newline = body.indexOf('\n');
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
+      const sessionId = entryMetadata(body)?.[SESSION_ID_METADATA_KEY];
+      body = withoutSessionMarker(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
@@ -951,6 +957,7 @@ function buildRetainItems(
         timestamp: entry.timestamp,
         document_id: documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
+        ...(sessionId === undefined ? {} : { metadata: { [SESSION_ID_METADATA_KEY]: sessionId } }),
       });
     }
   }
@@ -1154,6 +1161,10 @@ function planMarkdownMemory(
       // so edits and deletes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
+    }
+    if (dailyLogFileAt(inner) !== undefined) {
+      // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
+      bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
     planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
   }

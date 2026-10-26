@@ -41,6 +41,7 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
+import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
 import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
@@ -1966,6 +1967,96 @@ describe('runDataImport reads memory markers the way the vault does', () => {
       await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(edited));
       expect(retained.find(item => item.content === 'Likes coffee now.')?.timestamp).toBe('2026-10-05T07:00:00.000Z');
       expect(retained.map(item => item.content)).not.toContain(SEED_MEMORY.keptEntryText);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reads memory written before facts-only memory', () => {
+  const LEGACY_FILE = `memory/${TENANT}/memory/2026-09-01.md`;
+  const LEGACY_LOG = [
+    '## 2026-09-01T10:00:00.000Z',
+    '',
+    "Turn summary: - The person's dog is named Rex.",
+    '',
+    '> Chat title: Dog talk',
+    '',
+    '## 2026-09-01T11:00:00.000Z',
+    '',
+    'The person has a cat named Miso.',
+    '',
+    '<!-- session_id: chat-9 -->',
+    '',
+  ].join('\n');
+
+  async function legacyArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(LEGACY_FILE, Buffer.from(LEGACY_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  it('writes the old entries in the current shape into a Markdown target', async () => {
+    const { source, archive } = await legacyArchive();
+    const target = await makeInstance('target-legacy-markdown');
+    try {
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.memories).toBe(5);
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-09-01.md'), 'utf8');
+      expect(written).toBe(
+        [
+          '## 2026-09-01T10:00:00.000Z',
+          '',
+          "- The person's dog is named Rex.",
+          '',
+          '## 2026-09-01T11:00:00.000Z',
+          '',
+          'The person has a cat named Miso.',
+          '',
+          '<!-- session_id: chat-9 -->',
+          '',
+        ].join('\n'),
+      );
+      const reader = new MarkdownMemoryClient({ baseDir: target.memoryDir, namespace: TENANT });
+      const listed = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
+      if (!listed.ok) {
+        throw new Error('expected a vault listing');
+      }
+      const texts = listed.entries.map(entry => entry.text).join('\n');
+      expect(texts).toContain("The person's dog is named Rex.");
+      expect(texts).not.toContain('Turn summary');
+      expect(texts).not.toContain('Chat title');
+      expect(texts).not.toContain('session_id');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('sends the old entries to a client backend without the prefix or the title, and keeps the chat id', async () => {
+    const { source, archive } = await legacyArchive();
+    const target = await makeInstance('target-legacy-client');
+    try {
+      const retained: { content: string; context?: string | undefined; metadata?: Record<string, string> }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      const dog = retained.find(item => item.content.includes('Rex'));
+      expect(dog?.content).toBe("- The person's dog is named Rex.");
+      expect(dog?.context).toBeUndefined();
+      const cat = retained.find(item => item.content.includes('Miso'));
+      expect(cat?.content).toBe('The person has a cat named Miso.');
+      expect(cat?.metadata).toEqual({ session_id: 'chat-9' });
     } finally {
       await source.close();
       await target.close();
