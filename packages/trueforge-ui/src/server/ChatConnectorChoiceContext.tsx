@@ -12,23 +12,23 @@ import {
 } from 'react';
 
 import {
-  readTurnedOffConnectors,
-  withTurnedOffConnectors,
+  readTurnedOffConnectorKeys,
+  withTurnedOffConnectorKeys,
 } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 
 import { sessionMetadataRecord } from '../atoms/lib/sessionAgentDetails.js';
 import { useOptionalServer } from './ServerContext.js';
 import type { AgentUIServer, UpdateSessionRequest } from './types.js';
 
-const NO_NAMES: readonly string[] = [];
+const NO_KEYS: readonly string[] = [];
 
 /**
- * The connectors turned off per chat, shared by the composer and the shell. A chat that has no
+ * The off keys (connectorOffKey) of the connectors turned off per chat, shared by the composer and the shell. A chat that has no
  * server session yet keeps its choice as pending, and the shell sends it with the session create.
  */
 export type ChatConnectorChoiceStore = {
   get(sessionId: string | undefined): readonly string[] | undefined;
-  set(input: { sessionId: string | undefined; names: readonly string[] }): void;
+  set(input: { sessionId: string | undefined; keys: readonly string[] }): void;
   /** Gives the pending choice of a new chat to the session that was just created for it. */
   adoptPending(sessionId: string): void;
   clearPending(): void;
@@ -39,7 +39,7 @@ export type ChatConnectorChoiceStore = {
 export function createChatConnectorChoiceStore(): ChatConnectorChoiceStore {
   const bySession = new Map<string, readonly string[]>();
   const listeners = new Set<() => void>();
-  let pending: readonly string[] = NO_NAMES;
+  let pending: readonly string[] = NO_KEYS;
   let version = 0;
   const changed = () => {
     version += 1;
@@ -47,22 +47,22 @@ export function createChatConnectorChoiceStore(): ChatConnectorChoiceStore {
   };
   return {
     get: sessionId => (sessionId === undefined ? pending : bySession.get(sessionId)),
-    set: ({ sessionId, names }) => {
+    set: ({ sessionId, keys }) => {
       if (sessionId === undefined) {
-        pending = names;
+        pending = keys;
       } else {
-        bySession.set(sessionId, names);
+        bySession.set(sessionId, keys);
       }
       changed();
     },
     adoptPending: sessionId => {
       bySession.set(sessionId, pending);
-      pending = NO_NAMES;
+      pending = NO_KEYS;
       changed();
     },
     clearPending: () => {
       if (pending.length === 0) return;
-      pending = NO_NAMES;
+      pending = NO_KEYS;
       changed();
     },
     subscribe: listener => {
@@ -90,7 +90,7 @@ export async function createSessionWithConnectorChoice({
 }): ReturnType<AgentUIServer['createSession']> {
   const withMetadata: Parameters<AgentUIServer['createSession']>[0] & { metadata: Record<string, string> } = {
     ...request,
-    metadata: withTurnedOffConnectors(metadata, store?.get(undefined) ?? NO_NAMES),
+    metadata: withTurnedOffConnectorKeys(metadata, store?.get(undefined) ?? NO_KEYS),
   };
   const session = await server.createSession(withMetadata);
   store?.adoptPending(session.id);
@@ -121,7 +121,7 @@ export function useChatConnectorChoiceStore(): ChatConnectorChoiceStore | null {
  */
 export function useChatConnectorChoice(sessionId: string | undefined): {
   turnedOff: readonly string[];
-  setTurnedOff: (names: readonly string[]) => Promise<void>;
+  setTurnedOff: (keys: readonly string[]) => Promise<void>;
 } {
   const server = useOptionalServer();
   const shared = useContext(ChatConnectorChoiceContext);
@@ -140,7 +140,7 @@ export function useChatConnectorChoice(sessionId: string | undefined): {
       .then(session => {
         // A choice made while this read was in flight is newer than what the read saw.
         if (store.get(sessionId) === undefined) {
-          store.set({ sessionId, names: readTurnedOffConnectors(sessionMetadataRecord(session)) });
+          store.set({ sessionId, keys: readTurnedOffConnectorKeys(sessionMetadataRecord(session)) });
         }
       })
       .catch(() => {
@@ -150,9 +150,9 @@ export function useChatConnectorChoice(sessionId: string | undefined): {
   }, [server, sessionId, known, store]);
 
   const setTurnedOff = useCallback(
-    (names: readonly string[]) => {
-      const previous = store.get(sessionId) ?? NO_NAMES;
-      store.set({ sessionId, names });
+    (keys: readonly string[]) => {
+      const previous = store.get(sessionId) ?? NO_KEYS;
+      store.set({ sessionId, keys });
       if (server == null || sessionId === undefined) return Promise.resolve();
       const write = writes.current
         .catch(() => undefined)
@@ -161,12 +161,12 @@ export function useChatConnectorChoice(sessionId: string | undefined): {
           const current = await server.getSession({ sessionId });
           const request: UpdateSessionRequest & { metadata: Record<string, string> } = {
             sessionId,
-            metadata: withTurnedOffConnectors(sessionMetadataRecord(current), names),
+            metadata: withTurnedOffConnectorKeys(sessionMetadataRecord(current), keys),
           };
           await server.updateSession(request);
         })
         .catch((error: unknown) => {
-          store.set({ sessionId, names: previous });
+          store.set({ sessionId, keys: previous });
           throw error;
         });
       writes.current = write;
@@ -175,5 +175,5 @@ export function useChatConnectorChoice(sessionId: string | undefined): {
     [server, sessionId, store],
   );
 
-  return { turnedOff: known ?? NO_NAMES, setTurnedOff };
+  return { turnedOff: known ?? NO_KEYS, setTurnedOff };
 }

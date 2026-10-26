@@ -7,7 +7,10 @@ import {
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
-import { DEFAULT_ON_SOURCE_CONNECTOR_NAMES } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import {
+  connectorOffKey,
+  DEFAULT_ON_SOURCE_CONNECTOR_NAMES,
+} from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
 import {
   MAIL_CONNECTOR_NAME,
@@ -37,8 +40,8 @@ export interface MemoryTurnContext {
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
-  /** Connector names the person turned off for this chat, from the chat's stored choice. Absent: nothing is off. */
-  turnedOffConnectorNames?: readonly string[] | undefined;
+  /** Off keys (see connectorOffKey) of the connectors the person turned off for this chat. Absent: nothing is off. */
+  turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
   /**
@@ -152,7 +155,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     }
     let next = spec;
     for (const name of DEFAULT_ON_SOURCE_CONNECTOR_NAMES) {
-      if (setUpConnectorNames.includes(name) && !turnedOff.has(name)) {
+      if (setUpConnectorNames.includes(name) && !turnedOff.has(connectorOffKey(name))) {
         next = withConnectorAttached(next, name);
       }
     }
@@ -167,10 +170,10 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     // Root threads only, matching where the memory capability itself is attached: a sub-agent
     // is not the thread the host retains, so its mounts are left exactly as the spec states them.
     const designatedSearchProvider = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
-    const turnedOff = new Set(this.#memory.turnedOffConnectorNames ?? []);
+    const turnedOff = new Set(this.#memory.turnedOffConnectorKeys ?? []);
     // A chat that turned search off keeps it off: the designated provider is not offered again.
     const searchProviderServerName =
-      designatedSearchProvider !== undefined && turnedOff.has(designatedSearchProvider)
+      designatedSearchProvider !== undefined && turnedOff.has(connectorOffKey(designatedSearchProvider))
         ? undefined
         : designatedSearchProvider;
     const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);

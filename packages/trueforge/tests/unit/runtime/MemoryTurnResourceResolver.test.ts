@@ -11,6 +11,7 @@ import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/age
 import type { ILLM, IToolSet } from '@truefoundry/trueforge-core/core';
 import { isAuthRequired } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { createLogger } from 'winston';
 import { PERSONA_CONTEXT_VERSION, type PersonaContext } from '../../../src/personas/persona';
@@ -90,7 +91,7 @@ function stubModelClient(): ILLM {
 function memoryContext(
   providerServerName: string | undefined,
   searchProviderServerName?: () => Promise<string | undefined>,
-  chat: Pick<MemoryTurnContext, 'turnedOffConnectorNames' | 'recallEnabled'> = {},
+  chat: Pick<MemoryTurnContext, 'turnedOffConnectorKeys' | 'recallEnabled'> = {},
 ): MemoryTurnContext {
   return {
     // No client: these scenarios are about tool exposure, not about recall or retain.
@@ -111,7 +112,7 @@ function makeResolver(input: {
   searchProviderServerName?: () => Promise<string | undefined>;
   toolOutputScreen?: ToolOutputScreenConfig;
   setUpConnectorNames?: () => Promise<readonly string[]>;
-  chat?: Pick<MemoryTurnContext, 'turnedOffConnectorNames' | 'recallEnabled'>;
+  chat?: Pick<MemoryTurnContext, 'turnedOffConnectorKeys' | 'recallEnabled'>;
   persona?: PersonaContext;
 }) {
   return new MemoryTurnResourceResolver(
@@ -354,7 +355,7 @@ describe('web search, email and calendar on by default in every chat', () => {
       searchProviderServerName: () => Promise.resolve(SEARCH_SERVER),
       ...(setUp === undefined ? {} : { setUpConnectorNames: () => Promise.resolve(setUp) }),
       chat: {
-        turnedOffConnectorNames: input.turnedOff,
+        turnedOffConnectorKeys: input.turnedOff?.map(connectorOffKey),
         recallEnabled: input.unattended === true ? false : undefined,
       },
       ...(input.persona === undefined ? {} : { persona: input.persona }),

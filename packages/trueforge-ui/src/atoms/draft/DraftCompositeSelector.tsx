@@ -3,6 +3,7 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
@@ -347,11 +348,12 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const canConfigureSkills = settingsEnabled && settingsCatalog?.skillCatalog != null;
 
   const { turnedOff, setTurnedOff } = useChatConnectorChoice(draftSessionId);
+  const [choiceNotSaved, setChoiceNotSaved] = useState(false);
   // Email, Calendar and the search provider are on in every chat until the person turns one off.
   const defaultOnMounts = useMemo(
     () =>
       connectors
-        .filter(connector => isDefaultOnConnector(connector) && !turnedOff.includes(connector.name))
+        .filter(connector => isDefaultOnConnector(connector) && !turnedOff.includes(connectorOffKey(connector.name)))
         .map(connector => ({ id: connector.id, name: connector.name })),
     [connectors, turnedOff],
   );
@@ -483,9 +485,12 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     const isDefaultOn = isDefaultOnConnector(connector);
     if (isDefaultOn) {
       // Default-on sources are never stored as mounts: only the off choice is kept for the chat.
-      void setTurnedOff(
-        selected ? [...turnedOff, connector.name] : turnedOff.filter(name => name !== connector.name),
-      ).catch(() => undefined);
+      const offKey = connectorOffKey(connector.name);
+      setChoiceNotSaved(false);
+      setTurnedOff(selected ? [...turnedOff, offKey] : turnedOff.filter(key => key !== offKey)).catch(() => {
+        // The hook already put the stored choice back; say so, so the switch is not read as a silent undo.
+        setChoiceNotSaved(true);
+      });
       // A mount the chat already lists is dropped too, or it would keep the source on.
       if (!selected || !localMcpRef.current.some(m => m.id === connector.id)) return;
     }
@@ -641,6 +646,11 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
             onChange={setQuery}
             placeholder={tab === 'connectors' ? 'Search connectors...' : 'Search skills...'}
           />
+          {tab === 'connectors' && choiceNotSaved ? (
+            <p role="alert" className="text-failure-bg mx-3 mb-2 text-xs">
+              Your change was not saved. Check your connection, then try the switch again.
+            </p>
+          ) : null}
           {tab === 'skills' && skillsDisabled && skillsDisabledReason ? (
             <div
               role="status"

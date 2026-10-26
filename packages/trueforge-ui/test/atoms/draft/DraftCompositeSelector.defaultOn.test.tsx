@@ -6,6 +6,7 @@ import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { DraftCompositeSelector } from '@/atoms/draft/DraftCompositeSelector.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentSpec } from '@/server/types.js';
+import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
 let agentSpec: AgentSpec;
@@ -146,7 +147,7 @@ describe('connectors that are on by default in the composer', () => {
       fireEvent.click(row(/Email/));
     });
     await waitFor(() => expect(sessions.updateSession).toHaveBeenCalledTimes(1));
-    expect(sessions.stored.metadata).toEqual({ agent_details: 'expanded', connectors_off: '["Email"]' });
+    expect(sessions.stored.metadata).toEqual({ agent_details: 'expanded', [connectorOffKey('Email')]: '1' });
     expect(row(/Email/)).toHaveAttribute('aria-checked', 'false');
     expect(row(/Web search/)).toHaveAttribute('aria-checked', 'true');
 
@@ -175,5 +176,54 @@ describe('connectors that are on by default in the composer', () => {
     expect(row(/Email/)).toHaveAttribute('aria-checked', 'false');
     expect(sessions.updateSession).not.toHaveBeenCalled();
     expect(updateAgentSpec).not.toHaveBeenCalledWith(expect.objectContaining({ mcpServers: expect.anything() }));
+  });
+
+  it('shows a plain message and the stored switch when the choice could not be saved', async () => {
+    draftSessionId = 'chat-2';
+    const sessions = fakeSessions({});
+    sessions.updateSession.mockRejectedValueOnce(new Error('offline'));
+    renderPicker({ setUp: [SEARCH, EMAIL], sessions });
+    await openConnectors();
+
+    await act(async () => {
+      fireEvent.click(row(/Email/));
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not saved/);
+    expect(row(/Email/)).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('turns a connector with a very long name off and back on without a rejected write', async () => {
+    draftSessionId = 'chat-3';
+    const longName = 'long-search-provider-'.repeat(20);
+    const longSearch = { id: longName, name: longName, authenticated: true, searchProvider: true };
+    const sessions = fakeSessions({});
+    renderPicker({ setUp: [longSearch, EMAIL], sessions });
+    await openConnectors();
+
+    await act(async () => {
+      fireEvent.click(row(/Long search provider/));
+    });
+    await waitFor(() => expect(sessions.updateSession).toHaveBeenCalledTimes(1));
+    for (const [key, value] of Object.entries(sessions.stored.metadata)) {
+      expect(key.length).toBeLessThanOrEqual(32);
+      expect(value.length).toBeLessThanOrEqual(128);
+    }
+    expect(row(/Long search provider/)).toHaveAttribute('aria-checked', 'false');
+
+    await act(async () => {
+      fireEvent.click(row(/Long search provider/));
+    });
+    await waitFor(() => expect(sessions.updateSession).toHaveBeenCalledTimes(2));
+    expect(sessions.stored.metadata).toEqual({});
+    expect(row(/Long search provider/)).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('reads the name list an older chat stored', async () => {
+    draftSessionId = 'older-chat-2';
+    renderPicker({ setUp: [SEARCH, EMAIL], sessions: fakeSessions({ connectors_off: '["Email"]' }) });
+    await openConnectors();
+    await waitFor(() => expect(row(/Email/)).toHaveAttribute('aria-checked', 'false'));
+    expect(row(/Web search/)).toHaveAttribute('aria-checked', 'true');
   });
 });

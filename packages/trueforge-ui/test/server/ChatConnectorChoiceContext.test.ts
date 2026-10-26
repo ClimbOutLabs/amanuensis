@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+
 import {
   createChatConnectorChoiceStore,
   createSessionWithConnectorChoice,
@@ -15,7 +17,7 @@ function sessionNamed(id: string) {
 describe('createSessionWithConnectorChoice', () => {
   it('sends the new chat off choice with the session create, then hands it to the new session', async () => {
     const store = createChatConnectorChoiceStore();
-    store.set({ sessionId: undefined, names: ['Email'] });
+    store.set({ sessionId: undefined, keys: [connectorOffKey('Email')] });
     const createSession = vi.fn(async () => sessionNamed('chat-1'));
 
     await createSessionWithConnectorChoice({
@@ -27,9 +29,9 @@ describe('createSessionWithConnectorChoice', () => {
 
     expect(createSession).toHaveBeenCalledWith({
       agentSpec: spec,
-      metadata: { is_create_agent: 'false', connectors_off: '["Email"]' },
+      metadata: { is_create_agent: 'false', [connectorOffKey('Email')]: '1' },
     });
-    expect(store.get('chat-1')).toEqual(['Email']);
+    expect(store.get('chat-1')).toEqual([connectorOffKey('Email')]);
     expect(store.get(undefined)).toEqual([]);
   });
 
@@ -49,7 +51,7 @@ describe('createSessionWithConnectorChoice', () => {
 
   it('drops a choice made on a draft that was never sent', () => {
     const store = createChatConnectorChoiceStore();
-    store.set({ sessionId: undefined, names: ['Email'] });
+    store.set({ sessionId: undefined, keys: [connectorOffKey('Email')] });
     store.clearPending();
     expect(store.get(undefined)).toEqual([]);
   });

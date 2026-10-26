@@ -29,6 +29,7 @@ import {
   TurnStateSchema,
 } from '@truefoundry/trueforge-core/agent-session';
 import { ModelMessageEventSchema, TaskStateSchema } from '@truefoundry/trueforge-core/core';
+import { upgradeConnectorChoiceMetadata } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import {
   AgentInfoSchema,
   AgentParentSchema,
@@ -389,7 +390,7 @@ export const ImportSessionRecordSchema = z.object({
   folder_id: z.string().nullable(),
   external_id: z.string().nullable(),
   source: internal(SessionSourceSchema.nullable(), { label: LEFT_OUT.chatDetail }),
-  metadata: internal(SessionMetadataSchema, { label: LEFT_OUT.chatDetail }),
+  metadata: internal(SessionMetadataSchema.transform(upgradeConnectorChoiceMetadata), { label: LEFT_OUT.chatDetail }),
   // Never stored on import, so data in it is left out.
   custom: z.unknown().transform(value => {
     if (isRecord(value) ? Object.keys(value).length > 0 : value !== null && value !== undefined) {
