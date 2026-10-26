@@ -97,6 +97,37 @@ describe('Email connector classifier', () => {
     });
   });
 
+  describe('mark as read', () => {
+    // The hints the mail server really publishes for get_emails_content: a write only because of this choice.
+    const CONTENT_HINTS = { read_only_hint: false, open_world_hint: true };
+
+    it('reading message bodies with mark as read set asks with the card for that change', async () => {
+      const decision = await classifyTier(
+        hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: true }, CONTENT_HINTS),
+        makeCtx(),
+      );
+      expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null, sensitive_read: true });
+      expect(decision.card?.plain_what).toBe('Allow marking these emails as read?');
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('reading message bodies with mark as read off or absent stays a silent read', async () => {
+      for (const params of [{ email_ids: ['e1'] }, { email_ids: ['e1'], mark_as_read: false }]) {
+        const decision = await classifyTier(hostMailCall('get_emails_content', params, CONTENT_HINTS), makeCtx());
+        expect(decision).toMatchObject({ tier: 1, reason: 'mail_read', auto_deny: null, sensitive_read: true });
+        expect(decision.card).toBeNull();
+      }
+    });
+
+    it('mark as read set still asks when the sidecar is the one asking, never silently', async () => {
+      const decision = await classifyTier(
+        hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: true }, CLOSED_WORLD_READ),
+        makeCtx(),
+      );
+      expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null });
+    });
+  });
+
   describe('sends', () => {
     it('a send from the first-party Email sidecar still asks, even when the server declares it read-only', async () => {
       const decision = await classifyTier(

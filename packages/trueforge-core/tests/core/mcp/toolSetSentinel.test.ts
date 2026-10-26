@@ -502,3 +502,125 @@ describe("the operator's own Email sidecar, whose tools publish no annotations",
     expect((await other.toolCallInfo({ name: 'get_emails_content', arguments: {} })).is_approval_required).toBe(true);
   });
 });
+
+describe("the operator's own Email sidecar, with the annotations the mail server really publishes", () => {
+  // The upstream mail server annotates get_emails_content as a write (readOnlyHint false) only because
+  // of its optional mark-as-read choice; the call itself is a read while that choice is off.
+  const contentTool: ToolSchema = {
+    name: 'get_emails_content',
+    description: 'Reads email content.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  };
+  const sendTool: ToolSchema = {
+    name: 'send_email',
+    description: 'Sends an email.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  };
+
+  it('runs a plain content read with no card under the default gate', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    for (const args of [{ email_ids: ['e1'] }, { email_ids: ['e1'], mark_as_read: false }]) {
+      expect(await email.toolCallInfo({ name: 'get_emails_content', arguments: args })).toMatchObject({
+        tier: 1,
+        tier_reason: 'mail_read',
+        is_approval_required: false,
+      });
+    }
+    const response = await email.callTool({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(response).not.toHaveProperty('approvalRequired');
+  });
+
+  it('asks before reading with mark as read set, with the card for that change', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const info = await email.toolCallInfo({
+      name: 'get_emails_content',
+      arguments: { email_ids: ['e1'], mark_as_read: true },
+    });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
+    expect(info.approval_token_id).toEqual(expect.any(String));
+  });
+
+  it.each([
+    ['a changed tag list', ['@write', '@destructive']],
+    ['the all tag', ['@all']],
+    ['a literal tool name', ['get_emails_content']],
+  ])('still gates a plain content read when the person set %s', async (_label, requireApprovalForTools) => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+      requireApprovalForTools,
+    });
+    const info = await email.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: true });
+  });
+
+  it('keeps asking on a connector only named Email, which the host does not vouch for', async () => {
+    const other = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: false,
+      serverName: 'Email',
+    });
+    const info = await other.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info.is_approval_required).toBe(true);
+  });
+
+  it('never waives a destructive tool, even on the host-vouched read path', async () => {
+    const destructiveContent: ToolSchema = {
+      ...contentTool,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    };
+    const email = makeToolSet({
+      tools: [destructiveContent],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const info = await email.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: true });
+  });
+
+  it('runs a calendar read with no card when its annotations call it a write', async () => {
+    const listEvents: ToolSchema = {
+      name: 'list_events',
+      description: 'Lists events.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    };
+    const calendar = makeToolSet({
+      tools: [listEvents],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({ name: 'list_events', arguments: {} });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'caldav_private_read', is_approval_required: false });
+  });
+
+  it('still asks before sending, and no answer covers a send', async () => {
+    const email = makeToolSet({
+      tools: [sendTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const send = await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } });
+    expect(send.is_approval_required).toBe(true);
+    expect(allowsChatApproval(send)).toBe(false);
+    expect(allowsToolGrant(send)).toBe(false);
+  });
+});
