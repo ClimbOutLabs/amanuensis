@@ -49,7 +49,7 @@ function makeMemoryClient(recalledText: string[]): MemoryClient {
       ok: true,
       results: recalledText.map((text, index) => ({
         id: String(index),
-        type: 'world',
+
         occurred_start: '2026-08-14T00:00:00Z',
         text,
       })),

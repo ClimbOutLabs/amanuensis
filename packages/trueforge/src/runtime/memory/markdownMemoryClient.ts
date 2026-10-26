@@ -49,6 +49,7 @@ import {
   clearSummaryPending,
   entryMetadata,
   entryOccurredAt,
+  entryRecallText,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
@@ -65,7 +66,6 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
-  withoutSessionMarker,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -78,7 +78,7 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
-import { isFromSession, keywordMatches } from './recallRelevance';
+import { isFromSession } from './recallRelevance';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -102,6 +102,28 @@ const RECALL_MAX_DAILY_FILES = 14;
 
 /** Cap on tracked retain operation ids; oldest are dropped, newest kept. */
 const OPERATIONS_LOG_CAP = 2000;
+
+/** Lowercased query words worth matching; drops stopword-length fragments. */
+function queryWords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(word => word.length > 2);
+}
+
+function scoreEntry(words: string[], text: string): number {
+  if (words.length === 0) {
+    return 0;
+  }
+  const lower = text.toLowerCase();
+  let score = 0;
+  for (const word of words) {
+    if (lower.includes(word)) {
+      score += 1;
+    }
+  }
+  return score;
+}
 
 /** Merges ranked lists best-first, earlier lists leading each round, so no vault starves the others. */
 function interleaveRanked(lists: RankedMemory[][]): RankedMemory[] {
@@ -223,7 +245,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Curated memory first: it is the model's own long-term store.
       for (const { namespace, scan } of vaults) {
         if (scan.curated !== undefined) {
-          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated, type: 'markdown' });
+          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated });
         }
       }
 
@@ -245,8 +267,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
-          text: withoutSessionMarker(item.text),
-          type: 'markdown',
+          text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
           ...(metadata && { metadata }),
         });
@@ -261,10 +282,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /**
-   * One vault's recallable entries best-first: keyword matches that clear the relevance floor, fused
-   * with its own meaning index when ready. The chat being answered is left out of both.
-   */
+  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. The chat being answered is left out of both. */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
@@ -277,9 +295,12 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
     const excludeIds = new Set(ownEntries.map(entry => entry.id));
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
-    const keywordRanked = keywordMatches({ query: input.query, notes: entries })
-      .sort((a, b) => b.shared - a.shared || b.note.file.localeCompare(a.note.file))
-      .map(({ note }) => ({ id: note.id, text: note.text }));
+    const words = queryWords(input.query);
+    const scored = entries
+      .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
+      .filter(candidate => candidate.score > 0)
+      .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
+    const keywordRanked = scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
 
     // Meaning-based rank fuses with (never replaces) the keyword ranking. When the
     // vector leg cannot contribute, this resolves undefined and ranking stays

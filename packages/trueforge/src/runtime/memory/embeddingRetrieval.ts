@@ -117,25 +117,6 @@ export function passesPeakGate(similarities: number[]): boolean {
   return top - restMean >= VECTOR_PEAK_THRESHOLD;
 }
 
-/**
- * The ranked hits worth recalling: when the corpus peaks at all, only hits that stand out from the
- * baseline by the same margin that qualified the top one (or, in a small corpus, clear the confidence
- * bar). The rest are filler a peaked query would otherwise drag in to use up the budget.
- */
-export function relevantHits(ranked: { id: string; similarity: number }[]): { id: string; similarity: number }[] {
-  const similarities = ranked.map(hit => hit.similarity);
-  if (!passesPeakGate(similarities)) {
-    return [];
-  }
-  const baseline =
-    (similarities.reduce((sum, value) => sum + value, 0) - Math.max(...similarities)) / (similarities.length - 1);
-  const small = similarities.length <= SMALL_CORPUS_BYPASS_MAX;
-  return ranked.filter(
-    hit =>
-      hit.similarity - baseline >= VECTOR_PEAK_THRESHOLD || (small && hit.similarity >= VECTOR_CONFIDENCE_THRESHOLD),
-  );
-}
-
 export function rankByCosine(
   query: ArrayLike<number>,
   candidates: { id: string; vector: ArrayLike<number> }[],
@@ -417,11 +398,10 @@ export class EmbeddingSubsystem {
         }
       }
       const ranked = rankByCosine(queryVector, candidates);
-      const relevant = relevantHits(ranked);
-      if (relevant.length === 0) {
+      if (!passesPeakGate(ranked.map(hit => hit.similarity))) {
         return undefined;
       }
-      const vectorOrder = relevant.slice(0, VECTOR_TOP_K).map(hit => hit.id);
+      const vectorOrder = ranked.slice(0, VECTOR_TOP_K).map(hit => hit.id);
       const keywordOrder = input.keywordHits.map(hit => hit.id);
       const fused = orderVectorFirst({ vectorOrder, keywordOrder });
       const results: RankedMemory[] = [];

@@ -17,7 +17,6 @@ import {
   orderVectorFirst,
   passesPeakGate,
   rankByCosine,
-  relevantHits,
   warmEmbeddingsAtBoot,
   type EmbeddingSubsystemState,
 } from '../../../../src/runtime/memory/embeddingRetrieval';
@@ -291,31 +290,6 @@ describe('pure ranking helpers', () => {
     // Real valid query shape (48 entries, top 0.85, peak 0.076): the peak gate
     // alone accepts it, so nothing is lost by gating the bypass.
     expect(passesPeakGate([0.85, ...Array.from({ length: 47 }, () => 0.774)])).toBe(true);
-  });
-
-  it('relevantHits keeps only hits that stand out from the baseline, never the filler', () => {
-    const ranked = [
-      { id: 'top', similarity: 0.85 },
-      { id: 'near', similarity: 0.84 },
-      ...Array.from({ length: 20 }, (_, i) => ({ id: `filler-${String(i)}`, similarity: 0.77 })),
-    ];
-    // 22 entries: no small-corpus bypass. Baseline is about 0.775; only the two leaders clear it by 0.06.
-    expect(relevantHits(ranked).map(hit => hit.id)).toEqual(['top', 'near']);
-  });
-
-  it('relevantHits returns nothing when no hit peaks (a one-word reply scores flat)', () => {
-    const flat = Array.from({ length: 30 }, (_, i) => ({ id: `n-${String(i)}`, similarity: 0.78 + (i % 3) * 0.005 }));
-    expect(relevantHits(flat)).toEqual([]);
-    expect(relevantHits([])).toEqual([]);
-  });
-
-  it('relevantHits keeps confident hits in a small corpus', () => {
-    const small = [
-      { id: 'a', similarity: 0.85 },
-      { id: 'b', similarity: 0.83 },
-      { id: 'c', similarity: 0.82 },
-    ];
-    expect(relevantHits(small).map(hit => hit.id)).toEqual(['a', 'b', 'c']);
   });
 
   it('rankByCosine sorts best-first', () => {

@@ -177,13 +177,26 @@ export function withoutSessionMarker(text: string): string {
   return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
 }
 
+/** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
+function headingInstant(text: string): string | undefined {
+  const heading = text.startsWith('## ') ? (text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
+  return /^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())
+    ? new Date(heading).toISOString()
+    : undefined;
+}
+
 /** When an entry was written: its `## ` heading instant, else the day in its daily file name. */
 export function entryOccurredAt(entry: { id: string; text: string }): string | undefined {
-  const heading = entry.text.startsWith('## ') ? (entry.text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
-  if (/^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())) {
-    return new Date(heading).toISOString();
-  }
-  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
+  return headingInstant(entry.text) ?? /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
+}
+
+/**
+ * What recall shows the model for an entry: the text alone. The timestamp heading, the hidden chat id
+ * and the read-content marker are left out because recall reports them as the item's date and origin.
+ */
+export function entryRecallText(text: string): string {
+  const { body } = splitEntryTrailers(text);
+  return headingInstant(body) === undefined ? body : body.slice(body.indexOf('\n') + 1 || body.length).trim();
 }
 
 /** Curated long-term memory file inside a namespace directory. */

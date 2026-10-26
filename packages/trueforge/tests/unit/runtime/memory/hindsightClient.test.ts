@@ -14,7 +14,7 @@ describe('HindsightClient', () => {
     it('maps a successful response into results and entities', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
-          results: [{ id: '1', text: 'Alex likes tea', type: 'world', occurred_start: '2026-08-14T00:00:00Z' }],
+          results: [{ id: '1', text: 'Alex likes tea', occurred_start: '2026-08-14T00:00:00Z' }],
           entities: {
             Robin: { canonical_name: 'Robin', observations: [{ text: 'is Alex’s wife', mentioned_at: '2026-08-01' }] },
           },
@@ -37,7 +37,7 @@ describe('HindsightClient', () => {
 
       expect(outcome).toEqual({
         ok: true,
-        results: [{ id: '1', text: 'Alex likes tea', type: 'world', occurred_start: '2026-08-14T00:00:00Z' }],
+        results: [{ id: '1', text: 'Alex likes tea', occurred_start: '2026-08-14T00:00:00Z' }],
         entities: [
           {
             name: 'Robin',
@@ -62,14 +62,14 @@ describe('HindsightClient', () => {
       const fetchImpl = jest.fn().mockImplementation(async () =>
         jsonResponse({
           results: [
-            { id: '1', text: 'Discussed a follow-up', type: 'world', metadata: { session_id: 'chat-now' } },
+            { id: '1', text: 'Discussed a follow-up', metadata: { session_id: 'chat-now' } },
             {
               id: '2',
               text: 'Landlord was told about the heater',
-              type: 'world',
+
               metadata: { session_id: 'chat-old' },
             },
-            { id: '3', text: 'Older note with no chat recorded', type: 'world' },
+            { id: '3', text: 'Older note with no chat recorded' },
           ],
           entities: {},
         }),
@@ -121,7 +121,7 @@ describe('HindsightClient', () => {
 
     it('returns ok:false when the response exceeds the configured byte cap', async () => {
       const oversizedBody = JSON.stringify({
-        results: Array.from({ length: 50 }, () => ({ id: 'x', text: 'x'.repeat(50), type: 'world' })),
+        results: Array.from({ length: 50 }, () => ({ id: 'x', text: 'x'.repeat(50) })),
       });
       const fetchImpl = jest.fn().mockResolvedValue(
         new Response(oversizedBody, {
@@ -418,12 +418,7 @@ describe('HindsightClient', () => {
     it('drops malformed result entries and entity observations, sanitizing the ones that survive', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
-          results: [
-            null,
-            42,
-            { id: 'x', type: 'world' },
-            { id: 'y', text: 'valid text', type: 'world', occurred_start: 12345 },
-          ],
+          results: [null, 42, { id: 'x' }, { id: 'y', text: 'valid text', occurred_start: 12345 }],
           entities: {
             Robin: {
               canonical_name: 'Robin',
@@ -449,7 +444,7 @@ describe('HindsightClient', () => {
 
       expect(outcome).toEqual({
         ok: true,
-        results: [{ id: 'y', text: 'valid text', type: 'world' }],
+        results: [{ id: 'y', text: 'valid text' }],
         entities: [{ name: 'Robin', canonical_name: 'Robin', observations: [{ text: 'is Alex’s wife' }] }],
       });
     });
@@ -458,10 +453,10 @@ describe('HindsightClient', () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
           results: [
-            { id: '1', text: 'scored high', type: 'world', score: 0.92 },
-            { id: '2', text: 'scored low', type: 'world', score: 0.1 },
-            { id: '3', text: 'not a number', type: 'world', score: 'high' },
-            { id: '4', text: 'not finite', type: 'world', score: Number.NaN },
+            { id: '1', text: 'scored high', score: 0.92 },
+            { id: '2', text: 'scored low', score: 0.1 },
+            { id: '3', text: 'not a number', score: 'high' },
+            { id: '4', text: 'not finite', score: Number.NaN },
           ],
           entities: {
             Acme: { canonical_name: 'Acme', observations: [{ text: 'is a company' }], score: 0.7 },
@@ -487,10 +482,10 @@ describe('HindsightClient', () => {
       expect(outcome).toEqual({
         ok: true,
         results: [
-          { id: '1', text: 'scored high', type: 'world', score: 0.92 },
-          { id: '2', text: 'scored low', type: 'world', score: 0.1 },
-          { id: '3', text: 'not a number', type: 'world' },
-          { id: '4', text: 'not finite', type: 'world' },
+          { id: '1', text: 'scored high', score: 0.92 },
+          { id: '2', text: 'scored low', score: 0.1 },
+          { id: '3', text: 'not a number' },
+          { id: '4', text: 'not finite' },
         ],
         entities: [
           { name: 'Acme', canonical_name: 'Acme', observations: [{ text: 'is a company' }], score: 0.7 },

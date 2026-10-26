@@ -34,7 +34,6 @@ const REFUSE_REDIRECT: NonNullable<RequestInit['redirect']> = 'manual';
 export interface RecallItem {
   id: string;
   text: string;
-  type: string;
   entities?: string[];
   occurred_start?: string;
   occurred_end?: string;
@@ -110,7 +109,6 @@ function sanitizeRecallItem(value: unknown): RecallItem | null {
   const sanitized: RecallItem = {
     id: typeof item['id'] === 'string' ? item['id'] : '',
     text: item['text'],
-    type: typeof item['type'] === 'string' ? item['type'] : 'unknown',
   };
   const occurredStart = sanitizeOptionalString(item['occurred_start']);
   if (occurredStart !== undefined) {
