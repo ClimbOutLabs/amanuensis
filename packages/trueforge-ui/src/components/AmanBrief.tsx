@@ -9,6 +9,7 @@ import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { greetingLine } from './AmanTour.js';
 import {
   briefFooterLine,
+  briefOmittedLine,
   briefWhenLabel,
   buildBriefView,
   summarizeBriefAudit,
@@ -27,6 +28,8 @@ const UNDO_WINDOW_MS = 5000;
 
 export type AmanBriefProps = {
   brief: MorningBrief;
+  /** Items in the answer that did not fit the brief's shape and were left out. */
+  omittedCount: number;
   /** Identifies this brief for the greeting heading's id. */
   briefId: string;
   /** The chat the brief came from: the audit entries for the trust line, and where done marks are logged. */
@@ -41,7 +44,7 @@ function prefersReducedMotion(): boolean {
 }
 
 /** A plain card with the brief's greeting, digest, sections and trust line. */
-export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
+export function AmanBrief({ brief, omittedCount, briefId, sessionId }: AmanBriefProps) {
   const api = useOptionalSentinelApiState()?.api ?? null;
   const profile = useOptionalPersonalization()?.profile;
   const name = personDisplayName({ profile, signInName: undefined });
@@ -150,7 +153,9 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
             onUndo={undo}
           />
         ))}
-        {total === 0 ? <p className="text-base text-text-secondary">Nothing needs you this morning.</p> : null}
+        {total === 0 && omittedCount === 0 ? (
+          <p className="text-base text-text-secondary">Nothing needs you this morning.</p>
+        ) : null}
         {view.hiddenCount > 0 || expanded ? (
           <button
             type="button"
@@ -169,6 +174,12 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
           </p>
         )}
       </div>
+
+      {omittedCount > 0 ? (
+        <p data-testid="brief-omitted" className="text-sm text-text-secondary">
+          {briefOmittedLine(omittedCount)}
+        </p>
+      ) : null}
 
       <BriefFooter sessionId={sessionId} />
     </div>

@@ -1537,6 +1537,62 @@ describe('AssistantMessageContainer morning brief', () => {
     expect(screen.queryByTestId('brief-writing')).not.toBeInTheDocument();
   });
 
+  function briefAnswer(payload: unknown): string {
+    return `Here is your brief.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``;
+  }
+
+  function decision(index: number) {
+    return {
+      section: 'decision',
+      title: `Reply to person ${String(index)}`,
+      subtitle: [],
+      action: { label: 'Draft a reply', target: { kind: 'prompt', text: `Draft a reply to person ${String(index)}` } },
+    };
+  }
+
+  it('shows every card when the summary line runs long', () => {
+    const digest = `${Array.from({ length: 56 }, (_, index) => `word${String(index)}`).join(' ')}.`;
+    const items = Array.from({ length: 9 }, (_, index) => decision(index + 1));
+    renderBriefTurn({ role: 'assistant', content: briefAnswer({ digest, items }) }, false);
+    const brief = screen.getByTestId('aman-brief');
+    expect(within(brief).getAllByTestId('brief-row').length).toBeGreaterThan(0);
+    expect(within(brief).getByText('Reply to person 1')).toBeInTheDocument();
+    expect(within(brief).getByRole('heading', { name: 'Needs a decision · 9' })).toBeInTheDocument();
+    expect(screen.queryByTestId('brief-unreadable')).not.toBeInTheDocument();
+    expect(brief.textContent).not.toContain('{');
+  });
+
+  it('shows the other cards and a plain note when one item cannot be shown', () => {
+    const items = [decision(1), { ...decision(2), section: 'watch_out' }, decision(3)];
+    renderBriefTurn({ role: 'assistant', content: briefAnswer({ digest: 'Three replies.', items }) }, false);
+    expect(screen.getByText('Reply to person 1')).toBeInTheDocument();
+    expect(screen.getByText('Reply to person 3')).toBeInTheDocument();
+    expect(screen.getByTestId('brief-omitted')).toHaveTextContent('1 item could not be shown.');
+  });
+
+  it('shows readable words and never raw JSON when the answer was cut off', () => {
+    renderBriefTurn(
+      {
+        role: 'assistant',
+        content: 'Here is your **brief**.\n\n```json\n{"digest": "Nine things", "items": [{"section": "deci',
+      },
+      false,
+    );
+    const fallback = screen.getByTestId('brief-unreadable');
+    expect(fallback).toHaveTextContent('Here is your brief.');
+    expect(fallback).toHaveTextContent('Your brief could not be shown this time. Ask for it again.');
+    expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/[{}]|digest|"items"/);
+  });
+
+  it('shows a plain line, not raw JSON, when the answer is only JSON that does not fit', () => {
+    renderBriefTurn({ role: 'assistant', content: '```json\n{"digest": 5, "items": []}\n```' }, false);
+    expect(screen.getByTestId('brief-unreadable')).toHaveTextContent(
+      'Your brief could not be shown this time. Ask for it again.',
+    );
+    expect(document.body.textContent).not.toMatch(/[{}]|digest/);
+  });
+
   it('falls back to the plain answer as markdown when the block never arrives', () => {
     renderBriefTurn({ role: 'assistant', content: 'Your **mail** could not be read this morning.' }, false);
     expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
