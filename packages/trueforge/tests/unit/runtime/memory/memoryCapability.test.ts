@@ -475,6 +475,33 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(passthroughEvent(events)['injected_block']).toContain('[markdown, 2026-09-20] fact');
   });
 
+  it.each(['2026-09-20', '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00Z'])(
+    'leaves the date-valued day %s as it is west of UTC',
+    async day => {
+      const recall = jest.fn().mockResolvedValue({
+        ok: true,
+        results: [{ id: '1', type: 'world', occurred_start: day, text: 'fact' }],
+        entities: [],
+      });
+      const capability = hindsightMemoryCapability({
+        client: makeClient({ recall }),
+        config: DEFAULT_CONFIG,
+        logger: makeLogger(),
+        sessionId: 's1',
+        previousTurnId: null,
+        timeZone: 'America/Los_Angeles',
+      });
+      const processor = capability.preLLMProcessors?.[0];
+      if (!processor) {
+        throw new Error('expected a preLLM processor');
+      }
+
+      const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+
+      expect(passthroughEvent(events)['injected_block']).toContain('[world, 2026-09-20] fact');
+    },
+  );
+
   it('inserts the block as a system message just before the current message, without mutating the input array', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
@@ -682,6 +709,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       logger: makeLogger(),
       sessionId: 's1',
       previousTurnId: 't-prev',
+      keepsFullExchange: true,
     });
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {
@@ -721,6 +749,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       logger: makeLogger(),
       sessionId: 's1',
       previousTurnId: 't-prev',
+      keepsFullExchange: true,
     });
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {
@@ -2177,6 +2206,7 @@ describe('memory origin is kept and shown', () => {
       logger: makeLogger(),
       sessionId: 's1',
       previousTurnId: 't-prev',
+      keepsFullExchange: true,
     });
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {

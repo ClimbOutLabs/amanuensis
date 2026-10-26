@@ -222,6 +222,20 @@ describe('MarkdownMemoryClient', () => {
       }
     });
 
+    it('keeps every operation id when many turns record at once', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        const ids = Array.from({ length: 20 }, (_, index) => `op-${String(index)}`);
+
+        await Promise.all(ids.map(id => client.completeOperation(id)));
+
+        const statuses = await Promise.all(ids.map(id => client.getOperation(id, 5000)));
+        expect(statuses.map(status => status.ok && status.status)).toEqual(ids.map(() => 'completed'));
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
     it('keeps a read memory whole and labelled when its text has headings or a fake source line', async () => {
       const { client, dir } = await makeClient();
       try {

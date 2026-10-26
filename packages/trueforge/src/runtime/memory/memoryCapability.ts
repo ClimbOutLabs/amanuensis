@@ -54,7 +54,7 @@ import type {
   MemoryScreenStats,
 } from './memoryEvents';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { retainOperationId, submitRetain, type SummarizeTurnContext } from './memoryRetain';
+import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 
@@ -482,10 +482,17 @@ function sanitizeMemoryLine(text: string): string {
   return sanitizeMemoryText(text).replace(/\r\n|\r|\n/g, ' ');
 }
 
-/** The item with a full `occurred_start` instant shown as a day in the person's time zone; other items are unchanged. */
+/** A date-valued instant, such as a provider's midnight-UTC day, which names a day rather than a moment. */
+const DATE_VALUED_INSTANT = /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.0+)?Z$/;
+
+/**
+ * The item with an `occurred_start` that carries a real time shown as a day in the person's time
+ * zone. A plain date, or a midnight-UTC instant that stands for a date, is left as it is, so it
+ * never shifts a day west of UTC. Other items are unchanged.
+ */
 function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string | undefined }): RecallItem {
   const start = item.occurred_start;
-  if (timeZone === undefined || !start?.includes('T')) {
+  if (timeZone === undefined || !start?.includes('T') || DATE_VALUED_INSTANT.test(start)) {
     return item;
   }
   const instant = new Date(start);
@@ -1274,8 +1281,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly internalSourceState: InternalSourceState | undefined;
   /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
   private readonly webSearch: WebSearchTurnState | undefined;
-  /** Present when summaries are on: a recovered turn is summarized like any other, never stored as the raw exchange. */
-  private readonly summarize: SummarizeTurnContext | undefined;
+  /** True only when summaries are off, so a turn is saved as its full exchange and a vanished one may be rebuilt from the chat. */
+  private readonly keepsFullExchange: boolean;
   /** The person's time zone, so a recalled memory's day reads as they lived it. */
   private readonly timeZone: string | undefined;
 
@@ -1299,7 +1306,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
     webSearch?: WebSearchTurnState | undefined;
-    summarize?: SummarizeTurnContext | undefined;
+    keepsFullExchange?: boolean | undefined;
     timeZone?: string | undefined;
   }) {
     this.client = input.client;
@@ -1311,7 +1318,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
     this.webSearch = input.webSearch;
-    this.summarize = input.summarize;
+    this.keepsFullExchange = input.keepsFullExchange ?? false;
     this.timeZone = input.timeZone;
   }
 
@@ -2081,6 +2088,16 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     previousTurnId: string,
     vanishedEntry: PendingRetainOp,
   ): Promise<void> {
+    if (!this.keepsFullExchange) {
+      try {
+        await this.client.noteSummaryOutcome?.({ outcome: 'failed', reason: 'summary_not_finished' });
+      } catch (error) {
+        this.logger.debug('Marking the unfinished summary failed', {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
     const exchange = extractPreviousExchange(context);
     if (exchange === undefined) {
       this.pending = capPending([...this.pending, { ...vanishedEntry, attempts: vanishedEntry.attempts + 1 }]);
@@ -2095,7 +2112,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       completedAt: new Date().toISOString(),
       origin: exchange.origin,
       logger: this.logger,
-      summarize: this.summarize,
     });
     this.pending = capPending([
       ...this.pending,
@@ -2147,8 +2163,12 @@ export function hindsightMemoryCapability(input: {
   internalSourceState?: InternalSourceState | undefined;
   /** The turn's search state, which keeps the injected block's details so a search that carries them asks. */
   webSearch?: WebSearchTurnState | undefined;
-  /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
-  summarize?: SummarizeTurnContext | undefined;
+  /**
+   * True only when summaries are off for the turn. Otherwise a vanished earlier turn is never
+   * rebuilt from the chat: saving its raw exchange would defeat the summary, and asking the
+   * summary model here would hold up the person's turn. The vault is marked instead.
+   */
+  keepsFullExchange?: boolean | undefined;
   /** The person's IANA time zone; a recalled memory's instant is shown as a day in it. */
   timeZone?: string | undefined;
 }): AgentCapability {

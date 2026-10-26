@@ -383,7 +383,7 @@ function createTurnResolver(deps: {
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
   /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
-  memorySummarize?: SummarizeTurnContext | undefined;
+  memorySummarize: SummarizeTurnContext | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -2474,6 +2474,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
       previousTurnId: memoryPreviousTurnId,
+      memorySummarize,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
