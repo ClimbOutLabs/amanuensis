@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  StateValueError,
   createStateStore,
   parseRegistry,
   parseRelease,
@@ -49,6 +50,21 @@ test('setting a new key adds it at the end', () => {
   const entries = parseRegistry('name=main\n');
   const next = withRegistryValue(entries, 'tls', 'local');
   assert.equal(renderRegistry(next), 'name=main\ntls=local\n');
+});
+
+test('a key with an equals sign or a line break is refused, and so is a value with a line break', () => {
+  const entries = parseRegistry('name=main\n');
+  const isValueError = (error: unknown) => error instanceof StateValueError;
+  assert.throws(() => withRegistryValue(entries, 'pub=lic', 'x'), isValueError);
+  assert.throws(() => withRegistryValue(entries, 'pub\nlic', 'x'), isValueError);
+  assert.throws(() => withRegistryValue(entries, 'public_url', 'http://x/\nhealthy=1'), isValueError);
+  assert.throws(() => withRegistryValue(entries, 'public_url', 'http://x/\rhealthy=1'), isValueError);
+});
+
+test('a value with an equals sign is accepted, as values may hold one', () => {
+  const entries = parseRegistry('name=main\n');
+  const next = withRegistryValue(entries, 'origins', 'http://example.com/?a=b');
+  assert.equal(renderRegistry(next), 'name=main\norigins=http://example.com/?a=b\n');
 });
 
 const RELEASE_TEXT = `{
@@ -136,6 +152,32 @@ test('removing an instance removes its registry file', async () => {
   const store = createStateStore(backend);
   await store.removeInstance('main');
   assert.equal(backend.files.has('state/instances/main.conf'), false);
+});
+
+test('a writer refuses an entry whose key or value would add registry lines', async () => {
+  const store = createStateStore(memoryBackend(new Map()));
+  const isValueError = (error: unknown) => error instanceof StateValueError;
+  await assert.rejects(async () => {
+    await store.writeInstance({ name: 'main', entries: [{ key: 'name', value: 'main\nhealthy=1' }] });
+  }, isValueError);
+  await assert.rejects(async () => {
+    await store.writeInstance({ name: 'main', entries: [{ key: 'na=me', value: 'main' }] });
+  }, isValueError);
+  await assert.rejects(async () => {
+    await store.setInstanceValue({ name: 'main', key: 'healthy', value: '1\n0' });
+  }, isValueError);
+});
+
+test('writing a release refuses a field with a line break', async () => {
+  const store = createStateStore(memoryBackend(new Map()));
+  const current = parseRelease(RELEASE_TEXT);
+  assert.ok(current !== null);
+  await assert.rejects(
+    async () => {
+      await store.writeRelease({ ...current, appImage: 'aman-app:abc123\naman-app:evil' });
+    },
+    (error: unknown) => error instanceof StateValueError,
+  );
 });
 
 test('an instance name the registry cannot hold is refused', async () => {

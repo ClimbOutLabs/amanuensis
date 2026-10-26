@@ -152,6 +152,13 @@ export const STATE_BUSY: Problem = {
   fix: 'Wait for it to finish, then run aman status again.',
 };
 
+// The wording for a StateValueError refusal, for the first command that
+// writes state and prints it.
+export const STATE_VALUE_NOT_ALLOWED: Problem = {
+  happened: 'A value to save has a line break in it, or its name has an equals sign in it.',
+  fix: 'Take the line break or equals sign out, then try again.',
+};
+
 export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
   windows: {
     happened: 'Docker is not answering, so whether each instance is running is unknown.',
@@ -208,6 +215,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(NOT_INSTALLED));
   lines.push(problemText(STATE_UNREADABLE));
   lines.push(problemText(STATE_BUSY));
+  lines.push(problemText(STATE_VALUE_NOT_ALLOWED));
   lines.push(statusInstalledLine('aman-app:0'));
   lines.push(statusInstanceLine('main', 'running', 'http://127.0.0.1:8791'));
   lines.push(statusInstanceLine('main', 'partly running', 'http://127.0.0.1:8791'));

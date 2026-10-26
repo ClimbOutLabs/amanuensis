@@ -99,10 +99,20 @@ backups are pruned to the newest seven.
 
 Only one install run works on a home at a time. The lock is the folder
 `state/lock`, taken by `mkdir`, which is atomic everywhere, with the
-holder's process id written to `state/lock/pid`. A run that finds the
-folder reads the pid: if that process is still alive, the run stops and
-says another install is running; if it is gone, the run removes the folder
-and takes the lock itself. The holder removes the folder when it finishes.
+holder's process id written to `state/lock/pid`. How a run that finds the
+folder tells a live holder from a leftover lock depends on where the home
+lives. On a folder on the computer itself, the run reads the pid: if that
+process is still alive, the run stops and says another install is
+running; if it is gone, the run removes the folder and takes the lock
+itself. In the `aman_home` volume, writes run inside a short-lived
+container whose own shell is process 1, so a pid written there names that
+container's processes, not the holder, and cannot say whether the holder
+is still running. There the run reads the lock folder's age instead: a
+lock younger than fifteen minutes is a run still going, and an older one
+is a holder that stopped without removing it, so the run removes the
+folder and takes the lock itself. Writes under this lock take seconds, so
+fifteen minutes only ever means a holder that died. The holder removes
+the folder when it finishes.
 
 ## Rules every writer follows
 

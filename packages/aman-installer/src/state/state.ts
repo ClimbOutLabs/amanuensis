@@ -7,6 +7,15 @@ export class StateStoreError extends Error {}
 
 export class StateBusyError extends StateStoreError {}
 
+// The state volume could not be reached because Docker itself did not
+// answer: it is not running, or its command never started.
+export class StateDockerError extends StateStoreError {}
+
+// A key or value the line formats cannot hold: a line break in a key or a
+// value would render as extra lines the shell reader would take for real
+// settings, and an equals sign in a key would move where a line splits.
+export class StateValueError extends StateStoreError {}
+
 export const REGISTRY_DIR = 'state/instances';
 export const RELEASE_FILE = 'release/release.json';
 export const PREVIOUS_RELEASE_FILE = 'release/previous.release.json';
@@ -58,12 +67,28 @@ export function registryValue(entries: readonly RegistryEntry[], key: string): s
   return null;
 }
 
+function checkedRegistryKey(key: string): string {
+  if (key.includes('=') || key.includes('\n') || key.includes('\r')) {
+    throw new StateValueError('a registry key cannot hold an equals sign or a line break');
+  }
+  return key;
+}
+
+function checkedLineValue(value: string): string {
+  if (value.includes('\n') || value.includes('\r')) {
+    throw new StateValueError('a value to save cannot hold a line break');
+  }
+  return value;
+}
+
 // Replaces the key's line where it stands, or adds it at the end.
 export function withRegistryValue(
   entries: readonly RegistryEntry[],
   key: string,
   value: string,
 ): readonly RegistryEntry[] {
+  checkedRegistryKey(key);
+  checkedLineValue(value);
   const index = entries.findIndex(entry => entry.key === key);
   if (index === -1) {
     return [...entries, { key, value }];
@@ -216,8 +241,18 @@ export function createStateStore(backend: StateBackend): StateStore {
   };
   return {
     readSummary: () => readSummaryFrom(backend),
-    writeInstance: record =>
-      writeOneIfChanged(`${REGISTRY_DIR}/${checkedInstanceName(record.name)}.conf`, renderRegistry(record.entries)),
+    writeInstance: async record => {
+      for (const entry of record.entries) {
+        if (entry.key !== null) {
+          checkedRegistryKey(entry.key);
+        }
+        checkedLineValue(entry.value);
+      }
+      return writeOneIfChanged(
+        `${REGISTRY_DIR}/${checkedInstanceName(record.name)}.conf`,
+        renderRegistry(record.entries),
+      );
+    },
     setInstanceValue: async options => {
       const path = `${REGISTRY_DIR}/${checkedInstanceName(options.name)}.conf`;
       const current = await backend.readText(path);
@@ -228,6 +263,19 @@ export function createStateStore(backend: StateBackend): StateStore {
       await backend.removeFile(`${REGISTRY_DIR}/${checkedInstanceName(name)}.conf`);
     },
     writeRelease: async record => {
+      for (const field of [
+        record.schema,
+        record.sourceRef,
+        record.appImage,
+        record.sttImage,
+        record.calendarImage,
+        record.dexImage,
+        record.mailEmailImage,
+      ]) {
+        if (field !== null) {
+          checkedLineValue(field);
+        }
+      }
       const text = renderRelease(record);
       const current = await backend.readText(RELEASE_FILE);
       if (current === text) {

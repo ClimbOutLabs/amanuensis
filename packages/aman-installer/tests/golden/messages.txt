@@ -32,6 +32,7 @@ Docker is ready for Aman on this computer.
 Aman is not installed on this computer yet. Install Aman on this computer, then run aman status again.
 The record of what is installed could not be read. Run the installer again from the folder Aman was installed from, then run aman status again.
 Another install is running right now. Wait for it to finish, then run aman status again.
+A value to save has a line break in it, or its name has an equals sign in it. Take the line break or equals sign out, then try again.
 Aman is installed, version aman-app:0.
 Instance main is running at http://127.0.0.1:8791.
 Instance main is partly running at http://127.0.0.1:8791.

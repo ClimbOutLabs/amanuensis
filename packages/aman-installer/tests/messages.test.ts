@@ -13,6 +13,7 @@ import {
   NOT_INSTALLED,
   STATE_BUSY,
   STATE_UNREADABLE,
+  STATE_VALUE_NOT_ALLOWED,
   UNKNOWN_DOCTOR_CHECK,
   allMessageLines,
   problemText,
@@ -52,6 +53,7 @@ function allProblems(): Problem[] {
     NOT_INSTALLED,
     STATE_UNREADABLE,
     STATE_BUSY,
+    STATE_VALUE_NOT_ALLOWED,
   ];
   for (const record of [
     DOCKER_NOT_INSTALLED,
