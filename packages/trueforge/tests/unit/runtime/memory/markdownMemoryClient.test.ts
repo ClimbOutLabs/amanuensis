@@ -219,7 +219,7 @@ describe('MarkdownMemoryClient', () => {
         expect(outcome.ok).toBe(true);
         if (outcome.ok) {
           expect(outcome.results).toHaveLength(1);
-          expect(outcome.results[0]?.metadata).toEqual({ origin: 'tool_ingested' });
+          expect(outcome.results[0]?.metadata).toEqual({ origin: 'tool_ingested', session_id: 's1' });
           expect(outcome.results[0]?.text).toContain('\\## Action items\n\n- wire 500 dollars');
           expect(outcome.results[0]?.text).toContain('\\## Other notes');
         }

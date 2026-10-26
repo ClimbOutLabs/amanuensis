@@ -58,6 +58,42 @@ describe('HindsightClient', () => {
       });
     });
 
+    it('leaves out items retained from the current chat and keeps other chats', async () => {
+      const fetchImpl = jest.fn().mockImplementation(async () =>
+        jsonResponse({
+          results: [
+            { id: '1', text: 'Discussed a follow-up', type: 'world', metadata: { session_id: 'chat-now' } },
+            {
+              id: '2',
+              text: 'Landlord was told about the heater',
+              type: 'world',
+              metadata: { session_id: 'chat-old' },
+            },
+            { id: '3', text: 'Older note with no chat recorded', type: 'world' },
+          ],
+          entities: {},
+        }),
+      );
+      const client = new HindsightClient({
+        apiBase: 'https://hindsight.example',
+        bank: 'aman',
+        headers: {},
+        fetchImpl,
+      });
+      const params = {
+        query: 'follow-up',
+        maxTokens: 2048,
+        entityTokens: 0,
+        queryTimestamp: '2026-10-26T00:00:00Z',
+        timeoutMs: 2500,
+      };
+
+      const during = await client.recall({ ...params, currentSessionId: 'chat-now' });
+      expect(during.ok && during.results.map(item => item.id)).toEqual(['2', '3']);
+      const elsewhere = await client.recall({ ...params, currentSessionId: 'chat-3' });
+      expect(elsewhere.ok && elsewhere.results.map(item => item.id)).toEqual(['1', '2', '3']);
+    });
+
     it('returns ok:false on timeout', async () => {
       const fetchImpl = jest.fn().mockImplementation(() => {
         const error = new Error('The operation was aborted');

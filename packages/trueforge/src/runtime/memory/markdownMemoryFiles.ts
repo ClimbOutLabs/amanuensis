@@ -74,30 +74,113 @@ export function dailyLogEntries(input: { safeNamespace: string; file: string; co
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
   const text = context !== undefined && context.length > 0 ? `${item.content}\n\n> ${context}` : item.content;
-  const entry = `## ${item.timestamp}\n\n${escapeEntryStructure(text)}`;
+  const markers: string[] = [];
+  const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
+  if (sessionId !== undefined && SESSION_ID_PATTERN.test(sessionId)) {
+    markers.push(`${SESSION_MARKER_PREFIX}${sessionId}${SESSION_MARKER_SUFFIX}`);
+  }
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  return origin === undefined || origin === USER_STATED_ORIGIN ? entry : `${entry}\n\n${READ_CONTENT_SOURCE_LINE}`;
+  if (origin !== undefined && origin !== USER_STATED_ORIGIN) {
+    markers.push(READ_CONTENT_SOURCE_LINE);
+  }
+  return [`## ${item.timestamp}\n\n${escapeEntryStructure(text)}`, ...markers].join('\n\n');
 }
 
 /** Closing line marking an entry written after Aman read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
 
+/** Metadata key naming the chat an entry was written in. */
+export const SESSION_ID_METADATA_KEY = 'session_id';
+
+/** Hidden closing line naming the chat an entry was written in, so recall can skip that chat's own notes. */
+const SESSION_MARKER_PREFIX = '<!-- session_id: ';
+const SESSION_MARKER_SUFFIX = ' -->';
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+function isMarkerLine(line: string): boolean {
+  return (
+    line === READ_CONTENT_SOURCE_LINE ||
+    (line.startsWith(SESSION_MARKER_PREFIX) && line.endsWith(SESSION_MARKER_SUFFIX))
+  );
+}
+
 /**
  * Backslash-escapes body lines `splitEntries` or `entryMetadata` would read as structure (an
- * entry heading or the source marker), so retained text can neither split its entry, which drops
- * the marker from the earlier fragments, nor forge the marker. The escape stays readable Markdown.
+ * entry heading or a closing marker), so retained text can neither split its entry, which drops
+ * the markers from the earlier fragments, nor forge a marker. The escape stays readable Markdown.
  */
 function escapeEntryStructure(text: string): string {
   return text
     .split('\n')
-    .map(line => (line.startsWith('## ') || line.trimEnd() === READ_CONTENT_SOURCE_LINE ? `\\${line}` : line))
+    .map(line => (line.startsWith('## ') || isMarkerLine(line.trimEnd()) ? `\\${line}` : line))
     .join('\n');
 }
 
-/** Metadata recall hands back for an entry, read from the marker line `formatRetainEntry` wrote. */
+/** The entry text without its closing marker lines, plus what those lines recorded. */
+function splitEntryMarkers(text: string): { body: string; metadata: Record<string, string> } {
+  const lines = text.split('\n');
+  const metadata: Record<string, string> = {};
+  for (;;) {
+    const last = lines[lines.length - 1]?.trimEnd();
+    if (last === undefined || (last !== '' && !isMarkerLine(last))) {
+      break;
+    }
+    lines.pop();
+    if (last === READ_CONTENT_SOURCE_LINE) {
+      metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+    } else if (last !== '') {
+      metadata[SESSION_ID_METADATA_KEY] = last.slice(SESSION_MARKER_PREFIX.length, -SESSION_MARKER_SUFFIX.length);
+    }
+  }
+  return { body: lines.join('\n').trimEnd(), metadata };
+}
+
+/** Metadata recall hands back for an entry, read from the marker lines `formatRetainEntry` wrote. */
 export function entryMetadata(text: string): Record<string, string> | undefined {
-  const lastLine = text.slice(text.lastIndexOf('\n') + 1);
-  return lastLine === READ_CONTENT_SOURCE_LINE ? { [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN } : undefined;
+  const { metadata } = splitEntryMarkers(text);
+  return Object.keys(metadata).length === 0 ? undefined : metadata;
+}
+
+const ISO_HEADING_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\S+)?$/;
+
+/** The instant in an entry's `## ` heading, when it has a readable one. */
+export function entryHeadingTime(text: string): string | undefined {
+  const firstLine = text.split('\n', 1)[0] ?? '';
+  const heading = firstLine.startsWith('## ') ? firstLine.slice(3).trim() : '';
+  // Strict: the engine's own date parser accepts loose text such as "Action 1".
+  if (!ISO_HEADING_PATTERN.test(heading)) {
+    return undefined;
+  }
+  const parsed = new Date(heading);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/** The day a daily log file covers, as `YYYY-MM-DD`, when its name is a real date. */
+function fileDay(file: string): string | undefined {
+  const day = file.replace(/\.md$/, '');
+  return DAILY_LOG_FILE_PATTERN.test(file) && !Number.isNaN(new Date(`${day}T00:00:00.000Z`).getTime())
+    ? day
+    : undefined;
+}
+
+/**
+ * When an entry happened as recall reports it: the instant in its heading, else the day of its file
+ * (a bare date, so no time is claimed). Undefined only when neither is readable.
+ */
+export function entryRecallTime(entry: Pick<ScannedMemoryEntry, 'file' | 'text'>): string | undefined {
+  return entryHeadingTime(entry.text) ?? fileDay(entry.file);
+}
+
+/**
+ * What recall shows the model for an entry: its text without the hidden marker lines, and without a
+ * readable date heading (recall reports that date itself).
+ */
+export function entryRecallText(text: string): string {
+  const { body } = splitEntryMarkers(text);
+  if (entryHeadingTime(body) === undefined) {
+    return body;
+  }
+  return body.slice(body.indexOf('\n') + 1 || body.length).trim();
 }
 
 /** Curated long-term memory file inside a namespace directory. */
@@ -466,19 +549,8 @@ export interface VaultScannedEntry {
 
 /** Entry time from its `## ` heading, falling back to the file date. */
 export function vaultEntryTimestamp(entry: Pick<ScannedMemoryEntry, 'file' | 'text'>): string {
-  const firstLine = entry.text.split('\n', 1)[0] ?? '';
-  if (firstLine.startsWith('## ')) {
-    const parsed = new Date(firstLine.slice(3).trim());
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-  const day = entry.file.replace(/\.md$/, '');
-  const fallback = new Date(`${day}T00:00:00.000Z`);
-  if (!Number.isNaN(fallback.getTime())) {
-    return fallback.toISOString();
-  }
-  return new Date(0).toISOString();
+  const time = entryRecallTime(entry);
+  return time === undefined ? new Date(0).toISOString() : new Date(time).toISOString();
 }
 
 /**

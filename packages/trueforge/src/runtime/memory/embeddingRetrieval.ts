@@ -117,6 +117,25 @@ export function passesPeakGate(similarities: number[]): boolean {
   return top - restMean >= VECTOR_PEAK_THRESHOLD;
 }
 
+/**
+ * The ranked hits worth recalling: when the corpus peaks at all, only hits that stand out from the
+ * baseline by the same margin that qualified the top one (or, in a small corpus, clear the confidence
+ * bar). The rest are filler a peaked query would otherwise drag in to use up the budget.
+ */
+export function relevantHits(ranked: { id: string; similarity: number }[]): { id: string; similarity: number }[] {
+  const similarities = ranked.map(hit => hit.similarity);
+  if (!passesPeakGate(similarities)) {
+    return [];
+  }
+  const baseline =
+    (similarities.reduce((sum, value) => sum + value, 0) - Math.max(...similarities)) / (similarities.length - 1);
+  const small = similarities.length <= SMALL_CORPUS_BYPASS_MAX;
+  return ranked.filter(
+    hit =>
+      hit.similarity - baseline >= VECTOR_PEAK_THRESHOLD || (small && hit.similarity >= VECTOR_CONFIDENCE_THRESHOLD),
+  );
+}
+
 export function rankByCosine(
   query: ArrayLike<number>,
   candidates: { id: string; vector: ArrayLike<number> }[],
@@ -351,6 +370,8 @@ export class EmbeddingSubsystem {
     keywordHits: RankedMemory[];
     /** Live id → text from the caller's fresh scan; vector hits resolve here. */
     entryTexts: Map<string, string>;
+    /** Entries recall must not return (the chat being answered); also left out of the baseline. */
+    excludeIds?: ReadonlySet<string> | undefined;
     /** Query-embedding budget; falls back to FUSED_RANK_DEFAULT_TIMEOUT_MS when absent. */
     timeoutMs?: number;
   }): Promise<RankedMemory[] | undefined> {
@@ -391,15 +412,16 @@ export class EmbeddingSubsystem {
       const candidates: { id: string; vector: ArrayLike<number> }[] = [];
       for (const id of ids) {
         const entry = store.get(id);
-        if (entry !== undefined) {
+        if (entry !== undefined && input.excludeIds?.has(id) !== true) {
           candidates.push({ id, vector: entry.vector });
         }
       }
       const ranked = rankByCosine(queryVector, candidates);
-      if (!passesPeakGate(ranked.map(hit => hit.similarity))) {
+      const relevant = relevantHits(ranked);
+      if (relevant.length === 0) {
         return undefined;
       }
-      const vectorOrder = ranked.slice(0, VECTOR_TOP_K).map(hit => hit.id);
+      const vectorOrder = relevant.slice(0, VECTOR_TOP_K).map(hit => hit.id);
       const keywordOrder = input.keywordHits.map(hit => hit.id);
       const fused = orderVectorFirst({ vectorOrder, keywordOrder });
       const results: RankedMemory[] = [];

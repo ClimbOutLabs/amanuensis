@@ -28,6 +28,10 @@ export interface MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
+    currentSessionId?: string | undefined;
+    /** The chat's title line, for telling apart notes written before notes recorded their chat. */
+    currentChatTitle?: string | undefined;
   }): Promise<RecallOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;

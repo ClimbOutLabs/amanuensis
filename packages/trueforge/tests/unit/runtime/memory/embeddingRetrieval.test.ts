@@ -17,6 +17,7 @@ import {
   orderVectorFirst,
   passesPeakGate,
   rankByCosine,
+  relevantHits,
   warmEmbeddingsAtBoot,
   type EmbeddingSubsystemState,
 } from '../../../../src/runtime/memory/embeddingRetrieval';
@@ -290,6 +291,31 @@ describe('pure ranking helpers', () => {
     // Real valid query shape (48 entries, top 0.85, peak 0.076): the peak gate
     // alone accepts it, so nothing is lost by gating the bypass.
     expect(passesPeakGate([0.85, ...Array.from({ length: 47 }, () => 0.774)])).toBe(true);
+  });
+
+  it('relevantHits keeps only hits that stand out from the baseline, never the filler', () => {
+    const ranked = [
+      { id: 'top', similarity: 0.85 },
+      { id: 'near', similarity: 0.84 },
+      ...Array.from({ length: 20 }, (_, i) => ({ id: `filler-${String(i)}`, similarity: 0.77 })),
+    ];
+    // 22 entries: no small-corpus bypass. Baseline is about 0.775; only the two leaders clear it by 0.06.
+    expect(relevantHits(ranked).map(hit => hit.id)).toEqual(['top', 'near']);
+  });
+
+  it('relevantHits returns nothing when no hit peaks (a one-word reply scores flat)', () => {
+    const flat = Array.from({ length: 30 }, (_, i) => ({ id: `n-${String(i)}`, similarity: 0.78 + (i % 3) * 0.005 }));
+    expect(relevantHits(flat)).toEqual([]);
+    expect(relevantHits([])).toEqual([]);
+  });
+
+  it('relevantHits keeps confident hits in a small corpus', () => {
+    const small = [
+      { id: 'a', similarity: 0.85 },
+      { id: 'b', similarity: 0.83 },
+      { id: 'c', similarity: 0.82 },
+    ];
+    expect(relevantHits(small).map(hit => hit.id)).toEqual(['a', 'b', 'c']);
   });
 
   it('rankByCosine sorts best-first', () => {
@@ -709,6 +735,91 @@ describe('EmbeddingSubsystem', () => {
       // The keyword hit carries its freshly scanned text, not the indexed copy.
       expect(fused?.[0]?.text).toContain('alpha entry');
       expect(fused?.[1]?.text).toBe('FRESH beta text');
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
+  it('fusedRank leaves excluded entries out of the vector hits and the baseline', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['alpha own-chat note', 'beta other-chat note', 'gamma other-chat note']);
+      fixture.model.vectorForText = text => (text.includes('alpha') ? oneHot(0) : oneHot(1));
+      fixture.model.queryVector = oneHot(0);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+      const own = 'md:tenant-1:2026-09-19.md#0';
+      const entryTexts = new Map([
+        ['md:tenant-1:2026-09-19.md#1', 'beta other-chat note'],
+        ['md:tenant-1:2026-09-19.md#2', 'gamma other-chat note'],
+      ]);
+      // The only entry that matches the query is the excluded one: the others are flat, so nothing peaks.
+      expect(
+        await fixture.subsystem.fusedRank({
+          query: 'alpha',
+          keywordHits: [],
+          entryTexts,
+          excludeIds: new Set([own]),
+          timeoutMs: 5000,
+        }),
+      ).toBeUndefined();
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
+  it('recall by meaning skips the current chat and still finds another chat', async () => {
+    const fixture = await makeFixture();
+    try {
+      const writer = new MarkdownMemoryClient({ baseDir: fixture.baseDir, namespace: fixture.namespace });
+      await writer.retain({
+        items: [
+          {
+            content: 'Turn summary: hotel in Madrid is Petit Palace',
+            timestamp: '2026-09-19T10:00:00.000Z',
+            document_id: 'd1',
+            metadata: { session_id: 'chat-other' },
+          },
+          {
+            content: 'Turn summary: hotel plan is still undecided',
+            timestamp: '2026-09-19T10:01:00.000Z',
+            document_id: 'd2',
+            metadata: { session_id: 'chat-now' },
+          },
+          {
+            content: 'Turn summary: Lexie is a Bernese Mountain Dog',
+            timestamp: '2026-09-19T10:02:00.000Z',
+            document_id: 'd3',
+            metadata: { session_id: 'chat-other' },
+          },
+        ],
+        operationId: 'op-scope',
+        timeoutMs: 5000,
+      });
+      fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
+      fixture.model.queryVector = oneHot(0);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+
+      const client = new MarkdownMemoryClient({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        embeddings: () => fixture.subsystem,
+      });
+      const outcome = await client.recall({
+        query: 'accommodation in Spain',
+        maxTokens: 4000,
+        queryTimestamp: '2026-09-20T10:00:00.000Z',
+        entityTokens: 0,
+        timeoutMs: 5000,
+        currentSessionId: 'chat-now',
+      });
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) {
+        const texts = outcome.results.map(item => item.text);
+        expect(texts).toContainEqual(expect.stringContaining('Petit Palace'));
+        expect(texts.some(text => text.includes('still undecided'))).toBe(false);
+      }
     } finally {
       await cleanup(fixture);
     }

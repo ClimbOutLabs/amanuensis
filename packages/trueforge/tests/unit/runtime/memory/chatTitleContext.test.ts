@@ -40,7 +40,12 @@ describe('chatTitleContext', () => {
     });
     expect(item).toBeDefined();
     if (item === undefined) return;
-    expect(formatRetainEntry(item).split('\n').at(-1)).toBe('> Chat title: Trip planning > x');
+    expect(
+      formatRetainEntry(item)
+        .split('\n')
+        .filter(line => line !== '' && !line.startsWith('<!--'))
+        .at(-1),
+    ).toBe('> Chat title: Trip planning > x');
   });
 
   it('ignores blank assistant names and empty titles', () => {

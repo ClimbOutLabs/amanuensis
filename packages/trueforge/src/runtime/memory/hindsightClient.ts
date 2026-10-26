@@ -23,6 +23,7 @@ import type {
   MemoryVaultFailure,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { isFromCurrentChat } from './recallRelevance';
 
 /** Upper bound on the upstream error text carried into a reason line, a log field, or the UI. */
 const ERROR_DETAIL_MAX_CHARS = 200;
@@ -431,6 +432,7 @@ export class HindsightClient implements MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    currentSessionId?: string | undefined;
   }): Promise<RecallOutcome> {
     const sent = await this.sendWithOverloadRetry({
       path: '/memories/recall',
@@ -461,7 +463,15 @@ export class HindsightClient implements MemoryClient {
         results?: unknown;
         entities?: Record<string, unknown>;
       };
-      const results = sanitizeRecallItems(parsed.results);
+      const results = sanitizeRecallItems(parsed.results).filter(
+        item =>
+          !isFromCurrentChat({
+            metadata: item.metadata,
+            text: item.text,
+            sessionId: params.currentSessionId,
+            chatTitle: undefined,
+          }),
+      );
       const entities: EntitySummary[] = [];
       if (parsed.entities && typeof parsed.entities === 'object') {
         for (const [name, value] of Object.entries(parsed.entities)) {

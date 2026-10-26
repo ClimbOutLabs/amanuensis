@@ -281,7 +281,7 @@ describe('MarkdownMemoryClient persona vault scope', () => {
       await retain(clientFor(undefined), 'The cellar stores preserves for winter too');
 
       // Room for two entries: one from each vault, not two from the persona vault.
-      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 40);
+      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 25);
 
       expect(recalled).toHaveLength(2);
       expect(mentions(recalled, 'cellar')).toBe(true);

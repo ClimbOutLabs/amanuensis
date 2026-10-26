@@ -48,6 +48,8 @@ import {
   appendVaultTombstone,
   clearSummaryPending,
   entryMetadata,
+  entryRecallText,
+  entryRecallTime,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
@@ -76,6 +78,7 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { isFromCurrentChat, keywordMatches } from './recallRelevance';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -99,28 +102,6 @@ const RECALL_MAX_DAILY_FILES = 14;
 
 /** Cap on tracked retain operation ids; oldest are dropped, newest kept. */
 const OPERATIONS_LOG_CAP = 2000;
-
-/** Lowercased query words worth matching; drops stopword-length fragments. */
-function queryWords(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(word => word.length > 2);
-}
-
-function scoreEntry(words: string[], text: string): number {
-  if (words.length === 0) {
-    return 0;
-  }
-  const lower = text.toLowerCase();
-  let score = 0;
-  for (const word of words) {
-    if (lower.includes(word)) {
-      score += 1;
-    }
-  }
-  return score;
-}
 
 /** Merges ranked lists best-first, earlier lists leading each round, so no vault starves the others. */
 function interleaveRanked(lists: RankedMemory[][]): RankedMemory[] {
@@ -203,6 +184,8 @@ export class MarkdownMemoryClient implements MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    currentSessionId?: string | undefined;
+    currentChatTitle?: string | undefined;
   }): Promise<RecallOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
@@ -248,12 +231,27 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Each vault ranks on its own corpus and index; the lists then interleave.
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
-          this.rankVault({ namespace, scan, query: params.query, timeoutMs: params.timeoutMs }),
+          this.rankVault({
+            namespace,
+            scan,
+            query: params.query,
+            timeoutMs: params.timeoutMs,
+            currentSessionId: params.currentSessionId,
+            currentChatTitle: params.currentChatTitle,
+          }),
         ),
       );
+      const filesById = new Map(vaults.flatMap(({ scan }) => scan.entries.map(entry => [entry.id, entry.file])));
       for (const item of interleaveRanked(rankedLists)) {
         const metadata = entryMetadata(item.text);
-        const ok = take({ id: item.id, text: item.text, type: 'markdown', ...(metadata && { metadata }) });
+        const occurredStart = entryRecallTime({ file: filesById.get(item.id) ?? '', text: item.text });
+        const ok = take({
+          id: item.id,
+          text: entryRecallText(item.text),
+          type: 'markdown',
+          ...(occurredStart !== undefined && { occurred_start: occurredStart }),
+          ...(metadata && { metadata }),
+        });
         if (!ok) {
           break;
         }
@@ -265,19 +263,31 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. */
+  /**
+   * One vault's recallable entries best-first: keyword matches that clear the relevance floor, fused
+   * with its own meaning index when ready. The chat being answered is left out of both.
+   */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
     query: string;
     timeoutMs: number;
+    currentSessionId: string | undefined;
+    currentChatTitle: string | undefined;
   }): Promise<RankedMemory[]> {
-    const words = queryWords(input.query);
-    const scored = input.scan.entries
-      .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
-      .filter(candidate => candidate.score > 0)
-      .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
-    const keywordRanked = scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
+    const ownEntries = input.scan.entries.filter(entry =>
+      isFromCurrentChat({
+        metadata: entryMetadata(entry.text),
+        text: entry.text,
+        sessionId: input.currentSessionId,
+        chatTitle: input.currentChatTitle,
+      }),
+    );
+    const excludeIds = new Set(ownEntries.map(entry => entry.id));
+    const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
+    const keywordRanked = keywordMatches({ query: input.query, notes: entries })
+      .sort((a, b) => b.shared - a.shared || b.note.file.localeCompare(a.note.file))
+      .map(({ note }) => ({ id: note.id, text: note.text }));
 
     // Meaning-based rank fuses with (never replaces) the keyword ranking. When the
     // vector leg cannot contribute, this resolves undefined and ranking stays
@@ -290,7 +300,8 @@ export class MarkdownMemoryClient implements MemoryClient {
     const fused = await embeddings.fusedRank({
       query: input.query,
       keywordHits: keywordRanked,
-      entryTexts: new Map(input.scan.entries.map(entry => [entry.id, entry.text])),
+      entryTexts: new Map(entries.map(entry => [entry.id, entry.text])),
+      excludeIds,
       timeoutMs: input.timeoutMs,
     });
     return fused ?? keywordRanked;
