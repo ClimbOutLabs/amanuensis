@@ -47,9 +47,8 @@ import {
 import {
   appendVaultTombstone,
   clearSummaryPending,
+  entryDay,
   entryMetadata,
-  entryRecallText,
-  entryRecallTime,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
@@ -66,6 +65,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
+  withoutSessionMarker,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -78,7 +78,7 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
-import { isFromCurrentChat, keywordMatches } from './recallRelevance';
+import { isFromSession, keywordMatches } from './recallRelevance';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -185,7 +185,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     entityTokens: number;
     timeoutMs: number;
     currentSessionId?: string | undefined;
-    currentChatTitle?: string | undefined;
   }): Promise<RecallOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
@@ -237,19 +236,18 @@ export class MarkdownMemoryClient implements MemoryClient {
             query: params.query,
             timeoutMs: params.timeoutMs,
             currentSessionId: params.currentSessionId,
-            currentChatTitle: params.currentChatTitle,
           }),
         ),
       );
-      const filesById = new Map(vaults.flatMap(({ scan }) => scan.entries.map(entry => [entry.id, entry.file])));
       for (const item of interleaveRanked(rankedLists)) {
         const metadata = entryMetadata(item.text);
-        const occurredStart = entryRecallTime({ file: filesById.get(item.id) ?? '', text: item.text });
+        const day = entryDay(item.id);
+        // The day and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
-          text: entryRecallText(item.text),
+          text: withoutSessionMarker(item.text),
           type: 'markdown',
-          ...(occurredStart !== undefined && { occurred_start: occurredStart }),
+          ...(day !== undefined && { occurred_start: day }),
           ...(metadata && { metadata }),
         });
         if (!ok) {
@@ -273,15 +271,9 @@ export class MarkdownMemoryClient implements MemoryClient {
     query: string;
     timeoutMs: number;
     currentSessionId: string | undefined;
-    currentChatTitle: string | undefined;
   }): Promise<RankedMemory[]> {
     const ownEntries = input.scan.entries.filter(entry =>
-      isFromCurrentChat({
-        metadata: entryMetadata(entry.text),
-        text: entry.text,
-        sessionId: input.currentSessionId,
-        chatTitle: input.currentChatTitle,
-      }),
+      isFromSession({ metadata: entryMetadata(entry.text), sessionId: input.currentSessionId }),
     );
     const excludeIds = new Set(ownEntries.map(entry => entry.id));
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));

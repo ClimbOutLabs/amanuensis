@@ -48,7 +48,6 @@ const memory: MemoryTurnContext = {
   config: MEMORY_CONFIG,
   sessionId: 's1',
   previousTurnId: null,
-  sessionTitle: undefined,
   providerServerName: undefined,
 };
 

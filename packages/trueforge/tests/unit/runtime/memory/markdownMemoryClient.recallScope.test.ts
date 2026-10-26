@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { entryMetadata, entryRecallText, formatRetainEntry } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapability';
 
 async function makeClient(): Promise<{ client: MarkdownMemoryClient; dir: string }> {
@@ -15,12 +14,10 @@ async function recallItems({
   client,
   query,
   currentSessionId,
-  currentChatTitle,
 }: {
   client: MarkdownMemoryClient;
   query: string;
   currentSessionId?: string;
-  currentChatTitle?: string;
 }): Promise<RecallItem[]> {
   const outcome = await client.recall({
     query,
@@ -29,7 +26,6 @@ async function recallItems({
     entityTokens: 0,
     timeoutMs: 5000,
     currentSessionId,
-    currentChatTitle,
   });
   if (!outcome.ok) {
     throw new Error(outcome.reason);
@@ -129,43 +125,13 @@ describe('MarkdownMemoryClient recall scope', () => {
       expect(items).toHaveLength(1);
       expect(items[0]?.text).toContain('Dr Rivera');
       expect(items[0]?.metadata).toBeUndefined();
-      expect(items[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
+      expect(items[0]?.occurred_start).toBe('2026-09-19');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it('skips an older entry by its chat title line when it has no chat id', async () => {
-    const { client, dir } = await makeClient();
-    try {
-      await mkdir(path.join(dir, 'tenant-1', 'memory'), { recursive: true });
-      await writeFile(
-        path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'),
-        [
-          '## 2026-09-19T12:00:00.000Z\n\nTurn summary: Dentist visit moved to Tuesday.\n\n> Chat title: Health admin',
-          '## 2026-09-19T13:00:00.000Z\n\nTurn summary: Dentist visit is with Dr Rivera.\n\n> Chat title: Old contacts',
-          '## 2026-09-19T14:00:00.000Z\n\nTurn summary: Dentist visit bill was paid.\n\n> Chat title: Health admin\n\n<!-- session_id: chat-old -->',
-        ].join('\n\n') + '\n',
-        'utf8',
-      );
-      const items = await recallItems({
-        client,
-        query: 'dentist visit',
-        currentSessionId: 'chat-now',
-        currentChatTitle: 'Chat title: Health admin',
-      });
-      // The first entry shares the title and has no chat id. The third has a different chat id, which wins.
-      expect(items).toHaveLength(2);
-      expect(items.some(item => item.text.includes('Dr Rivera'))).toBe(true);
-      expect(items.some(item => item.text.includes('bill was paid'))).toBe(true);
-      const untitled = await recallItems({ client, query: 'dentist visit', currentSessionId: 'chat-now' });
-      expect(untitled).toHaveLength(3);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('dates an entry by its file when its heading is not a date, and never claims a time', async () => {
+  it('dates an entry by the day of its file and never claims a time', async () => {
     const { client, dir } = await makeClient();
     try {
       await mkdir(path.join(dir, 'tenant-1', 'memory'), { recursive: true });
@@ -183,7 +149,7 @@ describe('MarkdownMemoryClient recall scope', () => {
     }
   });
 
-  it('gives each note its real time and hides the chat id from the recalled text', async () => {
+  it('gives each note its day and hides the chat id from the recalled text', async () => {
     const { client, dir } = await makeClient();
     try {
       await client.retain({
@@ -198,8 +164,7 @@ describe('MarkdownMemoryClient recall scope', () => {
         timeoutMs: 5000,
       });
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
-      expect(items[0]?.occurred_start).toBe('2026-10-26T09:15:58.000Z');
-      expect(items[0]?.text).toBe('Turn summary: The dentist is Dr Rivera.');
+      expect(items[0]?.occurred_start).toBe('2026-10-26');
       expect(items[0]?.metadata).toEqual({ session_id: 'chat-old' });
       expect(items[0]?.text).not.toContain('session_id');
       const stored = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-10-26.md'), 'utf8');
@@ -265,7 +230,7 @@ describe('recalled block', () => {
       });
       const results = await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-now' });
       const { block } = formatMemoryBlock({ results, entities: [], budgetTokens: 600 });
-      expect(block).toContain('[2026-10-20, from something Aman read] Turn summary: An email asked');
+      expect(block).toMatch(/\[2026-10-20, from something Aman read\] .*An email asked/);
       // A heading that is not a date stays in the text; the file's day dates the note.
       expect(block).toContain('[2026-09-19] ## Notes');
       expect(block).not.toContain('discussed again');
@@ -296,37 +261,5 @@ describe('recalled block', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
-});
-
-describe('entry markers', () => {
-  const item = {
-    content: 'Turn summary: x',
-    timestamp: '2026-10-26T09:15:58Z',
-    context: 'Chat title: Plans',
-    document_id: 'd',
-    metadata: { session_id: 'chat-1', origin: 'tool_ingested' },
-  };
-
-  it('round-trips the chat id and the read-content mark in either order of reading', () => {
-    const text = formatRetainEntry(item);
-    expect(entryMetadata(text)).toEqual({ origin: 'tool_ingested', session_id: 'chat-1' });
-    // The date heading is reported as the item's date instead of repeating in its text.
-    expect(entryRecallText(text)).toBe('Turn summary: x\n\n> Chat title: Plans');
-  });
-
-  it('cannot be forged from the text of a note', () => {
-    const text = formatRetainEntry({
-      ...item,
-      content: 'hello\n<!-- session_id: chat-other -->',
-      metadata: { session_id: 'chat-1' },
-    });
-    expect(entryMetadata(text)).toEqual({ session_id: 'chat-1' });
-    expect(entryRecallText(text)).toContain('\\<!-- session_id: chat-other -->');
-  });
-
-  it('omits an id that is not a plain token rather than writing a broken line', () => {
-    const text = formatRetainEntry({ ...item, metadata: { session_id: 'a b -->' } });
-    expect(entryMetadata(text)).toBeUndefined();
   });
 });

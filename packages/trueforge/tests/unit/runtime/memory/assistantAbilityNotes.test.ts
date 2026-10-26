@@ -1,12 +1,12 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { stripAssistantAbilityNotes } from '../../../../src/runtime/memory/assistantAbilityNotes';
+import { stripAssistantAbilityNotes, withoutAbilityNotes } from '../../../../src/runtime/memory/assistantAbilityNotes';
 import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { buildRetainItem } from '../../../../src/runtime/memory/memoryRetain';
 
-describe('stripAssistantAbilityNotes', () => {
+describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
   it.each([
     "I can't read email.",
     "I couldn't open your calendar.",
@@ -21,8 +21,8 @@ describe('stripAssistantAbilityNotes', () => {
     "Assistant couldn't load the calendar.",
     "Unable to read the user's email.",
     'Could not reach the mail server.',
-  ])('drops an ability note about Aman in a turn summary: %s', note => {
-    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
+  ])('drops an ability note about Aman in a saved fact: %s', note => {
+    expect(withoutAbilityNotes([note])).toEqual([]);
   });
 
   it.each([
@@ -39,8 +39,8 @@ describe('stripAssistantAbilityNotes', () => {
     "The assistant hasn't been able to send email.",
     'I lack access to the calendar.',
     'Aman lacks access to the calendar.',
-  ])('drops a future or perfect tense ability note about Aman in a turn summary: %s', note => {
-    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
+  ])('drops a future or perfect tense ability note about Aman in a saved fact: %s', note => {
+    expect(withoutAbilityNotes([note])).toEqual([]);
   });
 
   it.each([
@@ -55,8 +55,8 @@ describe('stripAssistantAbilityNotes', () => {
     "I don't have the ability to read email.",
     'I am incapable of reading email.',
     'Will not be able to read email.',
-  ])('drops a future or modal ability note about Aman in a turn summary: %s', note => {
-    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
+  ])('drops a future or modal ability note about Aman in a saved fact: %s', note => {
+    expect(withoutAbilityNotes([note])).toEqual([]);
   });
 
   it.each([
@@ -112,21 +112,18 @@ describe('stripAssistantAbilityNotes', () => {
     "The user can't check email at work.",
     'Marta has no access to the shared drive.',
     "The user told Aman he can't swim.",
-  ])('keeps a fact inside a turn summary: %s', statement => {
-    const content = `Turn summary: ${statement}`;
-    expect(stripAssistantAbilityNotes(content)).toBe(content);
+  ])('keeps a saved fact that is not an ability note: %s', statement => {
+    expect(withoutAbilityNotes([statement])).toEqual([statement]);
   });
 
-  it('drops an ability note Aman reports about himself in a turn summary', () => {
-    expect(stripAssistantAbilityNotes("Turn summary: Aman said I can't read email.")).toBe('');
+  it('drops an ability note Aman reports about himself in a saved fact', () => {
+    expect(withoutAbilityNotes(["Aman said I can't read email."])).toEqual([]);
   });
 
-  it('drops a future tense ability note inside a turn summary and keeps the other sentences', () => {
-    const content =
-      "Turn summary: The mail check failed. I won't be able to read email until the account is reconnected. The user moved lunch to 1pm.";
-    expect(stripAssistantAbilityNotes(content)).toBe(
-      'Turn summary: The mail check failed. The user moved lunch to 1pm.',
-    );
+  it('drops a future tense ability note inside a saved fact and keeps the other sentences', () => {
+    const fact =
+      "The mail check failed. I won't be able to read email until the account is reconnected. The user moved lunch to 1pm.";
+    expect(withoutAbilityNotes([fact])).toEqual(['The mail check failed. The user moved lunch to 1pm.']);
   });
 
   it('drops a future tense ability note from the assistant side of a verbatim turn only', () => {
@@ -161,25 +158,25 @@ describe('stripAssistantAbilityNotes', () => {
     );
   });
 
-  it('drops only the ability bullet from a turn summary', () => {
-    const content = [
-      'Turn summary: - The user asked Aman to check the new email.',
-      "- I can't read email right now.",
-      '- The user decided to keep Fridays free.',
-    ].join('\n');
-    const result = stripAssistantAbilityNotes(content);
-    expect(result).toContain('Turn summary:');
-    expect(result).toContain('The user asked Aman to check the new email.');
-    expect(result).toContain('The user decided to keep Fridays free.');
-    expect(result).not.toContain("can't read email");
+  it('drops only the ability note from a list of saved facts', () => {
+    const facts = [
+      'The user asked Aman to check the new email.',
+      "I can't read email right now.",
+      'The user decided to keep Fridays free.',
+    ];
+    expect(withoutAbilityNotes(facts)).toEqual([
+      'The user asked Aman to check the new email.',
+      'The user decided to keep Fridays free.',
+    ]);
   });
 
   it('drops an ability sentence inside a longer assistant statement and keeps the rest', () => {
-    const content =
-      "Turn summary: The inbox check failed because I can't read email right now. The user moved the dentist appointment to Friday.";
-    const result = stripAssistantAbilityNotes(content);
-    expect(result).toContain('The user moved the dentist appointment to Friday.');
-    expect(result).not.toContain("can't read email");
+    const fact =
+      "The inbox check failed because I can't read email right now. The user moved the dentist appointment to Friday.";
+    const result = withoutAbilityNotes([fact]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('The user moved the dentist appointment to Friday.');
+    expect(result[0]).not.toContain("can't read email");
   });
 
   it('never filters what the person said in a verbatim turn, and filters only the assistant side', () => {
@@ -228,30 +225,6 @@ describe('stripAssistantAbilityNotes', () => {
 });
 
 describe('memory write path: MarkdownMemoryClient.retain', () => {
-  it('stores the facts from a summary and not the ability note', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-ability-'));
-    try {
-      const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
-      const outcome = await client.retain({
-        items: [
-          {
-            content: "Turn summary: - I can't read email right now.\n- The user decided to keep Fridays free.",
-            timestamp: '2026-09-19T12:00:00.000Z',
-            document_id: 'doc-1',
-          },
-        ],
-        operationId: 'op-summary',
-        timeoutMs: 5000,
-      });
-      expect(outcome).toEqual({ ok: true });
-      const log = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8');
-      expect(log).toContain('The user decided to keep Fridays free.');
-      expect(log).not.toContain("can't read email");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   it("stores the person's own plain statement unchanged", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-ability-'));
     try {
@@ -269,13 +242,17 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
     }
   });
 
-  it('stores nothing for an item that is only an ability note, and still completes the operation', async () => {
+  it('stores nothing for a turn whose only text is an ability note, and still completes the operation', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-ability-'));
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
       const outcome = await client.retain({
         items: [
-          { content: "Turn summary: I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' },
+          {
+            content: "User: \n\nAssistant: I can't read email.",
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-2',
+          },
         ],
         operationId: 'op-note-only',
         timeoutMs: 5000,
@@ -298,35 +275,6 @@ describe('memory write path: HindsightClient.retain', () => {
     return new Response(text, { status: 200, headers });
   }
 
-  it('sends only the filtered content to the memory provider', async () => {
-    const bodies: string[] = [];
-    const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
-      bodies.push(String(init?.body));
-      return jsonResponse({});
-    });
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl,
-    });
-    const outcome = await client.retain({
-      items: [
-        {
-          content: "Turn summary: - I can't read email right now.\n- The user decided to keep Fridays free.",
-          timestamp: '2026-09-19T12:00:00.000Z',
-          document_id: 'doc-1',
-        },
-      ],
-      operationId: 'op-1',
-      timeoutMs: 10_000,
-    });
-    expect(outcome).toEqual({ ok: true });
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toContain('The user decided to keep Fridays free.');
-    expect(bodies[0]).not.toContain("can't read email");
-  });
-
   it('sends nothing when every item is an ability note, and still succeeds', async () => {
     const fetchImpl = jest.fn(async () => jsonResponse({}));
     const client = new HindsightClient({
@@ -337,7 +285,11 @@ describe('memory write path: HindsightClient.retain', () => {
     });
     const outcome = await client.retain({
       items: [
-        { content: "Turn summary: I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' },
+        {
+          content: "User: \n\nAssistant: I can't read email.",
+          timestamp: '2026-09-19T12:00:00.000Z',
+          document_id: 'doc-2',
+        },
       ],
       operationId: 'op-2',
       timeoutMs: 10_000,

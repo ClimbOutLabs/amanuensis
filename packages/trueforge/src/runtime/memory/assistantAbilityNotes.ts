@@ -1,6 +1,5 @@
 const TURN_USER_PREFIX = 'User: ';
 const TURN_ASSISTANT_SEPARATOR = '\n\nAssistant: ';
-const TURN_SUMMARY_PREFIX = 'Turn summary: ';
 
 /** Enthusiasm idioms that use "can't" without stating an inability. */
 const IDIOM_PATTERN = /\bcan't wait\b|\bcan't thank\b|\bcan't help but\b/g;
@@ -107,7 +106,12 @@ function filterAssistantText(text: string): string {
     .trim();
 }
 
-/** Removes Aman's ability notes from assistant turn text and turn summaries; all other content is returned unchanged. */
+/** The facts left after dropping ability notes about the assistant; a fact that was only a note is removed. */
+export function withoutAbilityNotes(facts: readonly string[]): string[] {
+  return facts.map(filterAssistantText).filter(fact => fact !== '');
+}
+
+/** Removes the assistant's ability notes from assistant turn text; all other content is returned unchanged. */
 export function stripAssistantAbilityNotes(content: string): string {
   if (content.startsWith(TURN_USER_PREFIX)) {
     const separatorAt = content.indexOf(TURN_ASSISTANT_SEPARATOR);
@@ -121,10 +125,6 @@ export function stripAssistantAbilityNotes(content: string): string {
       return personText.trim() === '' ? '' : `${TURN_USER_PREFIX}${personText}`;
     }
     return `${TURN_USER_PREFIX}${personText}${TURN_ASSISTANT_SEPARATOR}${keptAssistant}`;
-  }
-  if (content.startsWith(TURN_SUMMARY_PREFIX)) {
-    const kept = filterAssistantText(content.slice(TURN_SUMMARY_PREFIX.length));
-    return kept === '' ? '' : `${TURN_SUMMARY_PREFIX}${kept}`;
   }
   return content;
 }

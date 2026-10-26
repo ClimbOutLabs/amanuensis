@@ -35,7 +35,6 @@ export interface MemoryTurnContext {
   config: MemoryConfig;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle: string | undefined;
   /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
@@ -69,7 +68,6 @@ function memoryCapabilitiesForTurn(input: {
       logger: input.logger,
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
-      sessionTitle: memory.sessionTitle,
       recallEnabled: memory.recallEnabled,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,

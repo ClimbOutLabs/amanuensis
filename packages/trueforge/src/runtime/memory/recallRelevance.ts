@@ -7,33 +7,18 @@
 import { SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 
 /**
- * Whether a recalled note was written in the chat being answered. The chat's full history is already
- * in the conversation, so an older copy can only mislead. A note records its chat in `session_id`
- * metadata. A note from before that existed carries only the chat title line, so it counts as this
- * chat when that line equals the current title. Titles are not unique, so a same-titled note from
- * another chat may be skipped too: leaving a note out is the safe error.
+ * Whether a recalled note was written in the given chat. The chat's full history is already in the
+ * conversation, so an older copy can only mislead. A note with no recorded chat (written before notes
+ * recorded one) is judged to be from another chat: a chat title is not unique, so it is never used to guess.
  */
-export function isFromCurrentChat({
+export function isFromSession({
   metadata,
-  text,
   sessionId,
-  chatTitle,
 }: {
   metadata: Readonly<Record<string, string>> | undefined;
-  text: string;
   sessionId: string | undefined;
-  chatTitle: string | undefined;
 }): boolean {
-  if (sessionId === undefined || sessionId === '') {
-    return false;
-  }
-  const recorded = metadata?.[SESSION_ID_METADATA_KEY];
-  if (recorded !== undefined) {
-    return recorded === sessionId;
-  }
-  return (
-    chatTitle !== undefined && chatTitle !== '' && text.split('\n').some(line => line.trimEnd() === `> ${chatTitle}`)
-  );
+  return sessionId !== undefined && sessionId !== '' && metadata?.[SESSION_ID_METADATA_KEY] === sessionId;
 }
 
 /** Short filler words that match almost any note, so matching them says nothing about relevance. */

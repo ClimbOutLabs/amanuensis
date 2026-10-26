@@ -1,10 +1,10 @@
 /**
  * Tests for the summary-pending marker the retain path leaves behind.
  *
- * When a turn's summary attempt fails, the turn is still saved as full text, and the
- * vault is marked as owed a summary so the Memories page can show that a summary is
- * missing instead of staying silent. The next chat with that agent runs the summary
- * job again; a success stores the summary and clears the mark.
+ * When a turn's summary attempt fails, nothing is saved, and the vault is marked as owed a
+ * summary so the Memories page can show that a summary is missing instead of staying silent.
+ * The next chat with that agent runs the summary job again; a success stores the facts and
+ * clears the mark.
  *
  * summarizeTurnContent is mocked to control the model outcome without network access;
  * the markdown client is real, against a temp directory.
@@ -96,13 +96,9 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    // The memory itself is never lost: the turn is saved as full text.
+    // Nothing is saved: neither the person's words nor the reply.
     const afterFailure = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
-    expect(afterFailure.ok).toBe(true);
-    if (afterFailure.ok) {
-      expect(afterFailure.entries).toHaveLength(1);
-      expect(afterFailure.entries[0]?.text).toContain('User: Please remember that my test robot');
-    }
+    expect(afterFailure.ok && afterFailure.entries).toEqual([]);
     // The failure is not silent: Zara's vault is marked as owed a summary, and no
     // other vault is marked.
     expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
@@ -110,7 +106,7 @@ describe('submitRetain summary-pending marker', () => {
 
     // The next chat with Zara runs the summary job again; this time it succeeds, the
     // summary is stored, and the mark clears.
-    mockSummarize.mockResolvedValue({ status: 'summarized', summary: '- The test robot is named Bleep-Bloop.' });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The test robot is named Bleep-Bloop.'] });
     await submitRetain({
       client: zaraClient,
       sessionId: 's1',
@@ -126,12 +122,12 @@ describe('submitRetain summary-pending marker', () => {
     const afterRetry = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
     expect(afterRetry.ok).toBe(true);
     if (afterRetry.ok) {
-      expect(afterRetry.entries.some(entry => entry.text.includes('Turn summary:'))).toBe(true);
+      expect(afterRetry.entries.some(entry => entry.text.includes('The test robot is named Bleep-Bloop.'))).toBe(true);
     }
     expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
   });
 
-  it('does not mark the vault for a deliberate skip (an overlong turn keeps its full text by design)', async () => {
+  it('does not mark the vault for a deliberate skip (an overlong turn is left alone)', async () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'input-too-long' });
 
     await submitRetain({
@@ -148,7 +144,7 @@ describe('submitRetain summary-pending marker', () => {
     expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
   });
 
-  it('leaves clients without summary tracking untouched when a summary fails', async () => {
+  it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {
     const client = new HindsightClient({
       apiBase: 'https://hindsight.test.example',
       bank: 'aman',
@@ -169,6 +165,6 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(retain).toHaveBeenCalledTimes(1);
+    expect(retain).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { isFromCurrentChat, keywordMatches, queryWords } from '../../../../src/runtime/memory/recallRelevance';
+import { isFromSession, keywordMatches, queryWords } from '../../../../src/runtime/memory/recallRelevance';
 
 const notes = [
   { text: 'Turn summary: Lexie the Bernese Mountain Dog sees the vet every spring.' },
@@ -14,40 +14,17 @@ function recalled(query: string): string[] {
     .sort();
 }
 
-describe('isFromCurrentChat', () => {
-  const base = { text: 'Turn summary: x', chatTitle: undefined };
-
+describe('isFromSession', () => {
   it('matches only the recorded chat id', () => {
-    expect(isFromCurrentChat({ ...base, metadata: { session_id: 's1' }, sessionId: 's1' })).toBe(true);
-    expect(isFromCurrentChat({ ...base, metadata: { session_id: 's2' }, sessionId: 's1' })).toBe(false);
+    expect(isFromSession({ metadata: { session_id: 's1' }, sessionId: 's1' })).toBe(true);
+    expect(isFromSession({ metadata: { session_id: 's2' }, sessionId: 's1' })).toBe(false);
   });
 
   it('treats a note with no recorded chat, or no current chat, as another chat', () => {
-    expect(isFromCurrentChat({ ...base, metadata: undefined, sessionId: 's1' })).toBe(false);
-    expect(isFromCurrentChat({ ...base, metadata: { origin: 'user_stated' }, sessionId: 's1' })).toBe(false);
-    expect(isFromCurrentChat({ ...base, metadata: { session_id: 's1' }, sessionId: undefined })).toBe(false);
-    expect(isFromCurrentChat({ ...base, metadata: { session_id: '' }, sessionId: '' })).toBe(false);
-  });
-
-  describe('for a note from before notes recorded their chat', () => {
-    const old = { text: 'Turn summary: x\n\n> Chat title: Trip planning', metadata: undefined, sessionId: 's1' };
-
-    it('matches the chat title line', () => {
-      expect(isFromCurrentChat({ ...old, chatTitle: 'Chat title: Trip planning' })).toBe(true);
-    });
-
-    it('does not match another title, a title that is only part of the line, or no title', () => {
-      expect(isFromCurrentChat({ ...old, chatTitle: 'Chat title: Trip' })).toBe(false);
-      expect(isFromCurrentChat({ ...old, chatTitle: 'Chat title: Taxes' })).toBe(false);
-      expect(isFromCurrentChat({ ...old, chatTitle: undefined })).toBe(false);
-      expect(isFromCurrentChat({ ...old, chatTitle: '' })).toBe(false);
-    });
-
-    it('trusts a recorded chat id over the title', () => {
-      expect(
-        isFromCurrentChat({ ...old, metadata: { session_id: 's2' }, chatTitle: 'Chat title: Trip planning' }),
-      ).toBe(false);
-    });
+    expect(isFromSession({ metadata: undefined, sessionId: 's1' })).toBe(false);
+    expect(isFromSession({ metadata: { origin: 'user_stated' }, sessionId: 's1' })).toBe(false);
+    expect(isFromSession({ metadata: { session_id: 's1' }, sessionId: undefined })).toBe(false);
+    expect(isFromSession({ metadata: { session_id: '' }, sessionId: '' })).toBe(false);
   });
 });
 

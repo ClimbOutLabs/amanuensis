@@ -187,6 +187,41 @@ describe('MarkdownMemoryClient', () => {
       }
     });
 
+    it('gives a recalled entry its day and chat id as fields, and leaves the chat id out of the text', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        await client.retain({
+          items: [
+            {
+              content: 'The person has a dog named Rex.',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'doc-dog',
+              metadata: { session_id: 'chat-4' },
+            },
+          ],
+          operationId: 'op-fields',
+          timeoutMs: 5000,
+        });
+        const outcome = await client.recall({
+          query: 'dog Rex',
+          maxTokens: 2048,
+          queryTimestamp: '2026-09-20T13:00:00.000Z',
+          entityTokens: 0,
+          timeoutMs: 5000,
+        });
+        expect(outcome.ok).toBe(true);
+        if (outcome.ok) {
+          expect(outcome.results).toHaveLength(1);
+          expect(outcome.results[0]?.text).toContain('The person has a dog named Rex.');
+          expect(outcome.results[0]?.text).not.toContain('session_id');
+          expect(outcome.results[0]?.occurred_start).toBe('2026-09-19');
+          expect(outcome.results[0]?.metadata).toEqual({ session_id: 'chat-4' });
+        }
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
     it('keeps a read memory whole and labelled when its text has headings or a fake source line', async () => {
       const { client, dir } = await makeClient();
       try {
