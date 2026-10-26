@@ -38,7 +38,7 @@ The panel then says it is connected and shows your Google address.
 
 ## Connect a calendar with an app password
 
-Use this for a calendar that is not Google Calendar. Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that supports CalDAV works too.
+Use this for a calendar that is not Google Calendar. Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
 
 An app password is a separate password for apps like this one. It is not your usual password. You make it at your calendar provider.
 
@@ -52,7 +52,7 @@ An app password is a separate password for apps like this one. It is not your us
 
 The app signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
 
-To change the calendar, click **Manage**. To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good.
+To change the calendar, click **Manage**, then click the button that starts with "Change". To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good. If the card says the sign-in stopped working, or that the calendar is not working right now, click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
 
 The app stores the app password only on your computer, in the calendar connector. Your assistant never sees it. Never paste the password into a chat. A chat cannot connect a calendar. Use Settings.
 

@@ -99,11 +99,11 @@ calendar_user_problem() {
   fi
 }
 
+# Only "not empty" is checked here. Which characters a password may hold is decided in one place, the connector's
+# account agent, which checks every value again before it saves anything.
 calendar_secret_problem() {
   if [ -z "$1" ]; then
     echo "The app password is needed. Create one at your provider, then type it here."
-  elif ! matches_whole "$1" '^[A-Za-z0-9._+@=!%~,:/-]+$'; then
-    echo "The app password has a character that cannot be saved. Create a new app password with letters and numbers, then try again."
   fi
 }
 
@@ -247,6 +247,7 @@ calendar_agent_write() { # name
   calendar_env_text | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) return 0 ;;
+    2) die "The calendar connector could not save those details. Check the address, login name, email and app password for odd characters, then run: install.sh instance calendar $name" ;;
     3) die "That calendar address cannot be used here. Use the address your provider gives you, then run: install.sh instance calendar $name" ;;
     *) die "The calendar account could not be saved in the connector. Run: install.sh instance calendar $name" ;;
   esac
@@ -309,6 +310,24 @@ calendar_link_remove() { # env file
   return 0
 }
 
+# Moves an account an older installer kept in the instance folder into the connector's own storage, then deletes the
+# old file and its settings line. An account already saved in the connector (connected again in Settings) is newer, so
+# it is kept and the old file is only deleted. Returns 1 when the account could not be moved, and then keeps the file.
+calendar_migrate_old_file() { # name
+  local name=$1 dir old answer
+  dir=$(instance_dir "$name")
+  old=$dir/.env.calendar
+  [ -s "$old" ] || return 0
+  grep -q "^  $CALENDAR_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 1
+  dc "$name" up -d --no-deps "$CALENDAR_SERVICE" >/dev/null 2>&1 || return 1
+  answer=$(dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  if [ "$answer" = none ]; then
+    dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin <"$old" >/dev/null 2>&1 || return 1
+  fi
+  rm -f -- "$old"
+  calendar_link_remove "$dir/.env" || true
+}
+
 cmd_instance_calendar() {
   local name=${OPT_NAME:-} dir
   [ -n "$name" ] || usage_die "usage: install.sh instance calendar <name> [--remove]"
@@ -320,6 +339,8 @@ cmd_instance_calendar() {
   load_installed_release
   warn_if_installed_older
   dir=$(instance_dir "$name")
+  # The connector's compose settings need the shared secret, so an instance from before it gets one first.
+  calendar_secret_backfill "$name"
   if [ "$OPT_REMOVE" = 1 ]; then
     # The saved password is deleted for good from the connector's volume, through its account agent.
     # The file an older installer kept in the instance folder, and its settings line, go too.

@@ -8,10 +8,10 @@ import type {
   McpServerRecord,
   UpsertMcpServerInput,
 } from '../../../src/db/mcpServerStore';
+import { ConnectorAccountError } from '../../../src/runtime/connectorAccount';
 import {
   getMailAccountState,
   MAIL_SIGN_IN_REFUSED_MESSAGE,
-  MailAccountError,
   resolveMailAccountSave,
   saveMailAccount,
   syncMailConnectorWithAccount,
@@ -144,7 +144,7 @@ describe('the account agent client', () => {
     const failure = await getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger }).catch(
       (caught: unknown) => caught,
     );
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
   });
 
@@ -162,8 +162,8 @@ describe('the account agent client', () => {
         smtp_port: undefined,
       },
     ).catch((caught: unknown) => caught);
-    expect(failure).toBeInstanceOf(MailAccountError);
-    expect(failure instanceof MailAccountError ? failure.failure : '').toBe('sign_in_refused');
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
+    expect(failure instanceof ConnectorAccountError ? failure.failure : '').toBe('sign_in_refused');
     expect(failure instanceof Error ? failure.message : '').toBe(MAIL_SIGN_IN_REFUSED_MESSAGE);
   });
 
@@ -183,7 +183,7 @@ describe('the account agent client', () => {
         smtp_port: undefined,
       },
     ).catch((caught: unknown) => caught);
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
   });
 
@@ -191,7 +191,7 @@ describe('the account agent client', () => {
     const failure = await getMailAccountState({ accountUrl: undefined, fetchImpl: undefined, logger }).catch(
       (caught: unknown) => caught,
     );
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
   });
 });
 

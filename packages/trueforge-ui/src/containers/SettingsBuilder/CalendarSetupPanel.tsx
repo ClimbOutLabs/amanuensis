@@ -1,12 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
-import { Button } from '@/atoms/primitives/Button.js';
-import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
-import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import AccountSetupPanel from './AccountSetupPanel.js';
 
 type CalendarSetupPanelProps = {
   open: boolean;
@@ -17,168 +15,71 @@ type CalendarSetupPanelProps = {
 };
 
 const OTHER_KEY = 'other';
-const STOPPED_LINE = 'Sign-in stopped working. Make a new app password and save it again.';
 const LABEL_CLASS = 'mb-2 block text-xs font-semibold uppercase tracking-wide text-text-secondary';
 
 /**
- * The Calendar card's setup panel. The app password is typed here and nowhere else: it goes
- * straight to the server endpoint, is cleared from this form on every answer, and is never
- * shown back. The card and this panel only ever see the email address and the status.
+ * The Calendar card's setup panel: the provider fields on the shared panel. The app password is typed here
+ * and nowhere else: it goes straight to the server endpoint, is cleared from this form on every answer, and
+ * is never shown back. The saved address and login are put back in the form so a change keeps them.
  */
 export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged }: CalendarSetupPanelProps) {
-  const [status, setStatus] = useState<CalendarAccountStatus | null>(null);
   const [providerKey, setProviderKey] = useState('fastmail');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [calendarUrl, setCalendarUrl] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
+  // Every status, including the one after Remove, sets the whole form, so nothing stale is left behind.
   const applyStatus = useCallback((next: CalendarAccountStatus) => {
-    setStatus(next);
     setProviderKey(next.providerKey);
     setEmail(next.email ?? '');
-    setShowForm(next.state !== 'connected');
-    setConfirmingRemove(false);
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    setError(null);
+    // The login only needs its own box when it is not the email address.
+    setUsername(next.username !== null && next.username !== next.email ? next.username : '');
+    setCalendarUrl(next.providerKey === OTHER_KEY ? (next.calendarUrl ?? '') : '');
     setPassword('');
-    let cancelled = false;
-    void port
-      .getCalendarStatus()
-      .then(next => {
-        if (!cancelled) {
-          applyStatus(next);
-        }
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) {
-          setError(getErrorMessage(caught, "Couldn't check your calendar just now. Try again."));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, port, applyStatus]);
+  }, []);
+  const clearPassword = useCallback(() => setPassword(''), []);
+  const loadStatus = useCallback(() => port.getCalendarStatus(), [port]);
+  const removeAccount = useCallback(() => port.removeCalendarAccount(), [port]);
 
-  const providers = status?.providers ?? [];
-  const provider = providers.find(item => item.key === providerKey) ?? providers.find(item => item.key === OTHER_KEY);
   const isOther = providerKey === OTHER_KEY;
-  const connected = status?.state === 'connected';
-
-  const handleSave = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
+  const saveAccount = async () => {
     try {
       const trimmedLogin = username.trim();
-      const next = await port.saveCalendarAccount({
+      return await port.saveCalendarAccount({
         providerKey,
         email: email.trim(),
         password,
         ...(trimmedLogin === '' ? {} : { username: trimmedLogin }),
         ...(isOther ? { calendarUrl: calendarUrl.trim() } : {}),
       });
-      setPassword('');
-      applyStatus(next);
-      onChanged();
-    } catch (caught) {
-      setPassword('');
-      setError(getErrorMessage(caught, "Couldn't save that calendar. Try again."));
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRemove = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await port.removeCalendarAccount();
-      applyStatus(next);
-      onChanged();
-    } catch (caught) {
-      setError(getErrorMessage(caught, "Couldn't remove that calendar. Try again."));
-    } finally {
-      setBusy(false);
+      setPassword('');
     }
   };
 
   return (
-    <CenteredModal
+    <AccountSetupPanel
       open={open}
       onOpenChange={onOpenChange}
+      onChanged={onChanged}
       title="Calendar"
-      description="Connect a CalDAV calendar with an app password, so your assistant can look at your calendar and, with your approval, add and change events."
-      className="md:max-w-2xl"
-    >
-      <div className="space-y-5 px-5 py-5 text-sm text-text-primary">
-        {error ? (
-          <p role="alert" className="rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-failure-bg">
-            {error}
-          </p>
-        ) : null}
-
-        {status === null && error === null ? <p className="text-text-secondary">Checking…</p> : null}
-
-        {status !== null && connected && !showForm ? (
-          <div className="space-y-4">
-            <p>
-              Connected as <span className="font-medium">{status.email}</span>.
-            </p>
-            <p className="text-text-secondary">
-              The app password is saved only on this computer, in the calendar connector. It is never shown again.
-            </p>
-            {confirmingRemove ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="w-full text-text-secondary">
-                  Remove this calendar? The saved app password is deleted for good.
-                </p>
-                <Button type="button" disabled={busy} onClick={() => void handleRemove()}>
-                  Remove calendar
-                </Button>
-                <Button variant="ghost" type="button" disabled={busy} onClick={() => setConfirmingRemove(false)}>
-                  Keep it
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" type="button" onClick={() => setShowForm(true)}>
-                  Change calendar
-                </Button>
-                <Button variant="ghost" type="button" onClick={() => setConfirmingRemove(true)}>
-                  Remove
-                </Button>
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {status !== null && (!connected || showForm) ? (
-          <form onSubmit={event => void handleSave(event)} className="space-y-4">
-            {status.state === 'sign_in_stopped' ? (
-              <p
-                role="alert"
-                className="rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-failure-bg"
-              >
-                {STOPPED_LINE}
-              </p>
-            ) : null}
-            {connected ? (
-              <p className="text-text-secondary">
-                Saving replaces the connected calendar. The sign-in is checked before anything is saved.
-              </p>
-            ) : (
-              <p className="text-text-secondary">The sign-in is checked before anything is saved.</p>
-            )}
+      description="Connect your calendar with an app password, so your assistant can look at your calendar and, with your approval, add and change events."
+      thing="calendar"
+      connector="calendar connector"
+      loadStatus={loadStatus}
+      saveAccount={saveAccount}
+      removeAccount={removeAccount}
+      onOpened={clearPassword}
+      onStatus={applyStatus}
+      connectedAs={status => status.email}
+      canSubmit={email.trim() !== '' && password !== ''}
+      fields={status => {
+        const providers = status.providers;
+        const provider =
+          providers.find(item => item.key === providerKey) ?? providers.find(item => item.key === OTHER_KEY);
+        return (
+          <>
             <div>
               <label htmlFor="calendar-provider" className={LABEL_CLASS}>
                 Calendar provider
@@ -276,19 +177,9 @@ export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged
                 </p>
               ) : null}
             </div>
-            <div className="flex justify-end gap-2">
-              {connected ? (
-                <Button variant="ghost" type="button" disabled={busy} onClick={() => setShowForm(false)}>
-                  Cancel
-                </Button>
-              ) : null}
-              <Button type="submit" disabled={busy || email.trim() === '' || password === ''}>
-                {busy ? 'Checking…' : 'Connect'}
-              </Button>
-            </div>
-          </form>
-        ) : null}
-      </div>
-    </CenteredModal>
+          </>
+        );
+      }}
+    />
   );
 }

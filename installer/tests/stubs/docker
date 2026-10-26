@@ -710,7 +710,12 @@ case "$cmd" in
               cat >/dev/null
               exit 3
             fi
-            cat >"$store"
+            text=$(cat)
+            # The calendar agent refuses text that does not hold all four settings.
+            if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
+              exit 2
+            fi
+            printf '%s\n' "$text" >"$store"
             echo "saved"
             ;;
           *--remove*)

@@ -71,6 +71,8 @@ function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccou
     available: true,
     state: 'not_connected',
     email: null,
+    username: null,
+    calendarUrl: null,
     providerKey: 'fastmail',
     providers: [FASTMAIL, GMX, WEBDE, OTHER],
     ...overrides,
@@ -178,7 +180,7 @@ describe('CalendarSetupPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'That login was refused. Make a new app password and try again.',
     );
-    expect((passwordField as HTMLInputElement).value).toBe('');
+    expect(passwordField).toHaveValue('');
   });
 
   it('shows the stopped line when the saved sign-in no longer works', async () => {
@@ -196,6 +198,109 @@ describe('CalendarSetupPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
     await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
     expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
+  });
+
+  it('opens a saved Other account with its address and login filled in, and a change keeps the login', async () => {
+    const port = makePort(
+      statusOf({
+        state: 'connected',
+        email: 'owner@example.invalid',
+        username: 'owner-login',
+        calendarUrl: 'https://nas.example.invalid/dav/',
+        providerKey: 'other',
+      }),
+    );
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    expect(screen.getByLabelText(/calendar address/i)).toHaveValue('https://nas.example.invalid/dav/');
+    expect(screen.getByLabelText(/login name/i)).toHaveValue('owner-login');
+    expect(screen.getByLabelText(/email address/i)).toHaveValue('owner@example.invalid');
+    expect(screen.getByLabelText(/app password/i)).toHaveValue('');
+
+    fireEvent.change(screen.getByLabelText(/app password/i), { target: { value: CANARY } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(port.saveCalendarAccount).toHaveBeenCalled());
+    expect(vi.mocked(port.saveCalendarAccount).mock.calls[0]?.[0]).toEqual({
+      providerKey: 'other',
+      email: 'owner@example.invalid',
+      password: CANARY,
+      username: 'owner-login',
+      calendarUrl: 'https://nas.example.invalid/dav/',
+    });
+  });
+
+  it('leaves the login box empty when the login is the email address', async () => {
+    renderPanel(
+      makePort(
+        statusOf({
+          state: 'connected',
+          email: 'owner@example.invalid',
+          username: 'owner@example.invalid',
+          calendarUrl: 'https://caldav.fastmail.com/dav/',
+        }),
+      ),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    expect(screen.getByLabelText(/login name/i)).toHaveValue('');
+  });
+
+  it('after Remove the form starts again from nothing: no old login, address or email', async () => {
+    const port = makePort(
+      statusOf({
+        state: 'connected',
+        email: 'owner@example.invalid',
+        username: 'owner-login',
+        calendarUrl: 'https://nas.example.invalid/dav/',
+        providerKey: 'other',
+      }),
+    );
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
+    const provider = await screen.findByLabelText(/calendar provider/i);
+    expect(provider).toHaveValue('fastmail');
+    expect(screen.getByLabelText(/email address/i)).toHaveValue('');
+    expect(screen.getByLabelText(/login name/i)).toHaveValue('');
+    fireEvent.change(provider, { target: { value: 'other' } });
+    expect(screen.getByLabelText(/calendar address/i)).toHaveValue('');
+  });
+
+  it.each([
+    ['sign_in_stopped', /Sign-in stopped working/],
+    ['not_working', /not working right now/],
+  ] as const)('a %s account can still be removed, or the window closed', async (state, line) => {
+    const onOpenChange = vi.fn();
+    const port = makePort(statusOf({ state, email: 'owner@example.invalid' }));
+    render(<CalendarSetupPanel open onOpenChange={onOpenChange} port={port} onChanged={() => undefined} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(line);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove calendar' }));
+    await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
+  });
+
+  it('a connected account being changed can go back with Cancel, and still be removed from the form', async () => {
+    renderPanel(makePort(statusOf({ state: 'connected', email: 'owner@example.invalid' })));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+  });
+
+  it('asks the list to refresh when a save fails, since a cut-off save may still have gone through', async () => {
+    const onChanged = vi.fn();
+    const port = makePort(statusOf());
+    vi.mocked(port.saveCalendarAccount).mockRejectedValue(
+      new Error("Couldn't reach the calendar connector. Try again."),
+    );
+    render(<CalendarSetupPanel open onOpenChange={() => undefined} port={port} onChanged={onChanged} />);
+    await screen.findByLabelText(/calendar provider/i);
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'owner@example.invalid' } });
+    fireEvent.change(screen.getByLabelText(/app password/i), { target: { value: CANARY } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await screen.findByRole('alert');
+    expect(onChanged).toHaveBeenCalled();
   });
 
   it('says so when the status cannot be read', async () => {

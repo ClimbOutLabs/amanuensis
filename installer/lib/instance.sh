@@ -176,7 +176,10 @@ instance_render() {
   fi
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
-  [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  if [ -n "${REL_CALENDAR_TAG:-}" ]; then
+    calendar_on=1
+    calendar_secret_backfill "$name"
+  fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
@@ -226,6 +229,16 @@ owner_name_backfill() { # name
   if [ -f "$env" ] && grep -q '^# >>> managed by the installer' "$env" && ! grep -q '^OWNER_NAME=' "$env"; then
     env_managed_set "$env" OWNER_NAME "$current"
   fi
+}
+
+# The secret the app and the calendar connector share, so only the app can use the connector's account port. It is made
+# once, in the settings file, and an existing value is never changed. Only an instance that has a settings file gets one.
+calendar_secret_backfill() { # name
+  local env
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] && grep -q '^# >>> managed by the installer' "$env" || return 0
+  grep -q '^CALENDAR_ACCOUNT_SECRET=.\{32,\}' "$env" && return 0
+  env_managed_set "$env" CALENDAR_ACCOUNT_SECRET "$(rand_hex 32)"
 }
 
 # running, partial or stopped, from the containers Compose labelled for the project.

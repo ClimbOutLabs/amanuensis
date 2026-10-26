@@ -51,15 +51,26 @@ export async function registerCalendarConnectorAtBoot({
 }
 
 /**
- * Removes the Calendar connector's registration, when the saved account is removed. A connector left
- * registered with no account behind it would offer calendar tools that can only fail.
+ * Removes the Calendar connector's registration, when the saved account is removed or stops working. A
+ * connector left registered with no account behind it would offer calendar tools that can only fail. Only a
+ * record at the calendar sidecar's own address is removed: another connector that shares the name, such as one
+ * the owner added by hand, is left alone. With no sidecar address nothing is removed.
  */
 export async function unregisterCalendarConnector({
+  url,
   mcpServerStore,
   tenant_id,
 }: {
-  mcpServerStore: Pick<IMcpServerStore, 'deleteServer'>;
+  url: string | undefined;
+  mcpServerStore: Pick<IMcpServerStore, 'getServer' | 'deleteServer'>;
   tenant_id: string;
 }): Promise<void> {
+  if (url === undefined) {
+    return;
+  }
+  const record = await mcpServerStore.getServer({ tenant_id, name: CALDAV_SERVER_NAME });
+  if (record?.manifest.type !== 'remote' || record.manifest.url !== url) {
+    return;
+  }
   await mcpServerStore.deleteServer({ tenant_id, name: CALDAV_SERVER_NAME });
 }

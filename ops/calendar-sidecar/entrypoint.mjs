@@ -13,6 +13,7 @@ import {
   DEFAULT_ACCOUNT_FILE,
   DEFAULT_PORT as DEFAULT_AGENT_PORT,
   readAccountText,
+  secretIsUsable,
 } from './agent.mjs';
 
 const POLL_MS = 2000;
@@ -43,6 +44,11 @@ export function gatewayCommand({ host, port }) {
       'none',
     ],
   ];
+}
+
+/** The tool server needs the login, never the secret that guards the account port. */
+function withoutAgentSecret(environment) {
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => name !== 'CALENDAR_ACCOUNT_SECRET'));
 }
 
 const hashOf = text => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -86,7 +92,7 @@ export function startSupervisor({ file, host, port, deps = {} }) {
       child = spawn(command, args, {
         stdio: ['ignore', 'inherit', 'inherit'],
         env: {
-          ...process.env,
+          ...withoutAgentSecret(process.env),
           CALDAV_URL: account.url,
           CALDAV_USERNAME: account.username,
           CALDAV_PASSWORD: account.password,
@@ -115,8 +121,15 @@ export function startSupervisor({ file, host, port, deps = {} }) {
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   const file = process.env.CALENDAR_ACCOUNT_FILE ?? DEFAULT_ACCOUNT_FILE;
   const agentPort = Number(process.env.CALENDAR_ACCOUNT_PORT ?? DEFAULT_AGENT_PORT);
-  const server = createAgentServer({ agent: createAgent({ file }) });
-  server.listen(agentPort, '0.0.0.0');
+  const secret = process.env.CALENDAR_ACCOUNT_SECRET;
+  // Without a usable secret the account port stays closed. The saved account is still served, and the
+  // installer still writes it through the command line.
+  const server = secretIsUsable(secret) ? createAgentServer({ agent: createAgent({ file }), secret }) : null;
+  if (server === null) {
+    process.stderr.write('calendar account agent: no account secret is set, so its port is closed\n');
+  } else {
+    server.listen(agentPort, '0.0.0.0');
+  }
   const supervisor = startSupervisor({
     file,
     host: process.env.CALENDAR_MCP_HOST ?? '0.0.0.0',
@@ -124,7 +137,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   });
   const shutdown = () => {
     supervisor.stop();
-    server.close();
+    server?.close();
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);

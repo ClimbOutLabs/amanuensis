@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { ConnectorAccountStateSchema } from './connectorAccount';
 
 export const CalendarProviderSchema = z
   .object({
@@ -21,10 +22,10 @@ export const CalendarAccountStatusSchema = z
     available: z
       .boolean()
       .describe('Whether this instance has the Calendar connector at all; when false, no card is shown.'),
-    state: z
-      .enum(['connected', 'not_connected', 'sign_in_stopped'])
-      .describe('Connected, not connected, or connected but the saved sign-in no longer works.'),
+    state: ConnectorAccountStateSchema,
     email: z.string().nullable().describe('The email address of the connected account; null when none is connected.'),
+    username: z.string().nullable().describe('The login name of the connected account; never the password.'),
+    calendar_url: z.string().nullable().describe('The calendar address of the connected account; null when none.'),
     provider_key: z
       .string()
       .describe('The provider of the connected account, worked out from its address; the picker default otherwise.'),

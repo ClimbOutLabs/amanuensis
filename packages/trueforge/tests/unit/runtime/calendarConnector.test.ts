@@ -1,6 +1,7 @@
 import {
   calendarMcpUrlFromAccountUrl,
   firstPartyOriginsFor,
+  parseCalendarAccountSecret,
   parseCalendarAccountUrl,
   parseCalendarConnectorUrl,
 } from '../../../src/config';
@@ -31,6 +32,21 @@ describe('CALENDAR_CONNECTOR_URL', () => {
 
   it('refuses a URL that carries credentials', () => {
     expect(() => parseCalendarConnectorUrl('http://user:pass@calendar-caldav:9558/mcp')).toThrow();
+  });
+});
+
+describe('CALENDAR_ACCOUNT_SECRET', () => {
+  it('is unset when blank, so the Settings Calendar card stays off', () => {
+    expect(parseCalendarAccountSecret(undefined)).toBeUndefined();
+    expect(parseCalendarAccountSecret('   ')).toBeUndefined();
+  });
+
+  it('accepts a secret of 32 characters or more, trimmed', () => {
+    expect(parseCalendarAccountSecret(` ${'a'.repeat(32)} `)).toBe('a'.repeat(32));
+  });
+
+  it('refuses a secret the connector would refuse, and says what to do', () => {
+    expect(() => parseCalendarAccountSecret('short')).toThrow('at least 32 characters');
   });
 });
 
@@ -125,9 +141,36 @@ describe('Calendar connector registration', () => {
 });
 
 describe('Calendar connector removal', () => {
-  it('deletes the registration under the name Calendar', async () => {
+  const ownRecord = { manifest: { type: 'remote', name: 'Calendar', url: URL, description: 'x' } };
+
+  it('deletes the registration at the sidecar address under the name Calendar', async () => {
+    const getServer = jest.fn().mockResolvedValue(ownRecord);
     const deleteServer = jest.fn().mockResolvedValue(true);
-    await unregisterCalendarConnector({ mcpServerStore: { deleteServer }, tenant_id: TENANT });
+    await unregisterCalendarConnector({ url: URL, mcpServerStore: { getServer, deleteServer }, tenant_id: TENANT });
     expect(deleteServer).toHaveBeenCalledWith({ tenant_id: TENANT, name: 'Calendar' });
+  });
+
+  it('leaves a connector named Calendar at another address alone', async () => {
+    const getServer = jest.fn().mockResolvedValue({
+      manifest: { type: 'remote', name: 'Calendar', url: 'https://mine.example.invalid/mcp', description: 'x' },
+    });
+    const deleteServer = jest.fn();
+    await unregisterCalendarConnector({ url: URL, mcpServerStore: { getServer, deleteServer }, tenant_id: TENANT });
+    expect(deleteServer).not.toHaveBeenCalled();
+  });
+
+  it('removes nothing when there is no record, or the sidecar address is not known', async () => {
+    const deleteServer = jest.fn();
+    await unregisterCalendarConnector({
+      url: URL,
+      mcpServerStore: { getServer: jest.fn().mockResolvedValue(undefined), deleteServer },
+      tenant_id: TENANT,
+    });
+    await unregisterCalendarConnector({
+      url: undefined,
+      mcpServerStore: { getServer: jest.fn().mockResolvedValue(ownRecord), deleteServer },
+      tenant_id: TENANT,
+    });
+    expect(deleteServer).not.toHaveBeenCalled();
   });
 });

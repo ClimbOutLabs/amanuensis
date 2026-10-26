@@ -63,10 +63,11 @@ test_url_refusals() {
 }
 
 test_secret_rules() {
-  t_begin "the app password is required and limited to characters a file can hold"
+  t_begin "the app password is required; which characters it may hold is left to the connector's agent"
   sandbox_new
   assert_contains "$(in_lib 'calendar_secret_problem ""')" "app password is needed"
-  assert_contains "$(in_lib 'calendar_secret_problem "has space"')" "cannot be saved"
+  assert_eq "$(in_lib 'calendar_secret_problem "has space"')" "" "spaces and punctuation are allowed"
+  assert_eq "$(in_lib "calendar_secret_problem 'it\"s a #1 pass'")" "" "quotes and a hash are allowed"
   assert_eq "$(in_lib "calendar_secret_problem '$CAL_SECRET'")" "" "a plain app password"
   sandbox_drop
 }
@@ -109,6 +110,38 @@ test_connector_starts_with_the_instance() {
   assert_contains "$(cat "$compose")" "calendar-account:/account"
   assert_contains "$(cat "$compose")" "CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560"
   assert_contains "$(cat "$compose")" "name: aman_main_calendar_account"
+  sandbox_drop
+}
+
+test_agent_secret_and_network() {
+  t_begin "the app and the connector share one secret through the settings file, and the connector has a network of its own"
+  sandbox_new
+  install_for_calendar
+  local env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml first
+  first=$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#first}" 64 "a random secret of 64 characters is made"
+  assert_not_contains "$(cat "$compose")" "$first" "the compose file never holds the secret"
+  assert_contains "$(cat "$compose")" "CALENDAR_ACCOUNT_SECRET: \${CALENDAR_ACCOUNT_SECRET:?missing from .env}"
+  assert_eq "$(awk '/^  calendar-caldav:/{f=1;next} /^  [a-z]/{f=0} f && /^    networks:/{n=1;next} f && n && /^      - /{print $2} f && n && !/^      - /{n=0}' "$compose" | tr '\n' ' ')" "calendar " "the connector joins only its own network"
+  assert_eq "$(awk '/^  mail-email:/{f=1;next} /^  [a-z]/{f=0} f && /calendar/{print}' "$compose")" "" "the mail connector is not on the calendar network"
+  assert_contains "$(awk '/^  loopback:/{f=1;next} /^  [a-z]/{f=0} f' "$compose")" "- calendar" "the app's network holder joins it"
+  run_install instance calendar main --remove
+  assert_rc 0
+  assert_eq "$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env")" "$first" "a later run never changes the secret"
+  sandbox_drop
+}
+
+test_an_older_instance_gets_a_secret() {
+  t_begin "an instance whose settings file has no calendar secret gets one on the next calendar command"
+  sandbox_new
+  install_for_calendar
+  local env=$AMAN_HOME/instances/main/.env
+  grep -v '^CALENDAR_ACCOUNT_SECRET=' "$env" >"$env.new" && mv "$env.new" "$env"
+  chmod 600 "$env"
+  run_install instance calendar main --remove
+  assert_rc 0
+  assert_eq "$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env" | wc -c | tr -d ' ')" 65 "64 characters and a newline"
+  assert_mode "$env" 600
   sandbox_drop
 }
 
@@ -297,6 +330,8 @@ test_presets
 test_gmail_is_skipped
 test_url_refusals
 test_secret_rules
+test_agent_secret_and_network
+test_an_older_instance_gets_a_secret
 test_install_with_calendar_flags
 test_connector_starts_with_the_instance
 test_connect_prompt_yes_asks_the_calendar_questions

@@ -66,6 +66,10 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    # The calendar network is shared with the calendar connector only (see calendar-caldav).
+    networks:
+      - default
+      - calendar
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -124,6 +128,9 @@ services:
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
       # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
       CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
+      # Guards the calendar account port; the same value goes to calendar-caldav. The default only keeps this
+      # throwaway smoke stack working, so set CALENDAR_ACCOUNT_SECRET in the shell for anything else.
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:-smoke-stack-calendar-secret-0123456789abcdef}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -241,8 +248,8 @@ services:
       - '9559'
     restart: unless-stopped
 
-  # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private to the
-  # Compose network: `expose` only, never `ports`. The server reaches it as http://calendar-caldav:9558/mcp.
+  # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private: `expose` only, never `ports`,
+  # on its own network. The server reaches it as http://calendar-caldav:9558/mcp.
   # The calendar login lives in a volume this sidecar owns, which the Settings Calendar card saves
   # through the sidecar's account agent on port 9560. The tool server runs only while a login is saved.
   calendar-caldav:
@@ -255,6 +262,11 @@ services:
       # The account agent: the account file it owns and its private-network port.
       CALENDAR_ACCOUNT_FILE: /account/.env.calendar
       CALENDAR_ACCOUNT_PORT: '9560'
+      # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:-smoke-stack-calendar-secret-0123456789abcdef}
+    # A network of its own, shared with the app's `loopback` only, so the mail connector cannot reach the account port.
+    networks:
+      - calendar
     volumes:
       - calendar-account:/account
     expose:
@@ -336,6 +348,11 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+networks:
+  # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
+  # server on the internet.
+  calendar: {}
 
 volumes:
   dex-tls:

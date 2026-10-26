@@ -10,13 +10,18 @@ export const ACCOUNT_FILE_HEADER =
   '# Written by the installer for the Calendar connector. Keep it private: it holds the app password.';
 
 // What the file can hold without a value being able to start a new line or a new setting.
-// The installer and the Settings card apply the same rules first and word them for a person.
+// The installer and the Settings card check the address and the login name the same way first and word
+// the problem for a person; the agent applies the rules again before it saves anything.
 const URL_PATTERN = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~/@%+=,:-]*)?$/;
 const USER_PATTERN = /^[A-Za-z0-9._+@=-]+$/;
-const PASSWORD_PATTERN = /^[A-Za-z0-9._+@=!%~,:/-]+$/;
+// Any printable character, spaces inside included, but nothing that could end the line or start a new setting.
+// This is the one place that decides which characters a password may hold; the app and the installer only
+// check that one was typed, and ask the agent.
+const PASSWORD_PATTERN = /^[^\p{C}\p{Zl}\p{Zp}]+$/u;
 // Dot-separated names whose parts start and end with a letter or digit, or an IPv4 address.
 const HOST_PATTERN = /^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.?$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Printable ASCII only: the tool server puts the address in a header and a search, where anything else breaks it.
+const EMAIL_PATTERN = /^[\x21-\x3F\x41-\x7E]+@[\x21-\x3F\x41-\x7E]+\.[\x21-\x3F\x41-\x7E]+$/;
 
 export const MAX_FIELD_LENGTH = 512;
 
@@ -24,24 +29,30 @@ function withinLimits(value) {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_FIELD_LENGTH;
 }
 
+/** The first field the account file cannot hold safely, or null when every field is fine. */
+export function accountProblem(account) {
+  if (account === null || typeof account !== 'object') {
+    return 'url';
+  }
+  if (!withinLimits(account.url) || !addressIsWellFormed(account.url)) {
+    return 'url';
+  }
+  if (!withinLimits(account.username) || !USER_PATTERN.test(account.username)) {
+    return 'username';
+  }
+  const passwordFits = withinLimits(account.password) && PASSWORD_PATTERN.test(account.password);
+  if (!passwordFits || account.password !== account.password.trim()) {
+    return 'password';
+  }
+  if (!withinLimits(account.email) || !EMAIL_PATTERN.test(account.email)) {
+    return 'email';
+  }
+  return null;
+}
+
 /** True when every field is something the account file can hold safely. */
 export function accountIsWellFormed(account) {
-  if (
-    account === null ||
-    typeof account !== 'object' ||
-    !withinLimits(account.url) ||
-    !withinLimits(account.username) ||
-    !withinLimits(account.password) ||
-    !withinLimits(account.email)
-  ) {
-    return false;
-  }
-  return (
-    addressIsWellFormed(account.url) &&
-    USER_PATTERN.test(account.username) &&
-    PASSWORD_PATTERN.test(account.password) &&
-    EMAIL_PATTERN.test(account.email)
-  );
+  return accountProblem(account) === null;
 }
 
 // The host must read the same after the URL parser normalizes it. A host written as a number in a

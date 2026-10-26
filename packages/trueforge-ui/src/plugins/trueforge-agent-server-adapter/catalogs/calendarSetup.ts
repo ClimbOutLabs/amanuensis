@@ -10,7 +10,7 @@ import type {
   CalendarSetupPort,
 } from '../../../server/calendarSetup.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
-import { createAccountSetupRequest } from './accountSetupRequest.js';
+import { AccountConnectionStateWireSchema, createAccountSetupRequest } from './accountSetupRequest.js';
 
 const CalendarProviderWireSchema = z.object({
   key: z.string(),
@@ -22,8 +22,10 @@ const CalendarProviderWireSchema = z.object({
 
 const CalendarAccountStatusWireSchema = z.object({
   available: z.boolean(),
-  state: z.enum(['connected', 'not_connected', 'sign_in_stopped']),
+  state: AccountConnectionStateWireSchema,
   email: z.string().nullable(),
+  username: z.string().nullable(),
+  calendar_url: z.string().nullable(),
   provider_key: z.string(),
   providers: z.array(CalendarProviderWireSchema),
 });
@@ -35,6 +37,8 @@ function toCalendarStatus(wire: CalendarAccountStatusWire): CalendarAccountStatu
     available: wire.available,
     state: wire.state,
     email: wire.email,
+    username: wire.username,
+    calendarUrl: wire.calendar_url,
     providerKey: wire.provider_key,
     providers: wire.providers.map(provider => ({
       key: provider.key,
@@ -50,7 +54,6 @@ export function createCalendarSetupApi(options: CreateTrueForgeClientOptions = {
   const request = createAccountSetupRequest({
     options,
     path: '/api/v1/user/settings/calendar',
-    label: 'Calendar',
     wireSchema: CalendarAccountStatusWireSchema,
     toStatus: toCalendarStatus,
   });

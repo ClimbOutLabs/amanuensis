@@ -19,12 +19,17 @@ export function agentErrorKind(body: unknown): string | null {
   return typeof error === 'string' ? error : null;
 }
 
+/** What an account agent answered, or why no answer came. The cause is for the caller to attach, never to log. */
+export type AccountAgentAnswer = { reached: true; status: number; body: unknown } | { reached: false; cause: unknown };
+
 /**
- * One call to an account agent. Returns null when the request cannot be made at all, so the caller
- * can say the connector is unreachable. `label` names the connector in the one log line.
+ * One call to an account agent. `reached: false` means the request could not be made at all, so the caller
+ * can say the connector is unreachable. `label` names the connector in the one log line. `secret`, when the
+ * agent needs one, travels as a bearer token and is never logged.
  */
 export async function callAccountAgent({
   accountUrl,
+  secret,
   fetchImpl,
   logger,
   label,
@@ -32,32 +37,36 @@ export async function callAccountAgent({
   payload,
   timeoutMs,
 }: {
-  accountUrl: string | undefined;
+  accountUrl: string;
+  secret: string | undefined;
   fetchImpl: typeof fetch | undefined;
   logger: Pick<Logger, 'warn'>;
   label: string;
   method: 'GET' | 'POST' | 'DELETE';
   payload?: unknown;
   timeoutMs: number;
-}): Promise<{ status: number; body: unknown } | null> {
-  if (accountUrl === undefined) {
-    return null;
-  }
+}): Promise<AccountAgentAnswer> {
   const doFetch = fetchImpl ?? fetch;
+  const headers: Record<string, string> = {};
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (secret !== undefined) {
+    headers['Authorization'] = `Bearer ${secret}`;
+  }
   let response: Response;
   try {
     response = await doFetch(`${accountUrl}/account`, {
       method,
-      headers: payload === undefined ? {} : { 'Content-Type': 'application/json' },
+      headers,
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    // No error text is logged: a failed request's message can carry the address it went to,
-    // and this module never risks printing anything that travelled with the password.
+  } catch (cause) {
+    // Only a fixed line is logged: a failed request's message can carry the address it went to.
     logger.warn(`${label} account agent could not be reached`);
-    return null;
+    return { reached: false, cause };
   }
   const body: unknown = await response.json().catch(() => null);
-  return { status: response.status, body };
+  return { reached: true, status: response.status, body };
 }

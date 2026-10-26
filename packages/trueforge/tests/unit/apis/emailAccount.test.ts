@@ -108,12 +108,6 @@ describe('the email settings endpoints', () => {
     // against it, and a real sidecar name would hang the test on DNS and retries.
     configuration.MAIL_EMAIL_MCP_URL = 'http://127.0.0.1:1/mcp';
     const router = createEmailAccountRouter({
-      resolveRequestContext: () => ({
-        tenant_id: 't1',
-        subject: { id: 'owner-1', type: 'user', display_name: 'owner-1' },
-        roles: [],
-        user_credential: null,
-      }),
       logger: createLogger({ silent: true }),
       fetchImpl: agent.fetchImpl,
       mcpServerStore: fakeStore.store,
@@ -189,6 +183,23 @@ describe('the email settings endpoints', () => {
     agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'refused' } }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
+  });
+
+  it('says not working when the saved account cannot be signed in to right now', async () => {
+    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'unreachable' } }]);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.state).toBe('not_working');
+  });
+
+  it('every status read settles the registration from what the agent holds', async () => {
+    agent.script([
+      { status: 200, body: CONNECTED },
+      { status: 200, body: NOT_CONNECTED },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    expect([...fakeStore.rows.values()].map(row => row.name)).toEqual(['Email']);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(0);
   });
 
   it('hides the card when the instance has no email connector to configure', async () => {

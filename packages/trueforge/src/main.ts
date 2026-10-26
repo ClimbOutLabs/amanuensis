@@ -107,8 +107,7 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
-import { registerCalendarConnectorFromSavedAccountInBackground } from './runtime/calendarAccount';
-import { registerCalendarConnectorAtBoot } from './runtime/calendarConnector';
+import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -705,27 +704,16 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     });
   }
-  // With a calendar account agent, the Calendar connector is registered only while an account is saved:
-  // the agent is asked in the background and the connector follows its answer. Without one (an operator
-  // who runs their own calendar sidecar), the configured endpoint is registered as it always was.
-  if (configuration.CALENDAR_ACCOUNT_URL === undefined) {
-    await registerCalendarConnectorAtBoot({
-      url: configuration.CALENDAR_CONNECTOR_URL,
-      mcpServerStore: mcpOAuthStore,
-      tenant_id: TENANT_ID,
-      logger,
-    });
-  } else {
-    void registerCalendarConnectorFromSavedAccountInBackground({
-      accountUrl: configuration.CALENDAR_ACCOUNT_URL,
-      mcpUrl: configuration.CALENDAR_CONNECTOR_URL ?? calendarMcpUrlFromAccountUrl(configuration.CALENDAR_ACCOUNT_URL),
-      fetchImpl: undefined,
-      mcpServerStore: mcpOAuthStore,
-      tenant_id: TENANT_ID,
-      logger,
-      retry: { attempts: 10, delayMs: 3000 },
-    });
-  }
+  await registerCalendarConnectorForBoot({
+    accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+    secret: configuration.CALENDAR_ACCOUNT_SECRET,
+    connectorUrl: configuration.CALENDAR_CONNECTOR_URL,
+    mcpUrl: configuration.CALENDAR_CONNECTOR_URL ?? calendarMcpUrlFromAccountUrl(configuration.CALENDAR_ACCOUNT_URL),
+    fetchImpl: undefined,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   await seedOwnerNameAtBoot({
     owner_name: configuration.OWNER_NAME,
     oidc: configuration.OIDC,

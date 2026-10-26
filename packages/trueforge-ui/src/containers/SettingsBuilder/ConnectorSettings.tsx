@@ -859,6 +859,7 @@ const ConnectorSettings = () => {
                 description="Read your email and, with your approval, draft and send it. Connects any email account with an app password."
                 connectedLine={emailStatus?.address ? `Connected as ${emailStatus.address}.` : null}
                 stoppedLine="Sign-in stopped working. Make a new app password and save it again."
+                notWorkingLine="Your email server could not be reached just now. Check your internet connection, then open Manage."
                 failedLabel="Couldn't check email right now"
                 state={emailStatus?.state ?? 'not_connected'}
                 failed={emailStatusFailed}
@@ -875,9 +876,10 @@ const ConnectorSettings = () => {
                 id="calendar"
                 title="Calendar"
                 glyph="31"
-                description="Look at your calendar and, with your approval, add and change events. Connects any CalDAV calendar with an app password."
+                description="Look at your calendar and, with your approval, add and change events. Connects your calendar with an app password."
                 connectedLine={calendarStatus?.email ? `Connected as ${calendarStatus.email}.` : null}
                 stoppedLine="Sign-in stopped working. Make a new app password and save it again."
+                notWorkingLine="Your calendar server could not be reached just now. Check your internet connection, then open Manage."
                 failedLabel="Couldn't check calendar right now"
                 state={calendarStatus?.state ?? 'not_connected'}
                 failed={calendarStatusFailed}

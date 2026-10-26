@@ -125,7 +125,8 @@ export const CALDAV_OTHER_NEEDS_ADDRESS_MESSAGE =
 const MAX_VALUE_LENGTH = 512;
 const URL_PATTERN = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~/@%+=,:-]*)?$/;
 const USER_PATTERN = /^[A-Za-z0-9._+@=-]+$/;
-const PASSWORD_PATTERN = /^[A-Za-z0-9._+@=!%~,:/-]+$/;
+// Printable ASCII only, so a header or a search built from the address cannot be broken.
+const EMAIL_PATTERN = /^[\x21-\x7E]+$/;
 
 /**
  * Why a typed calendar address cannot be used, in plain words, or null when its shape is fine. The address
@@ -163,18 +164,28 @@ export function caldavUserProblem(user: string): string | null {
   return null;
 }
 
-/** Why an app password cannot be saved, in plain words, or null when it can. */
+/**
+ * Why an app password cannot be saved, in plain words, or null when it can. Which characters it may hold is
+ * decided in one place, the calendar sidecar, which refuses a bad one with the field's name.
+ */
 export function caldavPasswordProblem(password: string): string | null {
   if (password === '') {
     return 'The app password is needed. Create one at your provider, then type it here.';
   }
-  if (password.length > MAX_VALUE_LENGTH || !PASSWORD_PATTERN.test(password)) {
-    return 'The app password has a character that cannot be saved. Create a new app password with letters and numbers, then try again.';
+  if (password.length > MAX_VALUE_LENGTH) {
+    return 'The app password is too long to save. Create a shorter app password, then try again.';
   }
   return null;
 }
 
 /** Why the calendar account's email address cannot be used, in plain words, or null when it can. */
 export function caldavEmailProblem(email: string): string | null {
-  return mailAddressProblem(email);
+  const problem = mailAddressProblem(email);
+  if (problem !== null) {
+    return problem;
+  }
+  if (!EMAIL_PATTERN.test(email)) {
+    return 'The email address has a character that cannot be saved. Use plain letters and numbers, then try again.';
+  }
+  return null;
 }

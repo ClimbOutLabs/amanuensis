@@ -25,6 +25,7 @@ services:
     networks:
       - default
       - link
+@@IF_CALENDAR@@      - calendar
     restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech service and nothing else. The service is on a network of its
@@ -144,9 +145,11 @@ services:
 @@IF_TLS@@    restart: unless-stopped
 
 # Calendar connector. It starts with the instance whenever the release has its image, so the Settings Calendar card can
-# set it up. The app reaches it at http://calendar-caldav:9558/mcp on this project's private network. Nothing is published.
+# set it up. The app reaches it at http://calendar-caldav:9558/mcp. Nothing is published. It sits on a network of its own
+# that only the app's network holder shares, so no other service (the mail connector reads untrusted mail) can reach its
+# account port, which also answers only a caller that presents this instance's secret.
 # The calendar login lives in a volume this sidecar owns, which the installer writes through the sidecar's account agent
-# and the Settings Calendar card changes through the same agent on port 9560, also private-network only.
+# and the Settings Calendar card changes through the same agent on port 9560.
 # The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
 @@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
@@ -157,6 +160,10 @@ services:
 @@IF_CALENDAR@@      # The account agent: the account file it owns and its private-network port.
 @@IF_CALENDAR@@      CALENDAR_ACCOUNT_FILE: /account/.env.calendar
 @@IF_CALENDAR@@      CALENDAR_ACCOUNT_PORT: '9560'
+@@IF_CALENDAR@@      # Shared with the app through .env, which the installer fills in once.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?missing from .env}
+@@IF_CALENDAR@@    networks:
+@@IF_CALENDAR@@      - calendar
 @@IF_CALENDAR@@    volumes:
 @@IF_CALENDAR@@      - calendar-account:/account
 @@IF_CALENDAR@@    expose:
@@ -305,3 +312,6 @@ networks:
   speech:
     internal: true
     name: @@STT_NETWORK@@
+  # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
+  # calendar server on the internet.
+@@IF_CALENDAR@@  calendar: {}

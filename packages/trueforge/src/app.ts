@@ -809,31 +809,34 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
-  // Browser session only, like Google's: the email account is the instance owner's, and its app
-  // password passes through the save call to the sidecar only.
+  // Browser session only and admin only: the Email and Calendar accounts belong to the whole instance, so a
+  // member of a shared server must not read or change them. Their app passwords pass through the save call
+  // to the sidecars only.
   app.route(
     EMAIL_SETTINGS_BASE_PATH,
     withAuth(
-      createEmailAccountRouter({
-        fetchImpl: undefined,
-        resolveRequestContext,
-        logger: deps.logger,
-        mcpServerStore: deps.resolveMcpServerStore(),
-      }),
+      withAdminAuth(
+        createEmailAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
-  // Browser session only, like Email's: the calendar account is the instance owner's, and its app
-  // password passes through the save call to the sidecar only.
   app.route(
     CALENDAR_SETTINGS_BASE_PATH,
     withAuth(
-      createCalendarAccountRouter({
-        fetchImpl: undefined,
-        resolveRequestContext,
-        logger: deps.logger,
-        mcpServerStore: deps.resolveMcpServerStore(),
-      }),
+      withAdminAuth(
+        createCalendarAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );

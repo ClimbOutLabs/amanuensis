@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import type { EmailAccountSaveRequest, EmailAccountStatus, EmailSetupPort } from '../../../server/emailSetup.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
-import { createAccountSetupRequest } from './accountSetupRequest.js';
+import { AccountConnectionStateWireSchema, createAccountSetupRequest } from './accountSetupRequest.js';
 
 const EmailProviderWireSchema = z.object({
   key: z.string(),
@@ -23,7 +23,7 @@ const EmailProviderWireSchema = z.object({
 
 const EmailAccountStatusWireSchema = z.object({
   available: z.boolean(),
-  state: z.enum(['connected', 'not_connected', 'sign_in_stopped']),
+  state: AccountConnectionStateWireSchema,
   address: z.string().nullable(),
   provider_key: z.string(),
   providers: z.array(EmailProviderWireSchema),
@@ -56,7 +56,6 @@ export function createEmailSetupApi(options: CreateTrueForgeClientOptions = {}):
   const request = createAccountSetupRequest({
     options,
     path: '/api/v1/user/settings/email',
-    label: 'Email',
     wireSchema: EmailAccountStatusWireSchema,
     toStatus: toEmailStatus,
   });

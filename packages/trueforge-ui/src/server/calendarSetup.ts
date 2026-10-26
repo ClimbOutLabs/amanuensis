@@ -1,3 +1,5 @@
+import type { AccountConnectionState } from './accountSetup.js';
+
 /**
  * The calendar account port the Harness adds on top of the runtime's connector port.
  * Hand-written wire types: the generated SDK has no calendar settings routes yet, so the
@@ -19,9 +21,13 @@ export interface CalendarProviderInfo {
 export interface CalendarAccountStatus {
   /** Whether this instance has the Calendar connector at all; when false, no card is shown. */
   available: boolean;
-  state: 'connected' | 'not_connected' | 'sign_in_stopped';
+  state: AccountConnectionState;
   /** The email address of the connected account; null when none is connected. */
   email: string | null;
+  /** The login name of the connected account, never the password; null when none is connected. */
+  username: string | null;
+  /** The calendar address of the connected account; null when none is connected. */
+  calendarUrl: string | null;
   providerKey: string;
   providers: CalendarProviderInfo[];
 }

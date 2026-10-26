@@ -256,6 +256,65 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
     expect(rendered.services.app.environment['CALENDAR_ACCOUNT_URL']).toBe('http://calendar-caldav:9560');
   });
 
+  test('the connector is on a network of its own that only the app network holder shares, and needs the secret', () => {
+    const rendered = z
+      .object({
+        services: z.object({
+          loopback: z.object({ networks: z.array(z.string()) }),
+          'calendar-caldav': z.object({
+            networks: z.tuple([z.literal('calendar')]),
+            environment: z.object({ CALENDAR_ACCOUNT_SECRET: z.string() }).loose(),
+          }),
+        }),
+        networks: z.object({ calendar: z.object({ internal: z.never().optional() }).nullable() }).loose(),
+      })
+      .parse(renderInstanceTemplate({ calendar: true }));
+    expect(rendered.services.loopback.networks).toEqual(['default', 'link', 'calendar']);
+    expect(rendered.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
+      '${CALENDAR_ACCOUNT_SECRET:?missing from .env}',
+    );
+    // Not an internal network: the connector reaches the calendar server on the internet.
+    expect(rendered.networks.calendar === null || rendered.networks.calendar.internal === undefined).toBe(true);
+  });
+
+  test('without the connector there is no calendar network and the app holder stays on its usual two', () => {
+    const rendered = z
+      .object({
+        services: z.object({ loopback: z.object({ networks: z.array(z.string()) }) }),
+        networks: z.record(z.string(), z.unknown()),
+      })
+      .parse(renderInstanceTemplate({ calendar: false }));
+    expect(rendered.services.loopback.networks).toEqual(['default', 'link']);
+    expect(Object.keys(rendered.networks)).not.toContain('calendar');
+  });
+
+  test('the dev stack gives the connector the same network and secret, and the app holder joins that network', () => {
+    const dev = z
+      .object({
+        services: z.object({
+          loopback: z.object({ networks: z.array(z.string()) }),
+          server: z.object({ environment: z.object({ CALENDAR_ACCOUNT_SECRET: z.string() }).loose() }),
+          'calendar-caldav': z.object({
+            networks: z.tuple([z.literal('calendar')]),
+            environment: z.object({ CALENDAR_ACCOUNT_SECRET: z.string() }).loose(),
+          }),
+        }),
+      })
+      .loose()
+      .parse(load('docker-compose.yml'));
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar']);
+    expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
+      dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
+    );
+    // Any other service the file lists stays off the calendar network.
+    const others = Object.entries(
+      z.object({ services: z.record(z.string(), z.unknown()) }).parse(load('docker-compose.yml')).services,
+    )
+      .filter(([name]) => name !== 'loopback' && name !== 'calendar-caldav')
+      .filter(([, service]) => JSON.stringify(service).includes('"calendar"'));
+    expect(others.map(([name]) => name)).toEqual([]);
+  });
+
   test('the app is told nothing about a calendar agent when the connector is left out', () => {
     const app = z
       .object({ services: z.object({ app: z.object({ environment: z.record(z.string(), z.string()) }) }) })

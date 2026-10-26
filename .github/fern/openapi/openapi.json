@@ -507,6 +507,10 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "search_provider": {
+            "description": "True for the connector chosen for web search. Every chat uses it unless the person turns it off.",
+            "type": "boolean"
+          },
           "url": {
             "description": "URL of the remote MCP server.",
             "format": "uri",
@@ -1160,6 +1164,13 @@
             "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
             "type": "boolean"
           },
+          "calendar_url": {
+            "description": "The calendar address of the connected account; null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "email": {
             "description": "The email address of the connected account; null when none is connected.",
             "type": [
@@ -1179,19 +1190,29 @@
             "type": "array"
           },
           "state": {
-            "description": "Connected, not connected, or connected but the saved sign-in no longer works.",
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
             "enum": [
               "connected",
               "not_connected",
-              "sign_in_stopped"
+              "sign_in_stopped",
+              "not_working"
             ],
             "type": "string"
+          },
+          "username": {
+            "description": "The login name of the connected account; never the password.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "available",
           "state",
           "email",
+          "username",
+          "calendar_url",
           "provider_key",
           "providers"
         ],
@@ -2605,11 +2626,12 @@
             "type": "array"
           },
           "state": {
-            "description": "Connected, not connected, or connected but the saved sign-in no longer works.",
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
             "enum": [
               "connected",
               "not_connected",
-              "sign_in_stopped"
+              "sign_in_stopped",
+              "not_working"
             ],
             "type": "string"
           }
@@ -23876,7 +23898,7 @@
                 }
               }
             },
-            "description": "The request did not come from this app, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -23950,7 +23972,7 @@
                 }
               }
             },
-            "description": "The request did not come from this app, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -23976,7 +23998,7 @@
     },
     "/api/v1/user/settings/calendar/status": {
       "get": {
-        "description": "Returns whether a calendar account is connected, its email and provider, and the provider table for the picker. The app password is never returned.",
+        "description": "Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.",
         "responses": {
           "200": {
             "content": {
@@ -23997,6 +24019,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -24052,7 +24084,7 @@
                 }
               }
             },
-            "description": "The request did not come from Aman, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -24126,7 +24158,7 @@
                 }
               }
             },
-            "description": "The request did not come from Aman, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -24173,6 +24205,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {

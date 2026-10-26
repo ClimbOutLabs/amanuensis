@@ -53,6 +53,7 @@ function childEnv({ accountFile, port, agentPort }) {
     PATH: process.env.PATH ?? '',
     CALENDAR_ACCOUNT_FILE: accountFile,
     CALENDAR_ACCOUNT_PORT: String(agentPort),
+    CALENDAR_ACCOUNT_SECRET: 'test-account-secret-0123456789abcdef0123',
     CALENDAR_MCP_HOST: '127.0.0.1',
     CALENDAR_MCP_PORT: String(port),
     CALDAV_ALLOW_TOOLS: CALENDAR_TOOLS.join(','),
@@ -196,5 +197,33 @@ describe('calendar sidecar follows the saved account', () => {
 
     rmSync(accountFile);
     await waitFor(async () => !(await listening(port)), 'the tool server to stop');
+  });
+});
+
+describe('calendar sidecar without an account secret', () => {
+  let child;
+  let folder;
+
+  after(() => {
+    child?.kill('SIGTERM');
+    if (folder !== undefined) {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the account port closed and says so in one line', async () => {
+    const port = await freePort();
+    const agentPort = await freePort();
+    folder = mkdtempSync(join(tmpdir(), 'calendar-sidecar-'));
+    const [command, ...args] = entrypointFromDockerfile();
+    const withoutSecret = childEnv({ accountFile: join(folder, '.env.calendar'), port, agentPort });
+    delete withoutSecret.CALENDAR_ACCOUNT_SECRET;
+    let stderr = '';
+    child = spawn(command, args, { cwd: SIDECAR_ROOT, env: withoutSecret, stdio: ['ignore', 'ignore', 'pipe'] });
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+    });
+    await waitFor(async () => stderr.includes('its port is closed'), 'the closed-port line');
+    assert.equal(await listeningAt(`http://127.0.0.1:${agentPort}/account`), false);
   });
 });

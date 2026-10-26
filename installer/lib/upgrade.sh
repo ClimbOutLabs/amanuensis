@@ -137,7 +137,13 @@ upgrade_old_connector_notice() { # file, connector name
   done
 }
 
+# A calendar account the older installer kept in the instance folder is moved into the connector's own storage. Only
+# one that could not be moved is reported, so the notice stops once the account is moved.
 upgrade_old_account_notices() {
+  local name
+  for name in $(reg_names); do
+    calendar_migrate_old_file "$name" || true
+  done
   upgrade_old_connector_notice .env.mail-email Email
   upgrade_old_connector_notice .env.calendar Calendar
 }

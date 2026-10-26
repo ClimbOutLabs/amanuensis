@@ -9,6 +9,8 @@ const STATUS_BODY = {
     available: true,
     state: 'connected',
     email: 'owner@example.invalid',
+    username: 'owner-login',
+    calendar_url: 'https://caldav.fastmail.com/dav/',
     provider_key: 'fastmail',
     providers: [
       {
@@ -61,6 +63,8 @@ describe('createCalendarSetupApi', () => {
     expect(seen[0]?.url).toBe('http://harness.test/api/v1/user/settings/calendar/status');
     expect(status.providerKey).toBe('fastmail');
     expect(status.email).toBe('owner@example.invalid');
+    expect(status.username).toBe('owner-login');
+    expect(status.calendarUrl).toBe('https://caldav.fastmail.com/dav/');
     expect(status.providers[0]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
     expect(status.providers[0]?.helpUrl).toContain('fastmail.help');
     expect(status.providers[1]?.helpUrl).toBeNull();
@@ -100,7 +104,7 @@ describe('createCalendarSetupApi', () => {
 
   it('remove sends a JSON body, so the call is not refused as foreign', async () => {
     const { api, seen } = apiWith(async () =>
-      reply({ data: { ...STATUS_BODY.data, state: 'not_connected', email: null } }),
+      reply({ data: { ...STATUS_BODY.data, state: 'not_connected', email: null, username: null, calendar_url: null } }),
     );
     const status = await api.removeCalendarAccount();
     expect(status.state).toBe('not_connected');
@@ -127,8 +131,56 @@ describe('createCalendarSetupApi', () => {
     ).rejects.toThrow('That login was refused. Make a new app password and try again.');
   });
 
-  it('a reply of the wrong shape is dropped, not trusted', async () => {
+  it('a reply of the wrong shape is dropped, not trusted, and the person gets a plain line', async () => {
     const { api } = apiWith(async () => reply({ data: { password: CANARY } }));
-    await expect(api.getCalendarStatus()).rejects.toThrow('unexpected calendar payload');
+    const failure = await api.getCalendarStatus().catch((caught: unknown) => caught);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure instanceof Error ? failure.message : '').toBe(
+      'The server answered in a way this page cannot read. Reload the page, then try again.',
+    );
+    expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
+  });
+
+  it('reads the not working state', async () => {
+    const { api } = apiWith(async () => reply({ data: { ...STATUS_BODY.data, state: 'not_working' } }));
+    expect((await api.getCalendarStatus()).state).toBe('not_working');
+  });
+
+  it('never shows technical text: a dropped connection, a missing session, a member, a crash and a bare error', async () => {
+    const cases: { make: () => Promise<Response>; says: string }[] = [
+      {
+        make: () => Promise.reject(new TypeError('Failed to fetch')),
+        says: "Couldn't reach the server. Check your internet connection and try again.",
+      },
+      {
+        make: async () => reply({ error: { message: 'Authentication required' } }, 401),
+        says: 'You are signed out. Sign in again, then try again.',
+      },
+      {
+        make: async () => reply({ error: { message: 'Admin access required' } }, 403),
+        says: 'Only the owner can change this. Sign in as the owner, then try again.',
+      },
+      {
+        make: async () => reply({ error: { message: 'TypeError: x is not a function at foo.ts:1' } }, 500),
+        says: 'Something went wrong on the server. Wait a minute, then try again.',
+      },
+      {
+        make: async () => new Response('<html>Bad gateway</html>', { status: 404 }),
+        says: 'That did not work. Try again.',
+      },
+    ];
+    for (const { make, says } of cases) {
+      const { api } = apiWith(make);
+      const failure = await api.getCalendarStatus().catch((caught: unknown) => caught);
+      expect(failure instanceof Error ? failure.message : '').toBe(says);
+      expect(failure instanceof Error ? failure.message : '').not.toMatch(/HTTP|Failed to fetch|payload|TypeError/);
+    }
+  });
+
+  it('keeps the original failure as the cause of the plain line', async () => {
+    const original = new TypeError('Failed to fetch');
+    const { api } = apiWith(() => Promise.reject(original));
+    const failure = await api.getCalendarStatus().catch((caught: unknown) => caught);
+    expect(failure instanceof Error ? failure.cause : undefined).toBe(original);
   });
 });

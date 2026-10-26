@@ -1,8 +1,9 @@
 // The calendar sidecar's account agent: the Settings Calendar card's counterpart inside the sidecar.
-// It listens on the instance's private network only (the port is exposed inside the compose network,
-// never published). The account lives in one file in the sidecar's own volume. The installer writes it
-// through this file's command line, and the Settings card writes it through the HTTP port. The
-// supervisor in entrypoint.mjs restarts the tool server whenever that file changes.
+// It listens on a private network that only the app shares (the port is exposed inside the compose
+// network, never published), and answers only a caller that presents the instance's secret. The account
+// lives in one file in the sidecar's own volume. The installer writes it through this file's command line,
+// and the Settings card writes it through the HTTP port. The supervisor in entrypoint.mjs restarts the
+// tool server whenever that file changes.
 //
 // Rules kept here:
 // - The password is accepted only in a save request or on stdin, is checked before anything is stored,
@@ -11,7 +12,7 @@
 // - Nothing is logged: the server prints no request lines, and an unexpected failure prints only the
 //   exception's type name.
 import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -28,7 +29,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  accountIsWellFormed,
+  accountProblem,
   allowedAddresses,
   hostOf,
   parseAccount,
@@ -40,6 +41,8 @@ import { checkSignIn } from './signin.mjs';
 export const DEFAULT_ACCOUNT_FILE = '/account/.env.calendar';
 export const DEFAULT_PORT = 9560;
 const ALLOWED_HOSTS = new Set(['calendar-caldav', 'localhost', '127.0.0.1']);
+/** A shorter secret is treated as none: the account port stays closed rather than guarded by a weak value. */
+export const MIN_SECRET_LENGTH = 32;
 const RECHECK_AFTER_MS = 300_000;
 const MAX_BODY_BYTES = 65_536;
 
@@ -85,7 +88,25 @@ function fingerprintOf(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-const SIGN_IN_WORDS = { ok: 'ok', login: 'refused', server: 'unreachable', blocked: 'unreachable' };
+// What a status answer says about the saved login. Anything but ok or refused means the tool server cannot
+// sign in right now, which the app shows as "not working".
+const SIGN_IN_WORDS = {
+  ok: 'ok',
+  login: 'refused',
+  server: 'unreachable',
+  blocked: 'unreachable',
+  certificate: 'unreachable',
+  redirect: 'unreachable',
+};
+
+// What a save answers when the sign-in check does not pass.
+const SAVE_REFUSALS = {
+  blocked: 'address_not_allowed',
+  login: 'sign_in_refused',
+  certificate: 'certificate_refused',
+  redirect: 'redirected',
+  server: 'server_unreachable',
+};
 
 /** Builds the agent. `deps` replaces the network and the clock in tests. */
 export function createAgent({ file = DEFAULT_ACCOUNT_FILE, deps = {} } = {}) {
@@ -122,18 +143,14 @@ export function createAgent({ file = DEFAULT_ACCOUNT_FILE, deps = {} } = {}) {
       payload !== null && typeof payload === 'object'
         ? { url: payload.url, username: payload.username, password: payload.password, email: payload.email }
         : null;
-    if (!accountIsWellFormed(candidate)) {
-      return { status: 400, body: { error: 'invalid' } };
+    const problem = accountProblem(candidate);
+    if (problem !== null) {
+      // The field's name is a fixed word, so the app can say which value to fix without repeating it.
+      return { status: 400, body: { error: 'invalid', field: problem } };
     }
     const result = await checkSignIn(candidate, deps);
-    if (result === 'blocked') {
-      return { status: 400, body: { error: 'address_not_allowed' } };
-    }
-    if (result === 'login') {
-      return { status: 400, body: { error: 'sign_in_refused' } };
-    }
     if (result !== 'ok') {
-      return { status: 400, body: { error: 'server_unreachable' } };
+      return { status: 400, body: { error: SAVE_REFUSALS[result] ?? 'server_unreachable' } };
     }
     const text = renderAccount(candidate);
     writeAccountText({ file, text });
@@ -172,8 +189,32 @@ function readBody(req) {
   });
 }
 
-/** The HTTP face of the agent, with no request log. */
-export function createAgentServer({ agent }) {
+/** True when the secret is long enough to guard the account port. */
+export function secretIsUsable(secret) {
+  return typeof secret === 'string' && secret.length >= MIN_SECRET_LENGTH;
+}
+
+/** Compares the presented header with the secret in constant time, whatever the lengths. */
+function presentedSecretMatches({ header, secret }) {
+  const presented = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  const left = createHash('sha256').update(presented, 'utf8').digest();
+  const right = createHash('sha256').update(secret, 'utf8').digest();
+  return timingSafeEqual(left, right);
+}
+
+/** True for a JSON body, with or without a charset; any other kind of body is refused. */
+function isJsonContentType(header) {
+  return typeof header === 'string' && /^application\/json\s*(;|$)/i.test(header.trim());
+}
+
+/**
+ * The HTTP face of the agent, with no request log. Every request must carry the instance's secret as a
+ * bearer token, so another container on the network cannot read, replace or delete the account.
+ */
+export function createAgentServer({ agent, secret }) {
+  if (!secretIsUsable(secret)) {
+    throw new Error('the account agent needs a secret of at least 32 characters');
+  }
   function send(res, { status, body }) {
     const data = JSON.stringify(body);
     res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) });
@@ -187,6 +228,10 @@ export function createAgentServer({ agent }) {
         send(res, { status: 403, body: { error: 'forbidden_host' } });
         return;
       }
+      if (!presentedSecretMatches({ header: req.headers.authorization, secret })) {
+        send(res, { status: 401, body: { error: 'unauthorized' } });
+        return;
+      }
       if (req.url !== '/account') {
         send(res, { status: 404, body: { error: 'not_found' } });
         return;
@@ -196,6 +241,10 @@ export function createAgentServer({ agent }) {
       } else if (req.method === 'DELETE') {
         send(res, await agent.remove());
       } else if (req.method === 'POST') {
+        if (!isJsonContentType(req.headers['content-type'])) {
+          send(res, { status: 415, body: { error: 'unsupported_media_type' } });
+          return;
+        }
         let payload;
         try {
           payload = JSON.parse(await readBody(req));
@@ -288,13 +337,7 @@ export async function runCommand({ command, file, stdin, deps = {}, out = proces
 
 async function main() {
   const file = process.env.CALENDAR_ACCOUNT_FILE ?? DEFAULT_ACCOUNT_FILE;
-  const command = process.argv[2];
-  if (command === undefined) {
-    const port = Number(process.env.CALENDAR_ACCOUNT_PORT ?? DEFAULT_PORT);
-    createAgentServer({ agent: createAgent({ file }) }).listen(port, '0.0.0.0');
-    return;
-  }
-  process.exitCode = await runCommand({ command, file, stdin: readStdin });
+  process.exitCode = await runCommand({ command: process.argv[2], file, stdin: readStdin });
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {

@@ -17,6 +17,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof AccountConnec
       description="Look at your calendar."
       connectedLine="Connected as owner@example.invalid."
       stoppedLine="Sign-in stopped working. Make a new app password and save it again."
+      notWorkingLine="Your calendar server could not be reached. Check your internet connection, then open Manage."
       failedLabel="Couldn't check calendar right now"
       state="not_connected"
       failed={false}
@@ -48,6 +49,18 @@ describe('AccountConnectorCard', () => {
     renderCard({ state: 'sign_in_stopped' });
     expect(screen.getByText('Sign-in stopped working')).toBeTruthy();
     expect(screen.getByText('Sign-in stopped working. Make a new app password and save it again.')).toBeTruthy();
+  });
+
+  it('says plainly when the saved account cannot be reached right now, and offers Manage', () => {
+    renderCard({ state: 'not_working' });
+    expect(screen.getByText('Not working right now')).toBeTruthy();
+    expect(screen.getByText(/could not be reached\. Check your internet connection/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeTruthy();
+  });
+
+  it('offers Manage for a stopped sign-in too, so the account can be changed or removed', () => {
+    renderCard({ state: 'sign_in_stopped' });
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeTruthy();
   });
 
   it('offers Try again instead of the panel when the status could not be read', () => {

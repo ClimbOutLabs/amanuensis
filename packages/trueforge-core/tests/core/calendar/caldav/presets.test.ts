@@ -120,7 +120,7 @@ describe('calendar value rules', () => {
     'https://caldav.example.invalid/?q=1',
   ];
   const users = ['owner@example.invalid', '', 'a b', 'a;b'];
-  const passwords = ['abcd-efgh-ijkl-mnop', '', 'has space', "it's", 'a\u0007b'];
+  const passwords = ['abcd-efgh-ijkl-mnop', '', 'has space', "it's"];
 
   it('agrees with the installer on what is acceptable', () => {
     for (const url of urls) {
@@ -142,5 +142,18 @@ describe('calendar value rules', () => {
     expect(caldavUserProblem('a b')).toContain('Use only letters');
     expect(caldavEmailProblem('not-an-address')).not.toBeNull();
     expect(caldavEmailProblem('owner@example.invalid')).toBeNull();
+  });
+
+  it('leaves the characters of a password to the calendar sidecar, which owns that rule', () => {
+    for (const password of ['it\'s a "quoted" #1 = é', 'two words', '日本語']) {
+      expect(caldavPasswordProblem(password)).toBeNull();
+    }
+    expect(caldavPasswordProblem('x'.repeat(513))).toContain('too long');
+  });
+
+  it('keeps the email address to printable ASCII, so the tool server is never given one it cannot use', () => {
+    expect(caldavEmailProblem('a\u0001b@example.invalid')).toContain('character that cannot be saved');
+    expect(caldavEmailProblem('owner@exämple.invalid')).toContain('character that cannot be saved');
+    expect(caldavEmailProblem('first.last+tag@example.invalid')).toBeNull();
   });
 });

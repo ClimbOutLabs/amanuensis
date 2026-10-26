@@ -1,44 +1,36 @@
 /**
- * Calendar account API under /api/v1/user/settings/calendar: the Settings Calendar card's endpoints.
- * Browser session only (mounted behind the UI-session middleware, like Google's and Email's), so no
- * agent or API token can read or change the account. The app password passes through the save call
- * to the sidecar's account agent and is never stored here, never logged, and never returned; the
- * responses are built only from the account's public view.
+ * Calendar account API under /api/v1/user/settings/calendar: the Settings Calendar card's endpoints. What each
+ * call does is shared with Email (see connectorAccountHandlers.ts); this file holds Calendar's own status shape.
  */
-import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
 import {
   CALDAV_PROVIDER_PRESETS,
   caldavProviderKeyForUrl,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 import type { Logger } from 'winston';
-import type { ResolveRequestContext } from '../auth/identity';
 import configuration, { calendarMcpUrlFromAccountUrl } from '../config';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import { calendarAccountRoutes } from '../routes/calendarAccountRoutes';
 import {
-  getCalendarAccountStatusRoute,
-  removeCalendarAccountRoute,
-  saveCalendarAccountRoute,
-} from '../routes/calendarAccountRoutes';
-import {
-  CalendarAccountError,
   getCalendarAccountState,
   removeCalendarAccount,
   saveCalendarAccount,
   syncCalendarConnectorWithAccount,
-  type CalendarAccountState,
+  type PublicCalendarAccount,
 } from '../runtime/calendarAccount';
-import type { CalendarAccountStatus } from '../schemas/calendarAccount';
+import { connectionStateOf } from '../runtime/connectorAccount';
+import type { CalendarAccountStatus, SaveCalendarAccountRequest } from '../schemas/calendarAccount';
+import { createConnectorAccountHandlers } from './connectorAccountHandlers';
 import { requireJsonOrSameOrigin } from './crossSite';
 import { TENANT_ID } from './sessions';
 
 export const CALENDAR_SETTINGS_BASE_PATH = '/api/v1/user/settings/calendar';
 
 interface CalendarAccountRouterDeps {
-  resolveRequestContext: ResolveRequestContext;
   logger: Logger;
   /** Replaceable so tests never reach a real sidecar. */
   fetchImpl: typeof fetch | undefined;
-  mcpServerStore: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer'>;
+  mcpServerStore: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer' | 'getServer'>;
 }
 
 const DEFAULT_PROVIDER_KEY = 'fastmail';
@@ -53,104 +45,76 @@ function providerTable(): CalendarAccountStatus['providers'] {
   }));
 }
 
-function statusBody(state: CalendarAccountState): CalendarAccountStatus {
-  return {
-    available: true,
-    state: !state.connected ? 'not_connected' : state.sign_in === 'refused' ? 'sign_in_stopped' : 'connected',
-    email: state.account?.email ?? null,
-    provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : caldavProviderKeyForUrl(state.account.url),
-    providers: providerTable(),
-  };
-}
-
-function unavailableBody(): CalendarAccountStatus {
-  return {
-    available: false,
-    state: 'not_connected',
-    email: null,
-    provider_key: DEFAULT_PROVIDER_KEY,
-    providers: providerTable(),
-  };
-}
-
 export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
   const clientDeps = () => ({
     accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+    secret: configuration.CALENDAR_ACCOUNT_SECRET,
     fetchImpl: deps.fetchImpl,
     logger: deps.logger,
   });
-  const effectiveMcpUrl = () =>
-    configuration.CALENDAR_CONNECTOR_URL ?? calendarMcpUrlFromAccountUrl(configuration.CALENDAR_ACCOUNT_URL);
-
-  const syncConnector = async (state: CalendarAccountState) => {
-    await syncCalendarConnectorWithAccount({
-      state,
-      mcpUrl: effectiveMcpUrl(),
-      mcpServerStore: deps.mcpServerStore,
-      tenant_id: TENANT_ID,
-      logger: deps.logger,
-    });
-  };
-
-  const statusHandler: RouteHandler<typeof getCalendarAccountStatusRoute> = async c => {
-    if (configuration.CALENDAR_ACCOUNT_URL === undefined) {
-      return c.json({ data: unavailableBody() }, 200);
-    }
-    try {
-      return c.json({ data: statusBody(await getCalendarAccountState(clientDeps())) }, 200);
-    } catch (caught) {
-      if (caught instanceof CalendarAccountError) {
-        // A status read can only fail one way: the connector could not be reached.
-        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
-      }
-      throw caught;
-    }
-  };
-
-  const saveHandler: RouteHandler<typeof saveCalendarAccountRoute> = async c => {
-    // The account is instance-wide and the router sits behind the browser-session middleware;
-    // resolving the caller is the owner check, the same pattern as the other settings routers.
-    deps.resolveRequestContext(c);
-    const body = c.req.valid('json');
-    try {
-      const state = await saveCalendarAccount(clientDeps(), {
-        provider_key: body.provider_key,
-        email: body.email,
-        password: body.password,
-        username: body.username,
-        calendar_url: body.calendar_url,
-      });
-      await syncConnector(state);
-      return c.json({ data: statusBody(state) }, 201);
-    } catch (caught) {
-      if (caught instanceof CalendarAccountError) {
-        return caught.failure === 'connector_unreachable'
-          ? c.json({ error: { message: caught.message, type: caught.failure } }, 502)
-          : c.json({ error: { message: caught.message, type: caught.failure } }, 400);
-      }
-      throw caught;
-    }
-  };
-
-  const removeHandler: RouteHandler<typeof removeCalendarAccountRoute> = async c => {
-    deps.resolveRequestContext(c);
-    try {
-      const state = await removeCalendarAccount(clientDeps());
-      await syncConnector(state);
-      return c.json({ data: statusBody(state) }, 200);
-    } catch (caught) {
-      if (caught instanceof CalendarAccountError) {
-        // A removal can only fail one way: the connector could not be reached.
-        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
-      }
-      throw caught;
-    }
-  };
+  const handlers = createConnectorAccountHandlers<
+    PublicCalendarAccount,
+    SaveCalendarAccountRequest,
+    CalendarAccountStatus
+  >({
+    // The card needs both the agent's address and the secret it answers to.
+    isAvailable: () =>
+      configuration.CALENDAR_ACCOUNT_URL !== undefined && configuration.CALENDAR_ACCOUNT_SECRET !== undefined,
+    unavailableBody: () => ({
+      available: false,
+      state: 'not_connected',
+      email: null,
+      username: null,
+      calendar_url: null,
+      provider_key: DEFAULT_PROVIDER_KEY,
+      providers: providerTable(),
+    }),
+    statusBody: state => ({
+      available: true,
+      state: connectionStateOf(state),
+      email: state.account?.email ?? null,
+      username: state.account?.username ?? null,
+      calendar_url: state.account?.url ?? null,
+      provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : caldavProviderKeyForUrl(state.account.url),
+      providers: providerTable(),
+    }),
+    readState: () => getCalendarAccountState(clientDeps()),
+    save: request =>
+      saveCalendarAccount(clientDeps(), {
+        provider_key: request.provider_key,
+        email: request.email,
+        password: request.password,
+        username: request.username,
+        calendar_url: request.calendar_url,
+      }),
+    remove: () => removeCalendarAccount(clientDeps()),
+    sync: state =>
+      syncCalendarConnectorWithAccount({
+        state,
+        mcpUrl:
+          configuration.CALENDAR_CONNECTOR_URL ?? calendarMcpUrlFromAccountUrl(configuration.CALENDAR_ACCOUNT_URL),
+        mcpServerStore: deps.mcpServerStore,
+        tenant_id: TENANT_ID,
+        logger: deps.logger,
+      }),
+  });
 
   const router = new OpenAPIHono();
   router.use('/', requireJsonOrSameOrigin());
-  router.openapi(getCalendarAccountStatusRoute, statusHandler);
-  router.openapi(saveCalendarAccountRoute, saveHandler);
-  router.openapi(removeCalendarAccountRoute, removeHandler);
+  router.openapi(calendarAccountRoutes.status, async c => {
+    const answer = await handlers.status();
+    return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
+  router.openapi(calendarAccountRoutes.save, async c => {
+    const answer = await handlers.save(c.req.valid('json'));
+    if (answer.status === 201) {
+      return c.json(answer.body, 201);
+    }
+    return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
+  });
+  router.openapi(calendarAccountRoutes.remove, async c => {
+    const answer = await handlers.remove();
+    return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
   return router;
 }

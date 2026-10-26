@@ -5,14 +5,17 @@ import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from '../../
 import configuration from '../../../src/config';
 import type {
   DeleteMcpServerInput,
+  GetMcpServerInput,
   IMcpServerStore,
   McpServerRecord,
   UpsertMcpServerInput,
 } from '../../../src/db/mcpServerStore';
 import {
   CALENDAR_ADDRESS_NOT_ALLOWED_MESSAGE,
+  CALENDAR_CERTIFICATE_MESSAGE,
   CALENDAR_CONNECTOR_UNREACHABLE_MESSAGE,
   CALENDAR_DETAILS_UNUSABLE_MESSAGE,
+  CALENDAR_REDIRECT_MESSAGE,
   CALENDAR_SERVER_UNREACHABLE_MESSAGE,
   CALENDAR_SIGN_IN_REFUSED_MESSAGE,
   CALENDAR_STATUS_UNREACHABLE_MESSAGE,
@@ -23,25 +26,29 @@ const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const ACCOUNT_URL = 'http://calendar-caldav:9560';
 const MCP_URL = 'http://calendar-caldav:9558/mcp';
 const EMAIL = 'owner@example.invalid';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
 
-type AgentReply = { status: number; body: unknown };
+/** A scripted answer, or a request that fails before any answer, as a timeout does. */
+type AgentReply = { status: number; body: unknown } | { fails: true };
 
 /** One recorded call to the fake account agent. */
-type AgentCall = { method: string; url: string; body: string | undefined };
+type AgentCall = { method: string; url: string; body: string | undefined; authorization: string | undefined };
 
 /** The agent the server proxies to: answers from a script and records every call. */
 function makeFakeAgent() {
   const calls: AgentCall[] = [];
   let replies: AgentReply[] = [];
   const fetchImpl = async (input: string | Request | URL, init?: RequestInit): Promise<Response> => {
+    const authorization = new Headers(init?.headers).get('authorization') ?? undefined;
     calls.push({
       method: init?.method ?? 'GET',
       url: String(input),
       body: typeof init?.body === 'string' ? init.body : undefined,
+      authorization,
     });
     const reply = replies.shift();
-    if (reply === undefined) {
-      throw new Error('the fake agent ran out of replies');
+    if (reply === undefined || 'fails' in reply) {
+      throw new Error('the fake agent could not answer');
     }
     return new Response(JSON.stringify(reply.body), {
       status: reply.status,
@@ -71,31 +78,41 @@ const CONNECTED: AgentBody = {
   sign_in: 'ok',
 };
 
-/** A fake MCP store for the connector registration the save and remove handlers keep in step. */
+/** A fake MCP store for the connector registration the handlers keep in step; `failing` makes writes throw. */
 function makeFakeStore() {
   const rows = new Map<string, UpsertMcpServerInput>();
-  const store: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer'> = {
+  const control = { failing: false };
+  const record = (input: UpsertMcpServerInput): McpServerRecord => ({
+    id: 'fake-id',
+    tenant_id: input.tenant_id,
+    name: input.name,
+    manifest: input.manifest,
+    first_party: input.first_party,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+  });
+  const store: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer' | 'getServer'> = {
     upsertServer: (input: UpsertMcpServerInput): Promise<McpServerRecord> => {
+      if (control.failing) {
+        return Promise.reject(new Error('the store is down'));
+      }
       rows.set(`${input.tenant_id}:${String(input.name)}`, input);
-      return Promise.resolve({
-        id: 'fake-id',
-        tenant_id: input.tenant_id,
-        name: input.name,
-        manifest: input.manifest,
-        first_party: input.first_party,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:00:00.000Z',
-      });
+      return Promise.resolve(record(input));
+    },
+    getServer: (input: GetMcpServerInput): Promise<McpServerRecord | undefined> => {
+      const row = rows.get(`${input.tenant_id}:${input.name}`);
+      return Promise.resolve(row === undefined ? undefined : record(row));
     },
     deleteServer: (input: DeleteMcpServerInput): Promise<boolean> =>
       Promise.resolve(rows.delete(`${input.tenant_id}:${input.name}`)),
   };
-  return { rows, store };
+  return { rows, store, control };
 }
 
 describe('the calendar settings endpoints', () => {
   const originalAccountUrl = configuration.CALENDAR_ACCOUNT_URL;
   const originalConnectorUrl = configuration.CALENDAR_CONNECTOR_URL;
+  const originalSecret = configuration.CALENDAR_ACCOUNT_SECRET;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
   let app: Hono;
@@ -104,14 +121,9 @@ describe('the calendar settings endpoints', () => {
     agent = makeFakeAgent();
     fakeStore = makeFakeStore();
     configuration.CALENDAR_ACCOUNT_URL = ACCOUNT_URL;
+    configuration.CALENDAR_ACCOUNT_SECRET = SECRET;
     configuration.CALENDAR_CONNECTOR_URL = undefined;
     const router = createCalendarAccountRouter({
-      resolveRequestContext: () => ({
-        tenant_id: 't1',
-        subject: { id: 'owner-1', type: 'user', display_name: 'owner-1' },
-        roles: [],
-        user_credential: null,
-      }),
       logger: createLogger({ silent: true }),
       fetchImpl: agent.fetchImpl,
       mcpServerStore: fakeStore.store,
@@ -123,6 +135,7 @@ describe('the calendar settings endpoints', () => {
   afterEach(() => {
     configuration.CALENDAR_ACCOUNT_URL = originalAccountUrl;
     configuration.CALENDAR_CONNECTOR_URL = originalConnectorUrl;
+    configuration.CALENDAR_ACCOUNT_SECRET = originalSecret;
   });
 
   async function call(input: {
@@ -308,8 +321,11 @@ describe('the calendar settings endpoints', () => {
         body: { provider_key: 'other', email: EMAIL, password: CANARY, calendar_url: 'https://localhost/' },
         says: 'full server name',
       },
-      { body: { provider_key: 'fastmail', email: EMAIL, password: "has a ' quote" }, says: 'cannot be saved' },
-      { body: { provider_key: 'fastmail', email: EMAIL, password: 'has space' }, says: 'cannot be saved' },
+      { body: { provider_key: 'fastmail', email: EMAIL, password: '' }, says: 'app password is needed' },
+      {
+        body: { provider_key: 'fastmail', email: 'a\u0001b@example.invalid', password: CANARY },
+        says: 'character that cannot be saved',
+      },
       { body: { provider_key: 'nowhere', email: EMAIL, password: CANARY }, says: 'not on the list' },
     ];
     for (const { body, says } of cases) {
@@ -405,6 +421,152 @@ describe('the calendar settings endpoints', () => {
     expect(text).not.toContain(CANARY);
     expect(fakeStore.rows.size).toBe(0);
     expect(agent.calls[1]?.method).toBe('DELETE');
+  });
+
+  it('presents the instance secret to the agent on every call, and nothing else as a credential', async () => {
+    agent.script([
+      { status: 200, body: NOT_CONNECTED },
+      { status: 200, body: CONNECTED },
+      { status: 200, body: NOT_CONNECTED },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    await call({ method: 'POST', path: '/', body: { provider_key: 'fastmail', email: EMAIL, password: CANARY } });
+    await call({ method: 'DELETE', path: '/', body: {} });
+    expect(agent.calls.map(sent => sent.authorization)).toEqual(Array(3).fill(`Bearer ${SECRET}`));
+    expect(agent.calls.map(sent => sent.url).join(' ')).not.toContain(SECRET);
+  });
+
+  it('leaves the card off while the agent has no secret to answer to', async () => {
+    configuration.CALENDAR_ACCOUNT_SECRET = undefined;
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.available).toBe(false);
+    expect(agent.calls).toHaveLength(0);
+  });
+
+  it('gives the saved address and login back for the form, and never the password', async () => {
+    agent.script([{ status: 200, body: { ...CONNECTED, username: 'owner-login', password: CANARY } }]);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(text).not.toContain(CANARY);
+    const data = JSON.parse(text).data;
+    expect(data.calendar_url).toBe('https://nas.example.invalid/dav/');
+    expect(data.username).toBe('owner-login');
+    expect(data.email).toBe(EMAIL);
+  });
+
+  it('says not working when the saved account cannot be signed in to right now, and keeps the connector', async () => {
+    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'unreachable' } }]);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.state).toBe('not_working');
+    expect(fakeStore.rows.size).toBe(1);
+  });
+
+  it('removes the connector when the saved login is refused, and does not register it', async () => {
+    agent.script([
+      { status: 200, body: CONNECTED },
+      { status: 200, body: { ...CONNECTED, sign_in: 'refused' } },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(1);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
+    expect(fakeStore.rows.size).toBe(0);
+    agent.script([{ status: 400, body: { error: 'sign_in_refused' } }]);
+    await call({ method: 'POST', path: '/', body: { provider_key: 'fastmail', email: EMAIL, password: CANARY } });
+    expect(fakeStore.rows.size).toBe(0);
+  });
+
+  it('every status read settles the registration from what the agent holds', async () => {
+    agent.script([
+      { status: 200, body: CONNECTED },
+      { status: 200, body: NOT_CONNECTED },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    expect([...fakeStore.rows.values()].map(row => row.name)).toEqual(['Calendar']);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(0);
+  });
+
+  it("never removes a connector named Calendar that is not the calendar sidecar's own", async () => {
+    await fakeStore.store.upsertServer({
+      tenant_id: 'default',
+      name: 'Calendar',
+      manifest: { type: 'remote', name: 'Calendar', url: 'https://mine.example.invalid/mcp', description: 'mine' },
+      first_party: false,
+    });
+    agent.script([{ status: 200, body: NOT_CONNECTED }]);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(1);
+  });
+
+  it('a save the connector registration could not follow still answers connected, and the next status read attaches it', async () => {
+    fakeStore.control.failing = true;
+    agent.script([{ status: 200, body: CONNECTED }]);
+    const saved = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'fastmail', email: EMAIL, password: CANARY },
+    });
+    expect(saved.status).toBe(201);
+    expect(fakeStore.rows.size).toBe(0);
+    fakeStore.control.failing = false;
+    agent.script([{ status: 200, body: CONNECTED }]);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(1);
+  });
+
+  it('a save that timed out asks the agent what it really holds, and attaches the connector when it saved', async () => {
+    agent.script([{ fails: true }, { status: 200, body: CONNECTED }]);
+    const { status, text } = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'fastmail', email: EMAIL, password: CANARY },
+    });
+    expect(status).toBe(502);
+    expect(JSON.parse(text).error.message).toBe(CALENDAR_CONNECTOR_UNREACHABLE_MESSAGE);
+    expect(text).not.toContain(CANARY);
+    expect(agent.calls).toHaveLength(2);
+    expect(agent.calls[1]?.method).toBe('GET');
+    expect(fakeStore.rows.size).toBe(1);
+  });
+
+  it('a removal that timed out asks the agent again, and detaches the connector when it was removed', async () => {
+    agent.script([{ status: 200, body: CONNECTED }]);
+    await call({ method: 'GET', path: '/status' });
+    expect(fakeStore.rows.size).toBe(1);
+    agent.script([{ fails: true }, { status: 200, body: NOT_CONNECTED }]);
+    const { status } = await call({ method: 'DELETE', path: '/', body: {} });
+    expect(status).toBe(502);
+    expect(fakeStore.rows.size).toBe(0);
+  });
+
+  it('names a certificate the server did not accept and a redirect to another server, each with one next step', async () => {
+    agent.script([
+      { status: 400, body: { error: 'certificate_refused' } },
+      { status: 400, body: { error: 'redirected' } },
+    ]);
+    const body = {
+      provider_key: 'other',
+      email: EMAIL,
+      password: CANARY,
+      calendar_url: 'https://nas.example.invalid/dav/',
+    };
+    const first = await call({ method: 'POST', path: '/', body });
+    expect(JSON.parse(first.text).error.message).toBe(CALENDAR_CERTIFICATE_MESSAGE);
+    const second = await call({ method: 'POST', path: '/', body });
+    expect(JSON.parse(second.text).error.message).toBe(CALENDAR_REDIRECT_MESSAGE);
+    expect(first.status).toBe(400);
+    expect(second.status).toBe(400);
+  });
+
+  it('says which value the connector refused, without repeating it', async () => {
+    agent.script([{ status: 400, body: { error: 'invalid', field: 'password' } }]);
+    const { text } = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'fastmail', email: EMAIL, password: CANARY },
+    });
+    expect(JSON.parse(text).error.message).toContain('app password has a character that cannot be saved');
+    expect(text).not.toContain(CANARY);
   });
 
   it('refuses a form post from another site: no JSON body, no save', async () => {

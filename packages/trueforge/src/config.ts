@@ -340,6 +340,26 @@ export function parseCalendarAccountUrl(raw: string | undefined): string | undef
   return trimmed;
 }
 
+/** The shortest account secret the calendar connector accepts; a shorter one keeps its account port closed. */
+const CALENDAR_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `CALENDAR_ACCOUNT_SECRET`: the value the calendar connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseCalendarAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < CALENDAR_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `CALENDAR_ACCOUNT_SECRET must be at least ${String(CALENDAR_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Calendar card off.`,
+    );
+  }
+  return trimmed;
+}
+
 /**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
@@ -1192,6 +1212,12 @@ export interface SharedServerConfiguration {
    * Env: `CALENDAR_ACCOUNT_URL`. Default unset.
    */
   CALENDAR_ACCOUNT_URL: string | undefined;
+  /**
+   * The secret the calendar connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Calendar card is left off.
+   * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
+   */
+  CALENDAR_ACCOUNT_SECRET: string | undefined;
   /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
@@ -2086,6 +2112,7 @@ const shared: SharedServerConfiguration = {
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
   CALENDAR_ACCOUNT_URL: parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL')),
+  CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

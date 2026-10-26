@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   accountIsWellFormed,
+  accountProblem,
   addressAllowed,
   allowedAddresses,
   ownNetworks,
@@ -51,15 +52,36 @@ describe('the account file', () => {
       { url: 'https://caldav.example.invalid/?a=b' },
       { username: 'a b' },
       { username: 'a\nCALDAV_URL=x' },
-      { password: "it's" },
-      { password: 'two words' },
       { password: 'a\nb' },
+      { password: 'tab\there' },
+      { password: 'line\u2028break' },
+      { password: ' padded' },
+      { password: 'padded ' },
       { password: '' },
       { email: 'not-an-address' },
+      { email: 'a\u0001b@example.invalid' },
+      { email: 'owner@exa\u007fmple.invalid' },
+      { email: 'own er@example.invalid' },
     ]) {
       assert.equal(accountIsWellFormed({ ...ACCOUNT, ...bad }), false, JSON.stringify(bad));
     }
     assert.equal(accountIsWellFormed(ACCOUNT), true);
+  });
+
+  it('takes any printable password, and reads back exactly what was written', () => {
+    for (const password of [`it's`, 'two words', 'p@ss "quoted" #1 = é', '#starts-with-hash', 'a=b=c', '日本語パスワード']) {
+      const account = { ...ACCOUNT, password };
+      assert.equal(accountIsWellFormed(account), true, password);
+      assert.deepEqual(parseAccount(renderAccount(account)), account, password);
+    }
+  });
+
+  it('names the first field that cannot be saved, never its value', () => {
+    assert.equal(accountProblem({ ...ACCOUNT, url: 'http://x.example.invalid/' }), 'url');
+    assert.equal(accountProblem({ ...ACCOUNT, username: 'a b' }), 'username');
+    assert.equal(accountProblem({ ...ACCOUNT, password: 'a\nb' }), 'password');
+    assert.equal(accountProblem({ ...ACCOUNT, email: 'nope' }), 'email');
+    assert.equal(accountProblem(ACCOUNT), null);
   });
 
   it('shows everything but the password', () => {

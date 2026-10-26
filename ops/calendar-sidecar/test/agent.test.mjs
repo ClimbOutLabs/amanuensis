@@ -9,9 +9,10 @@ import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { ownNetworks, renderAccount } from '../account.mjs';
-import { createAgent, createAgentServer, runCommand } from '../agent.mjs';
+import { createAgent, createAgentServer, MIN_SECRET_LENGTH, runCommand } from '../agent.mjs';
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
 const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
@@ -66,6 +67,11 @@ describe('the calendar account agent', () => {
     tlsCert = readFileSync(cert);
     calendarServer = createHttpsServer({ key: readFileSync(key), cert: tlsCert }, (req, res) => {
       seen.push({ method: req.method, authorization: req.headers.authorization, url: req.url });
+      if (behavior === 'slash' && !req.url.endsWith('/')) {
+        res.writeHead(301, { Location: `${req.url}/` });
+        res.end();
+        return;
+      }
       if (behavior === 'redirect') {
         res.writeHead(302, { Location: 'https://other.example.invalid/' });
         res.end('redirect echoing ' + (req.headers.authorization ?? ''));
@@ -111,7 +117,7 @@ describe('the calendar account agent', () => {
     agent = createAgent({ file, deps });
     listener?.closeAllConnections();
     listener?.close();
-    listener = createAgentServer({ agent });
+    listener = createAgentServer({ agent, secret: SECRET });
     await new Promise(done => listener.listen(0, '127.0.0.1', done));
     listenerPort = listener.address().port;
   });
@@ -119,7 +125,7 @@ describe('the calendar account agent', () => {
   async function call(method, body, headers = {}) {
     const response = await fetch(`http://127.0.0.1:${listenerPort}/account`, {
       method,
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${SECRET}`, ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: response.status, text: await response.text() };
@@ -163,9 +169,27 @@ describe('the calendar account agent', () => {
   it('does not follow a redirect with the login', async () => {
     behavior = 'redirect';
     const redirected = await call('POST', payload());
-    assert.deepEqual(JSON.parse(redirected.text), { error: 'server_unreachable' });
+    assert.deepEqual(JSON.parse(redirected.text), { error: 'redirected' });
     assert.equal(seen.length, 1);
     assert.ok(!redirected.text.includes(CANARY));
+    assert.equal(existsSync(file), false);
+  });
+
+  it('follows one redirect to another path on the same server, such as a trailing slash', async () => {
+    behavior = 'slash';
+    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav` }));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav', '/dav/'],
+    );
+  });
+
+  it('names a certificate it does not trust, and sends nothing after the handshake fails', async () => {
+    deps.tls = { lookup: deps.tls.lookup };
+    const refused = await call('POST', payload());
+    assert.deepEqual(JSON.parse(refused.text), { error: 'certificate_refused' });
+    assert.equal(seen.length, 0);
     assert.equal(existsSync(file), false);
   });
 
@@ -181,16 +205,17 @@ describe('the calendar account agent', () => {
   });
 
   it('refuses a request that could write a second setting into the file', async () => {
-    for (const bad of [
-      { url: `https://${HOST}/\nCALDAV_PASSWORD=x` },
-      { username: 'a\nCALDAV_URL=x' },
-      { password: 'one\ntwo' },
-      { password: "it's" },
-      { url: 'http://caldav.example.invalid/' },
-      { email: 'nope' },
+    for (const [bad, field] of [
+      [{ url: `https://${HOST}/\nCALDAV_PASSWORD=x` }, 'url'],
+      [{ username: 'a\nCALDAV_URL=x' }, 'username'],
+      [{ password: 'one\ntwo' }, 'password'],
+      [{ password: ' padded' }, 'password'],
+      [{ url: 'http://caldav.example.invalid/' }, 'url'],
+      [{ email: 'nope' }, 'email'],
+      [{ email: 'a\u0001b@example.invalid' }, 'email'],
     ]) {
       const invalid = await call('POST', payload(bad));
-      assert.deepEqual(JSON.parse(invalid.text), { error: 'invalid' }, JSON.stringify(bad));
+      assert.deepEqual(JSON.parse(invalid.text), { error: 'invalid', field }, JSON.stringify(bad));
     }
     assert.equal((await call('POST', undefined)).status, 400);
     assert.equal(existsSync(file), false);
@@ -210,11 +235,47 @@ describe('the calendar account agent', () => {
     assert.equal(JSON.parse((await call('GET')).text).sign_in, 'refused');
   });
 
+  it('answers only a caller that presents the secret, and says nothing else without it', async () => {
+    await call('POST', payload());
+    for (const headers of [{ authorization: '' }, { authorization: 'Bearer wrong' }, { authorization: SECRET }]) {
+      for (const method of ['GET', 'DELETE']) {
+        const refused = await call(method, undefined, headers);
+        assert.equal(refused.status, 401, `${method} ${JSON.stringify(headers)}`);
+        assert.deepEqual(JSON.parse(refused.text), { error: 'unauthorized' });
+      }
+      assert.equal((await call('POST', payload(), headers)).status, 401);
+    }
+    const noHeader = await fetch(`http://127.0.0.1:${listenerPort}/account`);
+    assert.equal(noHeader.status, 401);
+    assert.equal(existsSync(file), true, 'a refused delete must leave the account in place');
+  });
+
+  it('refuses a save whose body is not declared as JSON', async () => {
+    for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data']) {
+      const response = await call('POST', payload(), { 'content-type': type });
+      assert.equal(response.status, 415, type);
+    }
+    assert.equal(existsSync(file), false);
+    const withCharset = await call('POST', payload(), { 'content-type': 'application/json; charset=utf-8' });
+    assert.equal(withCharset.status, 200);
+  });
+
+  it('will not start without a secret long enough to guard the port', () => {
+    assert.throws(() => createAgentServer({ agent, secret: undefined }));
+    assert.throws(() => createAgentServer({ agent, secret: 'x'.repeat(MIN_SECRET_LENGTH - 1) }));
+  });
+
   it('only answers requests addressed to the service name, and only on /account', async () => {
     const plain = ({ path, method = 'GET', host = 'calendar-caldav' }) =>
       new Promise((done, failed) => {
         const req = httpRequest(
-          { host: '127.0.0.1', port: listenerPort, path, method, headers: { Host: host } },
+          {
+            host: '127.0.0.1',
+            port: listenerPort,
+            path,
+            method,
+            headers: { Host: host, Authorization: `Bearer ${SECRET}` },
+          },
           res => {
             res.resume();
             res.on('end', () => done(res.statusCode));
