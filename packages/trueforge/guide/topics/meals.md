@@ -1,7 +1,7 @@
 ---
 id: meals
 title: Planning meals
-covers: meals
+covers: dinner
 ---
 
 Ask Aman to plan your meals for the week. It plans around the food you already have, and then writes a shopping list for what is missing.

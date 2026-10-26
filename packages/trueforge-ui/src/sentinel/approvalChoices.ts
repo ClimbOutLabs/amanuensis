@@ -10,7 +10,7 @@ export const APPROVAL_CHOICES = {
     label: 'Always allow this tool',
     hint: 'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
   },
-  changeIt: { label: 'Change it', hint: 'Ask the agent to change this first. Nothing runs now.' },
+  changeIt: { label: 'Change it', hint: 'Ask the persona to change this first. Nothing runs now.' },
   deny: { label: 'Deny', hint: 'Do not run this call.' },
 } as const;
 
@@ -23,9 +23,9 @@ export const NEW_RECIPIENT_CHOICES = {
   cancel: { label: "Don't send", hint: 'Do not send. Nothing is added to your send list.' },
 } as const;
 
-/** The buttons on a mail card. Edit is the same path as Change it: the agent revises the mail first. */
+/** The buttons on a mail card. Edit is the same path as Change it: the persona revises the mail first. */
 export const EMAIL_CHOICES = {
-  edit: { label: 'Edit', hint: 'Ask the agent to change this first. Nothing is sent now.' },
+  edit: { label: 'Edit', hint: 'Ask the persona to change this first. Nothing is sent now.' },
   saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
 } as const;
 

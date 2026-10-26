@@ -1,7 +1,9 @@
 /**
  * Where the links, sites and email addresses of an outbound call came from. The person and a search's results are
  * theirs to use; text the assistant read (pages, mail, files, tool output) is data. A call is steered when a
- * destination it names was put there by that data and nowhere else.
+ * destination it names was put there by that data and nowhere else. The record also keeps the person's own
+ * details, the addresses and phone numbers in their words, their mail and their events, so a lookup that would
+ * send one can ask first once the chat has read other content.
  */
 
 /** Links, sites and addresses from one side, each folded so two spellings of one value match. */
@@ -29,6 +31,12 @@ export interface ChatProvenance {
   untrusted: ProvenanceValues;
   /** Where each address (`address:`) and site (`site:`) on the read side was first read, so a card can say so. */
   read_from: Map<string, ReadOrigin>;
+  /** The person's own details seen in this chat: addresses and phone numbers from their words, mail and events. */
+  own_details: Set<string>;
+  /** The details set filled up, so some were never kept; a lookup then counts any address or number as one. */
+  own_details_overflowed: boolean;
+  /** True once the chat has read content that is not the person's own words. */
+  read_content: boolean;
 }
 
 /**
@@ -42,7 +50,14 @@ function emptyValues(): ProvenanceValues {
 }
 
 export function emptyChatProvenance(): ChatProvenance {
-  return { trusted: emptyValues(), untrusted: emptyValues(), read_from: new Map() };
+  return {
+    trusted: emptyValues(),
+    untrusted: emptyValues(),
+    read_from: new Map(),
+    own_details: new Set(),
+    own_details_overflowed: false,
+    read_content: false,
+  };
 }
 
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
@@ -157,6 +172,97 @@ function recordText(side: ProvenanceValues, text: string): string[] {
   return found;
 }
 
+/** A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits. */
+const PHONE_CANDIDATE = /\+?\d(?:[\s().-]{0,3}\d){6,}/g;
+/** Fewest digits a phone number has, when written with a leading plus sign. */
+const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
+/** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
+const MIN_PHONE_DIGITS = 10;
+
+/** One number however it is written: its digits, with a leading country `1` folded away when it has one to spare. */
+function phoneKey(digits: string): string {
+  return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+}
+
+/** The phone numbers in a text, each folded so two writings of one number match. */
+function phoneDetails(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(PHONE_CANDIDATE)) {
+    const digits = match[0].replace(/\D/g, '');
+    if (
+      match[0].startsWith('+') ? digits.length >= MIN_INTERNATIONAL_PHONE_DIGITS : digits.length >= MIN_PHONE_DIGITS
+    ) {
+      found.push(phoneKey(digits));
+    }
+  }
+  return found;
+}
+
+const MAX_DECODE_ROUNDS = 3;
+/** Characters that show nothing, which a writer can hide inside a value to break an exact match. */
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
+
+/** One round of undoing percent coding; a value whose coding is broken is spelled out character by character. */
+function decodeOnce(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value.replace(/%([0-9A-Fa-f]{2})/g, (_whole: string, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+  }
+}
+
+/** Compatibility forms folded to plain ones (a full-width `＠` becomes `@`) and hidden characters removed. */
+function plainForm(value: string): string {
+  return value.normalize('NFKC').replace(INVISIBLE, '');
+}
+
+/**
+ * A text as it will be read where it arrives: plain characters, coding spelled out until it stops changing, and
+ * the spaces people leave around an at sign folded away. The one place a detail's spelling is settled, for the
+ * text the person gave and for the text a call sends alike.
+ */
+function foldSpelling(text: string): string {
+  let folded = plainForm(text);
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    const next = plainForm(decodeOnce(folded));
+    if (next === folded) {
+      break;
+    }
+    folded = next;
+  }
+  return folded.replace(/\s*@\s*/g, '@');
+}
+
+/** A mailbox however it is addressed: lower case, with a `+tag` dropped from the part before the at sign. */
+function mailboxKey(address: string): string {
+  const lower = address.toLowerCase();
+  const at = lower.lastIndexOf('@');
+  const tag = lower.indexOf('+');
+  return tag > 0 && tag < at ? `${lower.slice(0, tag)}${lower.slice(at)}` : lower;
+}
+
+/** The person's own details in a text: its mailboxes and its phone numbers, each folded so any writing of one matches. */
+function detailsInText(text: string): string[] {
+  const folded = foldSpelling(text);
+  return [...folded.matchAll(EMAIL)].map(match => mailboxKey(match[0])).concat(phoneDetails(folded));
+}
+
+/** Keeps a text's details among the person's own; past the cap the set overflows and every detail counts. */
+function recordDetails(provenance: ChatProvenance, text: string): void {
+  for (const detail of detailsInText(text)) {
+    if (provenance.own_details.has(detail)) {
+      continue;
+    }
+    if (provenance.own_details.size < MAX_VALUES_PER_SET) {
+      provenance.own_details.add(detail);
+    } else {
+      provenance.own_details_overflowed = true;
+    }
+  }
+}
+
 /** Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are. */
 function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: ReadOrigin }): void {
   const known = input.provenance.read_from.get(input.key);
@@ -174,10 +280,18 @@ function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: Re
 /** Text the person wrote or that is theirs: their messages, their profile, what the assistant remembers of them. */
 export function recordPersonText(input: { provenance: ChatProvenance; text: string }): void {
   recordText(input.provenance.trusted, input.text);
+  recordDetails(input.provenance, input.text);
 }
 
 /** Text the assistant read: a page, a mail, a file, a tool's output. It is data, never the person's say. */
 export function recordUntrustedText(input: { provenance: ChatProvenance; text: string; source: ReadSource }): void {
+  if (input.text.trim() !== '') {
+    input.provenance.read_content = true;
+  }
+  if (input.source === 'event' || input.source === 'file' || input.source === 'other') {
+    // The person's own events, their files and the host's notes on their chat hold their details too.
+    recordDetails(input.provenance, input.text);
+  }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
     noteOrigin({ provenance: input.provenance, key, origin: { source: input.source, name: null } });
   }
@@ -227,6 +341,7 @@ function senderOf(value: string): { address: string; name: string | null } | und
  */
 export function recordEmailText(input: { provenance: ChatProvenance; text: string }): void {
   recordUntrustedText({ provenance: input.provenance, text: input.text, source: 'email' });
+  recordDetails(input.provenance, input.text);
   const senders = [...input.text.matchAll(FROM_LINE)].map(match => match[1] ?? '');
   try {
     collectSenders({ node: JSON.parse(input.text), into: senders, depth: 0, isSender: false });
@@ -400,4 +515,28 @@ export function steeredDestinations(input: {
 export function isTrustedLink(input: { provenance: ChatProvenance; url: string }): boolean {
   const key = urlKey(input.url);
   return key !== undefined && input.provenance.trusted.urls.has(key);
+}
+
+/** Whether this chat has read content that is not the person's own words. */
+export function hasReadContent(provenance: ChatProvenance): boolean {
+  return provenance.read_content;
+}
+
+/**
+ * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
+ * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
+ * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
+ * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
+ * folded the same way the record was, so a detail counts however the value spells it.
+ */
+export function carriedPrivateDetails(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
+  const carried = new Set<string>();
+  for (const value of input.values) {
+    for (const detail of detailsInText(value)) {
+      if (input.provenance.own_details_overflowed || input.provenance.own_details.has(detail)) {
+        carried.add(detail);
+      }
+    }
+  }
+  return [...carried];
 }

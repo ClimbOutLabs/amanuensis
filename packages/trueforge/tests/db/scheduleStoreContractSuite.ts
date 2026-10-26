@@ -1,7 +1,7 @@
 import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../src/db/agentStore';
 import { cronRunName, ScheduleNameConflictError, type IScheduleStore } from '../../src/db/scheduleStore';
-import { nextTriggerAfter } from '../../src/runtime/cron';
+import { firstRunAfter, nextTriggerAfter } from '../../src/runtime/cron';
 import { ScheduleManifestSchema, type ScheduleManifest } from '../../src/schemas/schedule';
 
 const TENANT = 'default';
@@ -64,7 +64,7 @@ export function runScheduleStoreContractSuite(deps: {
         schedule_id: schedule.id,
         status: 'scheduled',
         created_by_subject: USER_SUBJECT,
-        scheduled_for: nextTriggerAfter({ cron: m.cron, timezone: m.timezone, from: runFrom }).toISOString(),
+        scheduled_for: firstRunAfter({ manifest: m, from: runFrom }).toISOString(),
       }),
     );
     expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toEqual(pendingRun);
@@ -72,6 +72,37 @@ export function runScheduleStoreContractSuite(deps: {
       throw new Error('Expected active schedule to create a pending run');
     }
     expect(await store.getRunById({ id: pendingRun.id })).toEqual(pendingRun);
+  });
+
+  it('create one-time schedule queues one run at its own time, and a done one queues none', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const runFrom = new Date('2026-10-26T10:00:00.000Z');
+    const once = manifest({ cron: null, run_at: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+
+    const { schedule, pendingRun } = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'once',
+      manifest: once,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+    expect(pendingRun?.scheduled_for).toBe('2026-10-26T22:00:00.000Z');
+    expect(schedule.manifest).toMatchObject({ cron: null, run_at: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+
+    const finished = await store.updateScheduleAndRun({
+      tenant_id: TENANT,
+      id: schedule.id,
+      name: 'once',
+      manifest: { ...once, status: 'done' },
+      runFrom,
+    });
+    expect(finished?.schedule.status).toBe('done');
+    expect(finished?.pendingRun).toBeUndefined();
+    expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
   });
 
   it('keeps the persona a schedule runs as through create, read and list', async () => {

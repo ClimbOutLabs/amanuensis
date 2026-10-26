@@ -647,7 +647,10 @@ case "$cmd" in
             echo "$*" >>"$S/demo_runs"
             [ -n "${STUB_DEMO_FAIL:-}" ] && { echo "No model is configured yet." >&2; exit 1; }
             if ! grep -q '^DEMO_MODE=true$' "$envfile"; then
-              echo "Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance." >&2
+              case "$*" in
+                *" --fresh"*) echo "Start fresh only works on a demo instance. Nothing was removed." >&2 ;;
+                *) echo "Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance." >&2 ;;
+              esac
               exit 1
             fi
             printf '{"action":"seed"}\n'

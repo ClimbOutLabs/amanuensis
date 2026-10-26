@@ -334,7 +334,7 @@ function servicesWithAudit(): { services: SentinelServices; records: AuditRecord
 }
 
 const TIER2_CARD = {
-  plain_what: 'Change `notes.md` in your workspace.',
+  plain_what: 'Change `notes.md` in your workspace?',
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

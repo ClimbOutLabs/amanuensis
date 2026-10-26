@@ -584,7 +584,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as "Lovelace, Ada".',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Lovelace, Ada"?',
     );
   });
 
@@ -595,7 +595,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy: nobody".',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy: nobody"?',
     );
     expect(info.tier3_card?.email?.bcc).toEqual([]);
   });
@@ -607,7 +607,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     expect(
       (await encoded.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,
-    ).toContain('Sent as "Ada Müller".');
+    ).toContain('Sent as "Ada Müller"?');
     const bare = await build({ features: [...COMPOSE], routes: COMPOSE_ROUTES(() => draftFrom('ada@example.com')) });
     expect(
       (await bare.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,

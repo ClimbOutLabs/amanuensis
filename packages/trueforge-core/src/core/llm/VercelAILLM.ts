@@ -44,6 +44,7 @@ import {
   getEmptyUsage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
+  type RepetitionStop,
   type ThinkingBlock,
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
@@ -1337,11 +1338,13 @@ export class ModelStreamFault extends Error {
  * raise it; a repeating answer is cut and noted instead (see REPEAT_STOP_NOTE).
  */
 export class ModelOutputRepetitionError extends ModelStreamFault {
-  constructor() {
-    super(
-      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-    );
+  /** The guard that stopped the reply, its channel, and the words it had seen when it tripped. */
+  readonly stop: RepetitionStop;
+
+  constructor({ words }: { words?: number | undefined } = {}) {
+    super("The model's reasoning stopped making progress.");
     this.name = 'ModelOutputRepetitionError';
+    this.stop = { guard: 'streaming_shingles', channel: 'reasoning', ...(words !== undefined ? { words } : {}) };
   }
 }
 
@@ -1369,6 +1372,11 @@ class StreamingRepetitionGuard {
    */
   markProgress(): void {
     this.wordsAtLastProgress = this.wordsSeen;
+  }
+
+  /** Words fed to the guard so far; reported with the stop when the guard trips. */
+  get wordCount(): number {
+    return this.wordsSeen;
   }
 
   push(text: string): boolean {
@@ -1836,7 +1844,7 @@ export async function* mapStreamToChunks({
         // A delta with no preceding `reasoning-start` would otherwise drop the block and its
         // signature, breaking replay while the text still streams out.
         if (reasoningRepetition.push(part.text)) {
-          throw new ModelOutputRepetitionError();
+          throw new ModelOutputRepetitionError({ words: reasoningRepetition.wordCount });
         }
         currentThinkingBlock ??= openThinkingBlock(part.providerMetadata);
         currentThinkingBlock.thinking += part.text;
@@ -2015,7 +2023,7 @@ export async function* mapStreamToChunks({
           // reasoning-delta is surfaced, so the person sees the thinking.
           const text = scan.droppedReasoningText;
           if (reasoningRepetition.push(text)) {
-            throw new ModelOutputRepetitionError();
+            throw new ModelOutputRepetitionError({ words: reasoningRepetition.wordCount });
           }
           currentThinkingBlock ??= openThinkingBlock(undefined);
           currentThinkingBlock.thinking += text;
@@ -2068,11 +2076,14 @@ export async function* mapStreamToChunks({
   }
 
   // Settle the markup guard. A clean reply releases its held tail, which passes the repetition guard
-  // like the rest of the answer; a reply that carried markup releases nothing of it.
+  // like the rest of the answer; a reply that carried markup releases nothing of it. A reply cut off
+  // at the output limit releases nothing either: what the guard still holds then is a tool call the
+  // limit cut in two, and releasing it would show the person raw markup as answer text.
   const markupOutcome = markupGuard.finish();
+  const cutOffMidCall = finalFinishReason === 'length' && markupGuard.inMarkup;
   let tail = '';
   if (!repetitionStopped) {
-    const flushed = answerUnits.push(markupOutcome === 'clean' ? markupGuard.heldText : '');
+    const flushed = answerUnits.push(markupOutcome === 'clean' && !cutOffMidCall ? markupGuard.heldText : '');
     const rest = flushed.stopped ? { text: '', stopped: false } : answerUnits.finish();
     repetitionStopped = flushed.stopped || rest.stopped;
     tail = flushed.text + rest.text;
@@ -2118,7 +2129,9 @@ export async function* mapStreamToChunks({
     output,
     finish_reason: finalFinishReason,
     ...(markupOutcome === 'leaked' ? { tool_markup: markupOutcome } : {}),
-    ...(repetitionStopped ? { repetition_stopped: true } : {}),
+    ...(repetitionStopped
+      ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
+      : {}),
   };
 }
 

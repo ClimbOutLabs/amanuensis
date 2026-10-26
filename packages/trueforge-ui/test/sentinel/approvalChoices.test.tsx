@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
-import { offersChangeIt } from '@/sentinel/approvalChoices.js';
+import { APPROVAL_CHOICES, EMAIL_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
 import { HeldActionCard } from '@/sentinel/HeldActionCard.js';
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
@@ -42,10 +42,10 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Always allow this here']);
+    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
     // A choice the server offers is never folded into the closed Details block.
     expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
       'title',
       "Don't ask again for this kind of action in this chat.",
@@ -98,6 +98,34 @@ describe('approval choices', () => {
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
     expect(terms).toEqual(['Approve', 'Always allow this here', 'Always allow', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('grant hint wording', () => {
+  it('never calls the chat persona an agent in a Change it or Edit hint, and says persona', () => {
+    expect(APPROVAL_CHOICES.changeIt.hint).toBe('Ask the persona to change this first. Nothing runs now.');
+    expect(EMAIL_CHOICES.edit.hint).toBe('Ask the persona to change this first. Nothing is sent now.');
+    for (const hint of [APPROVAL_CHOICES.changeIt.hint, EMAIL_CHOICES.edit.hint]) {
+      expect(hint).not.toMatch(/\bagent\b/i);
+    }
+  });
+
+  it('shows the persona hint as the Change it title on a held card', () => {
+    render(
+      <HeldActionCard
+        card={card}
+        status={{ kind: 'waiting' }}
+        alwaysAllowOffered={false}
+        onApprove={vi.fn()}
+        onAlwaysAllow={vi.fn()}
+        onDeny={vi.fn()}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Change it' })).toHaveAttribute(
+      'title',
+      'Ask the persona to change this first. Nothing runs now.',
+    );
   });
 });
 

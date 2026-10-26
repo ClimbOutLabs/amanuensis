@@ -534,6 +534,7 @@ export const ImportScheduleRecordSchema = z.object({
   name: z.string().min(1),
   /** Absent from exports made before schedules kept a persona. */
   persona_id: z.string().min(1).nullable().default(null),
+  /** Manifests from exports made before one-time schedules lack `run_at` and `kind`; the manifest schema fills `null` and `task`. */
   manifest: ScheduleManifestSchema,
   status: ScheduleStatusSchema,
   created_by_subject: CreatedBySubjectSchema,

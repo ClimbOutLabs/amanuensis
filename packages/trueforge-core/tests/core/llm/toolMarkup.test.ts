@@ -364,7 +364,100 @@ describe('ToolMarkupGuard stray closing tags', () => {
   it('hides a stray closing tag at the very end of the reply', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Done.\n</tool_call>');
+    expect(guard.finish()).toBe('clean');
     expect(shown + guard.heldText).toBe('Done.\n');
+  });
+
+  it('hides a stray closing tag glued to the end of an answer line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call>\nMore text follows here.');
+    expect(shown + guard.heldText).toBe('Done.\nMore text follows here.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('drops a stray closing tag the reply ends on, after words on the same line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Your visit is Monday at 2:30 pm.</tool_call>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Your visit is Monday at 2:30 pm.');
+  });
+
+  it('drops a stray closing tag followed only by spaces when the reply ends', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call>  ');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('drops a pair of stray closing tags the reply ends on', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call></tool_calls>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('drops a spaced pair of stray closing tags the reply ends on', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call> </tool_calls>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('drops a mixed pair of stray closing tags the reply ends on', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call></invoke>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('hides a pair of stray closing tags alone on a line and keeps the answer around it', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Let me look.\n</tool_call></tool_calls>\nThe space is ready.');
+    expect(shown).toBe('Let me look.\nThe space is ready.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a pair of stray closing tags glued to the end of an answer line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_call></tool_calls>\nMore text follows here.');
+    expect(shown + guard.heldText).toBe('Done.\nMore text follows here.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a pair of stray closing tags that streams in split pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done.</tool', '_call></to', 'ol_calls>\nNext.']) {
+      shown += guard.push(piece);
+    }
+    expect(shown + guard.heldText).toBe('Done.\nNext.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a spaced pair of stray closing tags split inside the second tag', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done.</tool_call> </to', 'ol_calls>']) {
+      shown += guard.push(piece);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('hides a spaced pair of stray closing tags split inside both tags', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done.</tool', '_call> </tool', '_calls>']) {
+      shown += guard.push(piece);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('Done.');
+  });
+
+  it('keeps a closing tag named in a sentence with words after it on the line', () => {
+    const guard = new ToolMarkupGuard();
+    const sentence = 'End the block with </tool_call> and then stop.';
+    expect(guard.push(sentence) + guard.heldText).toBe(sentence);
     expect(guard.finish()).toBe('clean');
   });
 
@@ -373,6 +466,13 @@ describe('ToolMarkupGuard stray closing tags', () => {
     const text = 'Close the block with </tool_call> at the end.';
     const shown = guard.push(text);
     expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a pair of closing tags named in a sentence as text', () => {
+    const guard = new ToolMarkupGuard();
+    const sentence = 'End the block with </tool_call></tool_calls> and then stop.';
+    expect(guard.push(sentence) + guard.heldText).toBe(sentence);
     expect(guard.finish()).toBe('clean');
   });
 

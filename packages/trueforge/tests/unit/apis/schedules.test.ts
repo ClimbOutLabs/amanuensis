@@ -293,7 +293,14 @@ describe('who a schedule runs as', () => {
       agent_name: chatAgent.name,
       persona_id: null,
       name: 'lobster-joke',
-      manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' },
+      manifest: {
+        task: 'Tell me a lobster joke.',
+        cron: '0 8 * * *',
+        timezone: 'UTC',
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+      },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -515,7 +522,7 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active' },
+      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active', run_at: null, kind: 'task' },
       created_by_subject: alice,
       runFrom: new Date(),
     });

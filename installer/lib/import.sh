@@ -41,7 +41,7 @@ import_on_exit() {
   if [ "${IMPORT_QUIET_RESTART:-0}" != 1 ]; then
     say "Starting the app of instance $name again"
   fi
-  dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||
+  dc "$name" up -d --wait --wait-timeout 240 --remove-orphans >/dev/null ||
     warn "The app of instance $name did not start properly. Run: aman doctor instance --fix"
 }
 

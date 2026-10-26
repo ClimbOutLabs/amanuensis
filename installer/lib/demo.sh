@@ -44,18 +44,27 @@ demo_enable() {
   }
 }
 
-# demo_seed_run NAME USER RESET: runs the CLI inside the running app container, which has the instance database and memory.
+# demo_seed_run NAME USER RESET [FRESH]: runs the CLI inside the running app container, which has the instance database and memory.
 demo_seed_run() {
-  local name=$1 user=$2 reset=$3 args
+  local name=$1 user=$2 reset=$3 fresh=${4:-0} args
   args=(demo-seed --user "$user")
   if [ "$reset" = 1 ]; then args+=(--reset); fi
+  if [ "$fresh" = 1 ]; then args+=(--fresh); fi
   if [ "$(instance_state "$name")" != running ]; then
     warn "Instance $name is not running, so no example data was added. Start it with install.sh, then run: $(demo_seed_command "$name")"
     return 1
   fi
-  say "Adding example data for $user to instance $name"
+  if [ "$fresh" = 1 ]; then
+    say "Removing everything $user made on instance $name, then adding the example data again"
+  else
+    say "Adding example data for $user to instance $name"
+  fi
   dc "$name" exec -T app aman "${args[@]}" || {
-    warn "Adding the example data failed. Run it again with: $(demo_seed_command "$name")"
+    if [ "$fresh" = 1 ]; then
+      warn "Starting fresh did not finish. Check what is left, then run it again with: $(demo_seed_command "$name") --fresh"
+    else
+      warn "Adding the example data failed. Run it again with: $(demo_seed_command "$name")"
+    fi
     return 1
   }
   log_event "demo seed ${args[*]:2} on instance $name"
@@ -74,12 +83,14 @@ demo_install_apply() {
 # The demo world is always the owner's.
 cmd_instance_demo_seed() {
   local name
-  [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset] [--instance NAME]"
+  [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset | --fresh] [--instance NAME]"
   require_installed
   name=$(instance_pick)
-  demo_env_on "$name" ||
+  if ! demo_env_on "$name"; then
+    [ "$OPT_FRESH" = 1 ] && die "Start fresh only works on a demo instance, and instance $name is not one. Nothing was removed. To make it a demo instance, run: install.sh --demo --name $name"
     die "Instance $name is not a demo instance. Turn demo mode on and add example data with: install.sh --demo --name $name"
+  fi
   docker_prepare
   lock_acquire
-  demo_seed_run "$name" "$(reg_get "$name" owner_email)" "$OPT_RESET" || exit 1
+  demo_seed_run "$name" "$(reg_get "$name" owner_email)" "$OPT_RESET" "$OPT_FRESH" || exit 1
 }

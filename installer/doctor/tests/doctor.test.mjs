@@ -850,6 +850,26 @@ describe('instance service health', () => {
     assert.ok(!world.calls().some(call => call.startsWith('exec')));
   });
 
+  it('names the https part in plain words when it is down', () => {
+    make();
+    containers([
+      app(),
+      dex(),
+      world.psLine({
+        id: 'c3',
+        name: 'aman-main-tls-1',
+        state: 'exited',
+        status: 'Exited (1) 3 minutes ago',
+        service: 'tls',
+      }),
+    ]);
+    const result = world.json();
+    assert.match(
+      find(result.doc.instances.main, 'containers').detail,
+      /The main secure connection is not running\./,
+    );
+  });
+
   it('ignores a one-shot container that exited cleanly', () => {
     make();
     containers([
@@ -1317,15 +1337,29 @@ describe('why an instance does not run', () => {
     assert.doesNotMatch(`${check.detail} ${check.fix}`, /docker (compose|logs)|compose\.yaml|\.env/);
   });
 
-  it('shows the state and, with --fix, asks the installer to render the instance again and restart it', () => {
+  it('with --fix, does not claim fixed when the problem is still there after the refresh', () => {
     make();
     const repo = world.sandbox();
     world.installerStub(repo);
     containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
-    const shown = world.shim(['doctor', 'instance']);
-    assert.equal(shown.code, 1);
-    assert.match(shown.stdout, /x The main app is not running\./);
-    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
+    assert.doesNotMatch(fixed.stdout, /Instance main is fixed/);
+    assert.match(fixed.stdout, /The main app is not running\./);
+  });
+
+  it('with --fix, claims fixed when the refresh leaves no failing check', () => {
+    make();
+    const repo = world.sandbox();
+    const dir = path.join(repo, 'installer');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'install.sh'),
+      `#!/usr/bin/env bash\necho "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"\nprintf '%s\\n' 'c1|aman-main-app-1|running|Up 2 minutes|app' 'c2|aman-main-dex-1|running|Up 2 minutes|dex' > "$FAKE_DOCKER_DIR/ps.out"\nexit 0\n`,
+    );
+    chmodSync(path.join(dir, 'install.sh'), 0o755);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
     const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
     assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
@@ -1510,6 +1544,23 @@ describe('https on the network', () => {
     make();
     world.network('main');
     assert.equal(tlsCheck(), undefined);
+  });
+
+  it('pays no attention to the https settings an instance kept after it was closed back to this computer', () => {
+    make();
+    world.tls('main', { origins: '', healthz: 0 });
+    const result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(find(result.doc.machine, 'tls'), undefined);
+  });
+
+  it('does not renew the certificate of an instance closed back to this computer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { origins: '', endsInSeconds: 59 * 86400 });
+    world.shim(['doctor', '--json']);
+    assert.ok(!world.calls().includes(`install.sh --home ${world.home} tls`));
   });
 
   it('is ok while the certificate lasts, lists every address, and answers over https', () => {

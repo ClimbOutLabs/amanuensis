@@ -13,11 +13,11 @@ import { createRoot } from 'react-dom/client';
 
 /**
  * Home screens in the states the browser test photographs: a first run with nothing set up, one
- * line done, the first chat sent, a morning brief on hand, Skip taken, and the full shell. Everything
+ * line done, the first chat sent, Skip taken, and the full shell. Everything
  * on screen is invented.
  */
-export type FixtureState = 'fresh' | 'half' | 'done' | 'brief' | 'skipped' | 'shell';
-export const FIXTURE_STATES: readonly FixtureState[] = ['fresh', 'half', 'done', 'brief', 'skipped', 'shell'];
+export type FixtureState = 'fresh' | 'half' | 'done' | 'skipped' | 'shell';
+export const FIXTURE_STATES: readonly FixtureState[] = ['fresh', 'half', 'done', 'skipped', 'shell'];
 
 function isFixtureState(value: string | null): value is FixtureState {
   return FIXTURE_STATES.some(state => state === value);
@@ -53,8 +53,6 @@ function setupFor(state: FixtureState): AmanSetupState {
       return { ...base, hasChatted: false, firstRunGuide: { dismissed: false, dismiss: () => {} } };
     case 'done':
       return { ...base, hasChatted: true, firstRunGuide: { dismissed: false, dismiss: () => {} } };
-    case 'brief':
-      return { ...base, hasChatted: true, hasBrief: true, firstRunGuide: { dismissed: false, dismiss: () => {} } };
     case 'skipped':
       return { ...base, hasChatted: false, firstRunGuide: { dismissed: true, dismiss: () => {} } };
   }

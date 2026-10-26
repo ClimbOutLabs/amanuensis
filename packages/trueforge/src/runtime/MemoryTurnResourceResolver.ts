@@ -36,7 +36,7 @@ export interface MemoryTurnContext {
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
-  /** When false, the user has disabled memory recall and retention for this session. */
+  /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
@@ -166,8 +166,9 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
           ? calendarNarrowedSpec
           : withSearchProviderAttached(calendarNarrowedSpec, searchProviderServerName),
     });
-    // Derive recallEnabled from the spec (defaults to true per schema)
-    const recallEnabled = input.spec.config.memory.recall_enabled;
+    // An explicit recallEnabled on the turn wins over the spec (defaults to true per schema):
+    // unattended runs pass false so their own earlier tasks cannot fingerprint-block their searches.
+    const recallEnabled = this.#memory.recallEnabled ?? input.spec.config.memory.recall_enabled;
     const memoryCapabilities = memoryCapabilitiesForTurn({
       memory: { ...this.#memory, recallEnabled },
       webSearch: this.webSearchTurn,

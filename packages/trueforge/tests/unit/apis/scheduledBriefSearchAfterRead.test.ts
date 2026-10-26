@@ -5,6 +5,9 @@
  */
 import { z } from '@hono/zod-openapi';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -21,6 +24,8 @@ import { BRIEF_DIRECTIVE, RUN_DIRECTIVE_PREFIX, SEARCH_DIRECTIVE_PREFIX } from '
 const TURN_TIMEOUT_MS = 60_000;
 const TAVILY_SERVER_NAME = 'tavily';
 const CLEAN_QUERY = 'Lantern Row bakery';
+/** A phrase only the repeat-run test uses, so its schedule name stays unique. */
+const REPEAT_QUERY = 'Quay Street florist';
 /** Carries the sender's name, which the mail header copies. */
 const NAMED_QUERY = `${MAIL_SENDER_NAME} bakery`;
 
@@ -62,8 +67,8 @@ function jsonInit(body: unknown, method = 'POST'): RequestInit {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** Runs one scheduled brief for `search` and returns its session id and finished turn. */
-async function runScheduledBrief({
+/** Creates an active schedule whose task searches for `search`, and returns it with its first pending run. */
+async function createBriefSchedule({
   server,
   agent,
   search,
@@ -71,9 +76,8 @@ async function runScheduledBrief({
   server: ApprovalTestServer;
   agent: { id: string; name: string };
   search: string;
-}): Promise<{ sessionId: string; turn: Turn }> {
-  const db = server.db();
-  const scheduled = await new SqliteScheduleStore(db).createScheduleAndRun({
+}) {
+  const scheduled = await new SqliteScheduleStore(server.db()).createScheduleAndRun({
     tenant_id: 'default',
     agent_id: agent.id,
     agent_name: agent.name,
@@ -92,23 +96,47 @@ async function runScheduledBrief({
   if (run === undefined) {
     throw new Error('the active schedule added no pending run');
   }
+  return { schedule: scheduled.schedule, run };
+}
 
+/** Executes one persisted run and returns its session id and finished turn. */
+async function executeRun({
+  server,
+  runId,
+}: {
+  server: ApprovalTestServer;
+  runId: string;
+}): Promise<{ sessionId: string; turn: Turn }> {
   // The scheduler hands the persisted run to the internal execution endpoint with the service key.
   const execute = await server.request('/api/internal/schedules/runs/execute', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${configuration.TRUEFORGE_API_KEY}` },
-    body: JSON.stringify({ schedule_run_id: run.id }),
+    body: JSON.stringify({ schedule_run_id: runId }),
   });
   expect(execute.status).toBe(204);
 
-  const session = await new SqliteSessionStore(db).getSessionByExternalId({
+  const session = await new SqliteSessionStore(server.db()).getSessionByExternalId({
     tenant_id: 'default',
-    external_id: run.id,
+    external_id: runId,
   });
   if (session === undefined) {
     throw new Error('the scheduled run created no session');
   }
   return { sessionId: session.session_id, turn: await finishedTurn(server, session.session_id) };
+}
+
+/** Runs one scheduled brief for `search` and returns its session id and finished turn. */
+async function runScheduledBrief({
+  server,
+  agent,
+  search,
+}: {
+  server: ApprovalTestServer;
+  agent: { id: string; name: string };
+  search: string;
+}): Promise<{ sessionId: string; turn: Turn }> {
+  const { run } = await createBriefSchedule({ server, agent, search });
+  return executeRun({ server, runId: run.id });
 }
 
 async function finishedTurn(server: ApprovalTestServer, sessionId: string): Promise<Turn> {
@@ -145,8 +173,19 @@ describe('scheduled brief: search and map after reading the mail', () => {
   let tavily: ReturnType<typeof installRecordedTavily>;
   let mail: ReturnType<typeof installRecordedMail>;
   let agent: { id: string; name: string };
+  const originalBackend = configuration.MEMORY_BACKEND;
+  const originalDir = configuration.MEMORY_MARKDOWN_DIR;
+  const originalEmbeddings = configuration.MEMORY_EMBEDDINGS_ENABLED;
+  const originalSummarize = configuration.MEMORY_SUMMARIZE;
+  let memoryDir: string;
 
   beforeAll(async () => {
+    // Scheduled runs save to the memory vault, so a later run could recall an earlier one.
+    memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-brief-memory-'));
+    configuration.MEMORY_BACKEND = 'markdown';
+    configuration.MEMORY_MARKDOWN_DIR = memoryDir;
+    configuration.MEMORY_EMBEDDINGS_ENABLED = false;
+    configuration.MEMORY_SUMMARIZE = false;
     server = await startApprovalTestServer();
     tavily = installRecordedTavily();
     mail = installRecordedMail();
@@ -202,6 +241,11 @@ describe('scheduled brief: search and map after reading the mail', () => {
     mail.restore();
     tavily.restore();
     await server.close();
+    configuration.MEMORY_BACKEND = originalBackend;
+    configuration.MEMORY_MARKDOWN_DIR = originalDir;
+    configuration.MEMORY_EMBEDDINGS_ENABLED = originalEmbeddings;
+    configuration.MEMORY_SUMMARIZE = originalSummarize;
+    await rm(memoryDir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
@@ -250,5 +294,40 @@ describe('scheduled brief: search and map after reading the mail', () => {
       expect(tavily.calls[0]?.body).toMatchObject({ query: NAMED_QUERY });
     },
     TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'runs the same schedule twice and the second run searches the first run’s words, with no card left waiting',
+    async () => {
+      const { schedule, run: firstRun } = await createBriefSchedule({ server, agent, search: REPEAT_QUERY });
+      const first = await executeRun({ server, runId: firstRun.id });
+      expect(first.turn.state.status).toBe('done');
+
+      const store = new SqliteScheduleStore(server.db());
+      const second = await executeRun({
+        server,
+        runId: (
+          (await store.getScheduledRunFor({ tenant_id: 'default', schedule_id: schedule.id })) ??
+          (await store.createRun({
+            tenant_id: 'default',
+            schedule_id: schedule.id,
+            name: schedule.name,
+            scheduled_for: new Date(),
+            created_by_subject: OWNER_SUBJECT,
+            status: 'scheduled',
+          }))
+        ).id,
+      });
+
+      expect(second.turn.state.status).toBe('done');
+      expect(second.turn.state).toMatchObject({ required_actions: [] });
+      const entries = await auditEntries(server, second.sessionId);
+      expect(entries.find(e => e.tool_name === 'tavily_search')).toMatchObject({
+        description: `Searched: ${REPEAT_QUERY}`,
+        outcome: 'logged',
+        auto_deny_reason: null,
+      });
+    },
+    TURN_TIMEOUT_MS * 2,
   );
 });

@@ -9,13 +9,13 @@ import {
 type Baseline = { total: number; rows: Record<string, number> };
 
 /**
- * Measured 2026-10-23 (every built-in tool sent from the first call, bundle guidance read on demand). The
+ * Measured 2026-10-25 (every built-in tool sent from the first call, bundle guidance read on demand). The
  * same on every turn, since nothing the message says changes the request; the memory provider's tools are
  * not captured yet, so they are not counted.
  */
 const BASELINE: Record<PersonalInstanceName, Baseline> = {
   personal: {
-    total: 8752,
+    total: 9141,
     rows: {
       'agent-identity': 184,
       'model-identity': 79,
@@ -40,15 +40,18 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       render_route: 298,
       get_openui_instructions: 101,
       apply_patch: 297,
-      exec: 466,
+      exec: 500,
       replace_text: 362,
       run_code: 541,
-      write_file: 261,
-      create_schedule: 334,
+      write_file: 295,
+      cancel_reminder: 77,
+      create_schedule: 326,
       delete_schedule: 91,
+      list_reminders: 56,
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
+      set_reminder: 264,
       create_space: 334,
       edit_space: 492,
       get_space: 175,
@@ -63,9 +66,9 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-with-google': {
-    total: 9790,
+    total: 10179,
     rows: {
-      'agent-identity': 97,
+      'agent-identity': 184,
       'model-identity': 79,
       'agent-capabilities': 793,
       'agent-capabilities/internal-messages': 59,
@@ -95,15 +98,18 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       render_route: 298,
       get_openui_instructions: 101,
       apply_patch: 297,
-      exec: 466,
+      exec: 500,
       replace_text: 362,
       run_code: 541,
-      write_file: 261,
-      create_schedule: 334,
+      write_file: 295,
+      cancel_reminder: 77,
+      create_schedule: 326,
       delete_schedule: 91,
+      list_reminders: 56,
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
+      set_reminder: 264,
       create_space: 334,
       edit_space: 492,
       get_space: 175,
@@ -118,9 +124,9 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-no-sandbox': {
-    total: 5847,
+    total: 6236,
     rows: {
-      'agent-identity': 97,
+      'agent-identity': 184,
       'model-identity': 79,
       'agent-capabilities': 862,
       'agent-capabilities/internal-messages': 59,
@@ -140,11 +146,14 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       render_places: 396,
       render_route: 298,
       get_openui_instructions: 101,
-      create_schedule: 334,
+      cancel_reminder: 77,
+      create_schedule: 326,
       delete_schedule: 91,
+      list_reminders: 56,
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
+      set_reminder: 264,
       create_space: 334,
       edit_space: 492,
       get_space: 175,
@@ -159,9 +168,9 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
     },
   },
   'personal-no-server-sandbox': {
-    total: 5895,
+    total: 6284,
     rows: {
-      'agent-identity': 97,
+      'agent-identity': 184,
       'model-identity': 79,
       'agent-capabilities': 910,
       'agent-capabilities/internal-messages': 59,
@@ -181,11 +190,14 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       render_places: 396,
       render_route: 298,
       get_openui_instructions: 101,
-      create_schedule: 334,
+      cancel_reminder: 77,
+      create_schedule: 326,
       delete_schedule: 91,
+      list_reminders: 56,
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
+      set_reminder: 264,
       create_space: 334,
       edit_space: 492,
       get_space: 175,

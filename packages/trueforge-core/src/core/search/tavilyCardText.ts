@@ -1,4 +1,4 @@
-import { TAVILY_EXTRACT_WHAT_PREFIX, TAVILY_SEARCH_WHAT_PREFIX } from '../permissions/searchHoldText';
+import { TAVILY_EXTRACT_WHAT_PREFIX, TAVILY_SEARCH_QUESTION_PREFIX } from '../permissions/searchHoldText';
 import {
   TAVILY_API_HOST,
   TAVILY_EXTRACT_TOOL_NAME,
@@ -28,14 +28,14 @@ export function tavilyApprovalWhat(input: {
   const { query, urls } = input.canonical_params;
   if (input.tool_name === TAVILY_SEARCH_TOOL_NAME && typeof query === 'string') {
     return (
-      `${TAVILY_SEARCH_WHAT_PREFIX}${cut(query)}. This sends those words to ${TAVILY_API_HOST} ` +
+      `${TAVILY_SEARCH_QUESTION_PREFIX}${cut(query)}? This sends those words to Tavily ` +
       `and uses ${creditWord(TAVILY_SEARCH_CREDITS)}.`
     );
   }
   if (input.tool_name === TAVILY_EXTRACT_TOOL_NAME && Array.isArray(urls)) {
     const links = urls.filter((url): url is string => typeof url === 'string').join(', ');
     return (
-      `${TAVILY_EXTRACT_WHAT_PREFIX}${cut(links)}. This sends those links to ${TAVILY_API_HOST} ` +
+      `${TAVILY_EXTRACT_WHAT_PREFIX}${cut(links)}? This sends those links to Tavily ` +
       `and uses up to ${creditWord(1)}.`
     );
   }

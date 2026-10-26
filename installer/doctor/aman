@@ -714,7 +714,7 @@ check_tls() {
     fix=$3
   }
   for name in $(list_instances); do
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     any=1
@@ -729,7 +729,7 @@ check_tls() {
   release="${AMAN_HOME}/release/release.json"
   image=$(json_value "$release" app_image)
   for name in $(list_instances); do
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
@@ -825,6 +825,7 @@ container_words() { # instance service
     app) printf 'the %s app' "$1" ;;
     dex) printf 'the %s sign-in service' "$1" ;;
     loopback) printf 'the %s network link' "$1" ;;
+    tls) printf 'the %s secure connection' "$1" ;;
     *) printf 'the %s %s' "$1" "$2" ;;
   esac
 }
@@ -1486,9 +1487,46 @@ doctor_sandbox() {
   exit "$failed"
 }
 
+# Checks one instance again after a repair, with the same checks the report and the upgrade gate read.
+doctor_recheck() { # name; 0 when no check fails
+  local name=$1 fails=0
+  local LOCAL=1
+  RECORDS=""
+  check_machine
+  check_instance "$name"
+  count_checks machine
+  fails=$((fails + N_FAIL))
+  count_checks "$name"
+  fails=$((fails + N_FAIL))
+  if [ "$fails" -gt 0 ]; then
+    ui_phase "Checking instance $name again"
+    PROBLEMS_ONLY=1
+    text_checks machine
+    text_checks "$name"
+    PROBLEMS_ONLY=0
+    return 1
+  fi
+  return 0
+}
+
+# Every check of this computer, in the order the report shows them. The report and the fix re-check run this
+# same set, so the two agree on what healthy means.
+check_machine() {
+  check_docker
+  check_runtime
+  check_credentials
+  check_images
+  check_disk
+  check_docker_memory
+  check_clock
+  check_backup
+  check_sandbox
+  check_checkout
+  check_tls
+}
 # The installer the sandbox tools were set up from, which knows how to render an instance again.
 # aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
-# render the instance again from its record and restart it.
+# render the instance again from its record and restart it, then check again and say fixed only when no check fails.
 doctor_repair() { # kind
   local kind=$1 fix=0 yes=0 name installer failed=0 question args=()
   shift
@@ -1554,7 +1592,11 @@ doctor_repair() { # kind
       question="Restart instance $name now?"
     fi
     if ui_confirm "$question" y; then
-      if bash "$installer" "${args[@]}"; then ui_ok "Instance $name is fixed"; else failed=1; fi
+      if bash "$installer" "${args[@]}" && doctor_recheck "$name"; then
+        ui_ok "Instance $name is fixed"
+      else
+        failed=1
+      fi
     fi
   done
   exit "$failed"
@@ -1717,7 +1759,7 @@ renew_tls_if_due() {
     [ -f "$conf" ] || continue
     name=${conf##*/}
     name=${name%.conf}
-    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+    if ! serves_https "$(registry_value "$name" tls)" "$(registry_value "$name" tls_port)" "$(registry_value "$name" origins)"; then
       continue
     fi
     ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
@@ -1900,17 +1942,7 @@ fi
 
 select_instances
 
-check_docker
-check_runtime
-check_credentials
-check_images
-check_disk
-check_docker_memory
-check_clock
-check_backup
-check_sandbox
-check_checkout
-check_tls
+check_machine
 for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
   check_instance "$instance_name"
 done
