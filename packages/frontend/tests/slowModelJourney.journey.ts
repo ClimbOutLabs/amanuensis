@@ -1220,3 +1220,104 @@ journey(
     }
   },
 );
+
+/** The earlier turns' wording, so a live turn that shows any of it is caught. */
+const EARLIER_QUESTIONS = ['Tell me about harbour lights', 'Next tell me about tide tables'];
+
+/**
+ * Runs a long third turn after two earlier ones and checks, at each stage, that the running turn's own area holds
+ * none of the earlier questions or replies, and that every earlier question shows exactly once in the chat.
+ */
+async function longTurnKeepsEarlierTurnsOut({
+  detailsOn,
+  shorten,
+}: {
+  detailsOn: boolean;
+  shorten: boolean;
+}): Promise<void> {
+  const page = await personalPage();
+  api.model.setPlanner(exchange => {
+    if (exchange.message.includes('lighthouse keepers')) {
+      if (exchange.toolResults.length < 5) return search(`lighthouse keepers ${String(exchange.toolResults.length)}`);
+    }
+    return undefined;
+  });
+  api.mcp.setSearchResults(searchResults);
+  const originalThreshold = configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS;
+  try {
+    await openHome(page);
+    await send(page, EARLIER_QUESTIONS[0] ?? '');
+    await page.waitForURL(/\/sessions\//, { timeout: UI_LIMIT_MS });
+    const sessionId = sessionIdOf(page);
+    await waitForReplyText(page, 'the first reply', 1);
+    await waitForIdle(page, 'the first reply');
+    await send(page, EARLIER_QUESTIONS[1] ?? '');
+    await waitForReplyText(page, 'the second reply', 2);
+    await waitForIdle(page, 'the second reply');
+    if (detailsOn) await turnOnAgentDetails(page);
+
+    const liveTurnIsClean = async (label: string): Promise<void> => {
+      const live = assistantReplies(page).last();
+      const liveText = await live.innerText();
+      assert.ok(!liveText.includes(FINAL_TEXT), `${label}: the running turn shows an earlier reply: ${liveText}`);
+      for (const question of EARLIER_QUESTIONS) {
+        assert.ok(!liveText.includes(question), `${label}: the running turn shows "${question}": ${liveText}`);
+        assert.equal(
+          await page.locator('[data-role="user"]').getByText(question).count(),
+          1,
+          `${label}: "${question}" does not show exactly once in the chat`,
+        );
+      }
+    };
+
+    if (shorten) configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS = 200;
+    const callsBefore = api.model.calls().length;
+    api.model.setPacing(SLOW);
+    await send(page, 'Now tell me about lighthouse keepers');
+    await until('the third turn running', UI_LIMIT_MS, async () => stopButton(page).isVisible());
+    await until('the third turn thinking', UI_LIMIT_MS, async () => {
+      await liveTurnIsClean('while the third turn starts');
+      return openReplyCalls().length > 0;
+    });
+    await pause(3_000);
+    await liveTurnIsClean('while the third turn thinks');
+    if (shorten) {
+      await until('the history shortened during the third turn', UI_LIMIT_MS, async () => {
+        await liveTurnIsClean('while the third turn runs before the shortening');
+        return api.model
+          .calls()
+          .slice(callsBefore)
+          .some(call => isShorteningCall(call));
+      });
+      await liveTurnIsClean('after the shortening');
+    }
+
+    await openChat(page, sessionId);
+    await until('the third turn still running after the reload', UI_LIMIT_MS, async () => stopButton(page).isVisible());
+    if (detailsOn && !(await agentDetailsAreOn(agentDetailsToggle(page)))) await turnOnAgentDetails(page);
+    await pause(2_000);
+    await liveTurnIsClean('after a reload mid-turn');
+
+    await stopButton(page).click();
+    await waitForIdle(page, 'the third reply stopped');
+    await liveTurnIsClean('after the third turn stopped');
+  } finally {
+    configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS = originalThreshold;
+    api.model.setPlanner(undefined);
+    api.mcp.setSearchResults(undefined);
+    api.model.setPacing(undefined);
+  }
+}
+
+journey('23a. agent details off: a long third turn shows nothing of the two before it', SCENARIO_LIMIT_MS, () =>
+  longTurnKeepsEarlierTurnsOut({ detailsOn: false, shorten: false }),
+);
+journey('23b. agent details on: a long third turn shows nothing of the two before it', SCENARIO_LIMIT_MS, () =>
+  longTurnKeepsEarlierTurnsOut({ detailsOn: true, shorten: false }),
+);
+journey('23c. agent details off: a long third turn that shortens the history, and a reload', SCENARIO_LIMIT_MS, () =>
+  longTurnKeepsEarlierTurnsOut({ detailsOn: false, shorten: true }),
+);
+journey('23d. agent details on: a long third turn that shortens the history, and a reload', SCENARIO_LIMIT_MS, () =>
+  longTurnKeepsEarlierTurnsOut({ detailsOn: true, shorten: true }),
+);
