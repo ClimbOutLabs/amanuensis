@@ -1,4 +1,4 @@
-import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, type AgentSpec, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentThread,
   AgentThreadOrchestrator,
@@ -59,6 +59,8 @@ async function setup(
     runner?: ChatRunner['kind'];
     /** The chat is talking to a persona right now. */
     persona?: boolean;
+    /** A plain chat's own setup; defaults to a bare model and instructions. */
+    spec?: AgentSpec;
   } = {},
 ) {
   const db = createSqliteDb(':memory:');
@@ -108,7 +110,7 @@ async function setup(
     });
   }
   const runner: ChatRunner =
-    input.runner === 'saved' ? { kind: 'saved', agent: researcher } : { kind: 'plain', spec: CHAT_SPEC };
+    input.runner === 'saved' ? { kind: 'saved', agent: researcher } : { kind: 'plain', spec: input.spec ?? CHAT_SPEC };
   const audit: AuditRecordInput[] = [];
   const services: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -254,6 +256,23 @@ describe('create_schedule', () => {
       created_by_subject: OWNER,
     });
     expect(JSON.parse(resultText(result))).toMatchObject({ created: { runs_as: 'Aman' } });
+  });
+
+  it("captures the chat's connectors, skills and sandbox on the agent the schedule runs as", async () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'test-provider/chat-model' },
+      instructions: 'chat',
+      mcp_servers: [{ name: 'calendar' }, { name: 'mail' }],
+      skills: [{ name: 'digest' }],
+      config: { sandbox: { enabled: true } },
+    });
+    const built = await setup({ spec });
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const [saved] = await built.listAll();
+    const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
+    expect(runsAs?.manifest.mcp_servers?.map(server => server.name)).toEqual(['calendar', 'mail']);
+    expect(runsAs?.manifest.skills?.map(skill => skill.name)).toEqual(['digest']);
+    expect(runsAs?.manifest.config.sandbox.enabled).toBe(true);
   });
 
   it('reuses the one stored agent for every schedule from a plain chat', async () => {
