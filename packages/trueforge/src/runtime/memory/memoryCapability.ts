@@ -485,7 +485,7 @@ function sanitizeMemoryLine(text: string): string {
 /** The item with a full `occurred_start` instant shown as a day in the person's time zone; other items are unchanged. */
 function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string | undefined }): RecallItem {
   const start = item.occurred_start;
-  if (timeZone === undefined || start === undefined || !start.includes('T')) {
+  if (timeZone === undefined || !start?.includes('T')) {
     return item;
   }
   const instant = new Date(start);
