@@ -17,17 +17,17 @@ const OWNER = 'owner-1';
 describe('the Calendar connector on the real tool route', () => {
   let server: ApprovalTestServer;
   let sidecar: InertMcpServer;
-  const originalCalendarUrl = configuration.CALENDAR_CONNECTOR_URL;
+  const originalCalendarUrl = configuration.CALENDAR_SIDECAR_MCP_URL;
 
   beforeAll(async () => {
     server = await startApprovalTestServer();
     sidecar = await startInertMcpServer({ calendar: true });
     server.setFirstPartyOrigins([sidecar.origin]);
-    configuration.CALENDAR_CONNECTOR_URL = sidecar.url;
+    configuration.CALENDAR_SIDECAR_MCP_URL = sidecar.url;
   }, 120_000);
 
   afterAll(async () => {
-    configuration.CALENDAR_CONNECTOR_URL = originalCalendarUrl;
+    configuration.CALENDAR_SIDECAR_MCP_URL = originalCalendarUrl;
     await sidecar.close();
     await server.close();
   });

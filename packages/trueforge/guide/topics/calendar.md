@@ -8,4 +8,4 @@ Ask Aman what is on your calendar this week. It reads your events and tells you 
 
 Aman can also add or change events, but only after you approve each one. A card shows the event before anything is saved.
 
-This needs Google Calendar connected. See "Connecting your email and calendar".
+This needs a calendar connected. Connect Google Calendar, or connect another calendar with an app password. See "Connecting your email and calendar".

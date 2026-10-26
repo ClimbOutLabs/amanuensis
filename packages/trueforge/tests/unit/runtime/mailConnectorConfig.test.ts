@@ -1,5 +1,7 @@
 import {
+  hostCalendarMcpUrl,
   hostMailMcpUrl,
+  parseCalendarAccountUrl,
   parseCalendarConnectorUrl,
   parseMailEmailMcpUrl,
   withMailSidecarOrigin,
@@ -68,10 +70,26 @@ describe("a real install is recognised as the host's own", () => {
       mailMcpUrl: parseMailEmailMcpUrl(INSTALLER_MAIL_LINE),
       mailAccountUrl: undefined,
     });
-    const calendarUrl = parseCalendarConnectorUrl(INSTALLER_CALENDAR_LINE);
+    const calendarUrl = hostCalendarMcpUrl({
+      calendarMcpUrl: parseCalendarConnectorUrl(INSTALLER_CALENDAR_LINE),
+      calendarAccountUrl: undefined,
+    });
 
     expect(isHostSidecar({ name: 'Email', url: INSTALLER_MAIL_LINE, mailUrl, calendarUrl })).toBe(true);
     expect(isHostSidecar({ name: 'Calendar', url: INSTALLER_CALENDAR_LINE, mailUrl, calendarUrl })).toBe(true);
+  });
+
+  it("treats the record a saved account registers, with only the account agent linked, as the host's own Calendar", () => {
+    // The installer writes CALENDAR_ACCOUNT_URL and no connector link.
+    const calendarUrl = hostCalendarMcpUrl({
+      calendarMcpUrl: parseCalendarConnectorUrl(undefined),
+      calendarAccountUrl: parseCalendarAccountUrl('http://calendar-caldav:9560'),
+    });
+
+    expect(calendarUrl).toBe(INSTALLER_CALENDAR_LINE);
+    expect(isHostSidecar({ name: 'Calendar', url: INSTALLER_CALENDAR_LINE, mailUrl: undefined, calendarUrl })).toBe(
+      true,
+    );
   });
 
   it("treats the record a saved account registers, with no installer link, as the host's own Email", () => {

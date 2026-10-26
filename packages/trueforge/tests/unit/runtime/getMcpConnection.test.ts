@@ -357,19 +357,19 @@ describe('getMcpConnection', () => {
     const original = {
       origins: configuration.FIRST_PARTY_MCP_ORIGINS,
       mail: configuration.MAIL_SIDECAR_MCP_URL,
-      calendar: configuration.CALENDAR_CONNECTOR_URL,
+      calendar: configuration.CALENDAR_SIDECAR_MCP_URL,
     };
 
     beforeEach(() => {
       configuration.FIRST_PARTY_MCP_ORIGINS = ['http://mail-email:9557', 'http://calendar-caldav:9558'];
       configuration.MAIL_SIDECAR_MCP_URL = MAIL_URL;
-      configuration.CALENDAR_CONNECTOR_URL = CALENDAR_URL;
+      configuration.CALENDAR_SIDECAR_MCP_URL = CALENDAR_URL;
     });
 
     afterAll(() => {
       configuration.FIRST_PARTY_MCP_ORIGINS = original.origins;
       configuration.MAIL_SIDECAR_MCP_URL = original.mail;
-      configuration.CALENDAR_CONNECTOR_URL = original.calendar;
+      configuration.CALENDAR_SIDECAR_MCP_URL = original.calendar;
     });
 
     async function save({ name, url, marked = false }: { name: string; url: string; marked?: boolean }) {
@@ -464,7 +464,7 @@ describe('getMcpConnection', () => {
 
     it('trusts nothing when the host has no sidecar configured', async () => {
       configuration.MAIL_SIDECAR_MCP_URL = undefined;
-      configuration.CALENDAR_CONNECTOR_URL = undefined;
+      configuration.CALENDAR_SIDECAR_MCP_URL = undefined;
       expect(await save({ name: 'Email', url: MAIL_URL })).toBe(false);
       expect(await save({ name: 'Calendar', url: CALENDAR_URL })).toBe(false);
     });
