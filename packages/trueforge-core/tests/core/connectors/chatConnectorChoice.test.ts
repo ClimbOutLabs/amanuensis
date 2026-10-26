@@ -56,7 +56,9 @@ describe('withTurnedOffConnectorKeys', () => {
     expect(readTurnedOffConnectorKeys(on)).not.toContain(key);
   });
 
-  it('refuses a raw connector name, so only short keys are stored', () => {
-    expect(() => withTurnedOffConnectorKeys({}, ['Email'])).toThrow('connectorOffKey');
+  it('refuses anything connectorOffKey did not make, so only short keys are stored', () => {
+    expect(() => withTurnedOffConnectorKeys({}, ['Email'])).toThrow('bug in the app');
+    expect(() => withTurnedOffConnectorKeys({}, ['connector_off_Email'])).toThrow('bug in the app');
+    expect(() => withTurnedOffConnectorKeys({}, [`connector_off_${'a'.repeat(40)}`])).toThrow('bug in the app');
   });
 });

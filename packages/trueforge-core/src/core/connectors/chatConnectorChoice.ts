@@ -16,6 +16,9 @@ export const DEFAULT_ON_SOURCE_CONNECTOR_NAMES: readonly string[] = [MAIL_CONNEC
 /** Prefix of the per-connector flag keys. Metadata keys are capped at 32 characters. */
 const CONNECTOR_OFF_KEY_PREFIX = 'connector_off_';
 
+/** Exactly what connectorOffKey makes: the prefix and a 16-hex-digit digest. */
+const CONNECTOR_OFF_KEY = /^connector_off_[0-9a-f]{16}$/;
+
 /** Stable 64-bit digest of a name as 16 hex digits, so any name fits the metadata key cap. */
 function nameDigest(name: string): string {
   let high = 0x811c9dc5;
@@ -51,9 +54,8 @@ export function withTurnedOffConnectorKeys(
   metadata: Record<string, string> | null | undefined,
   keys: readonly string[],
 ): Record<string, string> {
-  const notAKey = keys.find(key => !key.startsWith(CONNECTOR_OFF_KEY_PREFIX));
-  if (notAKey !== undefined) {
-    throw new Error(`"${notAKey}" is not a connector off key. Pass the key from connectorOffKey instead.`);
+  if (!keys.every(key => CONNECTOR_OFF_KEY.test(key))) {
+    throw new Error('An add-on choice was not in the form the app saves. This is a bug in the app. Please report it.');
   }
   const rest = Object.fromEntries(
     Object.entries(metadata ?? {}).filter(([key]) => !key.startsWith(CONNECTOR_OFF_KEY_PREFIX)),
