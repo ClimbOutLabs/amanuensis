@@ -72,7 +72,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryCancelledTurn, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53db0e287b 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce9aad9a94 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -577,7 +577,26 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        snapshot.turns.push(
          sessionEventsToSessionRecord(
            currentTurnId,
-@@ -2066,6 +2222,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -1535,7 +1691,7 @@ function attachRunningTurn(snapshot, runningTurn) {
+   return replaceSessionSnapshot(snapshot, {
+     runningTurn,
+     unstable_resume: true,
+-    groupRootBaseline: computeGroupRootBaseline(snapshot.turns),
++    groupRootBaseline: pendingUserText === void 0 ? computeGroupRootBaseline(snapshot.turns) : computeNewGroupRootBaseline(snapshot.turns),
+     ...pendingUserText !== void 0 ? {
+       pendingUser: {
+         turnId: runningTurn.id,
+@@ -1844,6 +2000,9 @@ function rootModelMessageIdsSinceBaseline(foldState, baseline) {
+   const baselineSet = new Set(baseline);
+   return bucket.modelMessageIds.filter((id) => !baselineSet.has(id));
+ }
++function computeNewGroupRootBaseline(turns) {
++  return turns.flatMap((turn) => turn.rootModelMessageIds ?? []);
++}
+ function computeGroupRootBaseline(turns) {
+   let groupStartIndex = turns.length - 1;
+   while (groupStartIndex >= 0 && turns[groupStartIndex]?.userText == null) {
+@@ -2066,6 +2225,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -590,7 +609,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2258,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2261,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -600,7 +619,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2328,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2331,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -608,7 +627,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2499,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2502,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -621,7 +640,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        }
        break;
      }
-@@ -3039,19 +3206,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3209,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -641,7 +660,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3238,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3241,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -664,7 +683,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3263,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3266,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -673,7 +692,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    }
  }
  
-@@ -3176,20 +3322,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3325,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -726,7 +745,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3241,6 +3416,17 @@ function resolveTurnInput(snapshot, turnId) {
+@@ -3241,6 +3419,17 @@ function resolveTurnInput(snapshot, turnId) {
    }
    return void 0;
  }
@@ -744,7 +763,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
  function useTrueFoundryAgentMessages({
    server,
    sessionId,
-@@ -3259,6 +3445,7 @@ function useTrueFoundryAgentMessages({
+@@ -3259,6 +3448,7 @@ function useTrueFoundryAgentMessages({
    const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState2(false);
    const [loadRetryTrigger, setLoadRetryTrigger] = useState2(0);
    const [resumeUnavailable, setResumeUnavailable] = useState2(false);
@@ -752,7 +771,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    const snapshotRef = useRef2(snapshot);
    snapshotRef.current = snapshot;
    const loadOlderInflightRef = useRef2(null);
-@@ -3273,6 +3460,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3463,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -763,7 +782,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3493,8 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3496,8 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -772,7 +791,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3503,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3506,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -784,7 +803,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3542,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3545,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -792,7 +811,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3562,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3565,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -844,7 +863,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
          }
        })();
        activeRunRef.current = run;
-@@ -3401,6 +3612,9 @@ function useTrueFoundryAgentMessages({
+@@ -3401,6 +3615,9 @@ function useTrueFoundryAgentMessages({
        setSnapshot(createEmptySessionSnapshot());
        return;
      }
@@ -854,7 +873,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      const isEarlyInitialLoad = isMain === false && isInitialSession === true && initialLoadStartedForRef.current !== sessionId;
      if (isMain === false) {
        if (!isEarlyInitialLoad) return;
-@@ -3447,6 +3661,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3664,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -862,7 +881,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3587,7 +3802,12 @@ function useTrueFoundryAgentMessages({
+@@ -3587,7 +3805,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { inputs: options.inputs, ...streamHeaders },
                  signal,
@@ -876,7 +895,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
                );
              }
              if ("resumeMcpAuth" in options) {
-@@ -3597,7 +3817,12 @@ function useTrueFoundryAgentMessages({
+@@ -3597,7 +3820,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { resumeMcpAuth: true, ...streamHeaders },
                  signal,
@@ -890,7 +909,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
                );
              }
              return streamTurnContent(
-@@ -3662,26 +3887,64 @@ function useTrueFoundryAgentMessages({
+@@ -3662,26 +3890,64 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -965,7 +984,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3953,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3956,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -997,7 +1016,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3984,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3987,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -1005,7 +1024,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +4001,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +4004,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -1013,7 +1032,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4156,8 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4159,8 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -1022,7 +1041,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4236,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4239,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -1031,7 +1050,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4010,9 +4290,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4293,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
            "This session has not been saved yet, so its files cannot be downloaded."
          );
        }
@@ -1041,7 +1060,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        return await server.downloadSandboxFile({
          sessionId,
          turnId,
-@@ -4047,6 +4324,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4327,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -1050,7 +1069,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4528,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4531,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -1066,7 +1085,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4582,8 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4585,8 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -1075,7 +1094,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4694,7 @@ export {
+@@ -4408,6 +4697,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -1083,7 +1102,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..3360bca1700724cd983631b068482d53
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4714,8 @@ export {
+@@ -4427,6 +4717,8 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -1373,7 +1392,7 @@ index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbe
  });
 -
 diff --git a/src/convertTurnMessages.ts b/src/convertTurnMessages.ts
-index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c8602b6263e5 100644
+index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8def14d9a9 100644
 --- a/src/convertTurnMessages.ts
 +++ b/src/convertTurnMessages.ts
 @@ -46,6 +46,7 @@ import {
@@ -1443,7 +1462,19 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c860
              snapshot.turns.push(
                  sessionEventsToSessionRecord(
                      currentTurnId,
-@@ -742,6 +757,7 @@ export async function prependOlderSessionHistory(
+@@ -520,7 +535,10 @@ function attachRunningTurn(
+     return replaceSessionSnapshot(snapshot, {
+         runningTurn,
+         unstable_resume: true as const,
+-        groupRootBaseline: computeGroupRootBaseline(snapshot.turns),
++        groupRootBaseline:
++            pendingUserText === undefined
++                ? computeGroupRootBaseline(snapshot.turns)
++                : computeNewGroupRootBaseline(snapshot.turns),
+         ...(pendingUserText !== undefined
+             ? {
+                   pendingUser: {
+@@ -742,6 +760,7 @@ export async function prependOlderSessionHistory(
  export type ConvertTurnsResult = {
      messages: ThreadMessage[];
      foldState: PeerThreadFoldState;
@@ -1451,7 +1482,22 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c860
      runningTurn?: Turn;
      unstable_resume?: boolean;
  };
-@@ -1275,10 +1291,15 @@ export function projectSessionMessages(
+@@ -981,6 +1000,14 @@ export function rootModelMessageIdsSinceBaseline(
+     return bucket.modelMessageIds.filter((id) => !baselineSet.has(id));
+ }
+ 
++/**
++ * Baseline for a running turn that opens a new group. It is not in `turns` yet, so
++ * every finished turn is before it, not just those before the last user turn.
++ */
++function computeNewGroupRootBaseline(turns: SessionTurnRecord[]): string[] {
++    return turns.flatMap((turn) => turn.rootModelMessageIds ?? []);
++}
++
+ export function computeGroupRootBaseline(turns: SessionTurnRecord[]): string[] {
+     let groupStartIndex = turns.length - 1;
+     while (groupStartIndex >= 0 && turns[groupStartIndex]?.userText == null) {
+@@ -1275,10 +1302,15 @@ export function projectSessionMessages(
              snapshot.activeStream;
          const resolvedUpdate =
              streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
@@ -1468,7 +1514,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c860
          let assistantMessage = turnStreamUpdateToAssistantMessage(
              turnId,
              resolvedUpdate,
-@@ -1319,8 +1340,8 @@ function ingestTurnsIntoSnapshot(
+@@ -1319,8 +1351,8 @@ function ingestTurnsIntoSnapshot(
          const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
          const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
  
@@ -1478,7 +1524,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c860
  
          const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
          const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
-@@ -1438,6 +1459,7 @@ export async function convertTurnsToThreadMessages(
+@@ -1438,6 +1470,7 @@ export async function convertTurnsToThreadMessages(
      return {
          messages,
          foldState: snapshot.fold,
@@ -1486,7 +1532,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c860
          ...(snapshot.runningTurn != null
              ? {
                    runningTurn: snapshot.runningTurn,
-@@ -1698,7 +1720,11 @@ export async function* streamTurnEvents(
+@@ -1698,7 +1731,11 @@ export async function* streamTurnEvents(
  
          if (event.type === "turn.done") {
              if (event.state.status === "error") {
