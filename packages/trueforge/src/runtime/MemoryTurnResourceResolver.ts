@@ -44,8 +44,8 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
-  /** Present when summaries are on for this turn; a recovered earlier turn is then summarized, never stored raw. */
-  summarize?: SummarizeTurnContext | undefined;
+  /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
+  summarize: SummarizeTurnContext | undefined;
   /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
   clientTimezone?: string | undefined;
   /**
@@ -74,7 +74,7 @@ function memoryCapabilitiesForTurn(input: {
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
       recallEnabled: memory.recallEnabled,
-      summarize: memory.summarize,
+      keepsFullExchange: memory.summarize === undefined,
       timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,

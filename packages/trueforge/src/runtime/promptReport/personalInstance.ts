@@ -282,6 +282,7 @@ export async function buildPersonalInstance(input: {
     config: MEMORY_CONFIG,
     sessionId: SESSION_ID,
     previousTurnId: null,
+    summarize: undefined,
     providerServerName: undefined,
   };
   const space: SpaceTurnContext = {

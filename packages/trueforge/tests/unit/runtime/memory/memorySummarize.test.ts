@@ -168,14 +168,6 @@ describe('parseSummaryReply', () => {
     expect(parseSummaryReply(reply)).toEqual({ kind: 'unreadable' });
   });
 
-  it('drops a sentence in the list that says there are no facts', () => {
-    expect(parseSummaryReply('{"facts": ["No durable facts."]}')).toEqual({ kind: 'nothing' });
-    expect(parseSummaryReply('{"facts": ["No durable facts were shared.", "The person has a cat."]}')).toEqual({
-      kind: 'facts',
-      facts: ['The person has a cat.'],
-    });
-  });
-
   it('drops facts that start with a label older versions wrote', () => {
     expect(
       parseSummaryReply(
@@ -184,24 +176,28 @@ describe('parseSummaryReply', () => {
     ).toEqual({ kind: 'facts', facts: ['The person has a dog.'] });
   });
 
-  it('keeps a fact that merely starts with the word Assistant or User', () => {
-    expect(parseSummaryReply('{"facts": ["Assistant professor Dana is the person\'s neighbor."]}')).toEqual({
+  it.each([
+    'User: hi',
+    'Assistant: Sure, here you go.',
+    '  user : thanks',
+    'The talk went like this.\nUser: hi\nAssistant: hello',
+  ])('drops the transcript line %j', fact => {
+    expect(parseSummaryReply(JSON.stringify({ facts: [fact, 'The person has a cat.'] }))).toEqual({
       kind: 'facts',
-      facts: ["Assistant professor Dana is the person's neighbor."],
+      facts: ['The person has a cat.'],
     });
   });
 
-  it('drops facts written as narration of the chat', () => {
-    expect(
-      parseSummaryReply(
-        '{"facts": ["Assistant asked whether to file it today.", "User wants the assistant to ask one item at a time.", "The person has a cat."]}',
-      ),
-    ).toEqual({ kind: 'facts', facts: ['The person has a cat.'] });
+  it('keeps nothing when every fact is a transcript line', () => {
+    expect(parseSummaryReply('{"facts": ["User: hi", "Assistant: hello"]}')).toEqual({ kind: 'nothing' });
   });
 
-  it('keeps nothing when every fact is narration', () => {
-    expect(parseSummaryReply('{"facts": ["Assistant drafted a note."]}')).toEqual({ kind: 'nothing' });
-  });
+  it.each(['User prefers dark mode.', 'The user prefers dark mode.', 'Assistant professor Dana is the neighbor.'])(
+    'keeps a real fact that merely mentions the user or an assistant: %j',
+    fact => {
+      expect(parseSummaryReply(JSON.stringify({ facts: [fact] }))).toEqual({ kind: 'facts', facts: [fact] });
+    },
+  );
 
   it('never stores prose or half a reply as a fact', () => {
     expect(parseSummaryReply('The person talked about a robot.')).toEqual({ kind: 'unreadable' });
@@ -350,19 +346,50 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' });
   });
 
-  it('summarizes the most recent part of an overlong turn, and says earlier text was left out', async () => {
+  it('keeps the start and the end of an overlong turn, and says the middle was left out', async () => {
     const llm = fakeSummarizer('{"facts": ["The person has a cat named Miso."]}');
     const createNonStream = jest.spyOn(llm, 'createNonStream');
     const result = await summarizeTurnContent({
       ...base,
-      userText: `${'filler '.repeat(3000)}Please remember that my cat is named Miso.`,
+      userText: `Please remember my wife is Ana. ${'filler '.repeat(3000)}Also my cat is named Miso.`,
       resolveLlm: async () => llm,
     });
     expect(result.status).toBe('summarized');
     const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain('my wife is Ana.');
     expect(sent).toContain('my cat is named Miso.');
-    expect(sent).toContain('Earlier text of this long turn was left out.');
+    expect(sent).toContain('Part of this long turn was left out.');
     expect(sent.length).toBeLessThan(20000);
+  });
+
+  it('cuts a long emoji paste on whole characters and still sees a request at its start', async () => {
+    const llm = fakeSummarizer('{"facts": ["The person\'s wife is Ana."]}');
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: `Please remember my wife is Ana.${'😀'.repeat(8200)}`,
+      resolveLlm: async () => llm,
+    });
+    expect(result.status).toBe('summarized');
+    const messages = createNonStream.mock.calls[0]?.[0]?.messages ?? [];
+    const sent = messages.map(message => (typeof message.content === 'string' ? message.content : '')).join('');
+    expect(sent).toContain('Please remember my wife is Ana.');
+    // A cut in the middle of an emoji would leave a lone half that does not survive a round trip.
+    expect(sent).toBe(Buffer.from(sent, 'utf8').toString('utf8'));
+    expect(sent).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+  });
+
+  it('fails, so the vault is marked, when part of the text was left out and no fact came back', async () => {
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'x'.repeat(9000),
+      resolveLlm: async () => fakeSummarizer('{"facts": []}'),
+    });
+    expect(result).toEqual({
+      status: 'failed',
+      reason: 'summary-text-left-out',
+      fallback: 'summary_text_left_out',
+    });
   });
 
   it('caps the generation with max_tokens so output cost is bounded', async () => {
@@ -573,6 +600,7 @@ describe('summarizeTurnContent on Token Factory', () => {
 describe('summarizeTurnContent reasoning fields on the real call', () => {
   const FACTS = '{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}';
   const servers: Server[] = [];
+  let modelCount = 0;
 
   afterEach(() => {
     for (const server of servers.splice(0)) {
@@ -580,10 +608,13 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
     }
   });
 
+  /** Each call gets its own model name, because a refusal is remembered per model for the whole process. */
   async function setup(options: {
     efforts: ModelProperties['reasoning_efforts'];
-    refuse?: (body: Record<string, unknown>) => number | undefined;
+    refuse?: (body: Record<string, unknown>) => { status: number; message: string } | undefined;
   }) {
+    modelCount += 1;
+    const providerName = `local-vllm-${String(modelCount)}`;
     const stub = await startModelEndpointStub({ content: FACTS, refuse: options.refuse });
     servers.push(stub.server);
     const db = createSqliteDb(':memory:');
@@ -591,10 +622,10 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
     const modelProviderStore = new SqliteModelProviderStore(db);
     await modelProviderStore.upsertProvider({
       tenant_id: TENANT_ID,
-      name: 'local-vllm',
+      name: providerName,
       manifest: {
         type: 'custom',
-        name: 'local-vllm',
+        name: providerName,
         base_url: stub.baseUrl,
         models: [
           {
@@ -612,13 +643,16 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
         turnDate: TURN_DATE,
         tenantId: TENANT_ID,
         modelProviderStore,
-        summarizationModelFqn: 'local-vllm/local-model',
+        summarizationModelFqn: `${providerName}/local-model`,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,
         logger: makeLogger(),
       });
     return { run, requests: stub.requests };
   }
+
+  const refuseReasoningField = (body: Record<string, unknown>) =>
+    'reasoning_effort' in body ? { status: 400, message: 'unsupported field: reasoning_effort' } : undefined;
 
   it('sends the lightest reasoning effort the model lists', async () => {
     const { run, requests } = await setup({ efforts: ['high', 'low'] });
@@ -637,16 +671,27 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
     expect(requests[0]).not.toHaveProperty('reasoning_effort');
   });
 
-  it('asks again without the field when the provider refuses it', async () => {
-    const { run, requests } = await setup({
-      efforts: ['low'],
-      refuse: body => ('reasoning_effort' in body ? 400 : undefined),
-    });
+  it('asks again without the field when the provider refuses it, and does not send it to that model again', async () => {
+    const { run, requests } = await setup({ efforts: ['low'], refuse: refuseReasoningField });
 
     expect((await run()).status).toBe('summarized');
-
     expect(requests).toHaveLength(2);
     expect(requests[0]).toHaveProperty('reasoning_effort');
     expect(requests[1]).not.toHaveProperty('reasoning_effort');
+
+    // A later turn for the same model goes straight to the plain request.
+    expect((await run()).status).toBe('summarized');
+    expect(requests).toHaveLength(3);
+    expect(requests[2]).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('does not retry a 400 that is about something else', async () => {
+    const { run, requests } = await setup({
+      efforts: ['low'],
+      refuse: () => ({ status: 400, message: 'the prompt is not valid' }),
+    });
+
+    expect((await run()).status).toBe('failed');
+    expect(requests).toHaveLength(1);
   });
 });

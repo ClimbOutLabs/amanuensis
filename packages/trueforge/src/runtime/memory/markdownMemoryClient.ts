@@ -22,7 +22,8 @@
  * `MemoryClient` contract: a memory failure degrades the turn instead of failing it.
  */
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
-import { readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
@@ -99,6 +100,9 @@ export interface MarkdownMemoryClientConfig {
 
 /** How many daily log files recall scans, newest first, before the token budget cuts it off. */
 const RECALL_MAX_DAILY_FILES = 14;
+
+/** Pending writes to each operations file in this process, so concurrent recordings run one at a time. */
+const operationsFileQueues = new Map<string, Promise<void>>();
 
 /** Cap on tracked retain operation ids; oldest are dropped, newest kept. */
 const OPERATIONS_LOG_CAP = 2000;
@@ -340,8 +344,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (items.length === 0) {
         // Everything retained was an ability note: store nothing, but record the
         // operation so a later sweep sees it as completed.
-        seen.add(params.operationId);
-        await this.writeOperationIds(seen);
+        await this.recordOperation(params.operationId);
         return { ok: true };
       }
 
@@ -379,8 +382,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         });
       }
 
-      seen.add(params.operationId);
-      await this.writeOperationIds(seen);
+      await this.recordOperation(params.operationId);
 
       // New memories become searchable by meaning without waiting for a backfill.
       // Kicking the warm here (not just on recall) means a retain-only session
@@ -396,9 +398,7 @@ export class MarkdownMemoryClient implements MemoryClient {
 
   async completeOperation(operationId: string): Promise<void> {
     try {
-      const seen = await this.readOperationIds();
-      seen.add(operationId);
-      await this.writeOperationIds(seen);
+      await this.recordOperation(operationId);
     } catch {
       // Best effort: a sweep that still finds the operation missing is covered by the recovery rule.
     }
@@ -677,9 +677,26 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  private async writeOperationIds(ids: Set<string>): Promise<void> {
-    const list = [...ids].slice(-OPERATIONS_LOG_CAP);
-    await ensureWritableDataDir({ dir: this.namespaceDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
-    await writeFile(this.operationsFile(), JSON.stringify(list), 'utf8');
+  /**
+   * Adds one operation id to the log. Concurrent turns in this process queue on the file, and the
+   * file is replaced whole, so no id is lost and a reader never sees half a write.
+   */
+  private async recordOperation(operationId: string): Promise<void> {
+    const file = this.operationsFile();
+    const previous = operationsFileQueues.get(file) ?? Promise.resolve();
+    const run = previous.then(async () => {
+      const ids = await this.readOperationIds();
+      ids.add(operationId);
+      await ensureWritableDataDir({ dir: this.namespaceDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
+      const temporary = `${file}.${String(process.pid)}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify([...ids].slice(-OPERATIONS_LOG_CAP)), 'utf8');
+      await rename(temporary, file);
+    });
+    // The queue carries on after a failed write; the caller still sees the failure.
+    operationsFileQueues.set(
+      file,
+      run.catch(() => undefined),
+    );
+    await run;
   }
 }

@@ -22,8 +22,8 @@ function sse(payload: unknown): string {
 export async function startModelEndpointStub(options: {
   usage?: { prompt_tokens: number; completion_tokens: number };
   content?: string;
-  /** Answers a request with this error status instead of `content`, e.g. a provider that refuses a field. */
-  refuse?: ((body: Record<string, unknown>) => number | undefined) | undefined;
+  /** Answers a request with this error instead of `content`, e.g. a provider that refuses a field. */
+  refuse?: ((body: Record<string, unknown>) => { status: number; message: string } | undefined) | undefined;
 }): Promise<{ server: Server; baseUrl: string; requests: Record<string, unknown>[] }> {
   const { usage, content = 'hello', refuse } = options;
   const requests: Record<string, unknown>[] = [];
@@ -36,10 +36,10 @@ export async function startModelEndpointStub(options: {
   });
   function respond(body: Record<string, unknown>, res: ServerResponse): void {
     requests.push(body);
-    const refusedStatus = refuse?.(body);
-    if (refusedStatus !== undefined) {
-      res.writeHead(refusedStatus, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: 'unsupported field: reasoning_effort', type: 'invalid_request' } }));
+    const refusal = refuse?.(body);
+    if (refusal !== undefined) {
+      res.writeHead(refusal.status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: refusal.message, type: 'invalid_request' } }));
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });

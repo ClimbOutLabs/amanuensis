@@ -31,12 +31,26 @@ const SUMMARIZE_MAX_CHARACTERS = 2000;
 /** Most facts kept from one turn; a longer list is cut. */
 const SUMMARIZE_MAX_FACTS = 8;
 
-/** Bound on each side of the exchange sent to the summarizer; a longer side keeps its most recent part. */
+/** Bound, in characters, on each side of the exchange sent to the summarizer. */
 const SUMMARIZE_MAX_INPUT_CHARACTERS = 8000;
 
-/** The last stretch of `text` that fits the input bound. */
-function mostRecentPart(text: string): string {
-  return text.length > SUMMARIZE_MAX_INPUT_CHARACTERS ? text.slice(-SUMMARIZE_MAX_INPUT_CHARACTERS).trimStart() : text;
+/** How much of a long side is kept from its start, and from its end. */
+const SUMMARIZE_KEPT_HEAD_CHARACTERS = 2000;
+
+/**
+ * A side of the exchange that fits the input bound, cut on whole characters. A longer side keeps
+ * its start, where a request to remember often sits, and its end, the person's last words.
+ */
+function boundedText(text: string): { text: string; cut: boolean } {
+  const characters = Array.from(text);
+  if (characters.length <= SUMMARIZE_MAX_INPUT_CHARACTERS) {
+    return { text, cut: false };
+  }
+  const tail = SUMMARIZE_MAX_INPUT_CHARACTERS - SUMMARIZE_KEPT_HEAD_CHARACTERS;
+  return {
+    text: `${characters.slice(0, SUMMARIZE_KEPT_HEAD_CHARACTERS).join('')}\n[the middle of this text was left out]\n${characters.slice(-tail).join('')}`,
+    cut: true,
+  };
 }
 
 /** Cap on generated summary tokens; bounds output cost by construction (the
@@ -73,6 +87,7 @@ export type SummaryFallbackReason =
   | 'model_failed'
   | 'model_timeout'
   | 'summary_empty'
+  | 'summary_text_left_out'
   | 'summary_unreadable'
   | 'summary_cut_short'
   | 'summary_too_long';
@@ -154,14 +169,14 @@ const SUMMARIZE_SYSTEM_PROMPT = [
  * Messages for the summarization call. Exported for tests; the exchange is the full
  * turn so the model can tell what a short reply refers to. `turnDate` is an ISO instant, shown
  * as the day in `timeZone`, so relative dates in the person's words can be written as real dates.
- * `earlierTextLeftOut` says a long turn was cut to its most recent part.
+ * `textLeftOut` says the middle of a long turn was cut.
  */
 export function buildSummarizationMessages(params: {
   userText: string;
   assistantText: string;
   turnDate: string;
   timeZone?: string | undefined;
-  earlierTextLeftOut?: boolean | undefined;
+  textLeftOut?: boolean | undefined;
 }): { role: 'system' | 'user'; content: string }[] {
   return [
     { role: 'system', content: SUMMARIZE_SYSTEM_PROMPT },
@@ -169,7 +184,7 @@ export function buildSummarizationMessages(params: {
       role: 'user',
       content: [
         `Date of the chat: ${describeTurnDate({ turnDate: params.turnDate, timeZone: params.timeZone })}`,
-        ...(params.earlierTextLeftOut === true ? ['Earlier text of this long turn was left out.'] : []),
+        ...(params.textLeftOut === true ? ['Part of this long turn was left out.'] : []),
         '<exchange>',
         `User: ${params.userText}`,
         '',
@@ -192,18 +207,11 @@ function describeTurnDate({ turnDate, timeZone }: { turnDate: string; timeZone: 
 
 const SummaryReplySchema = z.object({ facts: z.array(z.string()) });
 
-/** A fact written as narration of the chat ("User wants...", "Assistant asked...") is never stored. */
-const NARRATION_START =
-  /^(?:the\s+)?(?:user|assistant)\s+(?:is|was|has|had|will|would|can|could|should|did|does|wrote|told|gave|made|sent|[a-z]+ed|(?:ask|say|want|share|request|offer|suggest|confirm|note|tell|give|make|send)s?)\b/i;
-
 /** Labels older versions put in front of saved text; a fact that starts with one is not a fact. */
 const LEGACY_LABEL_START = /^(?:turn summary|chat title)\s*:/i;
 
-/**
- * The only structural signal for "nothing to keep" is an empty list. A sentence in the list that
- * says there are no facts is rejected as a second line of defence; the prompt forbids it.
- */
-const NO_FACTS_SENTENCE = /^(?:no|none|nothing)\b[^.]*\bfacts?\b/i;
+/** A line that reads as part of a transcript: a speaker label with a colon at the start of a line. */
+const TRANSCRIPT_LINE = /(?:^|\n)\s*(?:user|assistant)\s*:/i;
 
 type SummaryReply = { kind: 'facts'; facts: string[] } | { kind: 'nothing' } | { kind: 'unreadable' };
 
@@ -219,7 +227,8 @@ function extractReplyJson(reply: string): unknown {
 }
 
 /**
- * Reads the model's reply. Only `{"facts": []}` means there is nothing to keep. Anything that is
+ * Reads the model's reply. Only `{"facts": []}` means there is nothing to keep. A fact that is a
+ * transcript line ("User: hi", "Assistant: ..."), or has several lines of dialogue, is dropped. Anything that is
  * not a `{"facts": [...]}` object, in any language, including a blank reply or a sentence saying
  * there is nothing, is `unreadable`: it is never stored and never counted as "nothing". Exported
  * for tests.
@@ -231,10 +240,7 @@ export function parseSummaryReply(reply: string): SummaryReply {
   }
   const facts = parsed.data.facts
     .map(fact => fact.replace(/^\s*[-*•]\s*/, '').trim())
-    .filter(
-      fact =>
-        fact !== '' && !LEGACY_LABEL_START.test(fact) && !NO_FACTS_SENTENCE.test(fact) && !NARRATION_START.test(fact),
-    )
+    .filter(fact => fact !== '' && !LEGACY_LABEL_START.test(fact) && !TRANSCRIPT_LINE.test(fact))
     .slice(0, SUMMARIZE_MAX_FACTS);
   return facts.length === 0 ? { kind: 'nothing' } : { kind: 'facts', facts };
 }
@@ -255,42 +261,50 @@ export function lightReasoningRequestFields(properties: ModelProperties): Record
   return effort === 'none' ? { enable_thinking: false, reasoning_effort: effort } : { reasoning_effort: effort };
 }
 
-/** A request error that is a 400, or that names a reasoning field, so the provider likely refused the extra fields. */
-function looksLikeRejectedRequestFields(error: unknown): boolean {
-  return error instanceof Error && /\b400\b|reasoning[_ ]effort|enable[_ ]thinking|thinking/i.test(error.message);
+/** Models, by name, whose provider refused the reasoning fields; they are not sent again for the life of the process. */
+const modelsRefusingReasoningFields = new Set<string>();
+
+/** A 400 whose message names a reasoning field: the provider refused the hint, not the summary request. */
+function refusedReasoningFields(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /\b400\b/.test(error.message) &&
+    /reasoning[_ ]effort|enable[_ ]thinking/i.test(error.message)
+  );
 }
 
 /**
  * The model with extra request fields on every non-streaming call. A provider that refuses them
- * gets the same call once without them, and later calls skip them, so a model that cannot take the
- * hint still summarizes.
+ * gets the same call once without them, and that model skips them from then on, so a model that
+ * cannot take the hint still summarizes.
  */
 function withRequestFields({
   llm,
   fields,
+  modelKey,
   logger,
 }: {
   llm: ILLM;
   fields: Record<string, string | boolean>;
+  modelKey: string;
   logger: Logger;
 }): ILLM {
   if (Object.keys(fields).length === 0) {
     return llm;
   }
-  let refused = false;
   return {
     create: body => llm.create(body),
     createNonStream: async body => {
-      if (refused) {
+      if (modelsRefusingReasoningFields.has(modelKey)) {
         return llm.createNonStream(body);
       }
       try {
         return await llm.createNonStream(Object.assign({}, body, fields));
       } catch (error) {
-        if (!looksLikeRejectedRequestFields(error)) {
+        if (!refusedReasoningFields(error)) {
           throw error;
         }
-        refused = true;
+        modelsRefusingReasoningFields.add(modelKey);
         logger.debug('Memory summarization model refused the reasoning fields; retrying without them');
         return llm.createNonStream(body);
       }
@@ -333,11 +347,12 @@ export async function summarizeTurnContent(params: {
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }): Promise<SummarizeTurnResult> {
   const { tenantId, modelProviderStore, summarizationModelFqn, logger } = params;
-  // A long turn is cut to its most recent part, so the person's last words are kept and the model
-  // is told that earlier text is missing.
-  const userText = mostRecentPart(params.userText);
-  const assistantText = mostRecentPart(params.assistantText);
-  const earlierTextLeftOut = userText !== params.userText || assistantText !== params.assistantText;
+  // A long turn keeps its start and its end, and the model is told that the middle is missing.
+  const boundedUser = boundedText(params.userText);
+  const boundedAssistant = boundedText(params.assistantText);
+  const userText = boundedUser.text;
+  const assistantText = boundedAssistant.text;
+  const textLeftOut = boundedUser.cut || boundedAssistant.cut;
   if (userText.trim() === '' && assistantText.trim() === '') {
     return { status: 'skipped', reason: 'empty-exchange' };
   }
@@ -369,7 +384,12 @@ export async function summarizeTurnContent(params: {
           usage: params.modelUsage,
           logger,
         });
-        return withRequestFields({ llm: metered, fields: lightReasoningRequestFields(modelProperties), logger });
+        return withRequestFields({
+          llm: metered,
+          fields: lightReasoningRequestFields(modelProperties),
+          modelKey: `${tenantId}/${name}`,
+          logger,
+        });
       });
     let llm: ILLM;
     try {
@@ -385,7 +405,7 @@ export async function summarizeTurnContent(params: {
         assistantText,
         turnDate: params.turnDate,
         timeZone: params.timeZone,
-        earlierTextLeftOut,
+        textLeftOut,
       });
       // Cap the generation so the model cannot burn tokens for the full call budget on output
       // the length validation would discard anyway.
@@ -411,7 +431,13 @@ export async function summarizeTurnContent(params: {
       if (parsed.kind === 'unreadable') {
         return { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' };
       }
-      return parsed.kind === 'nothing' ? { status: 'nothing_to_keep' } : { status: 'summarized', facts: parsed.facts };
+      if (parsed.kind === 'nothing') {
+        // "Nothing" about text the model never saw is a guess, not an answer.
+        return textLeftOut
+          ? { status: 'failed', reason: 'summary-text-left-out', fallback: 'summary_text_left_out' }
+          : { status: 'nothing_to_keep' };
+      }
+      return { status: 'summarized', facts: parsed.facts };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.debug('Memory summarization failed', { reason });

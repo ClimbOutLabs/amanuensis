@@ -100,6 +100,17 @@ function savedLogs(dir: string): string[] {
     : [];
 }
 
+function capabilityFor(client: MarkdownMemoryClient, keepsFullExchange?: boolean) {
+  return hindsightMemoryCapability({
+    client,
+    config: CONFIG,
+    logger: makeLogger(),
+    sessionId: 's1',
+    previousTurnId: 't1',
+    ...(keepsFullExchange === undefined ? {} : { keepsFullExchange }),
+  });
+}
+
 describe('the turn after a turn that saved nothing, with summaries on', () => {
   let dir: string;
   let client: MarkdownMemoryClient;
@@ -114,9 +125,8 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  async function firstTurnSavesNothing(): Promise<void> {
-    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
-    await submitRetainWithVerification({
+  function drainFirstTurn(): Promise<boolean> {
+    return submitRetainWithVerification({
       ...TURN,
       client,
       userText: 'thanks',
@@ -124,63 +134,60 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
-    expect(savedLogs(dir)).toEqual([]);
   }
 
   it('does not rebuild the exchange from the chat and save it word for word', async () => {
-    await firstTurnSavesNothing();
+    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+    await drainFirstTurn();
+    expect(savedLogs(dir)).toEqual([]);
 
-    await runSecondTurn(
-      hindsightMemoryCapability({
-        client,
-        config: CONFIG,
-        logger: makeLogger(),
-        sessionId: 's1',
-        previousTurnId: 't1',
-        summarize: summarizeContext(),
-      }),
-    );
+    await runSecondTurn(capabilityFor(client));
 
     expect(savedLogs(dir)).toEqual([]);
     // The first turn's own answer stood: the summary model was not asked again.
     expect(mockSummarize).toHaveBeenCalledTimes(1);
+    expect(await client.summaryPending({ namespace: '' })).toBe(false);
   });
 
-  it('still saves nothing when the first turn left no record, because the summary decides again', async () => {
-    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+  it('saves nothing, and marks the vault, when the first turn left no record at all', async () => {
+    await runSecondTurn(capabilityFor(client));
 
-    await runSecondTurn(
-      hindsightMemoryCapability({
-        client,
-        config: CONFIG,
-        logger: makeLogger(),
-        sessionId: 's1',
-        previousTurnId: 't1',
-        summarize: summarizeContext(),
-      }),
-    );
-
-    expect(mockSummarize).toHaveBeenCalledTimes(1);
     expect(savedLogs(dir)).toEqual([]);
+    // No blocking summary call in the person's turn.
+    expect(mockSummarize).not.toHaveBeenCalled();
+    expect(await client.summaryPending({ namespace: '' })).toBe(true);
   });
 
-  it('saves the facts of a turn whose first attempt left no record, not the exchange', async () => {
-    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person says thanks often.'] });
-
-    await runSecondTurn(
-      hindsightMemoryCapability({
-        client,
-        config: CONFIG,
-        logger: makeLogger(),
-        sessionId: 's1',
-        previousTurnId: 't1',
-        summarize: summarizeContext(),
-      }),
+  it('saves no raw exchange when the next turn starts while the first summary is still running', async () => {
+    let finishSummary: (() => void) | undefined;
+    mockSummarize.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          finishSummary = () => {
+            resolve({ status: 'summarized', facts: ['The person says thanks often.'] });
+          };
+        }),
     );
+    const firstTurn = drainFirstTurn();
+    await new Promise(resolve => setTimeout(resolve, 20));
 
+    await runSecondTurn(capabilityFor(client));
+    expect(savedLogs(dir)).toEqual([]);
+
+    finishSummary?.();
+    await firstTurn;
     const logs = savedLogs(dir);
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain('The person says thanks often.');
     expect(logs[0]).not.toContain('User:');
+    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+  });
+
+  it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {
+    await runSecondTurn(capabilityFor(client, true));
+
+    const logs = savedLogs(dir);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('User: thanks');
   });
 });
