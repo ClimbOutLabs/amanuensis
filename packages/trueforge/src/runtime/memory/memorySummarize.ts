@@ -42,15 +42,19 @@ const SUMMARIZE_KEPT_HEAD_CHARACTERS = 2000;
  * its start, where a request to remember often sits, and its end, the person's last words.
  */
 function boundedText(text: string): { text: string; cut: boolean } {
-  const characters = Array.from(text);
-  if (characters.length <= SUMMARIZE_MAX_INPUT_CHARACTERS) {
+  // Length in UTF-16 units is never below the length in characters, so a short text needs no scan.
+  if (text.length <= SUMMARIZE_MAX_INPUT_CHARACTERS) {
     return { text, cut: false };
   }
-  const tail = SUMMARIZE_MAX_INPUT_CHARACTERS - SUMMARIZE_KEPT_HEAD_CHARACTERS;
-  return {
-    text: `${characters.slice(0, SUMMARIZE_KEPT_HEAD_CHARACTERS).join('')}\n[the middle of this text was left out]\n${characters.slice(-tail).join('')}`,
-    cut: true,
-  };
+  const tailLength = SUMMARIZE_MAX_INPUT_CHARACTERS - SUMMARIZE_KEPT_HEAD_CHARACTERS;
+  // Only the two ends are split into characters, so a huge paste is never copied whole. Each end
+  // is read from twice as many units as it keeps, since a character is at most two units.
+  if (text.length <= SUMMARIZE_MAX_INPUT_CHARACTERS * 2 && Array.from(text).length <= SUMMARIZE_MAX_INPUT_CHARACTERS) {
+    return { text, cut: false };
+  }
+  const head = Array.from(text.slice(0, SUMMARIZE_KEPT_HEAD_CHARACTERS * 2)).slice(0, SUMMARIZE_KEPT_HEAD_CHARACTERS);
+  const tail = Array.from(text.slice(-(tailLength * 2 + 1))).slice(-tailLength);
+  return { text: `${head.join('')}\n[the middle of this text was left out]\n${tail.join('')}`, cut: true };
 }
 
 /** Cap on generated summary tokens; bounds output cost by construction (the
@@ -87,7 +91,6 @@ export type SummaryFallbackReason =
   | 'model_failed'
   | 'model_timeout'
   | 'summary_empty'
-  | 'summary_text_left_out'
   | 'summary_unreadable'
   | 'summary_cut_short'
   | 'summary_too_long';
@@ -210,8 +213,11 @@ const SummaryReplySchema = z.object({ facts: z.array(z.string()) });
 /** Labels older versions put in front of saved text; a fact that starts with one is not a fact. */
 const LEGACY_LABEL_START = /^(?:turn summary|chat title)\s*:/i;
 
-/** A line that reads as part of a transcript: a speaker label with a colon at the start of a line. */
-const TRANSCRIPT_LINE = /(?:^|\n)\s*(?:user|assistant)\s*:/i;
+/**
+ * A line that reads as part of a transcript: a speaker label with a colon at the start of any line,
+ * after any quote, list, or emphasis marks. "User prefers dark mode." has no colon and is a fact.
+ */
+const TRANSCRIPT_LINE = /^[\s>*_"'\u2018\u2019\u201c\u201d\u200b\u2022-]*(?:user|assistant)\s*[:\uff1a]/im;
 
 type SummaryReply = { kind: 'facts'; facts: string[] } | { kind: 'nothing' } | { kind: 'unreadable' };
 
@@ -432,10 +438,7 @@ export async function summarizeTurnContent(params: {
         return { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' };
       }
       if (parsed.kind === 'nothing') {
-        // "Nothing" about text the model never saw is a guess, not an answer.
-        return textLeftOut
-          ? { status: 'failed', reason: 'summary-text-left-out', fallback: 'summary_text_left_out' }
-          : { status: 'nothing_to_keep' };
+        return { status: 'nothing_to_keep' };
       }
       return { status: 'summarized', facts: parsed.facts };
     } catch (error) {

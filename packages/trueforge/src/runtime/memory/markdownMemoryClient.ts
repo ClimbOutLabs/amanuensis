@@ -23,7 +23,7 @@
  */
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
@@ -693,8 +693,13 @@ export class MarkdownMemoryClient implements MemoryClient {
       ids.add(operationId);
       await ensureWritableDataDir({ dir: this.namespaceDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
       const temporary = `${file}.${String(process.pid)}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify([...ids].slice(-OPERATIONS_LOG_CAP)), 'utf8');
-      await rename(temporary, file);
+      try {
+        await writeFile(temporary, JSON.stringify([...ids].slice(-OPERATIONS_LOG_CAP)), 'utf8');
+        await rename(temporary, file);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
     });
     // The queue carries on after a failed write; the caller still sees the failure.
     operationsFileQueues.set(

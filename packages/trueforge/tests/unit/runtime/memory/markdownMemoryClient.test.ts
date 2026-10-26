@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
@@ -231,6 +231,21 @@ describe('MarkdownMemoryClient', () => {
 
         const statuses = await Promise.all(ids.map(id => client.getOperation(id, 5000)));
         expect(statuses.map(status => status.ok && status.status)).toEqual(ids.map(() => 'completed'));
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
+    it('leaves no temporary file behind when the operations file cannot be replaced', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        // A directory where the file goes makes the final rename fail.
+        await mkdir(path.join(dir, 'tenant-1', '.operations.json'), { recursive: true });
+
+        await client.completeOperation('op-blocked');
+
+        const leftovers = (await readdir(path.join(dir, 'tenant-1'))).filter(name => name.endsWith('.tmp'));
+        expect(leftovers).toEqual([]);
       } finally {
         await cleanup(dir);
       }
