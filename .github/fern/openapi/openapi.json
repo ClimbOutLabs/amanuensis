@@ -2266,9 +2266,13 @@
         "type": "object"
       },
       "CronExpression": {
+        "default": null,
         "description": "Standard 5-field cron expression, evaluated in `timezone`.",
         "pattern": "^[\\d*,\\-/]+(?:\\s+[\\d*,\\-/]+){4}$",
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "CustomModelProvider": {
         "additionalProperties": false,
@@ -6747,6 +6751,11 @@
             "exclusiveMinimum": 0,
             "type": "integer"
           },
+          "max_concurrent_requests": {
+            "description": "How many requests may be sent to this model at once; a further reply waits for one to finish. Absent means 1 for a model on a custom provider, and no limit for other providers.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
           "max_output_tokens": {
             "description": "Maximum output tokens the model can generate.",
             "exclusiveMinimum": 0,
@@ -6946,6 +6955,36 @@
           "relevance_judge"
         ],
         "type": "string"
+      },
+      "ModelWaitingPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "message": {
+            "description": "The plain line shown in the chat while the reply waits.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when a model step waits for another reply on the same model.",
+            "enum": [
+              "aman.model.waiting"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
       },
       "MoonshotModelProvider": {
         "additionalProperties": false,
@@ -8154,6 +8193,15 @@
         "properties": {},
         "type": "object"
       },
+      "RunAt": {
+        "default": null,
+        "description": "The single time a one-time schedule runs: ISO 8601 with a UTC offset, like 2026-10-26T18:00:00-04:00.",
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "RuntimeConfig": {
         "default": {
           "ask_user_questions": {
@@ -8459,11 +8507,25 @@
         ],
         "type": "object"
       },
+      "ScheduleKind": {
+        "default": "task",
+        "enum": [
+          "task",
+          "reminder"
+        ],
+        "type": "string"
+      },
       "ScheduleManifest": {
         "additionalProperties": false,
         "properties": {
           "cron": {
             "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
           },
           "status": {
             "$ref": "#/components/schemas/ScheduleStatus"
@@ -8478,8 +8540,7 @@
           }
         },
         "required": [
-          "task",
-          "cron"
+          "task"
         ],
         "type": "object"
       },
@@ -8553,7 +8614,8 @@
         "default": "active",
         "enum": [
           "active",
-          "paused"
+          "paused",
+          "done"
         ],
         "type": "string"
       },
@@ -8611,7 +8673,7 @@
       "SentinelUserSettings": {
         "properties": {
           "maps_without_asking": {
-            "description": "While on, map requests run without asking unless private data was read in this chat.",
+            "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "offline_mode": {
@@ -8652,7 +8714,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Approve for this chat\" (server:tool pairs) and \"Allow searches in this chat\".",
+            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -9011,6 +9073,9 @@
           },
           {
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
           }
         ]
       },
@@ -9051,7 +9116,8 @@
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
-          "aman.sandbox.provisioning"
+          "aman.sandbox.provisioning",
+          "aman.model.waiting"
         ],
         "type": "string"
       },
@@ -10386,22 +10452,22 @@
         "type": "object"
       },
       "Tier3Persona": {
-        "description": "The specialist a chat call adds, shown in full.",
+        "description": "The persona a chat call adds, shown in full.",
         "properties": {
           "description": {
-            "description": "One line on what the specialist is for.",
+            "description": "One line on what the persona is for.",
             "type": "string"
           },
           "instructions": {
-            "description": "The whole instruction text the specialist follows.",
+            "description": "The whole instruction text the persona follows.",
             "type": "string"
           },
           "model_name": {
-            "description": "The model the specialist answers with.",
+            "description": "The model the persona answers with.",
             "type": "string"
           },
           "name": {
-            "description": "Specialist name in plain words.",
+            "description": "Persona name in plain words.",
             "type": "string"
           }
         },
@@ -12350,6 +12416,7 @@
             "agent.context.compaction_started": "#/components/schemas/ContextCompactionStartedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
+            "aman.model.waiting": "#/components/schemas/ModelWaitingPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
@@ -12428,6 +12495,9 @@
           },
           {
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
@@ -18983,7 +19053,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 20,
+              "maxItems": 21,
               "minItems": 1,
               "type": "array"
             }

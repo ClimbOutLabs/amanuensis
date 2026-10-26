@@ -1702,7 +1702,8 @@ async function importArchive<TTransaction>(
               schedule.persona_id !== null && personas.some(({ persona }) => persona.id === schedule.persona_id)
                 ? schedule.persona_id
                 : null,
-            manifest: { ...schedule.manifest, status: 'paused' },
+            // A one-time schedule that already ran stays done, so switching it on can never run it again.
+            manifest: { ...schedule.manifest, status: schedule.manifest.status === 'done' ? 'done' : 'paused' },
             created_by_subject: importerSubject,
             runFrom: new Date(),
           },

@@ -16,7 +16,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
 import type { Persona } from '../personas/persona';
-import { nextTriggerAfter } from '../runtime/cron';
+import { firstRunAfter } from '../runtime/cron';
 import { InvalidCronError, type ScheduleRunStatus } from '../schemas/schedule';
 import type { ControlLoop } from './Controller';
 
@@ -227,7 +227,8 @@ export async function loadScheduleDispatchItem<TTransaction>(params: {
 
 /**
  * Mark the current run with `status`, then add the schedule's next scheduled run
- * if the schedule is still active and its cron still has a later trigger time.
+ * if the schedule is still active and its cron still has a later trigger time. A one-time
+ * schedule is marked done instead.
  *
  * ## LOCK ORDERING
  * The schedule row is locked FIRST, before the run row is touched. `updateScheduleAndRun`
@@ -259,17 +260,28 @@ async function finishScheduledRun<TTransaction>(params: {
       return;
     }
 
+    // A one-time schedule ends with its only run: it is marked done so it never gets another.
+    if (latest.manifest.run_at !== null) {
+      await store.updateScheduleAndRun(
+        {
+          tenant_id: latest.tenant_id,
+          id: latest.id,
+          name: latest.name,
+          manifest: { ...latest.manifest, status: 'done' },
+          runFrom: now,
+        },
+        txn,
+      );
+      return;
+    }
+
     // `now` selected this run (`scheduled_for <= now`), so anchoring here gives a
     // trigger time strictly later than the run being finished.
     const advanceFrom = new Date(Math.max(Date.parse(run.scheduled_for), now.getTime()));
 
     let nextTrigger: Date;
     try {
-      nextTrigger = nextTriggerAfter({
-        cron: latest.manifest.cron,
-        timezone: latest.manifest.timezone,
-        from: advanceFrom,
-      });
+      nextTrigger = firstRunAfter({ manifest: latest.manifest, from: advanceFrom });
     } catch (error) {
       if (!(error instanceof InvalidCronError)) {
         throw error;

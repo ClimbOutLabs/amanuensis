@@ -15,6 +15,8 @@ export type ThreadListRowProps = {
   agentName?: string;
   /** Shown as compact relative time on the right. */
   lastMessageAt?: Date;
+  /** Something new came in that the person has not opened yet. */
+  unread?: boolean;
   /** Overflow actions (e.g. delete menu) — rendered as a sibling of the title button. */
   actions?: ReactNode;
   className?: string;
@@ -26,6 +28,7 @@ export function ThreadListRow({
   onSelect,
   agentName,
   lastMessageAt,
+  unread,
   actions,
   className,
 }: ThreadListRowProps) {
@@ -36,6 +39,7 @@ export function ThreadListRow({
     <div
       data-slot="aui_thread-list-item"
       data-active={active || undefined}
+      data-unread={unread === true ? 'true' : undefined}
       className={cn(
         'group flex min-w-0 items-center gap-0.5 border transition-colors',
         sidebarQuietRadiusClassName,
@@ -59,7 +63,24 @@ export function ThreadListRow({
         })}
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-normal text-text-primary">{title}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={cn(
+                'block truncate text-sm text-text-primary',
+                unread === true ? 'font-semibold' : 'font-normal',
+              )}
+            >
+              {title}
+            </span>
+            {unread === true ? (
+              <span
+                role="img"
+                aria-label="New reminder"
+                data-slot="aui_thread-list-item-unread"
+                className="bg-primary-button-bg size-2 shrink-0 rounded-full"
+              />
+            ) : null}
+          </span>
           {agentName != null ? (
             <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.75rem] text-text-secondary">
               <Icon name="bot" className="shrink-0" />

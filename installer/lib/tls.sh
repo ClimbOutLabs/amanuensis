@@ -21,8 +21,9 @@ tls_leaf_dir() { printf '%s/leaf/%s' "$(tls_dir)" "$1"; }
 tls_trust_dir() { printf '%s/trust/%s' "$(tls_dir)" "$1"; }
 tls_image() { json_get "$PINS_FILE" caddy_image; }
 
-# An instance is served over https when its record says so and it has a port for it.
-tls_active() { [ "$(reg_get "$1" tls)" = local ] && [ -n "$(reg_get "$1" tls_port)" ]; }
+# Whether an instance is served over https is the one rule in shared.sh (serves_https); this is its installer
+# form, reading the record with reg_get.
+tls_active() { serves_https "$(reg_get "$1" tls)" "$(reg_get "$1" tls_port)" "$(reg_get "$1" origins)"; }
 
 # What a re-run wants for an instance opened on the network: the flag, else what it has, else https.
 tls_target() { # name; prints local or off

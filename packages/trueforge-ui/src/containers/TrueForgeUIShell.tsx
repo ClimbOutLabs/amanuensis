@@ -12,6 +12,7 @@ import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../ato
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
+import { RemindersProvider } from '../reminders/RemindersContext.js';
 import { HistorySessionSwitchBridge } from '../routing/HistorySessionSwitchBridge.js';
 import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
 import { RemoteIdRouteBridge } from '../routing/RemoteIdRouteBridge.js';
@@ -389,11 +390,13 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
               <ChatConnectorChoiceProvider store={connectorChoice}>
                 <ChatFolderProvider store={chatFolders}>
                   <SpaceProvider store={spaces}>
-                    {resolvedRoutes != null ? (
-                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                    ) : (
-                      visibilityTree
-                    )}
+                    <RemindersProvider>
+                      {resolvedRoutes != null ? (
+                        <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                      ) : (
+                        visibilityTree
+                      )}
+                    </RemindersProvider>
                   </SpaceProvider>
                 </ChatFolderProvider>
               </ChatConnectorChoiceProvider>

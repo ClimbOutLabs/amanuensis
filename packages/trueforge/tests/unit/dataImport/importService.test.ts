@@ -1054,6 +1054,50 @@ describe('runDataImport reads what compaction writes', () => {
   });
 });
 
+describe('runDataImport reads schedules from before one-time schedules', () => {
+  /** An export made before `run_at` and `kind` existed: the same schedules, with those two keys gone. */
+  async function olderFormat(archive: Buffer): Promise<Buffer> {
+    return repack(archive, entries => {
+      const schedules = listAt(
+        parseJson(entries.get('schedules.json') ?? Buffer.alloc(0), 'schedules.json'),
+        'schedules.json',
+      );
+      for (const item of schedules) {
+        const manifest = recordAt(recordAt(item, 'schedule')['manifest'], 'manifest');
+        Reflect.deleteProperty(manifest, 'run_at');
+        Reflect.deleteProperty(manifest, 'kind');
+      }
+      entries.set('schedules.json', Buffer.from(JSON.stringify(schedules)));
+    });
+  }
+
+  it('imports an older export without the new fields: repeating, a plain task, and switched off', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-schedules');
+    try {
+      const older = await olderFormat(archive);
+      const found = listAt(
+        parseJson(
+          new Map(readZipEntries(older).map(entry => [entry.name, entry.data])).get('schedules.json') ??
+            Buffer.alloc(0),
+          'schedules.json',
+        ),
+        'schedules.json',
+      );
+      expect(recordAt(recordAt(found[0], 'schedule')['manifest'], 'manifest')).not.toHaveProperty('run_at');
+
+      await runDataImport(importDeps(target), importRequest(older));
+      const daily = await target.stores.scheduleStore.getSchedule({ tenant_id: TENANT, id: SEED_IDS.scheduleDaily });
+      expect(daily?.status).toBe('paused');
+      expect(daily?.manifest).toMatchObject({ run_at: null, kind: 'task', status: 'paused' });
+      expect(daily?.manifest.cron).not.toBeNull();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport reads the compaction start note', () => {
   it('keeps a compaction start event and leaves out one whose shape changed', async () => {
     const { source, archive } = await seededArchive();
