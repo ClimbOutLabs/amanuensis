@@ -27,9 +27,19 @@ function shellQuote(text: string): string {
 // folder age cannot say that here: the holder ran in its own container, so
 // its pid means nothing to this one, and a long install keeps the lock far
 // longer than any fixed age.
-// Taking over a dead lock first moves the old folder to a name of its own
-// (only one run can win that move), checks it really was the dead one, then
-// removes it. Exit 3 means another run holds the lock.
+//
+// A takeover goes through a second folder, state/takeover, made with mkdir
+// like the lock: only the run holding it may move a lock folder aside, so two
+// runs that both find a dead lock cannot both move it. Under it the run
+// judges the lock again, reads its owner, moves the folder aside with one
+// rename, and checks that what it moved still has that owner and a stopped
+// beat; if not, it is a live lock another run made a moment ago, and it goes
+// back. A guard left by a crashed run is judged by its own timestamp. Every
+// way out of a takeover that does not leave this run holding the lock is exit
+// 3, "another install is running". After writing its owner the run reads it
+// back, and waits a second once in case the folder is being put back; the
+// exit cleanup removes the lock only while the owner is still this run's.
+// The script uses no GNU-only tool, so it runs the same on a Mac.
 export function volumeLockedScript(options: { home: string; command: string; timing?: LockTiming }): string {
   const timing = options.timing ?? LOCK_TIMING;
   const dead = String(timing.deadSeconds);
@@ -38,29 +48,39 @@ export function volumeLockedScript(options: { home: string; command: string; tim
     `cd ${shellQuote(options.home)} || exit 1;`,
     'mkdir -p state;',
     'chmod 700 state;',
-    'beat_age() { b=$(cat "$1/beat" 2>/dev/null); case "$b" in \'\'|*[!0-9]*) return 1 ;; esac; echo $(( $(date +%s) - b )); };',
-    // A lock with no beat yet is a holder between mkdir and its first beat, so it is given a moment.
-    `is_live() { [ -d "$1" ] || return 1; n=0; while [ "$n" -lt 3 ]; do if a=$(beat_age "$1"); then [ "$a" -lt ${dead} ]; return; fi; n=$((n + 1)); sleep 1; done; return 1; };`,
-    'tries=0;',
-    'while ! mkdir state/lock 2>/dev/null; do',
-    'tries=$((tries + 1));',
-    '[ "$tries" -le 5 ] || exit 3;',
-    'is_live state/lock && exit 3;',
-    'old="state/lock.old.$$.$(date +%s)";',
-    'if [ ! -e "$old" ] && mv state/lock "$old" 2>/dev/null; then',
-    // The folder moved may be a live lock another run made a moment ago: put it back.
-    `if a=$(beat_age "$old") && [ "$a" -lt ${dead} ]; then`,
-    'if [ -e state/lock ]; then rm -rf "$old"; else mv "$old" state/lock 2>/dev/null || rm -rf "$old"; fi;',
-    'exit 3;',
-    'fi;',
-    'rm -rf "$old";',
-    'fi;',
-    'done;',
+    'age_of() { b=$(cat "$1" 2>/dev/null); case "$b" in \'\'|*[!0-9]*) return 1 ;; esac; echo $(( $(date +%s) - b )); };',
+    // A folder with no timestamp yet belongs to a run between mkdir and its first write, so it is given a moment.
+    `is_live() { [ -d "$1" ] || return 1; n=0; while [ "$n" -lt 3 ]; do if a=$(age_of "$1/$2"); then [ "$a" -lt ${dead} ]; return; fi; n=$((n + 1)); sleep 1; done; return 1; };`,
     'token="$$-$(date +%s)";',
-    'beat() { date +%s > "state/lock/beat.$$" && mv -f "state/lock/beat.$$" state/lock/beat; };',
+    'if ! mkdir state/lock 2>/dev/null; then',
+    'is_live state/lock beat && exit 3;',
+    'if ! mkdir state/takeover 2>/dev/null; then',
+    'is_live state/takeover since && exit 3;',
+    'mv state/takeover "state/takeover.stale-$token" 2>/dev/null || exit 3;',
+    'mkdir state/takeover 2>/dev/null || exit 3;',
+    'rm -rf "state/takeover.stale-$token";',
+    'fi;',
+    'date +%s > state/takeover/since;',
+    'if is_live state/lock beat; then rm -rf state/takeover; exit 3; fi;',
+    'old_owner=$(cat state/lock/owner 2>/dev/null);',
+    'if [ -d state/lock ]; then',
+    'aside="state/lock.stale-$token";',
+    'if ! mv state/lock "$aside" 2>/dev/null; then rm -rf state/takeover; exit 3; fi;',
+    'aged=$(age_of "$aside/beat");',
+    `if [ "$(cat "$aside/owner" 2>/dev/null)" != "$old_owner" ] || { [ -n "$aged" ] && [ "$aged" -lt ${dead} ]; }; then`,
+    'if [ ! -e state/lock ]; then mv "$aside" state/lock 2>/dev/null; fi;',
+    'rm -rf state/takeover; exit 3;',
+    'fi;',
+    'rm -rf "$aside";',
+    'fi;',
+    'if ! mkdir state/lock 2>/dev/null; then rm -rf state/takeover; exit 3; fi;',
+    'rm -rf state/takeover;',
+    'fi;',
     'printf \'%s\\n\' "$token" > state/lock/owner;',
+    'beat() { date +%s > "state/lock/beat.$$" && mv -f "state/lock/beat.$$" state/lock/beat; };',
     'beat;',
     'printf \'%s\\n\' "$$" > state/lock/pid;',
+    'if [ "$(cat state/lock/owner 2>/dev/null)" != "$token" ]; then sleep 1; if [ "$(cat state/lock/owner 2>/dev/null)" != "$token" ]; then exit 3; fi; fi;',
     // The beat stops with the holder, and never touches a lock another run took over.
     `( while sleep ${String(timing.beatSeconds)}; do kill -0 "$$" 2>/dev/null || exit 0; [ "$(cat state/lock/owner 2>/dev/null)" = "$token" ] || exit 0; beat; done ) </dev/null >/dev/null 2>&1 &`,
     'beater=$!;',

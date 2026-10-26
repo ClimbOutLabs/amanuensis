@@ -367,3 +367,60 @@ test('a live lock moved aside by mistake is put back and the run is told it is b
   assert.equal(result.status, 3, result.stderr.toString());
   assert.equal((await readFile(join(home, 'state', 'lock', 'owner'), 'utf8')).trim(), 'other-run');
 });
+
+// The takeover has to be safe when several runs find the same stopped
+// holder's lock together, so these start real runs at the same moment.
+
+function startWrite(home: string) {
+  const child = spawn('sh', ['-c', volumeLockedScript({ home, command: WRITE })]);
+  child.stdin.on('error', () => undefined);
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const done = new Promise<{ status: number | null; stderr: string }>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', status => {
+      resolve({ status, stderr });
+    });
+  });
+  return { child, done };
+}
+
+for (const [label, owner] of [
+  ['a lock with an owner', 'other-run'],
+  ['a lock a crash left with no owner', ''],
+] as const) {
+  test(`when many runs find ${label} whose beat stopped together, exactly one writes and the rest are told another install is running`, async () => {
+    const writers = 6;
+    for (let round = 0; round < 8; round += 1) {
+      const home = await freshHome();
+      await leaveLock({ home, owner, beatAgeSeconds: 3600 });
+      const runs = Array.from({ length: writers }, () => startWrite(home));
+      // The winner waits at its input while it holds the lock, so the losers leave on their own.
+      let exited = 0;
+      const tracked = runs.map(async run => {
+        const result = await run.done;
+        exited += 1;
+        return result;
+      });
+      for (let waited = 0; exited < writers - 1; waited += 1) {
+        if (waited > 600) {
+          runs.forEach(run => run.child.kill());
+          assert.fail(`round ${String(round)} did not settle`);
+        }
+        await pause(25);
+      }
+      runs.forEach(run => run.child.stdin.end(Buffer.from(buildTar(ONE_FILE))));
+      const results = await Promise.all(tracked);
+      const codes = results.map(result => result.status).sort((a, b) => (a ?? -1) - (b ?? -1));
+      assert.deepEqual(
+        codes,
+        [0, ...Array.from({ length: writers - 1 }, () => 3)],
+        `round ${String(round)}: ${results.map(result => result.stderr).join(' | ')}`,
+      );
+      assert.equal(await readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'), 'name=main\n');
+      await assert.rejects(access(join(home, 'state', 'lock')));
+    }
+  });
+}

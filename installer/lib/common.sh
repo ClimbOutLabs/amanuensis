@@ -236,20 +236,21 @@ ensure_private_dir() {
 LOCK_BEAT_SECONDS=15
 LOCK_DEAD_SECONDS=120
 
-# Seconds since the lock folder's last beat, or nothing when there is no readable beat.
-lock_beat_age() {
-  local beat
-  beat=$(cat "$1/beat" 2>/dev/null || true)
-  case $beat in '' | *[!0-9]*) return 1 ;; esac
-  printf '%s\n' $(($(date +%s) - beat))
+# Seconds since the time written in file $1, or nothing when there is no readable time.
+lock_age_of() {
+  local when
+  when=$(cat "$1" 2>/dev/null || true)
+  case $when in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' $(($(date +%s) - when))
 }
 
-# A lock with no beat yet is a holder between mkdir and its first beat, so it is given a moment.
+# Whether the folder $1 shows a sign of life in its file $2 within the dead limit. A folder with no time yet
+# belongs to a run between mkdir and its first write, so it is given a moment.
 lock_is_live() {
   local tries=0 age
   [ -d "$1" ] || return 1
   while [ "$tries" -lt 3 ]; do
-    if age=$(lock_beat_age "$1"); then
+    if age=$(lock_age_of "$1/$2"); then
       [ "$age" -lt "$LOCK_DEAD_SECONDS" ]
       return
     fi
@@ -263,29 +264,50 @@ lock_write_beat() {
   date +%s >"$1/beat.$$" && mv -f "$1/beat.$$" "$1/beat"
 }
 
-# Taking over a stopped holder's lock moves its folder to a name of its own first, so of two runs that both
-# see the old lock only one wins the move; it then checks that what it moved was the stopped lock, not a live
-# one another run had just made, and puts a live one back.
-lock_acquire() {
-  local lock="$STATE_DIR/lock" tries=0 claimed age
-  ensure_private_dir "$STATE_DIR"
-  while ! mkdir "$lock" 2>/dev/null; do
-    tries=$((tries + 1))
-    [ "$tries" -le 5 ] || lock_busy
-    lock_is_live "$lock" && lock_busy
-    claimed="$lock.old.$$.$(date +%s).$tries"
-    if mv "$lock" "$claimed" 2>/dev/null; then
-      if age=$(lock_beat_age "$claimed") && [ "$age" -lt "$LOCK_DEAD_SECONDS" ]; then
-        if [ -e "$lock" ]; then rm -rf "$claimed"; else mv "$claimed" "$lock" 2>/dev/null || rm -rf "$claimed"; fi
-        lock_busy
-      fi
-      rm -rf "$claimed"
+# A takeover goes through a second folder, state/takeover, made with mkdir like the lock: only the run holding it
+# may move a lock folder aside, so two runs that both find a dead lock cannot both move it. Under it the run
+# judges the lock again, reads its owner, moves the folder aside with one rename, and checks that what it moved
+# still has that owner and a stopped beat; if not, it is a live lock another run made a moment ago, and it goes
+# back. A guard left by a crashed run is judged by its own timestamp. After writing its owner the run reads it
+# back, and waits a second once in case the folder is being put back.
+lock_take_over() {
+  local lock=$1 guard="$STATE_DIR/takeover" aside="$STATE_DIR/lock.stale-$LOCK_TOKEN" old_owner age
+  lock_is_live "$lock" beat && lock_busy
+  if ! mkdir "$guard" 2>/dev/null; then
+    lock_is_live "$guard" since && lock_busy
+    mv "$guard" "$STATE_DIR/takeover.stale-$LOCK_TOKEN" 2>/dev/null || lock_busy
+    mkdir "$guard" 2>/dev/null || lock_busy
+    rm -rf "$STATE_DIR/takeover.stale-$LOCK_TOKEN"
+  fi
+  date +%s >"$guard/since"
+  if lock_is_live "$lock" beat; then rm -rf "$guard"; lock_busy; fi
+  old_owner=$(cat "$lock/owner" 2>/dev/null || true)
+  if [ -d "$lock" ]; then
+    if ! mv "$lock" "$aside" 2>/dev/null; then rm -rf "$guard"; lock_busy; fi
+    age=$(lock_age_of "$aside/beat" || true)
+    if [ "$(cat "$aside/owner" 2>/dev/null || true)" != "$old_owner" ] || { [ -n "$age" ] && [ "$age" -lt "$LOCK_DEAD_SECONDS" ]; }; then
+      if [ ! -e "$lock" ]; then mv "$aside" "$lock" 2>/dev/null || true; fi
+      rm -rf "$guard"
+      lock_busy
     fi
-  done
+    rm -rf "$aside"
+  fi
+  if ! mkdir "$lock" 2>/dev/null; then rm -rf "$guard"; lock_busy; fi
+  rm -rf "$guard"
+}
+
+lock_acquire() {
+  local lock="$STATE_DIR/lock"
+  ensure_private_dir "$STATE_DIR"
   LOCK_TOKEN="$$-$(date +%s)"
+  if ! mkdir "$lock" 2>/dev/null; then lock_take_over "$lock"; fi
   printf '%s\n' "$LOCK_TOKEN" >"$lock/owner"
   lock_write_beat "$lock"
   printf '%s\n' "$$" >"$lock/pid"
+  if [ "$(cat "$lock/owner" 2>/dev/null || true)" != "$LOCK_TOKEN" ]; then
+    sleep 1
+    [ "$(cat "$lock/owner" 2>/dev/null || true)" = "$LOCK_TOKEN" ] || lock_busy
+  fi
   LOCK_HELD=1
   lock_beat_start "$lock"
 }

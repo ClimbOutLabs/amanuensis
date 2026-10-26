@@ -105,23 +105,30 @@ test('a holder whose lock was taken over leaves the new holder lock in place', a
   assert.equal((await readFile(join(lockDir, 'owner'), 'utf8')).trim(), 'new-run');
 });
 
-test('two runs that start together on a dead lock end with a write or a busy answer, never another error', async () => {
+test('when several runs find a lock whose beat stopped together, never two hold it at once', async () => {
   const home = await tempHome();
   await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  let holding = 0;
+  let mostAtOnce = 0;
   const results = await Promise.allSettled(
-    [1, 2].map(async number => {
-      const store = createStateStore(folderBackend(home, FAST));
-      // Each run holds the lock a moment, so the second one meets a live lock.
-      return store.writeInstance({
-        name: `run-${String(number)}`,
-        entries: parseRegistry(`name=run-${String(number)}\n`),
-      });
-    }),
+    Array.from({ length: 6 }, () =>
+      withFolderLock({
+        home,
+        timing: FAST,
+        run: async () => {
+          holding += 1;
+          mostAtOnce = Math.max(mostAtOnce, holding);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          holding -= 1;
+        },
+      }),
+    ),
   );
+  assert.equal(mostAtOnce, 1);
+  assert.ok(results.some(result => result.status === 'fulfilled'));
   for (const result of results) {
     if (result.status === 'rejected') {
       assert.ok(result.reason instanceof StateBusyError, String(result.reason));
     }
   }
-  assert.ok(results.some(result => result.status === 'fulfilled'));
 });

@@ -13,6 +13,7 @@ import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.
 import { createMemoryVaultCatalog } from './catalogs/memoryVaultCatalog.js';
 import { createModelProviderCatalog } from './catalogs/modelProviderCatalog.js';
 import { createSandboxProviderCatalog } from './catalogs/sandboxProviderCatalog.js';
+import { createScheduleToolsCatalog } from './catalogs/scheduleToolsCatalog.js';
 import { createSkillCatalog } from './catalogs/skillCatalog.js';
 import { createTokenFactoryUsageCatalog } from './catalogs/tokenFactoryUsageCatalog.js';
 import { createToolOutputScreenCatalog } from './catalogs/toolOutputScreenCatalog.js';
@@ -125,6 +126,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   // reports "not supported" on other servers.
   return {
     ...server,
+    scheduleTools: createScheduleToolsCatalog(clientOptions),
     toolOutputScreen: createToolOutputScreenCatalog(clientOptions),
     chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),

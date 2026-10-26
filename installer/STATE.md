@@ -130,16 +130,20 @@ The rules:
   its first beat for a few milliseconds. A run that finds a lock with no
   readable `beat` looks again, up to three times a second apart, before it
   counts as dead.
-- **Taking a dead lock is atomic.** The run first moves the dead folder to a
-  name of its own (`lock.old.<pid>.<time>`) with `mv`, and only one run can win
-  that move. It then reads the moved folder's `beat`. If it turns out to be
-  fresh (another run took over a moment earlier), it puts the folder back and
-  reports busy. If it was dead, it removes the folder and makes the lock with
-  `mkdir`. A run that loses the move simply tries `mkdir` again, finds a live
-  lock and reports busy. One window is left: a second run that moves aside
-  the new holder's lock in the few milliseconds before that holder writes its
-  first `beat` cannot tell it from a dead one. The new holder then finds its
-  `owner` gone and does not remove the other run's lock when it ends.
+- **Taking a dead lock is atomic.** A takeover goes through a second folder,
+  `state/takeover`, made with `mkdir` like the lock itself, and only the run
+  holding it may move a lock folder aside. So two runs that both find a dead
+  lock cannot both move it. Under that folder the run judges the lock again,
+  reads its `owner`, moves the folder aside with one `mv` to a name of its own
+  (`lock.stale-<token>`), and checks that what it moved still has that
+  `owner` and a stopped `beat`. If not, it moved a live lock another run had
+  just made, so it puts the folder back. Otherwise it removes the moved
+  folder, makes the lock with `mkdir`, and removes `state/takeover`. A
+  `state/takeover` left by a crashed run holds a `since` time and is judged
+  by the same dead limit. Every way out of a takeover that does not leave the
+  run holding the lock counts as busy. After writing its `owner`, the run
+  reads it back and, if it is not its own, waits a second once (the folder
+  may be on its way back) before giving up as busy.
 - **Only the owner removes the lock.** At the end of a run, the holder removes
   `state/lock` only if `owner` still holds its token. A holder whose lock was
   taken over leaves the new holder's lock alone.
