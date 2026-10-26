@@ -1,11 +1,13 @@
 /**
- * The one check on links a space body adds: a picture or a link must come from the person or a search
- * result in this chat, be https when it is a picture, and never name a placeholder domain. A space
- * page loads its pictures from the host itself, so a made up or mail-borne link would send the
- * person's browser to that host. Links already in the body before a write are left alone, so an
- * unrelated edit never trips over an older picture.
+ * The one check on links a space body adds. A new picture or link must pass the same check a web lookup
+ * of that URL passes before it runs without asking: the outbound secret guard, and no private details in
+ * the link. The link test weighs who loads the link. A link is opened only when the person follows it, so
+ * it follows the lookup rule: read content may name it, but may not change it. A picture is loaded by the
+ * person's own browser every time the space opens, so only a link the person, a search, or a page the chat
+ * opened chose may be one. A picture must also be https and never name a placeholder domain. Links already
+ * in the body before a write are left alone, so an unrelated edit never trips over an older picture.
  */
-import { isTrustedLink, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { checkLookup, collectOutboundStrings, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
 import type { SpaceFormatSchema } from '../schemas/space';
 import { bodyLinks, type BodyLink } from './spaceBodyLinks';
@@ -22,6 +24,21 @@ export class SpaceLinkRefusedError extends Error {
     this.name = 'SpaceLinkRefusedError';
   }
 }
+
+const GUARD_RULE_MESSAGE =
+  'This link cannot be used, because its text trips a safety check. Search for the page, then use a link from the results.';
+
+const STEERED_LINK_MESSAGE =
+  'This link was changed from what the page or message showed. Use the link exactly as it appeared, or search for it first.';
+
+const UNCHOSEN_PICTURE_MESSAGE =
+  "This picture did not come from the person, a search result, or a page this chat opened. Open the picture's page first, then use the image link from that page.";
+
+const USERINFO_PICTURE_MESSAGE =
+  "This picture's link carries a user name or password, so it cannot be used. Search for the picture, then use a link from the results.";
+
+const PRIVATE_DETAIL_MESSAGE =
+  "This link would carry one of the person's own private details. Take the detail out of the link, or search for the page first.";
 
 const UNSTABLE_MARKUP_MESSAGE =
   'This page has markup that cannot be checked for links safely. Simplify the markup, then try again.';
@@ -42,7 +59,10 @@ export function isPlaceholder(host: string): boolean {
  * with the URL parser the browser uses, so a spelling a browser reads as a remote address is
  * checked as one, whatever its scheme separators look like.
  */
-function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnState): string | undefined {
+function refusalFor(
+  { kind, value, tag }: BodyLink,
+  input: { web_search: WebSearchTurnState; secrets: readonly string[] },
+): string | undefined {
   // Scripts never run on a space page, whatever their source, so a script source is refused
   // outright rather than checked against the chat's results and then stripped at render.
   if (tag === 'script') {
@@ -75,13 +95,29 @@ function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnSta
   if (isPlaceholder(url.hostname)) {
     return `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`;
   }
-  // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
+  // A picture is fetched as written, and the picture fetch refuses a link that carries a user
+  // name or password, so such a picture could never load even where the clean link was chosen.
+  if (kind === 'picture' && (url.username !== '' || url.password !== '')) {
+    return USERINFO_PICTURE_MESSAGE;
+  }
+  // The lookup check compares the text the model wrote; a value the parser only resolved is checked as resolved.
+  // A picture is an embed the person's browser loads, a link is a lookup the person chooses to open.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
-  if (!isTrustedLink({ provenance: web_search.provenance, url: candidate })) {
-    if (kind === 'picture') {
-      return "Open the picture's page first, then use the image link from that page.";
-    }
-    return `This ${noun}'s link did not come from the person or a search in this chat. Search for the ${noun} first, then use a link from the results.`;
+  const check = checkLookup({
+    strings: collectOutboundStrings({ url: candidate }),
+    secrets: input.secrets,
+    earlier: input.web_search.sentText,
+    provenance: input.web_search.provenance,
+    use: kind === 'picture' ? 'embed' : 'lookup',
+  });
+  if (!check.verdict.ok) {
+    return GUARD_RULE_MESSAGE;
+  }
+  if (check.steered.length > 0) {
+    return kind === 'picture' ? UNCHOSEN_PICTURE_MESSAGE : STEERED_LINK_MESSAGE;
+  }
+  if (check.privateDetails.length > 0) {
+    return PRIVATE_DETAIL_MESSAGE;
   }
   return undefined;
 }
@@ -95,6 +131,8 @@ export function refuseNewSpaceLinks(input: {
   previousBody: string;
   format: z.infer<typeof SpaceFormatSchema>;
   web_search: WebSearchTurnState;
+  /** Exact secret values the host holds for this person, read by the outbound secret guard. */
+  secrets: readonly string[];
 }): void {
   const links = bodyLinks({ body: input.body, format: input.format });
   if (links === undefined) {
@@ -109,7 +147,7 @@ export function refuseNewSpaceLinks(input: {
     if (previous.has(`${link.kind}\u0000${link.value}`)) {
       continue;
     }
-    const refusal = refusalFor(link, input.web_search);
+    const refusal = refusalFor(link, { web_search: input.web_search, secrets: input.secrets });
     if (refusal !== undefined) {
       throw new SpaceLinkRefusedError(refusal);
     }

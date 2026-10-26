@@ -169,6 +169,7 @@ function makeCall(store: SpaceToolStore): Call {
     authority: AUTHORITY,
     tracing: NOOP_TRACING,
     webSearch: createWebSearchTurnState(),
+    outboundSecrets: () => Promise.resolve([]),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {

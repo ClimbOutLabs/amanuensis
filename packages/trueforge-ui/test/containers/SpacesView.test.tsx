@@ -585,6 +585,12 @@ describe('rewriteSpacePictureUrls', () => {
     expect(rewritten).toContain('/api/space-pictures?url=https%3A%2F%2Fupload.wikimedia.org%2Fother.jpg 2x');
   });
 
+  it('trims a trailing space from a picture link before routing it, as the saved link is trimmed', () => {
+    const rewritten = rewriteSpacePictureUrls(`<img src="${FOX} " alt="Red fox">`);
+    expect(rewritten).toContain(`/api/space-pictures?url=${encodeURIComponent(FOX)}`);
+    expect(rewritten).not.toContain(encodeURIComponent(`${FOX} `));
+  });
+
   it('leaves data: and relative pictures alone', () => {
     const html = '<img src="data:image/png;base64,AAAA" alt="Dot"><img src="local.png" alt="Local">';
     expect(rewriteSpacePictureUrls(html)).toBe(html);

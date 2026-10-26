@@ -6,7 +6,7 @@
  * used to test; the hook itself is gone with the old recording layer.
  */
 import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
-import { isTrustedLink } from '../../../src/core/permissions/provenance';
+import { steeredLinks } from '../../../src/core/permissions/provenance';
 
 const FOX = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
 const FILE_PAGE = 'https://commons.wikimedia.org/wiki/File:Red_Fox.jpg';
@@ -20,7 +20,7 @@ describe('a page read counts its pictures as seen', () => {
       argument_values: [FILE_PAGE],
       texts: [`# File:Red Fox.jpg\n<img src="${FOX}" alt="Red fox">`],
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX })).toBe(true);
+    expect(steeredLinks({ provenance: state.provenance, values: [FOX] })).toEqual([]);
   });
 
   it('does not count pictures from a result that is not a page read', () => {
@@ -31,6 +31,6 @@ describe('a page read counts its pictures as seen', () => {
       argument_values: [],
       texts: [`<img src="${FOX}" alt="Red fox">`],
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX })).toBe(false);
+    expect(steeredLinks({ provenance: state.provenance, values: [`${FOX}?size=2`] })).toHaveLength(1);
   });
 });

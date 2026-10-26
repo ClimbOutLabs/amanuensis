@@ -260,6 +260,7 @@ function makeHarness(logger?: Logger, overrides?: { tenantId?: string; userRef?:
     authority: { tenantId: overrides?.tenantId ?? 'default', userRef: overrides?.userRef ?? 'user-a' },
     tracing: NOOP_TRACING,
     webSearch: createWebSearchTurnState(),
+    outboundSecrets: () => Promise.resolve([]),
     sessionId,
     ...(logger === undefined ? {} : { logger }),
   });

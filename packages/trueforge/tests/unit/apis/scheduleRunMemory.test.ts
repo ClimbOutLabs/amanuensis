@@ -156,6 +156,7 @@ describe('scheduled run memory wiring', () => {
         resolveSkillStore: () => ({ resolveTurnSkills: async () => [] }) as never,
         resolveSandboxProviderStore: () => ({}) as never,
         tokenStore: {} as never,
+        outboundSecrets: () => Promise.resolve([]),
         repositoryStore: {} as never,
         sessionStore: {} as never,
         spaceStore: {} as never,

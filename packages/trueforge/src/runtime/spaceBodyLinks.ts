@@ -205,14 +205,30 @@ function htmlLinks(html: string): BodyLink[] | undefined {
 
 const markdownProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
 
-function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
+/** The reference definitions a markdown body declares, and which of them a picture reference uses. */
+interface MarkdownReferences {
+  /** The URL each definition names, by its identifier; the first definition of an identifier wins. */
+  definitions: Map<string, string>;
+  /** The identifiers at least one picture reference uses. */
+  pictureUses: Set<string>;
+}
+
+function collectMarkdownLinks(node: Nodes, links: BodyLink[], references: MarkdownReferences): boolean {
   switch (node.type) {
     case 'link':
+      links.push(link(node.url));
+      break;
     case 'definition':
       links.push(link(node.url));
+      if (!references.definitions.has(node.identifier)) {
+        references.definitions.set(node.identifier, node.url);
+      }
       break;
     case 'image':
       links.push(picture(node.url));
+      break;
+    case 'imageReference':
+      references.pictureUses.add(node.identifier);
       break;
     case 'html': {
       const inner = htmlLinks(node.value);
@@ -227,7 +243,7 @@ function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
   }
   if ('children' in node) {
     for (const child of node.children) {
-      if (!collectMarkdownLinks(child, links)) {
+      if (!collectMarkdownLinks(child, links, references)) {
         return false;
       }
     }
@@ -237,7 +253,19 @@ function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
 
 function markdownLinks(markdown: string): BodyLink[] | undefined {
   const links: BodyLink[] = [];
-  return collectMarkdownLinks(markdownProcessor.parse(markdown), links) ? links : undefined;
+  const references: MarkdownReferences = { definitions: new Map(), pictureUses: new Set() };
+  if (!collectMarkdownLinks(markdownProcessor.parse(markdown), links, references)) {
+    return undefined;
+  }
+  // A definition a picture reference uses is a picture: the renderer loads it as one every time
+  // the space opens, so it is read as a picture here as well as the link it also is, and the
+  // write check and the picture route see the same thing.
+  for (const [identifier, url] of references.definitions) {
+    if (references.pictureUses.has(identifier)) {
+      links.push(picture(url));
+    }
+  }
+  return links;
 }
 
 /**

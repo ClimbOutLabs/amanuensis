@@ -1,15 +1,25 @@
 import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
-import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import {
+  recordEmailText,
+  recordPersonText,
+  recordSearchResults,
+} from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { recordToolResultProvenance } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
 
 const SEEN = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
 const UNSEEN = 'https://upload.wikimedia.org/wikipedia/commons/4/4d/Invented_Fox.jpg';
 
-function webSearchWith(urls: string[]): WebSearchTurnState {
+const FOX_PAGE = 'https://commons.wikimedia.org/wiki/File:Red_Fox.jpg';
+
+/** A turn whose only read content is a page the assistant opened with the page reader, which shows the picture as `<img>`. */
+function webSearchAfterOpeningPage(): WebSearchTurnState {
   const state = createWebSearchTurnState();
-  recordSearchResults({
-    provenance: state.provenance,
-    texts: [JSON.stringify({ results: urls.map(url => ({ title: 'Result', url })) })],
+  recordToolResultProvenance({
+    state,
+    tool_name: 'web_fetch',
+    argument_values: [FOX_PAGE],
+    texts: [`# File:Red Fox.jpg\n<img src="${SEEN}" alt="Red fox">`],
   });
   return state;
 }
@@ -19,13 +29,15 @@ function refusalOf({
   body,
   format,
   previousBody = '',
+  web_search = webSearchAfterOpeningPage(),
 }: {
   body: string;
   format: 'html' | 'markdown';
   previousBody?: string;
+  web_search?: WebSearchTurnState;
 }) {
   try {
-    refuseNewSpaceLinks({ body, previousBody, format, web_search: webSearchWith([SEEN]) });
+    refuseNewSpaceLinks({ body, previousBody, format, web_search, secrets: [] });
     return undefined;
   } catch (error) {
     if (error instanceof SpaceLinkRefusedError) {
@@ -144,11 +156,11 @@ const MARKDOWN_SPELLINGS: Spelling[] = [
 
 describe('space links are checked from a real parse of the body', () => {
   describe.each([...HTML_SPELLINGS, ...MARKDOWN_SPELLINGS])('$name', ({ format, body }) => {
-    it('refuses a link the chat never returned', () => {
+    it('refuses a link the chat never read', () => {
       expect(refusalOf({ body: body(UNSEEN), format })).toBeDefined();
     });
 
-    it('keeps a link that a search result returned', () => {
+    it('keeps a link exactly as an opened page showed it', () => {
       expect(refusalOf({ body: body(SEEN), format })).toBeUndefined();
     });
   });
@@ -174,5 +186,298 @@ describe('space links are checked from a real parse of the body', () => {
   it('checks only links a write adds, so an unrelated edit keeps a link from an earlier turn', () => {
     const previousBody = `<img src="${UNSEEN}" alt="Fox"><p>Old text</p>`;
     expect(refusalOf({ body: `${previousBody}<p>New text</p>`, format: 'html', previousBody })).toBeUndefined();
+  });
+});
+
+describe('a space picture or link follows the rule a lookup of it follows', () => {
+  it('allows a picture link copied exactly from a page the assistant opened', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('refuses a picture link copied exactly from an email, since a browser loads a picture on its own', () => {
+    const web_search = createWebSearchTurnState();
+    recordEmailText({ provenance: web_search.provenance, text: `Photo: ${SEEN}` });
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('keeps a link copied exactly from an email, since a link opens only when the person follows it', () => {
+    const web_search = createWebSearchTurnState();
+    recordEmailText({ provenance: web_search.provenance, text: `Photo: ${SEEN}` });
+    expect(refusalOf({ body: `<a href="${SEEN}">Fox</a>`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('refuses a picture link from read content with an added query', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN}?size=2" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a link from read content with an added query', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<a href="${SEEN}?size=2">Fox</a>`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+
+  it('refuses a picture link from read content with a changed path', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const changed = SEEN.replace('Red_Fox.jpg', 'Red_Fox_large.jpg');
+    expect(refusalOf({ body: `<img src="${changed}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a link from read content with a changed path', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const changed = SEEN.replace('Red_Fox.jpg', 'Red_Fox_large.jpg');
+    expect(refusalOf({ body: `<a href="${changed}">Fox</a>`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+
+  it('refuses a copied link that carries text the outbound guard rejects', () => {
+    const encodedRun = 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldY';
+    const link = `${SEEN}?blob=${encodedRun}`;
+    const web_search = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state: web_search,
+      tool_name: 'browse_page',
+      argument_values: [FOX_PAGE],
+      texts: [`<img src="${link}" alt="Fox">`],
+    });
+    expect(refusalOf({ body: `<img src="${link}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'trips a safety check',
+    );
+  });
+
+  it('refuses a placeholder domain even when it was copied from read content', () => {
+    const link = 'https://example.com/fox.jpg';
+    const web_search = createWebSearchTurnState();
+    recordEmailText({ provenance: web_search.provenance, text: link });
+    expect(refusalOf({ body: `<img src="${link}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'placeholder domain',
+    );
+  });
+});
+
+describe('a space picture must be one the person, a search, or an opened page chose', () => {
+  const UNSEEN_PICTURE = 'https://images.picturestack.net/fox.jpg';
+
+  it('refuses a picture on a host nothing in the chat named', () => {
+    const web_search = createWebSearchTurnState();
+    expect(refusalOf({ body: `<img src="${UNSEEN_PICTURE}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a picture copied exactly from a page the chat opened when the page only named it in text', () => {
+    const web_search = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state: web_search,
+      tool_name: 'web_fetch',
+      argument_values: [FOX_PAGE],
+      texts: [`Read more at ${UNSEEN_PICTURE}`],
+    });
+    expect(refusalOf({ body: `<img src="${UNSEEN_PICTURE}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+    expect(refusalOf({ body: `<a href="${UNSEEN_PICTURE}">Fox</a>`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('keeps a picture a search result returned', () => {
+    const web_search = createWebSearchTurnState();
+    recordSearchResults({
+      provenance: web_search.provenance,
+      texts: [JSON.stringify({ results: [{ url: UNSEEN_PICTURE }] })],
+    });
+    expect(refusalOf({ body: `<img src="${UNSEEN_PICTURE}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+});
+
+describe('a space link value that carries more than the link itself', () => {
+  it('keeps a picture link with only a trailing space, which every reader drops', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN} " alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('refuses a picture link with words after it', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<img src="${SEEN} as shown" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a link with words after it', () => {
+    const web_search = webSearchAfterOpeningPage();
+    expect(refusalOf({ body: `<a href="${SEEN} as shown">Fox</a>`, format: 'html', web_search })).toContain(
+      'Use the link exactly as it appeared',
+    );
+  });
+});
+
+describe('a space link value that ends in a space only some readers drop', () => {
+  // Whitespace to the language's own trim, but a URL reader keeps each of these and
+  // percent-encodes it into the link it opens, so the value is a longer link than the
+  // one the chat saw. The plain space is the only ending every reader drops.
+  const WIDER_SPACES: { name: string; char: string }[] = [
+    { name: 'an ideographic space', char: '\u3000' },
+    { name: 'a line separator', char: '\u2028' },
+    { name: 'a non-breaking space', char: '\u00A0' },
+    { name: 'a byte order mark', char: '\uFEFF' },
+  ];
+
+  describe.each(WIDER_SPACES)('$name', ({ char }) => {
+    it('refuses an HTML picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `<img src="${SEEN}${char}" alt="Fox">`, format: 'html', web_search })).toContain(
+        "Open the picture's page first",
+      );
+    });
+
+    it('refuses a markdown picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `![Fox](${SEEN}${char})`, format: 'markdown', web_search })).toContain(
+        "Open the picture's page first",
+      );
+    });
+
+    it('refuses a CSS picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(
+        refusalOf({
+          body: `<div style="background-image: url('${SEEN}${char}')">Fox</div>`,
+          format: 'html',
+          web_search,
+        }),
+      ).toContain("Open the picture's page first");
+    });
+
+    it('refuses a link whose address ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `<a href="${SEEN}${char}">Fox</a>`, format: 'html', web_search })).toContain(
+        'Use the link exactly as it appeared',
+      );
+    });
+
+    it('keeps a srcset picture whose link ends in it, since a candidate is read only up to the space after it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(
+        refusalOf({ body: `<img src="${SEEN}" srcset="${SEEN}${char} 2x">`, format: 'html', web_search }),
+      ).toBeUndefined();
+    });
+  });
+});
+
+describe('a markdown picture written as a reference to a definition', () => {
+  const UNSEEN_HOST_PICTURE = 'https://images.picturestack.net/fox.jpg';
+
+  it('refuses a reference picture on a site nothing in the chat named', () => {
+    const web_search = createWebSearchTurnState();
+    const body = `![Fox][fox]\n\n[fox]: ${UNSEEN_HOST_PICTURE}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toContain("Open the picture's page first");
+  });
+
+  it('keeps a reference picture an opened page showed', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const body = `![Fox][fox]\n\n[fox]: ${SEEN}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toBeUndefined();
+  });
+
+  it('still reads a definition a link uses as a link, not a picture', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const body = `[Fox][fox]\n\n[fox]: ${SEEN}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toBeUndefined();
+  });
+});
+
+describe('a space link carrying a private detail of the person', () => {
+  const OWN_ADDRESS = 'sam@postbox.net';
+  const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;
+
+  function chatThatReadContent(): WebSearchTurnState {
+    const web_search = createWebSearchTurnState();
+    recordPersonText({ provenance: web_search.provenance, text: `My email is ${OWN_ADDRESS}` });
+    recordToolResultProvenance({
+      state: web_search,
+      tool_name: 'browse_page',
+      argument_values: [FOX_PAGE],
+      texts: ['A page about foxes.'],
+    });
+    return web_search;
+  }
+
+  it('refuses a link that carries the detail once the chat has read content', () => {
+    const web_search = chatThatReadContent();
+    expect(refusalOf({ body: `<a href="${CARRYING}">Route</a>`, format: 'html', web_search })).toContain(
+      "would carry one of the person's own private details",
+    );
+  });
+
+  it('refuses a chosen picture that carries the detail', () => {
+    const web_search = chatThatReadContent();
+    recordSearchResults({
+      provenance: web_search.provenance,
+      texts: [JSON.stringify({ results: [{ url: CARRYING }] })],
+    });
+    expect(refusalOf({ body: `<img src="${CARRYING}" alt="Route">`, format: 'html', web_search })).toContain(
+      "would carry one of the person's own private details",
+    );
+  });
+
+  it('keeps the same link when the chat has read no content', () => {
+    const web_search = createWebSearchTurnState();
+    recordPersonText({ provenance: web_search.provenance, text: `My email is ${OWN_ADDRESS}` });
+    expect(refusalOf({ body: `<a href="${CARRYING}">Route</a>`, format: 'html', web_search })).toBeUndefined();
+  });
+});
+
+describe('a space picture is compared as it would be fetched', () => {
+  const WWW_SEEN = 'https://www.upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+
+  function searchReturned(url: string): WebSearchTurnState {
+    const web_search = createWebSearchTurnState();
+    recordSearchResults({
+      provenance: web_search.provenance,
+      texts: [JSON.stringify({ results: [{ url }] })],
+    });
+    return web_search;
+  }
+
+  it('refuses a picture whose link carries a user name and password, though a search returned the clean link', () => {
+    const withCredentials = 'https://name:pass@upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+    const web_search = searchReturned(SEEN);
+    expect(refusalOf({ body: `<img src="${withCredentials}" alt="Fox">`, format: 'html', web_search })).toContain(
+      'user name or password',
+    );
+  });
+
+  it('refuses a picture on the www host when a search returned the host without it', () => {
+    const web_search = searchReturned(SEEN);
+    expect(refusalOf({ body: `<img src="${WWW_SEEN}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('refuses a picture on the plain host when a search returned the www host', () => {
+    const web_search = searchReturned(WWW_SEEN);
+    expect(refusalOf({ body: `<img src="${SEEN}" alt="Fox">`, format: 'html', web_search })).toContain(
+      "Open the picture's page first",
+    );
+  });
+
+  it('keeps a picture on the www host when a search returned that very link', () => {
+    const web_search = searchReturned(WWW_SEEN);
+    expect(refusalOf({ body: `<img src="${WWW_SEEN}" alt="Fox">`, format: 'html', web_search })).toBeUndefined();
+  });
+
+  it('keeps a link that carries a user name and password the person gave, since a link opens only when followed', () => {
+    const link = 'https://name:pass@upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+    const web_search = createWebSearchTurnState();
+    recordPersonText({ provenance: web_search.provenance, text: `My fox picture: ${link}` });
+    expect(refusalOf({ body: `<a href="${link}">Fox</a>`, format: 'html', web_search })).toBeUndefined();
   });
 });

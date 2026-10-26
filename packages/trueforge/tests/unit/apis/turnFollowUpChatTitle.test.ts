@@ -122,6 +122,7 @@ async function createChat() {
   const turnDrains = new TurnDrainRegistry();
   const deps = {
     mcpCatalog: McpCatalog.loadShipped(),
+    outboundSecrets: () => Promise.resolve([]),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,

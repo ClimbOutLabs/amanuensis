@@ -288,6 +288,7 @@ export async function buildPersonalInstance(input: {
   const space: SpaceTurnContext = {
     store: unusedSpaceStore(),
     authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
+    outboundSecrets: () => Promise.resolve([]),
     sessionId: SESSION_ID,
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,

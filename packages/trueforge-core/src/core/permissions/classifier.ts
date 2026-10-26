@@ -76,6 +76,7 @@ import {
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
+import { checkLookup, type LookupCheck } from './lookupCheck';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import {
   isMapsToolName,
@@ -94,7 +95,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { carriedPrivateDetails, hasReadContent, namesUrl, steeredDestinations, steeredLinks } from './provenance';
+import { namesUrl, steeredDestinations } from './provenance';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -1790,14 +1791,17 @@ function searchSummaryText(strings: OutboundStrings): string {
 async function outboundGuard(input: {
   ctx: ClassifyContext;
   strings: OutboundStrings | undefined;
-}): Promise<{ secrets: readonly string[]; verdict: OutboundGuardVerdict }> {
+}): Promise<{ secrets: readonly string[]; check: LookupCheck }> {
   const { ctx, strings } = input;
   const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  const verdict: OutboundGuardVerdict =
-    strings === undefined
-      ? { ok: false, rule: 'uninspectable' }
-      : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
-  return { secrets, verdict };
+  const check = checkLookup({
+    strings,
+    secrets,
+    earlier: ctx.web_search.sentText,
+    provenance: ctx.web_search.provenance,
+    use: 'lookup',
+  });
+  return { secrets, check };
 }
 
 /**
@@ -1966,7 +1970,8 @@ async function classifySearchProviderTool(input: {
   };
 
   // A held key is masked whether or not searches are set to ask.
-  const { secrets, verdict } = await outboundGuard({ ctx, strings });
+  const { secrets, check } = await outboundGuard({ ctx, strings });
+  const { verdict } = check;
   if (!verdict.ok && verdict.rule === 'server_secret') {
     return heldWithoutKey(secrets);
   }
@@ -1985,15 +1990,12 @@ async function classifySearchProviderTool(input: {
       sensitive_read: false,
     });
   }
-  if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+  if (check.steered.length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
   // The detail is the person's own, but a chat that has read other people's content asks before sending one:
-  // what prompted putting it in a lookup may not have been the person.
-  if (
-    hasReadContent(ctx.web_search.provenance) &&
-    carriedPrivateDetails({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0
-  ) {
+  // what prompted putting it in a lookup may not have been the person. The lookup check owns the test.
+  if (check.privateDetails.length > 0) {
     return ctx.services.unattended ? privateDetailSkipped(ctx) : held(SEARCH_PRIVATE_DETAIL_REASON, say.private_detail);
   }
   return tier1Decision({
@@ -2086,17 +2088,21 @@ function steeringChecked(input: {
 
 /**
  * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
- * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
+ * secret guard still reads its places, and the lookup check's private-detail test reads them too. Returns the
+ * guard's rule, or the private-detail mark, when the call should show its card instead.
  */
 async function classifyMapsSilently(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
-}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
+}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict } | { heldPrivateDetail: true }> {
   const { action, ctx } = input;
   const strings = collectOutboundStrings(action.canonical_params);
-  const { verdict } = await outboundGuard({ ctx, strings });
-  if (!verdict.ok) {
-    return { held: verdict };
+  const { check } = await outboundGuard({ ctx, strings });
+  if (!check.verdict.ok) {
+    return { held: check.verdict };
+  }
+  if (check.privateDetails.length > 0) {
+    return { heldPrivateDetail: true };
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
@@ -3301,9 +3307,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         reason_detail:
           silent === undefined
             ? holdSay(ctx.web_search.assistantName).maps_always
-            : silent.held.ok
-              ? null
-              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
+            : 'heldPrivateDetail' in silent
+              ? holdSay(ctx.web_search.assistantName).private_detail
+              : silent.held.ok
+                ? null
+                : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

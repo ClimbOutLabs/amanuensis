@@ -24,6 +24,7 @@ import {
   type TurnInputItem,
   type TurnRecordWithoutSnapshot,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelServices } from '@truefoundry/trueforge-core/core';
 import {
   AgentHarnessError,
   existingSandboxIdForProvider,
@@ -279,6 +280,8 @@ export interface TurnsRouterDeps {
   personalizationStore: IPersonalizationStore;
   personaStore: IPersonaStore;
   spaceStore: ISpaceStore;
+  /** Exact secret values the host holds, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
@@ -327,6 +330,8 @@ export type BeginTurnExecutionDeps = Pick<
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
+  /** Exact secret values the host holds, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -386,6 +391,8 @@ function createTurnResolver(deps: {
   /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
   memorySummarize: SummarizeTurnContext | undefined;
   spaceStore: ISpaceStore;
+  /** Exact secret values the host holds, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
@@ -439,6 +446,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     memorySummarize,
     spaceStore,
+    outboundSecrets,
     googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
@@ -859,6 +867,7 @@ function createTurnResolver(deps: {
     switchNotice,
     {
       store: spaceStore,
+      outboundSecrets,
       googleConnections: googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
@@ -1596,6 +1605,7 @@ async function beginAcceptedTurnExecution(
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
+        outboundSecrets: deps.outboundSecrets,
         googleConnectionStore: deps.googleConnectionStore,
         logger: deps.logger,
         signal: abortController.signal,
@@ -2477,6 +2487,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       spaceStore: deps.spaceStore,
+      outboundSecrets: deps.outboundSecrets,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,

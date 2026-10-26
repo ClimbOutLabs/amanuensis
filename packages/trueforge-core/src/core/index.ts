@@ -459,6 +459,7 @@ export {
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './permissions/context';
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
+export { checkLookup, type LookupCheck } from './permissions/lookupCheck';
 export {
   DEFAULT_MAPS_TRAVEL_MODE,
   MAPS_TRAVEL_MODES,
@@ -481,7 +482,7 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
-export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
+export { recordPageImageUrls, recordPersonText } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

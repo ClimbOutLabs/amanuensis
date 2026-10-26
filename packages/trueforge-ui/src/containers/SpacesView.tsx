@@ -200,6 +200,25 @@ const SPACE_ALT_ATTR_RE = /\salt=(["'])/i;
 const SPACE_EMPTY_ALT_ATTR_RE = /\salt=(["'])\1/i;
 
 /**
+ * A picture link as the write-time check saved it: tabs and line breaks removed, and the C0
+ * controls and spaces at either end dropped, the same trim that check applies. A link written
+ * with a trailing space must reach the picture route in this form, because the route compares
+ * the link it is asked for with the saved one and answers not found for any other spelling.
+ */
+function savedPictureUrl(raw: string): string {
+  const value = raw.replace(/[\t\n\r]/g, '');
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
+/**
  * Routes a space page's web pictures through the owner's picture route, so the frame loads them
  * same-origin under the shell policy instead of blanking on the inherited `img-src`. Stored
  * pictures already passed the write-time seen check, and the route itself refuses any URL no
@@ -213,7 +232,7 @@ export function rewriteSpacePictureUrls(html: string): string {
   while ((match = SPACE_IMG_TAG_RE.exec(html)) !== null) {
     let tag = match[0];
     tag = tag.replace(SPACE_SRC_ATTR_RE, (_whole, quote: string, url: string) => {
-      return ` src=${quote}${spacePictureRouteUrl(url)}${quote}`;
+      return ` src=${quote}${spacePictureRouteUrl(savedPictureUrl(url))}${quote}`;
     });
     tag = tag.replace(SPACE_SRCSET_ATTR_RE, (_whole, quote: string, value: string) => {
       const rewritten = value

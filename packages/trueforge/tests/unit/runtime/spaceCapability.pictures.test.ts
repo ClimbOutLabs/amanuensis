@@ -6,7 +6,12 @@ import type {
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
 import { createWebSearchTurnState, pageImageUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
-import { recordPageImageUrls, recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import {
+  recordEmailText,
+  recordPageImageUrls,
+  recordSearchResults,
+} from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { recordToolResultProvenance } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import {
   CREATE_SPACE_TOOL_NAME,
   EDIT_SPACE_TOOL_NAME,
@@ -44,7 +49,8 @@ const AUTHORITY = { tenantId: 'default', userRef: 'user-a' };
 const COLLIE_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Border_Collie_working.jpg';
 const POODLE_URL = 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Standard_Poodle.jpg';
 
-const NOT_SEEN_PICTURE = "Open the picture's page first, then use the image link from that page.";
+const UNCHOSEN_PICTURE_MESSAGE =
+  "This picture did not come from the person, a search result, or a page this chat opened. Open the picture's page first, then use the image link from that page.";
 
 function textOf(response: CallToolResponse): string {
   if (!('result' in response)) {
@@ -137,7 +143,13 @@ function searchResult(urls: string[]): string {
 }
 
 function setup(webSearch: WebSearchTurnState, store: SpaceToolStore = makeStore()) {
-  const capability = spaceCapability({ store, authority: AUTHORITY, tracing: NOOP_TRACING, webSearch });
+  const capability = spaceCapability({
+    store,
+    authority: AUTHORITY,
+    tracing: NOOP_TRACING,
+    webSearch,
+    outboundSecrets: () => Promise.resolve([]),
+  });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
     throw new Error('expected space tool set');
@@ -160,12 +172,19 @@ async function errorOf(response: CallToolResponse): Promise<string> {
 }
 
 describe('space pictures and links come only from this chat', () => {
-  it('refuses a picture link the chat never returned, with the message the model acts on', async () => {
-    const call = setup(createWebSearchTurnState());
-    const response = await call(CREATE_SPACE_TOOL_NAME, {
-      ...createArgs(`![Collie](https://images.wikimedia.org/invented/border-collie.jpg)`),
+  it('refuses a picture link changed from the one an opened page showed, with the message the model acts on', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state: webSearch,
+      tool_name: 'browse_page',
+      argument_values: ['https://commons.wikimedia.org/wiki/File:Border_Collie_working.jpg'],
+      texts: [`<img src="${COLLIE_URL}" alt="Border Collie working">`],
     });
-    expect(await errorOf(response)).toBe("Open the picture's page first, then use the image link from that page.");
+    const call = setup(webSearch);
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs(`<img src="${COLLIE_URL.replace('Border_Collie_working', 'Border_Collie_cropped')}" alt="Collie">`),
+    });
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
   it('refuses a placeholder domain even when a search result returned it', async () => {
@@ -198,28 +217,28 @@ describe('space pictures and links come only from this chat', () => {
     expect(stringField(created, 'body')).toContain(COLLIE_URL);
   });
 
-  it('refuses a seen link with query data appended, since that is a different address', async () => {
+  it('refuses a link an opened page showed, with query data appended', async () => {
     const webSearch = createWebSearchTurnState();
-    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL])] });
+    recordToolResultProvenance({
+      state: webSearch,
+      tool_name: 'browse_page',
+      argument_values: ['https://commons.wikimedia.org/wiki/File:Border_Collie_working.jpg'],
+      texts: [`<img src="${COLLIE_URL}" alt="Border Collie working">`],
+    });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs(`<img src="${COLLIE_URL}?email=person%40example.org" alt="Collie">`),
     });
-    expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
-  it('refuses a picture link copied from an email body, since mail text is not a result URL', async () => {
+  it('refuses a picture link copied exactly from an email, since a browser loads a picture on its own', async () => {
     const webSearch = createWebSearchTurnState();
-    // The model read this mail: the link is in the body text and in the Gmail tool's linked_images list.
-    // Neither is a result's own `url` field, so neither is recorded.
-    const mail = JSON.stringify({
-      bodyHtml: `<img src="${POODLE_URL}">`,
-      linked_images: [POODLE_URL],
-    });
-    recordSearchResults({ provenance: webSearch.provenance, texts: [mail] });
+    recordEmailText({ provenance: webSearch.provenance, text: `<img src="${POODLE_URL}">` });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${POODLE_URL}" alt="Poodle">`) });
-    expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
+    expect(isErrorResponse(response)).toBe(true);
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
   it('refuses an http picture even when a result returned it', async () => {

@@ -614,6 +614,18 @@ describe('links and where they came from', () => {
     expect((await fetchInfo(h, mailLink)).tier).toBe(1);
   });
 
+  it('opens a search result whose name the fetch spells with percent coding', async () => {
+    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    readResult(h, {
+      tool_name: 'web_search',
+      args: ['fox picture'],
+      text: JSON.stringify({ results: [{ title: 'Fox', url: 'https://uploads.example.net/wiki/Fox_(animal).jpg' }] }),
+    });
+    readResult(h, { tool_name: 'read_page', args: ['https://blog.example.net/'], text: 'Photos live at https://uploads.example.net/ ' });
+    expect((await fetchInfo(h, 'https://uploads.example.net/wiki/Fox_%28animal%29.jpg')).tier).toBe(1);
+    expect((await fetchInfo(h, 'https://uploads.example.net/wiki/Fox_%28animal%29.jpg?u=sam')).tier).toBe(3);
+  });
+
   it("holds a link from someone else's mail when the call adds the person's address to it", async () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });

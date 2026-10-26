@@ -15,6 +15,7 @@ import type {
   AgentTracing,
   InstructionBuilder,
   Sandbox,
+  SentinelServices,
   WebSearchTurnState,
 } from '@truefoundry/trueforge-core/core';
 import {
@@ -431,6 +432,8 @@ export interface SpaceCapabilityOptions {
   logger?: Logger;
   /** This turn's search record: the links a search or page result returned, the only links a space may add. */
   webSearch: WebSearchTurnState;
+  /** Exact secret values the host holds for this person, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
 /**
@@ -770,7 +773,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space, update_space, and edit_space, never by editing files in the sandbox. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Copy each picture link exactly as a page, a message, or a search result showed it. Pass body as one string with real line breaks. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
@@ -830,6 +833,13 @@ class SpaceTool extends LocalToolMCP {
     return { spaces: result.records, aggregate_revision: result.aggregate_revision, has_more: result.has_more };
   }
 
+  private linkSecrets(): Promise<readonly string[]> {
+    return this.options.outboundSecrets({
+      tenant_id: this.options.authority.tenantId,
+      created_by: this.options.authority.userRef,
+    });
+  }
+
   private async get(
     input: z.infer<typeof GET_SPACE_INPUT_SCHEMA>,
   ): Promise<{ space: SpaceRecord; aggregate_revision: number; include_body: boolean }> {
@@ -859,6 +869,7 @@ class SpaceTool extends LocalToolMCP {
       previousBody: '',
       format: input.format,
       web_search: this.options.webSearch,
+      secrets: await this.linkSecrets(),
     });
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
@@ -894,6 +905,7 @@ class SpaceTool extends LocalToolMCP {
       previousBody: current.body,
       format: input.format,
       web_search: this.options.webSearch,
+      secrets: await this.linkSecrets(),
     });
     this.checkShrink(input.space_id, current, input.body, input.confirm_shrink, UPDATE_SPACE_TOOL_NAME);
     const mutation = await this.options.store.updateSpace({
@@ -959,6 +971,7 @@ class SpaceTool extends LocalToolMCP {
       previousBody: current.body,
       format: input.format ?? current.format,
       web_search: this.options.webSearch,
+      secrets: await this.linkSecrets(),
     });
     this.checkShrink(input.space_id, current, body, input.confirm_shrink, EDIT_SPACE_TOOL_NAME);
     const mutation = await this.options.store.updateSpace({
@@ -1470,6 +1483,8 @@ export interface SpaceTurnContext {
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
   authority: SpaceTurnAuthority;
+  /** Exact secret values the host holds for this person, for the outbound secret guard on space links. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
   /** Operational log for delta-edit failures. */

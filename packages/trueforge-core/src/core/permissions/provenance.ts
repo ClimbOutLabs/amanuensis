@@ -6,7 +6,11 @@
  * send one can ask first once the chat has read other content.
  */
 
-/** Links, sites and addresses from one side, each folded so two spellings of one value match. */
+/**
+ * Links, sites and addresses from one side, each folded so two spellings of one value match. A link is
+ * also kept under its picture key, which folds less: a picture is fetched as written, so its scheme and
+ * its host as written are part of which picture it is.
+ */
 interface ProvenanceValues {
   urls: Set<string>;
   hosts: Set<string>;
@@ -60,7 +64,41 @@ export function emptyChatProvenance(): ChatProvenance {
   };
 }
 
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
+const TRAILING_PUNCTUATION_CHARS = '.,;:!?)]}\'"';
+/** Each closing bracket and the opening one it answers to. */
+const CLOSING_BRACKETS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+/**
+ * A link as written, without the prose punctuation at its end. A closing bracket stays when it
+ * balances an opening one inside the link: a link the person pasted can itself end in one, and
+ * dropping it records a different link from the one they gave.
+ */
+function withoutTrailingPunctuation(value: string): string {
+  let end = value.length;
+  while (end > 0) {
+    const last = value.charAt(end - 1);
+    if (!TRAILING_PUNCTUATION_CHARS.includes(last)) {
+      break;
+    }
+    const opener = CLOSING_BRACKETS[last];
+    if (opener !== undefined) {
+      let balance = 0;
+      for (const char of value.slice(0, end - 1)) {
+        if (char === opener) {
+          balance += 1;
+        }
+        if (char === last) {
+          balance -= 1;
+        }
+      }
+      if (balance > 0) {
+        break;
+      }
+    }
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
 const SCHEME_URL = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>\\`]+/g;
 const SCHEMELESS_URL_WITH_PATH = /(?<![\w@.-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?\/[^\s"'<>\\`]*/g;
 const WWW_URL = /(?<![\w@.-])www\.[^\s"'<>\\`]+/gi;
@@ -76,7 +114,7 @@ function urlsInText(text: string): string[] {
   let rest = text;
   for (const pattern of [SCHEME_URL, WWW_URL, SCHEMELESS_URL_WITH_PATH]) {
     rest = rest.replace(pattern, match => {
-      found.push(match.replace(TRAILING_PUNCTUATION, ''));
+      found.push(withoutTrailingPunctuation(match));
       return ' ';
     });
   }
@@ -87,10 +125,49 @@ function isWholeUrl(value: string): boolean {
   return WHOLE_HOST.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(value) || /^www\.\S+$/i.test(value);
 }
 
+/** A link an outbound value names, and whether it is the whole value, the edge characters a reader drops aside. */
+interface NamedLink {
+  url: string;
+  /**
+   * The value is this link and nothing else. Only a whole value may claim a recorded trust or an
+   * exact copy: a reader opens the whole value, so a link inside a longer one is a different link
+   * from the one that was recorded, whatever follows it.
+   */
+  whole: boolean;
+}
+
+/**
+ * A value with the edge characters a URL reader drops removed: the C0 controls and the space at
+ * either end. Wider spaces and format characters stay, since a reader keeps them.
+ */
+function readerTrimmed(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
+/** The links an outbound value names: the value itself when it is one, else those written inside it. */
+function linksOf(value: string): NamedLink[] {
+  const trimmed = readerTrimmed(value);
+  // Wider spaces and format characters survive the reader's edge trim, which drops only the
+  // characters above, and are percent-encoded into the link the reader opens. A value ending
+  // in one therefore opens as a different link from the trimmed text, so it is not the link
+  // itself: only the links written inside it count, and none of them is whole.
+  if (/^\s/.test(trimmed) || /\s$/.test(trimmed)) {
+    return urlsInText(value).map(url => ({ url, whole: false }));
+  }
+  return isWholeUrl(trimmed) ? [{ url: trimmed, whole: true }] : urlsInText(value).map(url => ({ url, whole: false }));
+}
+
 /** The URLs an outbound value names: the value itself when it is one, else those written inside it. */
 function urlsOf(value: string): string[] {
-  const trimmed = value.trim();
-  return isWholeUrl(trimmed) ? [trimmed] : urlsInText(value);
+  return linksOf(value).map(link => link.url);
 }
 
 /** Whether any outbound value is, or contains, a URL: a call that opens a page rather than searches. */
@@ -111,15 +188,61 @@ function hostKey(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
-/** One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away. */
+/**
+ * Characters a percent coding may name without changing what a link names: letters, digits and the
+ * marks below split nothing in a path or a query, so the coded spelling and the plain one are the
+ * same character in the link. Any other character stays coded: a coded slash is not a slash, and a
+ * coded `&`, `=` or `+` still splits a query, so those spellings name different links.
+ */
+const PLAINLY_SPELLED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$'()*+,;:@";
+
+const PERCENT_CODED = /%([0-9A-Fa-f]{2})/g;
+
+/**
+ * One spelling of a link's path or query: a percent coding of a character that splits nothing folds
+ * to the character itself, and a coding that stays is written with capital letters, so two spellings
+ * of one link (a file name's parentheses plain, or coded as %28 and %29) share a key.
+ */
+function settledSpelling(part: string): string {
+  return part.replace(PERCENT_CODED, (_whole: string, hex: string) => {
+    const character = String.fromCharCode(Number.parseInt(hex, 16));
+    return PLAINLY_SPELLED.includes(character) ? character : `%${hex.toUpperCase()}`;
+  });
+}
+
+/** A link's path as both keys write it: one trailing slash folds away, and the root path adds nothing. */
+function foldedPath(url: URL): string {
+  const path = settledSpelling(url.pathname);
+  const trimmed = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+  return trimmed === '/' ? '' : trimmed;
+}
+
+/**
+ * One page however it is spelled: http or https, host case, `www.`, one trailing slash, the fragment
+ * and a percent coding of a character that splits nothing fold away.
+ */
 function urlKey(value: string): string | undefined {
   const url = parsedUrl(value);
   if (url === undefined || url.hostname === '') {
     return undefined;
   }
-  const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  return `${hostKey(url.hostname)}${port}${foldedPath(url)}${settledSpelling(url.search)}`;
+}
+
+/**
+ * One picture as it would be fetched: the scheme and the host exactly as written stay, only the
+ * host's case, one trailing slash, the fragment and a percent coding of a character that splits
+ * nothing fold away. A picture is loaded as written, so the `www.` host and the plain host can
+ * serve different files, and so can the two schemes.
+ */
+function pictureKey(value: string): string | undefined {
+  const url = parsedUrl(value);
+  if (url === undefined || url.hostname === '') {
+    return undefined;
+  }
+  const port = url.port === '' ? '' : `:${url.port}`;
+  return `${url.protocol}//${url.hostname.toLowerCase()}${port}${foldedPath(url)}${settledSpelling(url.search)}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -140,7 +263,7 @@ function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts
   return side.overflowed || side[input.kind].has(input.value);
 }
 
-/** Records one link; returns its site, or undefined when it is not a link. */
+/** Records one link, under its folded key and its picture key; returns its site, or undefined when it is not a link. */
 function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   const key = urlKey(value);
   const host = parsedUrl(value)?.hostname;
@@ -148,6 +271,10 @@ function recordUrl(side: ProvenanceValues, value: string): string | undefined {
     return undefined;
   }
   add({ side, kind: 'urls', value: key });
+  const picture = pictureKey(value);
+  if (picture !== undefined) {
+    add({ side, kind: 'urls', value: picture });
+  }
   add({ side, kind: 'hosts', value: hostKey(host) });
   return hostKey(host);
 }
@@ -425,9 +552,10 @@ function isBareSite(url: string): boolean {
  * Whether read content steered a link. A bare site is steered when only read content named it. A link that adds a
  * path or a query is trusted only as the exact link the person gave or a search returned, once read content named
  * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
- * does not vouch for a page on it that read content chose.
+ * does not vouch for a page on it that read content chose. Exact means the whole value: a recorded trust vouches
+ * only for a value that is the link itself, never for a longer value the link merely begins.
  */
-function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+function steeredUrl(input: { provenance: ChatProvenance; url: string; whole: boolean }): boolean {
   const { provenance } = input;
   const key = urlKey(input.url);
   const host = parsedUrl(input.url)?.hostname;
@@ -438,20 +566,50 @@ function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean
   if (!untrustedHas({ provenance, kind: 'hosts', value: site })) {
     return false;
   }
-  return isBareSite(input.url) ? !provenance.trusted.hosts.has(site) : !provenance.trusted.urls.has(key);
+  const vouched =
+    input.whole && (isBareSite(input.url) ? provenance.trusted.hosts.has(site) : provenance.trusted.urls.has(key));
+  return !vouched;
 }
 
 /**
  * Links a lookup names that read content steered and that carry something that content did not give. Opening a
  * link exactly as a page or a mail wrote it sends nothing of the person's, so it is not steered; adding to it is.
+ * Exact means the value is the link alone: a value that carries the link and then more opens as the longer
+ * value, not as the copy, so the copy's exemption does not hold for it either.
  */
 export function steeredLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const { provenance } = input;
   return input.values.flatMap(value =>
-    urlsOf(value).filter(url => {
-      const key = urlKey(url);
-      return key !== undefined && !provenance.untrusted.urls.has(key) && steeredUrl({ provenance, url });
-    }),
+    linksOf(value)
+      .filter(({ url, whole }) => {
+        const key = urlKey(url);
+        return (
+          key !== undefined && !(whole && provenance.untrusted.urls.has(key)) && steeredUrl({ provenance, url, whole })
+        );
+      })
+      .map(({ url }) => url),
+  );
+}
+
+/**
+ * Links in values that nobody chose to load: not exactly a link the person gave, a search returned, or a
+ * page the chat opened showed as a picture. A lookup runs once on the person's behalf, so read content may
+ * name its links; an embed is loaded by the person's own browser every time it is shown, so only a chosen
+ * link may be one. Copying a link exactly as read content wrote it is not a choice, and neither is a value
+ * that carries a chosen link and then more: the browser loads the whole value as one link, which is not
+ * the link that was chosen. The comparison is the picture key, not the page key: a browser fetches the
+ * picture as written, so a spelling that changes the scheme or the host, a `www.` added or dropped, names
+ * a different picture from the one that was chosen, even where the two spellings name the same page.
+ */
+export function unchosenLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
+  const { provenance } = input;
+  return input.values.flatMap(value =>
+    linksOf(value)
+      .filter(({ url, whole }) => {
+        const key = pictureKey(url);
+        return key === undefined || !(whole && provenance.trusted.urls.has(key));
+      })
+      .map(({ url }) => url),
   );
 }
 
@@ -501,20 +659,14 @@ export function steeredDestinations(input: {
     for (const match of value.matchAll(EMAIL)) {
       addAddress(match[0]);
     }
-    for (const url of urlsOf(value.replace(EMAIL, ' '))) {
+    for (const { url, whole } of linksOf(value.replace(EMAIL, ' '))) {
       const host = parsedUrl(url)?.hostname;
-      if (host !== undefined && steeredUrl({ provenance, url })) {
+      if (host !== undefined && steeredUrl({ provenance, url, whole })) {
         steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${hostKey(host)}` }) });
       }
     }
   }
   return steered;
-}
-
-/** Whether a link is exactly one the person gave or a search returned. */
-export function isTrustedLink(input: { provenance: ChatProvenance; url: string }): boolean {
-  const key = urlKey(input.url);
-  return key !== undefined && input.provenance.trusted.urls.has(key);
 }
 
 /** Whether this chat has read content that is not the person's own words. */
@@ -527,7 +679,10 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
  * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
  * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
  * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
- * folded the same way the record was, so a detail counts however the value spells it.
+ * folded the same way the record was, so a detail counts however the value spells it. A detail counts
+ * whole, as one value: the same address or number cut in two across a link's path and query, or spread
+ * over two query values, is not caught. That gap sits with links, which are opened only when the person
+ * follows them; a picture must be exactly a chosen link, so pictures are not affected.
  */
 export function carriedPrivateDetails(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const carried = new Set<string>();

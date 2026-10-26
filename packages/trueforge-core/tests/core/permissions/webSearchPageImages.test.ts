@@ -3,7 +3,7 @@
  * file no search result named. Only the page's own pictures count: a link the page merely points
  * at, or a picture on a page the chat never opened, stays untrusted.
  */
-import { isTrustedLink, recordPageImageUrls, recordSearchResults } from '../../../src/core/permissions/provenance';
+import { recordPageImageUrls, recordSearchResults, steeredLinks } from '../../../src/core/permissions/provenance';
 import { createWebSearchTurnState, pageImageUrls } from '../../../src/core/permissions/webSearch';
 
 const COMMONS_PAGE = 'https://commons.wikimedia.org/wiki/File:Red_Fox.jpg';
@@ -34,20 +34,10 @@ describe('recordPageImageUrls', () => {
       provenance: state.provenance,
       texts: [JSON.stringify({ results: [{ title: 'Red Fox', url: COMMONS_PAGE }] })],
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
     recordPageImageUrls({
       provenance: state.provenance,
       urls: pageImageUrls(`# File:Red Fox.jpg\n![Red fox](${FOX_IMAGE})\n<img src="${FOX_IMAGE}" alt="Red fox">`),
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(true);
-  });
-
-  it('does not count a picture that only appears in a search excerpt', () => {
-    const state = createWebSearchTurnState();
-    recordSearchResults({
-      provenance: state.provenance,
-      texts: [JSON.stringify({ results: [{ title: 'Foxes', url: OTHER_PAGE, excerpt: FOX_IMAGE }] })],
-    });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
+    expect(steeredLinks({ provenance: state.provenance, values: [FOX_IMAGE] })).toEqual([]);
   });
 });
