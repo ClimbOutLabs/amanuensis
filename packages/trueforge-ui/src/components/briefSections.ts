@@ -93,6 +93,12 @@ export function briefWhenLabel(iso: string): string | undefined {
   return `${day} / ${time}`;
 }
 
+/** The line under a brief when some items did not fit and were left out. Empty when none were. */
+export function briefOmittedLine(count: number): string {
+  if (count <= 0) return '';
+  return `${pluralize(count, 'item')} could not be shown. Ask for your brief again to try once more.`;
+}
+
 function pluralize(count: number, singular: string): string {
   return `${String(count)} ${singular}${count === 1 ? '' : 's'}`;
 }

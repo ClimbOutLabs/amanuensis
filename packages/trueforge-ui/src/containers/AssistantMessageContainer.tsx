@@ -9,7 +9,7 @@ import {
   type MessageStatus,
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
-import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { parseMorningBrief, unreadableBriefText } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
@@ -163,6 +163,7 @@ function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
 }
 
 const BRIEF_WRITING_LINE = 'Putting your brief together…';
+const BRIEF_UNREADABLE_LINE = 'Your brief could not be shown this time. Ask for it again.';
 
 export function AssistantMessageContainer() {
   const AssistantMessageBubble = useSlot('AssistantMessageBubble');
@@ -201,16 +202,19 @@ export function AssistantMessageContainer() {
   const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
   const answerText = useAuiState(s => messageText(s.message.content));
   // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
-  // line shows instead of the raw text; a finished answer without a valid block shows as normal markdown.
-  const brief = answersBrief ? parseMorningBrief(answerText) : null;
-  const briefWriting = answersBrief && brief === null && isMessageRunning;
+  // line shows instead of the raw text. A finished answer that holds JSON but cannot be drawn shows its words
+  // without the JSON; a finished answer with no JSON shows as normal markdown.
+  const readBrief = answersBrief ? parseMorningBrief(answerText) : null;
+  const briefWriting = answersBrief && readBrief === null && isMessageRunning;
+  const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
+  const unreadableText = answersBrief && readBrief === null && settled ? unreadableBriefText(answerText) : null;
+  const briefHidesText = briefWriting || unreadableText !== null;
 
   const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts);
 
   // With agent details off the person sees their answer and what needs them, nothing of the work.
   // In-between lines hide; a settled reply with no text after its last step keeps its last line as
   // the answer, unless a step after that line failed, and then one plain line says it did not finish.
-  const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
   const lastInterim = interimTextIndices.at(-1);
   const failedAfterLastInterim = lastInterim !== undefined && parts.slice(lastInterim + 1).some(isToolPartErrored);
   const keptAsAnswer = settled && !hasFinal && !failedAfterLastInterim ? lastInterim : undefined;
@@ -355,7 +359,7 @@ export function AssistantMessageContainer() {
             case 'group-interimText':
               return null;
             case 'text':
-              return briefWriting ? null : <AssistantTextContainer />;
+              return briefHidesText ? null : <AssistantTextContainer />;
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
@@ -382,6 +386,16 @@ export function AssistantMessageContainer() {
           {BRIEF_WRITING_LINE}
         </p>
       ) : null}
+      {unreadableText === null ? null : (
+        <div data-testid="brief-unreadable" className="flex flex-col gap-2">
+          {unreadableText === '' ? null : (
+            <p className="whitespace-pre-line text-base text-text-primary">{unreadableText}</p>
+          )}
+          <p role="status" className="text-sm text-text-secondary">
+            {BRIEF_UNREADABLE_LINE}
+          </p>
+        </div>
+      )}
       {showNotFinished && (
         <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
           This reply did not finish. Ask again, or turn on Agent details to see what went wrong.
@@ -408,8 +422,13 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {brief !== null ? (
-          <AmanBrief brief={brief} briefId={turnId ?? messageId} sessionId={sessionId} />
+        {readBrief !== null ? (
+          <AmanBrief
+            brief={readBrief.brief}
+            omittedCount={readBrief.omittedCount}
+            briefId={turnId ?? messageId}
+            sessionId={sessionId}
+          />
         ) : chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
           <ChatImageScope port={chatImagesPort} sessionId={sessionId} turnId={turnId} settled={!isMessageRunning}>
             {messageBody}
