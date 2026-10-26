@@ -52,12 +52,21 @@ export function splitEntries(content: string): string[] {
 }
 
 /**
- * Older versions wrote a `Turn summary: ` prefix after each entry heading and a closing
- * `> Chat title: ...` line. Neither is a fact, so both are dropped. Only whole lines are touched,
- * so the entry count, and with it every entry id, stays the same.
+ * Older versions wrote a `Turn summary: ` prefix right after each entry heading and a closing
+ * `> Chat title: ...` line, which sits last in its entry (before a source line, if any). Neither is
+ * a fact, so both are dropped. A title-looking line inside an entry's text is left alone. Only
+ * whole lines are touched, so the entry count, and with it every entry id, stays the same, and
+ * running it again changes nothing.
  */
 export function upgradeLegacyEntries(content: string): string {
-  return content.replace(/(^|\n)(## [^\n]*\n\n)Turn summary: ?/g, '$1$2').replace(/\n\n> Chat title: [^\n]*/g, '');
+  const prefix = /(^|\n)(## [^\n]*\n\n)(?:Turn summary: ?)+/g;
+  const trailingTitle = /\n\n> Chat title: [^\n]*(?=(?:\n\n> Source: read content)?(?:\n*$|\n+## ))/g;
+  let upgraded = content;
+  for (let previous = ''; previous !== upgraded;) {
+    previous = upgraded;
+    upgraded = upgraded.replace(prefix, '$1$2').replace(trailingTitle, '');
+  }
+  return upgraded;
 }
 
 /** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
@@ -76,8 +85,11 @@ export function dailyLogEntries(input: { safeNamespace: string; file: string; co
 /** Metadata key naming the chat an entry came from; stored as a hidden trailer line, never in the fact text. */
 export const SESSION_ID_METADATA_KEY = 'session_id';
 
+/** What a chat id may hold so it can ride in a hidden closing line; the one owner of that rule. */
+const SESSION_ID_CHARACTERS = '[A-Za-z0-9_-]{1,128}';
+
 /** Hidden (Markdown comment) trailer carrying the chat id; it renders as nothing and holds no fact. */
-const SESSION_MARKER_PATTERN = /^<!-- session_id: ([A-Za-z0-9_-]{1,128}) -->$/;
+const SESSION_MARKER_PATTERN = new RegExp(`^<!-- session_id: (${SESSION_ID_CHARACTERS}) -->$`);
 
 /** Closing line marking an entry written after the assistant read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
@@ -139,8 +151,9 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     } else if (line === READ_CONTENT_SOURCE_LINE) {
       metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
       lines.pop();
-    } else if (sessionId !== undefined && metadata[SESSION_ID_METADATA_KEY] === undefined) {
-      metadata[SESSION_ID_METADATA_KEY] = sessionId;
+    } else if (sessionId !== undefined) {
+      // Every closing marker is dropped; the one nearest the end is the one that counts.
+      metadata[SESSION_ID_METADATA_KEY] ??= sessionId;
       lines.pop();
     } else {
       break;
@@ -157,12 +170,20 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
 
 /** The entry text the Memories page shows and edits: the hidden chat id line is dropped. */
 export function withoutSessionMarker(text: string): string {
-  return text.replace(/\n\n<!-- session_id: [A-Za-z0-9_-]{1,128} -->(?=\n\n> Source: read content$|$)/, '');
+  const { body, metadata } = splitEntryTrailers(text);
+  if (metadata[SESSION_ID_METADATA_KEY] === undefined) {
+    return text;
+  }
+  return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
 }
 
-/** The day an entry was written, read from the daily file name in its id. */
-export function entryDay(entryId: string): string | undefined {
-  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entryId)?.[1];
+/** When an entry was written: its `## ` heading instant, else the day in its daily file name. */
+export function entryOccurredAt(entry: { id: string; text: string }): string | undefined {
+  const heading = entry.text.startsWith('## ') ? (entry.text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}T/.test(heading) && !Number.isNaN(new Date(heading).getTime())) {
+    return new Date(heading).toISOString();
+  }
+  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
 }
 
 /** Curated long-term memory file inside a namespace directory. */

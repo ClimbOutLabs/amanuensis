@@ -129,6 +129,27 @@ describe('markdownMemoryFiles', () => {
       expect(withoutSessionMarker(text)).not.toContain('session_id');
     });
 
+    it('is dropped whole when an entry carries more than one closing marker', () => {
+      const text =
+        '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: old-1 -->\n\n<!-- session_id: chat-2 -->';
+      expect(entryMetadata(text)).toEqual({ session_id: 'chat-2' });
+      expect(withoutSessionMarker(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nA fact.');
+    });
+
+    it('is dropped from an entry that also closes with the read-content line', () => {
+      const text = '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: chat-2 -->\n\n> Source: read content';
+      expect(withoutSessionMarker(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n> Source: read content');
+    });
+
+    it('accepts and rejects the same ids when written and when read back', () => {
+      const long = 'a'.repeat(128);
+      for (const id of [long, 'a'.repeat(129), 'chat 1', 'a-b_C9']) {
+        const written = formatRetainEntry({ ...item, metadata: { session_id: id } });
+        const readBack = entryMetadata(written)?.['session_id'];
+        expect(readBack).toBe(/^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined);
+      }
+    });
+
     it('is absent for an entry without one', () => {
       expect(
         entryMetadata(
@@ -193,6 +214,36 @@ describe('markdownMemoryFiles', () => {
       const current =
         '## 2026-09-01T10:00:00.000Z\n\nThe person has a cat named Miso.\n\n<!-- session_id: chat-1 -->\n';
       expect(upgradeLegacyEntries(current)).toBe(current);
+    });
+
+    it('changes nothing when run again, even on a doubled prefix or a doubled title', () => {
+      const doubled = [
+        '## 2026-09-01T10:00:00.000Z',
+        '',
+        'Turn summary: Turn summary: The person has a cat.',
+        '',
+        '> Chat title: First',
+        '',
+        '> Chat title: Second',
+        '',
+      ].join('\n');
+      const once = upgradeLegacyEntries(doubled);
+      expect(once).toBe('## 2026-09-01T10:00:00.000Z\n\nThe person has a cat.\n');
+      expect(upgradeLegacyEntries(once)).toBe(once);
+    });
+
+    it('leaves a title-looking line inside an entry text alone', () => {
+      const content = [
+        '## 2026-09-01T10:00:00.000Z',
+        '',
+        'The person quoted a heading:',
+        '',
+        '> Chat title: Not a real title',
+        '',
+        'and then went on to talk about a cat.',
+        '',
+      ].join('\n');
+      expect(upgradeLegacyEntries(content)).toBe(content);
     });
 
     it('is read with the same entry ids and clean text', () => {

@@ -127,8 +127,27 @@ describe('submitRetain summary-pending marker', () => {
     expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
   });
 
-  it('does not mark the vault for a deliberate skip (an overlong turn is left alone)', async () => {
-    mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'input-too-long' });
+  it('marks the vault when no summary model is set, because the turn could not be saved', async () => {
+    mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'no-model-configured' });
+
+    await submitRetain({
+      client: zaraClient,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'Please remember that my robot is named Bleep-Bloop.',
+      assistantText: 'Got it.',
+      completedAt: '2026-10-20T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
+    const listed = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
+    expect(listed.ok && listed.entries).toEqual([]);
+  });
+
+  it('does not mark the vault for an empty exchange, which holds nothing to lose', async () => {
+    mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
       client: zaraClient,

@@ -23,6 +23,7 @@ import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
@@ -43,6 +44,10 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** Present when summaries are on for this turn; a recovered earlier turn is then summarized, never stored raw. */
+  summarize?: SummarizeTurnContext | undefined;
+  /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
+  clientTimezone?: string | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
    * the turn's tool policy can block web_search as a substitute for recall.
@@ -69,6 +74,8 @@ function memoryCapabilitiesForTurn(input: {
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
       recallEnabled: memory.recallEnabled,
+      summarize: memory.summarize,
+      timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
     }),

@@ -14,6 +14,7 @@ import {
 } from '../../../../src/runtime/memory/memorySummarize';
 import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
+import type { ModelProperties } from '../../../../src/schemas/modelProvider';
 import { TENANT_ID } from '../../../../src/tenancy';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
 import { startModelEndpointStub } from '../../../fixtures/modelEndpointStub';
@@ -98,6 +99,33 @@ describe('buildSummarizationMessages', () => {
     expect(system).toContain('Never write "User" or "Assistant"');
   });
 
+  it('gives the date of the chat in the time zone of the person', () => {
+    const user = buildSummarizationMessages({
+      userText: 'hi',
+      assistantText: 'hello',
+      turnDate: '2026-10-26T23:30:00.000Z',
+      timeZone: 'Asia/Tokyo',
+    })[1]?.content;
+    expect(user).toContain('Date of the chat: 2026-10-27 (Tuesday)');
+  });
+
+  it('falls back to UTC for a time zone it does not know', () => {
+    const user = buildSummarizationMessages({
+      userText: 'hi',
+      assistantText: 'hello',
+      turnDate: TURN_DATE,
+      timeZone: 'Not/AZone',
+    })[1]?.content;
+    expect(user).toContain('Date of the chat: 2026-10-26 (Monday)');
+  });
+
+  it('asks for the empty list exactly, and never for a sentence saying there is nothing', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('Always reply with one JSON object and nothing else');
+    expect(system).toContain('Never write a sentence that says there is nothing to keep');
+  });
+
   it('gives the date of the chat so relative dates can be written out', () => {
     const user = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[1]
       ?.content;
@@ -117,24 +145,50 @@ describe('parseSummaryReply', () => {
     ['code fences', '```json\n{"facts": ["The person owns a bike."]}\n```'],
     ['a lead-in sentence', 'Here is the result: {"facts": ["The person owns a bike."]}'],
     ['a trailing comma', '{"facts": ["The person owns a bike.",]}'],
-    ['a bare list', '["The person owns a bike."]'],
     ['bullet marks inside the facts', '{"facts": ["- The person owns a bike."]}'],
   ])('tolerates %s', (_name, reply) => {
     expect(parseSummaryReply(reply)).toEqual({ kind: 'facts', facts: ['The person owns a bike.'] });
   });
 
+  it.each(['{"facts": []}', '```json\n{"facts": []}\n```', '{"facts":[]}'])('treats %j as nothing to keep', reply => {
+    expect(parseSummaryReply(reply)).toEqual({ kind: 'nothing' });
+  });
+
   it.each([
     '',
     '   ',
-    '{"facts": []}',
-    '```json\n{"facts": []}\n```',
     'None',
     'No durable facts were shared in this exchange.',
+    'Aucun fait durable.',
+    'Keine dauerhaften Fakten.',
     'Turn summary: - No durable facts were shared in this exchange.',
     '(no content)',
-    '{"facts": ["No durable facts."]}',
-  ])('treats %j as nothing to keep', reply => {
-    expect(parseSummaryReply(reply)).toEqual({ kind: 'nothing' });
+    '["The person owns a bike."]',
+  ])('never counts %j as nothing to keep or as a fact', reply => {
+    expect(parseSummaryReply(reply)).toEqual({ kind: 'unreadable' });
+  });
+
+  it('drops a sentence in the list that says there are no facts', () => {
+    expect(parseSummaryReply('{"facts": ["No durable facts."]}')).toEqual({ kind: 'nothing' });
+    expect(parseSummaryReply('{"facts": ["No durable facts were shared.", "The person has a cat."]}')).toEqual({
+      kind: 'facts',
+      facts: ['The person has a cat.'],
+    });
+  });
+
+  it('drops facts that start with a label older versions wrote', () => {
+    expect(
+      parseSummaryReply(
+        '{"facts": ["Turn summary: The person has a cat.", "Chat title: Cats", "The person has a dog."]}',
+      ),
+    ).toEqual({ kind: 'facts', facts: ['The person has a dog.'] });
+  });
+
+  it('keeps a fact that merely starts with the word Assistant or User', () => {
+    expect(parseSummaryReply('{"facts": ["Assistant professor Dana is the person\'s neighbor."]}')).toEqual({
+      kind: 'facts',
+      facts: ["Assistant professor Dana is the person's neighbor."],
+    });
   });
 
   it('drops facts written as narration of the chat', () => {
@@ -242,13 +296,23 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'failed', reason: 'provider down', fallback: 'model_unresolved' });
   });
 
-  it.each(['   ', '{"facts": []}', 'No durable facts were shared in this exchange.', '(no content)'])(
-    'returns nothing_to_keep when the model says there is nothing: %j',
+  it('returns nothing_to_keep only for the empty list', async () => {
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => fakeSummarizer('{"facts": []}') });
+    expect(result).toEqual({ status: 'nothing_to_keep' });
+  });
+
+  it.each(['No durable facts were shared in this exchange.', 'Aucun fait durable.', '(no content)'])(
+    'fails, rather than calling it nothing to keep, when the model writes %j',
     async reply => {
       const result = await summarizeTurnContent({ ...base, resolveLlm: async () => fakeSummarizer(reply) });
-      expect(result).toEqual({ status: 'nothing_to_keep' });
+      expect(result).toEqual({ status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' });
     },
   );
+
+  it('fails, so the vault is marked, when the model finishes with no text at all', async () => {
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => fakeSummarizer('   ') });
+    expect(result).toEqual({ status: 'failed', reason: 'summary-empty', fallback: 'summary_empty' });
+  });
 
   it('returns failed, and keeps no text, when the reply is not the expected shape', async () => {
     const result = await summarizeTurnContent({
@@ -286,15 +350,19 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' });
   });
 
-  it('returns skipped/input-too-long instead of truncating an overlong turn', async () => {
+  it('summarizes the most recent part of an overlong turn, and says earlier text was left out', async () => {
+    const llm = fakeSummarizer('{"facts": ["The person has a cat named Miso."]}');
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
     const result = await summarizeTurnContent({
       ...base,
-      userText: 'x'.repeat(8001),
-      resolveLlm: async () => {
-        throw new Error('must not be called');
-      },
+      userText: `${'filler '.repeat(3000)}Please remember that my cat is named Miso.`,
+      resolveLlm: async () => llm,
     });
-    expect(result).toEqual({ status: 'skipped', reason: 'input-too-long' });
+    expect(result.status).toBe('summarized');
+    const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain('my cat is named Miso.');
+    expect(sent).toContain('Earlier text of this long turn was left out.');
+    expect(sent.length).toBeLessThan(20000);
   });
 
   it('caps the generation with max_tokens so output cost is bounded', async () => {
@@ -499,5 +567,86 @@ describe('summarizeTurnContent on Token Factory', () => {
     expect((await run()).status).toBe('summarized');
 
     expect(await usageStore.getUsage({ usage_date: TODAY })).toBeUndefined();
+  });
+});
+
+describe('summarizeTurnContent reasoning fields on the real call', () => {
+  const FACTS = '{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}';
+  const servers: Server[] = [];
+
+  afterEach(() => {
+    for (const server of servers.splice(0)) {
+      server.close();
+    }
+  });
+
+  async function setup(options: {
+    efforts: ModelProperties['reasoning_efforts'];
+    refuse?: (body: Record<string, unknown>) => number | undefined;
+  }) {
+    const stub = await startModelEndpointStub({ content: FACTS, refuse: options.refuse });
+    servers.push(stub.server);
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const modelProviderStore = new SqliteModelProviderStore(db);
+    await modelProviderStore.upsertProvider({
+      tenant_id: TENANT_ID,
+      name: 'local-vllm',
+      manifest: {
+        type: 'custom',
+        name: 'local-vllm',
+        base_url: stub.baseUrl,
+        models: [
+          {
+            model_id: 'local-model',
+            name: 'local-model',
+            properties: options.efforts === undefined ? {} : { reasoning_efforts: options.efforts },
+          },
+        ],
+      },
+    });
+    const run = () =>
+      summarizeTurnContent({
+        userText: 'My robot is named Bleep-Bloop.',
+        assistantText: 'Got it.',
+        turnDate: TURN_DATE,
+        tenantId: TENANT_ID,
+        modelProviderStore,
+        summarizationModelFqn: 'local-vllm/local-model',
+        tokenFactoryBudget: uncappedTokenFactoryBudget,
+        modelUsage: discardedModelUsage,
+        logger: makeLogger(),
+      });
+    return { run, requests: stub.requests };
+  }
+
+  it('sends the lightest reasoning effort the model lists', async () => {
+    const { run, requests } = await setup({ efforts: ['high', 'low'] });
+
+    expect((await run()).status).toBe('summarized');
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.['reasoning_effort']).toBe('low');
+  });
+
+  it('sends no reasoning field to a model that lists none', async () => {
+    const { run, requests } = await setup({ efforts: undefined });
+
+    expect((await run()).status).toBe('summarized');
+
+    expect(requests[0]).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('asks again without the field when the provider refuses it', async () => {
+    const { run, requests } = await setup({
+      efforts: ['low'],
+      refuse: body => ('reasoning_effort' in body ? 400 : undefined),
+    });
+
+    expect((await run()).status).toBe('summarized');
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toHaveProperty('reasoning_effort');
+    expect(requests[1]).not.toHaveProperty('reasoning_effort');
   });
 });

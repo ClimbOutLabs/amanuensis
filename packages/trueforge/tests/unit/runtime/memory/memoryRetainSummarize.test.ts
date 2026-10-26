@@ -189,7 +189,6 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
       { status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' },
     ],
     ['is skipped for a missing model', { status: 'skipped', reason: 'no-model-configured' }],
-    ['is skipped for a long input', { status: 'skipped', reason: 'input-too-long' }],
   ] as const)('stores nothing, not the chat text, when summarization %s', async (_name, result) => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
@@ -680,17 +679,17 @@ describe('turn outcome log at info', () => {
     ]);
   });
 
-  it('logs a reason code, and saves nothing, when the summarizer is skipped for a missing model or long input', async () => {
+  it('logs a reason code, and saves nothing, when the summarizer is skipped for a missing model, and logs nothing for an empty exchange', async () => {
     const { client, retain } = retainingClient();
     const { logger, lines } = captureLogger();
 
     mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'no-model-configured' });
     await submitRetain(submitFor({ client, logger, interactive: true }));
-    mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'input-too-long' });
+    mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'empty-exchange' });
     await submitRetain(submitFor({ client, logger, interactive: true }));
 
     expect(retain).not.toHaveBeenCalled();
-    expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['no_summary_model', 'input_too_long']);
+    expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['no_summary_model']);
   });
 
   it('logs one info line when the Hindsight backend is given only an ability note', async () => {

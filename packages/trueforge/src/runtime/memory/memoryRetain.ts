@@ -85,7 +85,7 @@ export function buildRetainItem(params: BuildRetainItemParams): RetainItem | und
 export interface SummarizeTurnContext {
   tenantId: string;
   modelProviderStore: IModelProviderStore;
-  /** Model to summarize with; an undefined/blank value skips summarization. */
+  /** Model to summarize with; an undefined or blank value means no summary, so the turn saves nothing. */
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
   modelUsage: TurnModelUsage;
@@ -107,6 +107,8 @@ export interface SubmitRetainParams {
   userText: string;
   assistantText: string;
   completedAt: string;
+  /** The person's IANA time zone, so a summary writes dates as the day they lived. */
+  timeZone?: string | undefined;
   /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
   origin?: AmanMemoryOrigin | undefined;
   logger: Logger;
@@ -168,6 +170,7 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
       userText: params.userText,
       assistantText: params.assistantText,
       turnDate: params.completedAt,
+      timeZone: params.timeZone,
       tenantId: summarize.tenantId,
       modelProviderStore: summarize.modelProviderStore,
       summarizationModelFqn: summarize.summarizationModelFqn,
@@ -204,9 +207,9 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
         return { kind: 'nothing' };
       case 'skipped':
         params.logger.debug('Memory summarization skipped', { reason: result.reason });
-        if (result.reason === 'input-too-long') {
-          logTurnMemoryNotSaved(params, { message: 'the turn was too long to summarize', reason: 'input_too_long' });
-        } else if (result.reason === 'no-model-configured') {
+        // An empty exchange holds nothing to lose. A missing model is a loss the Memories page should say.
+        if (result.reason === 'no-model-configured') {
+          await recordSummaryOutcome(params, { outcome: 'failed', reason: 'model_unresolved' });
           logTurnMemoryNotSaved(params, { message: 'no summary model is set', reason: 'no_summary_model' });
         }
         return { kind: 'nothing' };
@@ -266,6 +269,8 @@ async function attemptRetainSubmission(
   // The decision is made once per turn: a repeat attempt must not call the model again.
   const memory = precomputed ?? (await decideTurnMemory(params));
   if (memory.kind === 'nothing') {
+    // Recorded as done so the next turn's sweep does not rebuild this turn's exchange from the chat.
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
     return 'skipped';
   }
   const item = buildRetainItem({ ...params, memoryText: memory.kind === 'text' ? memory.text : undefined });
@@ -274,7 +279,8 @@ async function attemptRetainSubmission(
   }
   // Decided here, before any backend call, so every backend behaves the same. Returning
   // 'skipped' also ends the verification pass, so this info line is logged once per turn.
-  if (stripAssistantAbilityNotes(item.content) === '') {
+  // Summarized facts were already filtered, so only a kept exchange needs this check.
+  if (memory.kind === 'exchange' && stripAssistantAbilityNotes(item.content) === '') {
     logTurnMemoryNotSaved(params, {
       message: 'it only described what the assistant could not do',
       reason: 'ability_notes_only',

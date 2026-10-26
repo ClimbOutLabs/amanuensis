@@ -43,6 +43,7 @@ import type {
   ReflectBudget,
   RetryOperationOutcome,
 } from './hindsightClient';
+import { localDay } from './localDay';
 import type { MemoryClient } from './memoryClient';
 import type {
   MemoryCuratedStats,
@@ -53,7 +54,7 @@ import type {
   MemoryScreenStats,
 } from './memoryEvents';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { retainOperationId, submitRetain } from './memoryRetain';
+import { retainOperationId, submitRetain, type SummarizeTurnContext } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 
@@ -479,6 +480,16 @@ function sanitizeMemoryText(text: string): string {
 /** As {@link sanitizeMemoryText}, and also collapses newlines so a memory stays on one line. */
 function sanitizeMemoryLine(text: string): string {
   return sanitizeMemoryText(text).replace(/\r\n|\r|\n/g, ' ');
+}
+
+/** The item with a full `occurred_start` instant shown as a day in the person's time zone; other items are unchanged. */
+function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string | undefined }): RecallItem {
+  const start = item.occurred_start;
+  if (timeZone === undefined || start === undefined || !start.includes('T')) {
+    return item;
+  }
+  const instant = new Date(start);
+  return Number.isNaN(instant.getTime()) ? item : { ...item, occurred_start: localDay({ instant, timeZone }).date };
 }
 
 /**
@@ -1263,6 +1274,10 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly internalSourceState: InternalSourceState | undefined;
   /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
   private readonly webSearch: WebSearchTurnState | undefined;
+  /** Present when summaries are on: a recovered turn is summarized like any other, never stored as the raw exchange. */
+  private readonly summarize: SummarizeTurnContext | undefined;
+  /** The person's time zone, so a recalled memory's day reads as they lived it. */
+  private readonly timeZone: string | undefined;
 
   // A thread is per-turn, so instance state (never persisted itself) is naturally per-turn.
   private ranForThisTurn = false;
@@ -1284,6 +1299,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
     webSearch?: WebSearchTurnState | undefined;
+    summarize?: SummarizeTurnContext | undefined;
+    timeZone?: string | undefined;
   }) {
     this.client = input.client;
     this.config = input.config;
@@ -1294,6 +1311,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
     this.webSearch = input.webSearch;
+    this.summarize = input.summarize;
+    this.timeZone = input.timeZone;
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1572,7 +1591,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         maxEntities: this.config.recallMaxEntities,
         suppressEntities: applyDamping,
       });
-      items = gated.items;
+      items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
       entities = gated.entities;
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never
@@ -2076,6 +2095,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       completedAt: new Date().toISOString(),
       origin: exchange.origin,
       logger: this.logger,
+      summarize: this.summarize,
     });
     this.pending = capPending([
       ...this.pending,
@@ -2127,6 +2147,10 @@ export function hindsightMemoryCapability(input: {
   internalSourceState?: InternalSourceState | undefined;
   /** The turn's search state, which keeps the injected block's details so a search that carries them asks. */
   webSearch?: WebSearchTurnState | undefined;
+  /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
+  summarize?: SummarizeTurnContext | undefined;
+  /** The person's IANA time zone; a recalled memory's instant is shown as a day in it. */
+  timeZone?: string | undefined;
 }): AgentCapability {
   const processor = new HindsightMemoryProcessor({ ...input, screenClient: resolveScreenClient(input) });
   return {
