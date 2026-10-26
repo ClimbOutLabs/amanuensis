@@ -33,7 +33,8 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { isFirstPartyOrigin, isHostSidecar } from '../mcp/firstParty';
+import { isFirstPartyOrigin, isReservedConnectorName } from '../mcp/firstParty';
+import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -494,17 +495,14 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
-  // The stored mark is what setup decided at save time. The host's own Email and Calendar sidecars count
-  // without it, since an import or an edit in Settings clears the mark. Either way the operator must still
-  // list the origin, so dropping an origin from the configuration takes effect on the next turn.
+  // The stored mark is what setup decided at save time. The names Email and Calendar belong to the host's own
+  // sidecars: they are first-party only at the address the host was set up with, whatever the stored mark says,
+  // so an old or imported record cannot hold the trust. Either way the origin must still be on the first-party
+  // list, so dropping an origin from the configuration takes effect on the next turn.
   const firstParty =
-    (record.first_party ||
-      isHostSidecar({
-        name: record.name,
-        url: record.manifest.url,
-        mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-        calendarUrl: configuration.CALENDAR_CONNECTOR_URL,
-      })) &&
+    (isReservedConnectorName(record.name)
+      ? isHostOwnConnector({ name: record.name, url: record.manifest.url })
+      : record.first_party) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   const searchProvider =
     record.manifest.type === 'remote' && record.manifest.search_provider === true

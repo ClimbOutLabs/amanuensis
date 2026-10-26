@@ -26,8 +26,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { isMailSend } from '../email/mailConnector/sendListApproval';
-import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
+import { isMailReadToolName, isMailSendToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -58,7 +57,12 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
-import { FIRST_PARTY_TOOL_REASON, MAIL_READ_REASON } from './connectorTrust';
+import {
+  FIRST_PARTY_TOOL_REASON,
+  MAIL_NEW_RECIPIENT_REASON,
+  MAIL_READ_REASON,
+  MAIL_SEND_REASON,
+} from './connectorTrust';
 import {
   classifyContextFor,
   type SentinelCallIdentity,
@@ -165,6 +169,7 @@ import {
 } from './webSearch';
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
+import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
 import { classifyCaldavTool } from './caldavTier';
 
 export interface SentinelAction {
@@ -2232,10 +2237,7 @@ function demoRefusal(reason_detail: string): TierDecision {
 /** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
 async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
-  if (
-    action.tool_type !== 'mcp' ||
-    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
-  ) {
+  if (!isHostMailSend(action)) {
     return [];
   }
   return mailRecipientsNotListed({
@@ -2849,8 +2851,43 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
       },
-      reason: 'mail_new_recipient',
+      reason: MAIL_NEW_RECIPIENT_REASON,
       reason_detail: 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
+  // A send through the host's own Email sidecar always asks, whatever the sidecar says about it. Its own reason is how
+  // the host later knows to check the Email list before the send; a connector that only shares the name never gets it.
+  if (isHostMailSend(action)) {
+    const { fields } = extraction;
+    return tier3Decision({
+      card: {
+        plain_what: externalServiceWhat({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        }),
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
+      },
+      reason: MAIL_SEND_REASON,
+      reason_detail: 'A mail send through the Email sidecar always asks.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -3056,6 +3093,26 @@ function isHostMailRead(action: SentinelAction): boolean {
   );
 }
 
+/** A mail send through the host's own Email sidecar, the only send whose recipients are checked against the Email list. */
+function isHostMailSend(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' &&
+    action.mcp_first_party === true &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    isMailSendToolName(action.tool_name)
+  );
+}
+
+/** A calendar read the host itself vouched for. */
+function isHostCalendarRead(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' &&
+    action.mcp_first_party === true &&
+    action.mcp_server_name === CALDAV_SERVER_NAME &&
+    isCaldavReadToolName(action.tool_name)
+  );
+}
+
 /**
  * The card for a call that has to ask but matched no more specific class. A connector call shows its
  * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
@@ -3068,21 +3125,24 @@ function connectorApprovalCard(input: {
 }): Tier3Card {
   const { action, extraction } = input;
   const { fields } = extraction;
-  // Only a read the host vouches for may say "your email"; a connector that merely shares the name asks like any other.
+  // Only a read the host vouches for may say "your email" or "your calendar"; a connector that merely shares the name asks like any other.
   const hostMailRead = isHostMailRead(action);
+  const hostCalendarRead = isHostCalendarRead(action);
   return {
     plain_what:
       spaceToolLine(action) ??
       extraction.connector_what ??
-      (hostMailRead
-        ? 'Allow reading your email?'
-        : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
+      (hostCalendarRead
+        ? 'Allow looking at your calendar?'
+        : hostMailRead
+          ? 'Allow reading your email?'
+          : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
     plain_why: plainWhy(input.agent_intent),
     // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
     cannot_be_undone:
       extraction.connector_what !== null
         ? "Once this is sent, it can't be unsent."
-        : hostMailRead
+        : hostMailRead || hostCalendarRead
           ? null
           : 'It is not clear whether this can be undone.',
     why_asked_again: null,

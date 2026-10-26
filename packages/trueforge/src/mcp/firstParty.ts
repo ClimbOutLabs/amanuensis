@@ -85,6 +85,32 @@ export function isHostSidecar({
   return hostUrl !== undefined && sameAddress({ a: url, b: hostUrl });
 }
 
+/** Names the app keeps for its own Email and Calendar connectors. */
+export function isReservedConnectorName(name: string): boolean {
+  return name === MAIL_CONNECTOR_NAME || name === CALDAV_SERVER_NAME;
+}
+
+/**
+ * Why a connector may not take the name Email or Calendar, or undefined when it may: those names belong to the
+ * app's own sidecars, so another address cannot use them. The text says what to do next.
+ */
+export function reservedNameRefusal({
+  name,
+  url,
+  mailUrl,
+  calendarUrl,
+}: {
+  name: string;
+  url: string;
+  mailUrl: string | undefined;
+  calendarUrl: string | undefined;
+}): string | undefined {
+  if (!isReservedConnectorName(name) || isHostSidecar({ name, url, mailUrl, calendarUrl })) {
+    return undefined;
+  }
+  return `The name "${name}" is kept for the ${name} connector that comes with Aman. Give this connector another name. To connect your ${name === MAIL_CONNECTOR_NAME ? 'email' : 'calendar'}, use Settings.`;
+}
+
 // Compared as whole addresses, so a trailing slash or a query string is a different address and fails closed.
 function sameAddress({ a, b }: { a: string; b: string }): boolean {
   try {

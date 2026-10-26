@@ -372,13 +372,13 @@ describe('getMcpConnection', () => {
       configuration.CALENDAR_CONNECTOR_URL = original.calendar;
     });
 
-    async function save({ name, url }: { name: string; url: string }) {
+    async function save({ name, url, marked = false }: { name: string; url: string; marked?: boolean }) {
       // A record the way an import or a Settings save leaves it: no first-party mark.
       await mcpServerStore.upsertServer({
         tenant_id: 'default',
         name,
         manifest: { type: 'remote', name, url, description: 'A connector.' },
-        first_party: false,
+        first_party: marked,
       });
       const connection = await getMcpConnection({
         tenant_id: 'default',
@@ -391,6 +391,24 @@ describe('getMcpConnection', () => {
 
     it('trusts the Email connector at the sidecar address the host owns even when its record has no mark', async () => {
       expect(await save({ name: 'Email', url: MAIL_URL })).toBe(true);
+    });
+
+    it("ignores a stored mark on Email or Calendar at an address that is not the host's, even when its origin is listed", async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'https://mail.example'];
+      expect(await save({ name: 'Email', url: 'https://mail.example/mcp', marked: true })).toBe(false);
+      expect(await save({ name: 'Calendar', url: 'https://mail.example/mcp', marked: true })).toBe(false);
+    });
+
+    it('trusts the Email connector at an IPv6 sidecar address the host owns', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://[::1]:9557'];
+      configuration.MAIL_SIDECAR_MCP_URL = 'http://[::1]:9557/mcp';
+      expect(await save({ name: 'Email', url: 'http://[0:0:0:0:0:0:0:1]:9557/mcp' })).toBe(true);
+      expect(await save({ name: 'Email', url: 'http://[::2]:9557/mcp' })).toBe(false);
+    });
+
+    it('keeps the mark of a connector with another name that the operator listed', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'https://memory.example'];
+      expect(await save({ name: 'Memory', url: 'https://memory.example/mcp', marked: true })).toBe(true);
     });
 
     it('trusts the Calendar connector at the sidecar address the host owns even when its record has no mark', async () => {

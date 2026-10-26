@@ -38,6 +38,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
   'gmail_send',
   'mail_new_recipient',
+  'mail_send',
   'destructive_action',
   'install_action',
   'mcp_destructive_hint',

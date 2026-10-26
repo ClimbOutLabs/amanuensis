@@ -29,6 +29,7 @@ import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMes
 import { awaitsApproval } from '../mcp/approvalGrant';
 import { isReadOnlyCall } from '../mcp/executeToolCalls';
 import { deniedToolCallRemediation, deniedToolCallText, REPEATED_DENIAL_REMEDIATION } from '../mcp/ToolSet';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
 import { mergeCurrentContextUsage } from './contextUsage';
@@ -78,6 +79,14 @@ export function unknownOutcomeCloseout(admissionProvenance: ToolAdmissionProvena
     },
     admissionProvenance,
   };
+}
+
+/**
+ * A read the host itself judged, so running it again is harmless: inspection it classified, or a read of its own
+ * mail or calendar, or of a connector it marked first-party. A connector's own read-only claim does not count.
+ */
+function isHostVouchedRead(info: InternalToolCallInfo): boolean {
+  return info.effect === 'inspect' || isHostVouchedReadReason(info.tier_reason);
 }
 
 function unresolvedCallOutcome(
@@ -133,14 +142,16 @@ function unresolvedCallOutcome(
  * to explain why. Closing it states the outcome the user already chose. An undecided call that
  * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
  *
- * When `readsRunNext` is set, the turn goes straight to its tool step, so a read that is open, whether it
- * was allowed or needed no answer, is left for that step to run. Repeating a read is harmless, and closing
- * it would throw away an answer the person already gave.
+ * When `resuming` is set, the turn goes straight to its tool step, so calls that step can safely run are left open
+ * for it. That is a read the host itself vouched for (never a connector's own read-only claim), and an allowed
+ * change that never reached dispatch: its tracking marker is written before dispatch and a decision with a binding
+ * only exists in contexts that write it, so no marker proves the change never ran. The step still checks the
+ * single-use approval again before anything is sent.
  */
 export function getClosableOpenToolCallOutcomes(
   context: ContextMessage[],
   deniedApprovalIdentities: ReadonlySet<string>,
-  options: { readsRunNext: boolean } = { readsRunNext: false },
+  options: { resuming: boolean } = { resuming: false },
 ): Map<string, ClosableToolOutcome> {
   const lastIdx = context.findLastIndex(
     (msg): msg is InternalEnrichedAssistantMessage =>
@@ -180,9 +191,8 @@ export function getClosableOpenToolCallOutcomes(
     if (toolCall.tool_info.is_thread_creation === true) {
       continue;
     }
-    const leftToRun = options.readsRunNext && isReadOnlyCall(toolCall.tool_info);
     if (toolCall.tool_info.is_approval_required !== true) {
-      if (leftToRun) {
+      if (options.resuming && isHostVouchedRead(toolCall.tool_info)) {
         continue;
       }
       closable.set(
@@ -212,7 +222,14 @@ export function getClosableOpenToolCallOutcomes(
       });
       continue;
     }
-    if (decision.status === 'allow' && leftToRun) {
+    if (
+      options.resuming &&
+      decision.status === 'allow' &&
+      (isHostVouchedRead(toolCall.tool_info) ||
+        (!isReadOnlyCall(toolCall.tool_info) &&
+          !preparedToolCallIds.has(toolCall.id) &&
+          !startedToolCallIds.has(toolCall.id)))
+    ) {
       continue;
     }
     closable.set(
@@ -263,11 +280,11 @@ export function getClosableOpenToolCalls(
 
 export class OpenToolCallCloser implements PreSendContextProcessor {
   private readonly deniedApprovalIdentities: () => ReadonlySet<string>;
-  private readonly readsRunNext: () => boolean;
+  private readonly resuming: () => boolean;
 
-  constructor(input: { deniedApprovalIdentities: () => ReadonlySet<string>; readsRunNext: () => boolean }) {
+  constructor(input: { deniedApprovalIdentities: () => ReadonlySet<string>; resuming: () => boolean }) {
     this.deniedApprovalIdentities = input.deniedApprovalIdentities;
-    this.readsRunNext = input.readsRunNext;
+    this.resuming = input.resuming;
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
@@ -275,7 +292,7 @@ export class OpenToolCallCloser implements PreSendContextProcessor {
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorAppendContext, void, unknown> {
     const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities(), {
-      readsRunNext: this.readsRunNext(),
+      resuming: this.resuming(),
     });
     if (closable.size === 0) {
       return;

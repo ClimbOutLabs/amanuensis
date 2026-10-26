@@ -65,14 +65,14 @@ describe('renderOutboundArguments', () => {
     expect(
       renderOutboundArguments({ query: 'best pizza', num_results: 5, filters: { site: 'a.com' }, tags: ['x', 'y'] }),
     ).toEqual({
-      text: 'query: best pizza\nnum_results (number): 5\nfilters (group): {"site":"a.com"}\ntags (list): ["x","y"]',
+      text: 'query: best pizza\nnum_results (number): 5\nfilters (object): {"site":"a.com"}\ntags (array): ["x","y"]',
       truncated: false,
     });
   });
 
   test('a string that looks like a number is told apart from a number', () => {
     expect(rendered({ amount: '5', count: 5, flag: true, none: null }).text).toBe(
-      'amount: 5\ncount (number): 5\nflag (yes or no): true\nnone (empty): null',
+      'amount: 5\ncount (number): 5\nflag (boolean): true\nnone (null): null',
     );
   });
 
@@ -612,7 +612,7 @@ describe('Parallel preset tools', () => {
     expect(decision.reason).toBe('connector_outbound');
     expect(card.plain_what).toBe('Fetch a web page on parallel-web?');
     expect(card.destination_host).toBe('search.parallel.ai');
-    expect(card.outbound_text).toContain('urls (list): ["https://www.usps.com/manage/forward.htm"');
+    expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
     expect(card.outbound_text).toContain('objective: How to change an address');
   });
 

@@ -2018,10 +2018,10 @@ const appDataDir = resolveAppDataDir({
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 
-const mailSidecarMcpUrl = hostMailMcpUrl({
-  mailMcpUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
-  mailAccountUrl: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
-});
+const mailEmailMcpUrl = parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL'));
+const mailEmailAccountUrl = parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'));
+const calendarConnectorUrl = parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL'));
+const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
 
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
@@ -2056,16 +2056,16 @@ const shared: SharedServerConfiguration = {
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
-      calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+      calendarUrl: calendarConnectorUrl,
     }),
     mailUrl: mailSidecarMcpUrl,
   }),
-  MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
-  MAIL_EMAIL_ACCOUNT_URL: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
+  MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
-  CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+  CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

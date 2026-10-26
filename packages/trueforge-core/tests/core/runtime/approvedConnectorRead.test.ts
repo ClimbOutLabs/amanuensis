@@ -1,6 +1,6 @@
 /**
- * A read that asks first must run once the person says yes, even when the same step also made another
- * call. It is never closed as "did not run" while its answer is on its way to being carried out.
+ * A call the person said yes to must run when the chat is opened again with that yes saved but the call never made.
+ * It is never closed as "did not run" while the next step is the one that runs it.
  */
 import { EventType } from '../../../src/core/events/schema';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
@@ -10,19 +10,19 @@ import type { ToolSource } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../../src/core/mcp/ToolSet';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions';
+import { approvalExpiredReason } from '../../../src/core/permissions/approvalExpiry';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
-import type { AgentThreadExecutionEvent, AgentThreadSnapshot } from '../../../src/core/runtime/AgentThread.types';
-import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
+import type { AgentThreadSnapshot } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
+import { textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
 
-const ROOT_ID = 'thread_root';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
-const MAIL_SERVER = 'Email';
-const SPACES_SERVER = 'Spaces';
+const ROOT_ID = 'thread_root';
+const CHILD_ID = 'thread_child';
 
 type CallSpec = { id: string; name: string; args: string };
+type ToolAnnotations = { readOnlyHint?: boolean; openWorldHint?: boolean };
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
 async function* toolCallsStream(
@@ -53,7 +53,7 @@ async function* toolCallsStream(
   };
 }
 
-function makeSource(input: { name: string; tool: string; reply: string }): {
+function makeSource(input: { name: string; tool: string; reply: string; annotations?: ToolAnnotations }): {
   source: ToolSource;
   callTool: jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>;
 } {
@@ -63,9 +63,9 @@ function makeSource(input: { name: string; tool: string; reply: string }): {
   const tools = [
     {
       name: input.tool,
-      description: 'Reads and changes nothing',
+      description: 'A tool for the test',
       inputSchema: { type: 'object' as const, properties: {} },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      ...(input.annotations === undefined ? {} : { annotations: input.annotations }),
       preload: true,
     },
   ];
@@ -90,46 +90,72 @@ function makeSource(input: { name: string; tool: string; reply: string }): {
 /** The same services serve every request of the chat, as on the server: approval tokens live in them. */
 async function makeServices() {
   const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
-  // The owner has always allowed reading a space, so that call never asks; reading mail does.
+  // The owner has always allowed reading a space, so that call never asks; everything else here does.
   await services.tool_grants.recordToolGrant({
     ...OWNER,
-    mcp_server_name: SPACES_SERVER,
+    mcp_server_name: 'Spaces',
     tool_name: 'get_space',
     mcp_server_host: null,
   });
   return services;
 }
 
+type Services = Awaited<ReturnType<typeof makeServices>>;
+
+/** One request of the chat: a thread rebuilt from what the last request saved, as the server does. */
 function build(input: {
-  /** Marks the Email connector as the host's own sidecar and makes every one of its tools ask. */
-  hostMail?: boolean;
-  script: (() => ReturnType<typeof textReplyStream>)[];
-  services: Awaited<ReturnType<typeof makeServices>>;
-  /** What the chat saved when it paused: the thread's context and its tool-call memory. */
+  services: Services;
+  script?: (() => ReturnType<typeof textReplyStream>)[];
   saved?: Pick<AgentThreadSnapshot, 'context' | 'tool_call_memo'>;
+  /** Marks the Email connector as the host's own sidecar and makes every one of its tools ask. */
+  hostMail?: boolean | undefined;
+  /** The same for the Calendar connector. */
+  hostCalendar?: boolean | undefined;
+  /** Runs as a helper started by another thread, not as the chat's own thread. */
+  subAgent?: boolean | undefined;
 }) {
-  const { services } = input;
-  const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1', services });
-  const spaces = makeSource({ name: SPACES_SERVER, tool: 'get_space', reply: 'space notes' });
-  const mail = makeSource({ name: MAIL_SERVER, tool: 'get_emails_content', reply: 'three emails' });
-  const toolSets = [spaces, mail].map(
-    ({ source }) =>
-      new ToolSet({
-        source,
-        selectors: {
-          enableTools: ['@all'],
-          disableTools: [],
-          preloadTools: [],
-          requireApprovalForTools: input.hostMail === true && source === mail.source ? ['@all'] : undefined,
-        },
-        preload: true,
-        sentinel,
-        searchProvider: undefined,
-        firstParty: input.hostMail === true && source === mail.source,
-      }),
-  );
+  const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1', services: input.services });
+  const sources = {
+    space: makeSource({
+      name: 'Spaces',
+      tool: 'get_space',
+      reply: 'space notes',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+    mail: makeSource({
+      name: 'Email',
+      tool: 'get_emails_content',
+      reply: 'three emails',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+    calendar: makeSource({ name: 'Calendar', tool: 'list_events', reply: '[]' }),
+    notes: makeSource({ name: 'Notes', tool: 'save_note', reply: 'saved' }),
+    claim: makeSource({
+      name: 'Misc',
+      tool: 'do_thing',
+      reply: 'done',
+      annotations: { readOnlyHint: true },
+    }),
+  };
+  const toolSets = Object.entries(sources).map(([key, { source }]) => {
+    const hostOwned =
+      (input.hostMail === true && key === 'mail') || (input.hostCalendar === true && key === 'calendar');
+    return new ToolSet({
+      source,
+      selectors: {
+        enableTools: ['@all'],
+        disableTools: [],
+        preloadTools: [],
+        requireApprovalForTools: hostOwned ? ['@all'] : undefined,
+      },
+      preload: true,
+      sentinel,
+      searchProvider: undefined,
+      firstParty: hostOwned,
+    });
+  });
   const llmCreate = jest.fn();
-  for (const step of input.script) {
+  for (const step of input.script ?? []) {
     llmCreate.mockImplementationOnce(step);
   }
   llmCreate.mockImplementation(() => textReplyStream('All done.'));
@@ -145,11 +171,11 @@ function build(input: {
       modelId: undefined,
       configuredModels: undefined,
     },
-    threadId: ROOT_ID,
+    threadId: input.subAgent === true ? CHILD_ID : ROOT_ID,
     title: 'approved read',
-    parent: undefined,
+    parent: input.subAgent === true ? { thread_id: ROOT_ID, tool_call_id: 'launch' } : undefined,
     agentInfo: undefined,
-    context: input.saved?.context,
+    context: input.saved?.context ?? [{ role: 'user', content: 'Look at my email and my notes.' }],
     currentContextUsage: undefined,
     preComputedCompletion: undefined,
     sandbox: undefined,
@@ -164,121 +190,236 @@ function build(input: {
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
   });
-  const orchestrator = new AgentThreadOrchestrator({
-    agentThreads: new Map([[thread.threadId, thread]]),
-    createDynamicSubAgentThread: () => Promise.reject(new Error('unexpected sub-agent')),
-    tracing: NOOP_AGENT_TRACING,
-    logger: makeSilentLogger(),
-  });
-  return { thread, orchestrator, spacesCall: spaces.callTool, mailCall: mail.callTool };
+  return {
+    thread,
+    calls: {
+      space: sources.space.callTool,
+      mail: sources.mail.callTool,
+      notes: sources.notes.callTool,
+      claim: sources.claim.callTool,
+    },
+  };
 }
 
-describe('a read that asked first and was allowed', () => {
-  it('runs after the yes when the same step also read a space, and is not closed as never run', async () => {
-    const script = [
-      () =>
-        toolCallsStream([
-          { id: 'call-space', name: 'get_space', args: '{}' },
-          { id: 'call-mail', name: 'get_emails_content', args: '{}' },
-        ]),
-    ];
-    const services = await makeServices();
-    const first = build({ script, services });
-    const asked = await runTurn({
-      orchestrator: first.orchestrator,
-      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'What is in my email?' }],
-    });
-    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
-      tool_calls: [{ id: 'call-mail' }],
-    });
+async function drain<T>(events: AsyncIterable<T>): Promise<T[]> {
+  const drained: T[] = [];
+  for await (const event of events) {
+    drained.push(event);
+  }
+  return drained;
+}
 
-    // The next request builds a fresh thread from what was saved, as the server does.
-    const resumed = build({ script: [], services, saved: first.thread.toSnapshot() });
-    const answered = await runTurn({
-      orchestrator: resumed.orchestrator,
-      sendBatch: [
-        {
-          type: EventType.USER_TOOL_APPROVAL,
-          thread_id: ROOT_ID,
-          tool_call_id: 'call-mail',
-          approval: { status: 'allow' },
-        },
-      ],
-    });
-
-    expect(resumed.mailCall).toHaveBeenCalledTimes(1);
-    const results = answered.events.flatMap(event => (event.type === EventType.TOOL_RESPONSE_V2 ? [event] : []));
-    expect(results.find(result => result.tool_call_id === 'call-mail')?.disposition).toBe('executed_ok');
-    expect(JSON.stringify(results)).not.toContain('tool_call_never_ran');
+/** What each call ended as, read from the saved chat, so a call closed before the step counts too. */
+function dispositions(thread: AgentThread): [string, string][] {
+  return thread.toSnapshot().context.flatMap(message => {
+    if (!('role' in message) || message.role !== 'tool' || typeof message.content !== 'string') {
+      return [];
+    }
+    const envelope: unknown = JSON.parse(message.content);
+    const outcome =
+      typeof envelope === 'object' && envelope !== null && 'outcome' in envelope ? envelope.outcome : null;
+    const disposition =
+      typeof outcome === 'object' && outcome !== null && 'disposition' in outcome ? outcome.disposition : null;
+    return typeof disposition === 'string' ? [[message.tool_call_id, disposition] as [string, string]] : [];
   });
+}
 
-  it('runs when the chat resumes after the yes was saved but the run was cut off', async () => {
-    const script = [
-      () =>
-        toolCallsStream([
-          { id: 'call-space', name: 'get_space', args: '{}' },
-          { id: 'call-mail', name: 'get_emails_content', args: '{}' },
-        ]),
-    ];
+/** The chat asks about the calls the model made in one step. */
+async function ask(input: {
+  services: Services;
+  calls: CallSpec[];
+  hostMail?: boolean | undefined;
+  subAgent?: boolean | undefined;
+}) {
+  const asking = build({
+    services: input.services,
+    script: [() => toolCallsStream(input.calls)],
+    hostMail: input.hostMail,
+    subAgent: input.subAgent,
+  });
+  const events = await drain(asking.thread.execute({ signal: new AbortController().signal }));
+  return { events, saved: asking.thread.toSnapshot() };
+}
+
+/**
+ * The chat asks, the person answers, and the answers are saved. Then the run stops before any call is made, so the
+ * next request finds the answers and no results.
+ */
+async function askThenSaveAnswers(input: {
+  services: Services;
+  calls: CallSpec[];
+  answers: { id: string; approval: { status: 'allow' } | { status: 'deny'; reason?: string } }[];
+  hostMail?: boolean | undefined;
+  subAgent?: boolean | undefined;
+}) {
+  const { saved: asked } = await ask(input);
+  const saving = build({ services: input.services, saved: asked, hostMail: input.hostMail, subAgent: input.subAgent });
+  await drain(
+    saving.thread.send(
+      input.answers.map(answer => ({
+        type: EventType.USER_TOOL_APPROVAL,
+        thread_id: input.subAgent === true ? CHILD_ID : ROOT_ID,
+        tool_call_id: answer.id,
+        approval: answer.approval,
+      })),
+    ),
+  );
+  return { saved: saving.thread.toSnapshot() };
+}
+
+const SPACE_AND_MAIL: CallSpec[] = [
+  { id: 'call-space', name: 'get_space', args: '{}' },
+  { id: 'call-mail', name: 'get_emails_content', args: '{}' },
+];
+const READ_AND_WRITE: CallSpec[] = [
+  { id: 'call-space', name: 'get_space', args: '{}' },
+  { id: 'call-note', name: 'save_note', args: JSON.stringify({ text: 'Lunch at noon' }) },
+];
+
+describe('a call that asked first and was allowed, when the chat is opened again', () => {
+  it('runs an allowed email read and the space read made in the same step', async () => {
     const services = await makeServices();
-    const first = build({ script, services });
-    await runTurn({
-      orchestrator: first.orchestrator,
-      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'What is in my email?' }],
+    const { saved } = await askThenSaveAnswers({
+      services,
+      calls: SPACE_AND_MAIL,
+      answers: [{ id: 'call-mail', approval: { status: 'allow' } }],
     });
 
-    // The yes is saved with the chat, then the run stops before any call is made.
-    const answering = build({ script: [], services, saved: first.thread.toSnapshot() });
-    for await (const saved of answering.orchestrator.send([
-      {
-        type: EventType.USER_TOOL_APPROVAL,
-        thread_id: ROOT_ID,
-        tool_call_id: 'call-mail',
-        approval: { status: 'allow' },
-      },
-    ])) {
-      void saved;
-    }
-    expect(answering.mailCall).not.toHaveBeenCalled();
+    const resumed = build({ services, saved });
+    await drain(resumed.thread.execute({ signal: new AbortController().signal }));
 
-    const resumed = build({ script: [], services, saved: answering.thread.toSnapshot() });
-    const events: AgentThreadExecutionEvent[] = [];
-    for await (const event of resumed.orchestrator.execute({ signal: new AbortController().signal })) {
-      events.push(event);
-    }
-
-    const results = events.flatMap(event => (event.type === EventType.TOOL_RESPONSE_V2 ? [event] : []));
-    expect(results.map(result => [result.tool_call_id, result.disposition])).toEqual([
+    expect(dispositions(resumed.thread)).toEqual([
       ['call-space', 'executed_ok'],
       ['call-mail', 'executed_ok'],
     ]);
-    expect(resumed.mailCall).toHaveBeenCalledTimes(1);
+    expect(resumed.calls.mail).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the plain reading line, and no warning, for the host's own Email when a setting makes it ask", async () => {
-    const script = [() => toolCallsStream([{ id: 'call-mail', name: 'get_emails_content', args: '{}' }])];
+  it('runs an allowed change that never started, next to a read made in the same step', async () => {
     const services = await makeServices();
-    const asked = await runTurn({
-      orchestrator: build({ script, services, hostMail: true }).orchestrator,
-      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'What is in my email?' }],
+    const { saved } = await askThenSaveAnswers({
+      services,
+      calls: READ_AND_WRITE,
+      answers: [{ id: 'call-note', approval: { status: 'allow' } }],
     });
-    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+
+    const resumed = build({ services, saved });
+    await drain(resumed.thread.execute({ signal: new AbortController().signal }));
+
+    expect(dispositions(resumed.thread)).toEqual([
+      ['call-space', 'executed_ok'],
+      ['call-note', 'executed_ok'],
+    ]);
+    expect(resumed.calls.notes).toHaveBeenCalledTimes(1);
+  });
+
+  it('does the same for a helper thread started by another thread', async () => {
+    const services = await makeServices();
+    const { saved } = await askThenSaveAnswers({
+      services,
+      calls: READ_AND_WRITE,
+      answers: [{ id: 'call-note', approval: { status: 'allow' } }],
+      subAgent: true,
+    });
+
+    const resumed = build({ services, saved, subAgent: true });
+    await drain(resumed.thread.execute({ signal: new AbortController().signal }));
+
+    expect(dispositions(resumed.thread)).toEqual([
+      ['call-space', 'executed_ok'],
+      ['call-note', 'executed_ok'],
+    ]);
+    expect(resumed.calls.notes).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not run an allowed call when the connector alone says it only reads', async () => {
+    const services = await makeServices();
+    const { saved } = await askThenSaveAnswers({
+      services,
+      calls: [{ id: 'call-claim', name: 'do_thing', args: '{}' }],
+      answers: [{ id: 'call-claim', approval: { status: 'allow' } }],
+    });
+
+    const resumed = build({ services, saved });
+    await drain(resumed.thread.execute({ signal: new AbortController().signal }));
+
+    expect(dispositions(resumed.thread)).toEqual([['call-claim', 'never_ran']]);
+    expect(resumed.calls.claim).not.toHaveBeenCalled();
+  });
+
+  it('does not run a call whose card expired, and still runs the read made in the same step', async () => {
+    const services = await makeServices();
+    const { saved } = await askThenSaveAnswers({
+      services,
+      calls: READ_AND_WRITE,
+      answers: [{ id: 'call-note', approval: { status: 'deny', reason: approvalExpiredReason() } }],
+    });
+
+    const resumed = build({ services, saved });
+    await drain(resumed.thread.execute({ signal: new AbortController().signal }));
+
+    expect(dispositions(resumed.thread)).toEqual([
+      ['call-note', 'denied'],
+      ['call-space', 'executed_ok'],
+    ]);
+    expect(resumed.calls.notes).not.toHaveBeenCalled();
+  });
+
+  it('keeps asking, and runs nothing, while a call is still undecided', async () => {
+    const services = await makeServices();
+    const { saved } = await ask({ services, calls: READ_AND_WRITE });
+
+    const resumed = build({ services, saved });
+    const events = await drain(resumed.thread.execute({ signal: new AbortController().signal }));
+
+    expect(events.map(event => event.type)).toContain(EventType.TOOL_APPROVAL_REQUIRED);
+    expect(dispositions(resumed.thread)).toEqual([]);
+    expect(resumed.calls.space).not.toHaveBeenCalled();
+    expect(resumed.calls.notes).not.toHaveBeenCalled();
+  });
+});
+
+describe('the card for a read that asks because of a setting', () => {
+  it('says "reading your email", with no warning, for the host\'s own Email', async () => {
+    const asking = build({
+      services: await makeServices(),
+      script: [() => toolCallsStream([{ id: 'call-mail', name: 'get_emails_content', args: '{}' }])],
+      hostMail: true,
+    });
+    const events = await drain(asking.thread.execute({ signal: new AbortController().signal }));
+
+    expect(events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [
         { id: 'call-mail', tier3_card: { plain_what: 'Allow reading your email?', cannot_be_undone: null } },
       ],
     });
   });
 
-  it("shows the generic line for a connector named Email that is not the host's own", async () => {
-    const script = [() => toolCallsStream([{ id: 'call-mail', name: 'get_emails_content', args: '{}' }])];
-    const services = await makeServices();
-    const asked = await runTurn({
-      orchestrator: build({ script, services }).orchestrator,
-      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'What is in my email?' }],
+  it("is the generic card for a connector named Email that is not the host's own", async () => {
+    const asking = build({
+      services: await makeServices(),
+      script: [() => toolCallsStream([{ id: 'call-mail', name: 'get_emails_content', args: '{}' }])],
     });
-    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+    const events = await drain(asking.thread.execute({ signal: new AbortController().signal }));
+
+    expect(events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [
         { id: 'call-mail', tier3_card: { cannot_be_undone: 'It is not clear whether this can be undone.' } },
+      ],
+    });
+  });
+
+  it('says "looking at your calendar", with no warning, for the host\'s own Calendar', async () => {
+    const asking = build({
+      services: await makeServices(),
+      script: [() => toolCallsStream([{ id: 'call-calendar', name: 'list_events', args: '{}' }])],
+      hostCalendar: true,
+    });
+    const events = await drain(asking.thread.execute({ signal: new AbortController().signal }));
+
+    expect(events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [
+        { id: 'call-calendar', tier3_card: { plain_what: 'Allow looking at your calendar?', cannot_be_undone: null } },
       ],
     });
   });

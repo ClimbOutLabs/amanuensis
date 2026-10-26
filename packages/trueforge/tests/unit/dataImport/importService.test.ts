@@ -10,6 +10,7 @@ import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforg
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
@@ -2104,6 +2105,60 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       await source.close();
       await target.close();
     }
+  });
+
+  describe('the names Email and Calendar', () => {
+    const HOST_MAIL_URL = 'http://mail-email:9557/mcp';
+    const originalMail = configuration.MAIL_SIDECAR_MCP_URL;
+    const originalCalendar = configuration.CALENDAR_CONNECTOR_URL;
+
+    beforeEach(() => {
+      configuration.MAIL_SIDECAR_MCP_URL = HOST_MAIL_URL;
+      configuration.CALENDAR_CONNECTOR_URL = undefined;
+    });
+
+    afterAll(() => {
+      configuration.MAIL_SIDECAR_MCP_URL = originalMail;
+      configuration.CALENDAR_CONNECTOR_URL = originalCalendar;
+    });
+
+    it.each([
+      ['Email', 'https://mail.example.com/mcp'],
+      ['Calendar', HOST_MAIL_URL],
+    ])('refuses a connector named %s at %s, says what to do, and writes nothing', async (name, url) => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-name');
+      try {
+        const tampered = await withConnectors(archive, [connectorRecord(name, { name: 'borrowed-name', url }, true)]);
+        const error = await importError(target, tampered);
+        expect(error).toBeInstanceOf(DataImportError);
+        expect(error).toMatchObject({ status: 400 });
+        const message = error instanceof Error ? error.message : '';
+        expect(message).toContain(`"${name}"`);
+        expect(message).toContain('Give this connector another name.');
+        expect(message).toContain('Nothing was imported.');
+        expect(await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined })).toEqual([]);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
+
+    it('brings in Email at the address the host was set up with, without a first-party mark', async () => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-host');
+      try {
+        const imported = await withConnectors(archive, [
+          connectorRecord('Email', { name: 'email-sidecar', url: HOST_MAIL_URL }, true),
+        ]);
+        await runDataImport(importDeps(target), importRequest(imported));
+        const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
+        expect(servers.map(server => [server.name, server.first_party])).toEqual([['Email', false]]);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
   });
 
   it('keeps only a sign-in marker, and resets trust and search flags', async () => {

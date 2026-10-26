@@ -41,6 +41,7 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { reservedNameRefusalForHost } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
@@ -1336,6 +1337,12 @@ async function importArchive<TTransaction>(
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
   const connectors = normalizeImportedConnectors(contents.connectors);
+  for (const connector of connectors) {
+    const reserved = reservedNameRefusalForHost({ name: connector.name, url: connector.manifest.url });
+    if (reserved !== undefined) {
+      throw new DataImportError(`${reserved} Nothing was imported.`, 400);
+    }
+  }
   const connectorNames = new Set(connectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
