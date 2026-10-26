@@ -27,14 +27,15 @@ export function searchProviderLabel({ host }: { host: string | undefined }): str
   return host === undefined ? undefined : PROVIDER_LABEL_BY_HOST.get(host.toLowerCase());
 }
 
-/** The held card names the lookup in plain words, never the connector's id. */
-const WEB_SEARCH_NAME = 'Web search';
-const WEB_SEARCH_WHAT_PREFIX = `${WEB_SEARCH_NAME}: `;
-const OPEN_PAGE_NAME = 'Open a web page';
-const OPEN_PAGE_WHAT_PREFIX = `${OPEN_PAGE_NAME}: `;
+/** The held card names the lookup in plain words, never the connector's id. Kept so saved cards still match. */
+const WEB_SEARCH_WHAT_PREFIX = 'Web search: ';
+const OPEN_PAGE_WHAT_PREFIX = 'Open a web page: ';
 
-/** Opening of the Tavily search card sentence. */
+/** Opening of the Tavily search card sentence, under the older wording. Kept so saved cards still match. */
 export const TAVILY_SEARCH_WHAT_PREFIX = 'Search the web with Tavily for: ';
+
+/** Opening of a Tavily search card sentence, as a question. */
+export const TAVILY_SEARCH_QUESTION_PREFIX = 'Search the web with Tavily for ';
 
 /** Opening of the Tavily page-read card sentence. */
 export const TAVILY_EXTRACT_WHAT_PREFIX = 'Open these web pages with Tavily: ';
@@ -122,11 +123,12 @@ export function withHoldSay(text: string, say: string): string {
   return `${text}${/[.!?]$/.test(text) ? '' : '.'} ${say}`;
 }
 
-/** Card sentence for a held lookup; the summary is already masked where it must be. A page read says it opens a page. */
+/** Card question for a held lookup; the summary is already masked where it must be. A page read says it opens a page. */
 export function searchHoldCardText({ summary, say, page }: { summary: string; say: string; page: boolean }): string {
-  const name = page ? OPEN_PAGE_NAME : WEB_SEARCH_NAME;
-  const prefix = page ? OPEN_PAGE_WHAT_PREFIX : WEB_SEARCH_WHAT_PREFIX;
-  return withHoldSay(summary === '' ? name : `${prefix}${summary}`, say);
+  if (page) {
+    return withHoldSay(summary === '' ? 'Open this web page?' : `Open ${summary}?`, say);
+  }
+  return withHoldSay(summary === '' ? 'Search the web?' : `Search the web for ${summary}?`, say);
 }
 
 /** Audit row text for a held lookup: the rule that fired, never the query. */
@@ -134,16 +136,26 @@ export function searchHoldAuditText({ server, say, page }: { server: string; say
   return withHoldSay(`${page ? PAGE_WHAT_PREFIX : SEARCH_WHAT_PREFIX}${server}`, say);
 }
 
-/** Whether a card sentence describes a held search or page read, generic or Tavily. */
+/** Whether a card sentence describes a held search or page read, generic or Tavily, old or new wording. */
 export function isSearchHoldCardText(text: string): boolean {
-  return [
-    WEB_SEARCH_WHAT_PREFIX,
-    OPEN_PAGE_WHAT_PREFIX,
-    SEARCH_WHAT_PREFIX,
-    PAGE_WHAT_PREFIX,
-    TAVILY_SEARCH_WHAT_PREFIX,
-    TAVILY_EXTRACT_WHAT_PREFIX,
-  ].some(prefix => text.startsWith(prefix));
+  if (
+    [
+      WEB_SEARCH_WHAT_PREFIX,
+      OPEN_PAGE_WHAT_PREFIX,
+      SEARCH_WHAT_PREFIX,
+      PAGE_WHAT_PREFIX,
+      TAVILY_SEARCH_WHAT_PREFIX,
+      TAVILY_EXTRACT_WHAT_PREFIX,
+      TAVILY_SEARCH_QUESTION_PREFIX,
+      'Search the web for ',
+      'Search the web?',
+      'Open this web page?',
+    ].some(prefix => text.startsWith(prefix))
+  ) {
+    return true;
+  }
+  // A page question names the page itself, so it has no fixed prefix past "Open ".
+  return text.startsWith('Open ') && text.includes('?');
 }
 
 // Cards saved before the hold reason moved into plain_what kept it in why_asked_again, in older wording.

@@ -5,6 +5,7 @@ import { useRef, useState, type FC } from 'react';
 import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { StubTear } from '../atoms/Reward.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
@@ -144,9 +145,9 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 
 /**
  * Approval ticket for calendar, schedule, persona and other non-mail actions. The question is the
- * title, the rows show only what the server sent, and the stub says what it is and where it stands. The
- * raw request and the connector's arguments fold into Details unless `outboundOpen` is set. Mail uses EmailApprovalCard
- * instead.
+ * title, the rows show only what the server sent, and the stub says what it is. The header pill is the
+ * one status line. The raw request and the connector's arguments fold into Details unless `outboundOpen`
+ * is set. Mail uses EmailApprovalCard instead.
  */
 export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   approvalId,
@@ -163,6 +164,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   disabled = false,
   outboundOpen = false,
 }) => {
+  const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
   const [tearing, setTearing] = useState(false);
@@ -178,7 +180,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const { calendar_event: calendarEvent, schedule, persona } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
-  const stub = approvalStub(card, { sentAt });
+  const stub = approvalStub(card);
   const plumbingText = card.outbound_plumbing_text ?? null;
   const outboundShown =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
@@ -201,7 +203,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     <>
       <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
       <p className="aui-ticket__detail text-text-primary">{stub.detail}</p>
-      <p className="aui-ticket__label text-gold-ink">{stub.state}</p>
     </>
   );
 
@@ -242,11 +243,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
-            {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
+            {card.destination !== null && <DetailRow label="Destination" value={card.destination} />}
             {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
-            {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
+            {card.amount !== null && <DetailRow label="Amount" value={card.amount} />}
             {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
-            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
+            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} />}
           </dl>
         )}
 
@@ -348,7 +349,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               <AlwaysAllowToolControl
                 size="small"
                 disabled={disabled || sentAt !== null}
-                description="The agent will run this kind of action on this connector without asking, in every chat."
+                description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
                 onConfirm={markSent(onApproveAlways)}
               />
             )}

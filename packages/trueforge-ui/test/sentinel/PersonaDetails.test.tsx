@@ -9,7 +9,7 @@ const INSTRUCTIONS = 'Plans trips in detail, with a day-by-day route.\n\nFocus o
 
 /** The card the server sends when the chat asks to add a travel planner persona. */
 const TRAVEL_PLANNER_CARD = {
-  plain_what: 'Add a persona: Travel planner. Plans trips in detail, with a day-by-day route.',
+  plain_what: 'Add a persona: Travel planner? Plans trips in detail, with a day-by-day route.',
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

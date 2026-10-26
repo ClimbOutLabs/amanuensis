@@ -22,5 +22,9 @@ if [ "${2:-}" = --summary ]; then
   fi
   exit "${STUB_DOCTOR_EXIT:-0}"
 fi
-echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
+if [ -n "${STUB_DOCTOR_JSON:-}" ]; then
+  printf '%s\n' "$STUB_DOCTOR_JSON"
+else
+  echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
+fi
 exit "${STUB_DOCTOR_EXIT:-0}"

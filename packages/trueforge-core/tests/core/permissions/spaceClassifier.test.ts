@@ -150,7 +150,7 @@ describe('Space tool classification', () => {
     });
     expect(decision).toMatchObject({ tier: 3, reason: 'unclassified', card: null });
     const card = approvalCardForGatedCall({ action, agent_intent: null });
-    expect(card.plain_what).toBe('This is a new tool from space. Check what it will do before you allow it.');
+    expect(card.plain_what).toBe('Allow this new tool from space?');
   });
 
   it.each([
@@ -205,8 +205,6 @@ describe('Space tool classification', () => {
     const decision = await classifyTier(action, makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).not.toBe('space_write');
-    expect(decision.card?.plain_what).toBe(
-      'This is a new tool from some-other-server. Check what it will do before you allow it.',
-    );
+    expect(decision.card?.plain_what).toBe('Allow this new tool from some-other-server?');
   });
 });

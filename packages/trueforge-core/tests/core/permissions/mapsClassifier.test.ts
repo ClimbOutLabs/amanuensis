@@ -344,7 +344,7 @@ describe('maps without asking', () => {
       expect(decision.tier).toBe(3);
       expect(decision.reason).toBe('maps_tool');
       expect(decision.card?.plain_what).toBe(
-        'Send "Paris" to nominatim.openstreetmap.org to find it, then load map tiles for that area from tile.openstreetmap.org.',
+        'Send "Paris" to nominatim.openstreetmap.org to find it, then load map tiles for that area from tile.openstreetmap.org?',
       );
     }
   });

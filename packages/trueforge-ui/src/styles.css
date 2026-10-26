@@ -602,6 +602,17 @@
   margin: 0;
 }
 
+/* The live wait line in the Activity row: it comes from the chat, not the receipt, so it sits
+ * above the history and never counts as an entry. */
+.aman-runtime-rail__waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
 /* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
 ::placeholder {
   color: var(--text-muted);

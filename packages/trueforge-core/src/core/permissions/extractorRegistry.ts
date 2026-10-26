@@ -520,7 +520,6 @@ export function isCalendarChangeToolName(toolName: string): boolean {
 }
 
 interface ConnectorCallInput {
-  tool_name: string;
   words: string;
   /** " on <connector>" when the connector's configured name is known. */
   where: string;
@@ -611,14 +610,14 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'gist'),
     sends: 'content',
-    describe: ({ tool_name, where }) => `Publish a gist with ${tool_name}${where}.`,
+    describe: ({ where }) => `Publish a gist${where}?`,
   },
   {
     match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
     sends: 'content',
-    describe: ({ tool_name, where, params }) => {
+    describe: ({ where, params }) => {
       const repo = repositoryLabel(params);
-      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with ${tool_name}${where}.`;
+      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`}${where}?`;
     },
     destination: repositoryLabel,
   },
@@ -627,28 +626,28 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     sends: 'message',
     needs_recipient: true,
     recipient: params => joinOrNull([...new Set(nestedRecipientValues(params, FORWARD_KEY_SET))]),
-    describe: ({ tool_name, where, fields }) =>
-      `Forward every matching message${toRecipient(fields)}, now and from here on, with ${tool_name}${where}.`,
+    describe: ({ where, fields }) =>
+      `Forward every matching message${toRecipient(fields)}, now and from here on${where}?`,
   },
   {
     match: words => hasPhrase(words, 'forward'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
+    describe: ({ where, fields }) => `Forward a message${toRecipient(fields)}${where}?`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
+    describe: ({ where, fields }) => `Send a reply${toRecipient(fields)}${where}?`,
   },
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft', 'save_draft'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
+    describe: ({ where, fields }) => `Save a message draft${toRecipient(fields)}${where}?`,
   },
   {
     // Archiving only moves mail inside the mailbox, so it carries no recipient and is not an external send.
     match: words => hasPhrase(words, 'archive'),
-    describe: ({ tool_name, where }) => `Archive emails with ${tool_name}${where}.`,
+    describe: ({ where }) => `Archive emails${where}?`,
   },
   {
     match: words =>
@@ -666,12 +665,12 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
-    describe: ({ tool_name, where }) => `Fetch a web page with ${tool_name}${where}.`,
+    describe: ({ where }) => `Fetch a web page${where}?`,
   },
   {
     match: words => hasPhrase(words, 'search'),
-    describe: ({ tool_name, where, words }) =>
-      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with ${tool_name}${where}.`,
+    describe: ({ where, words }) =>
+      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'}${where}?`,
   },
 ];
 
@@ -1076,7 +1075,6 @@ export function extractCardFields(input: {
       family === undefined
         ? null
         : family.describe({
-            tool_name: escapeDisplayText(input.tool_name),
             words,
             where,
             fields,

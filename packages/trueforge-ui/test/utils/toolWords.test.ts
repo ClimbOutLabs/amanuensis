@@ -16,6 +16,19 @@ describe('toolWords', () => {
     expect(toolDoneWords('some_new_tool')).toBe(TOOL_DONE_FALLBACK);
   });
 
+  it('reads an unnamed persona check and switch as a persona, never a specialist', () => {
+    expect(toolDoingWords('list_personas')).toBe('Checking the personas');
+    expect(toolDoneWords('list_personas')).toBe('Checked a persona');
+    expect(toolDoneWords('persona_read')).toBe('Checked a persona');
+    expect(toolDoingWords('use_persona')).toBe('Switching persona');
+    expect(toolDoneWords('use_persona')).toBe('Switched persona');
+    expect(toolDoneWords('persona_switch')).toBe('Switched persona');
+    expect(toolStepTitle({ toolName: 'use_persona', state: 'not_done' })).toBe('A persona switch');
+    for (const toolName of ['list_personas', 'persona_read', 'use_persona', 'persona_switch', 'create_persona']) {
+      expect(toolDoneWords(toolName)).not.toMatch(/specialist/i);
+    }
+  });
+
   it('titles a step that did not run by what it is, never as underway or done', () => {
     expect(toolStepTitle({ toolName: 'web_search', state: 'running' })).toBe('Searching the web');
     expect(toolStepTitle({ toolName: 'web_search', state: 'done' })).toBe('Searched the web');

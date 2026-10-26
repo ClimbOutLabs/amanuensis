@@ -2266,9 +2266,13 @@
         "type": "object"
       },
       "CronExpression": {
+        "default": null,
         "description": "Standard 5-field cron expression, evaluated in `timezone`.",
         "pattern": "^[\\d*,\\-/]+(?:\\s+[\\d*,\\-/]+){4}$",
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "CustomModelProvider": {
         "additionalProperties": false,
@@ -2495,6 +2499,117 @@
         },
         "type": "object"
       },
+      "EmailAccountStatus": {
+        "properties": {
+          "address": {
+            "description": "The connected account address; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "description": "Whether this instance has the Email connector at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of the connected account, worked out from its servers; the picker default otherwise.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "The provider picker table, in display order.",
+            "items": {
+              "$ref": "#/components/schemas/EmailProvider"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Connected, not connected, or connected but the saved sign-in no longer works.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "address",
+          "provider_key",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "EmailProvider": {
+        "properties": {
+          "help_hint": {
+            "description": "One plain sentence on how to get an app password.",
+            "type": "string"
+          },
+          "help_url": {
+            "description": "The provider's own help page for making an app password; null when none could be checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imap_host": {
+            "description": "Incoming mail server.",
+            "type": "string"
+          },
+          "imap_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming mail port.",
+            "type": "integer"
+          },
+          "key": {
+            "description": "Stable provider key, such as gmail or other.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person sees in the provider picker.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing mail server.",
+            "type": "string"
+          },
+          "smtp_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing mail port.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "imap_host",
+          "imap_port",
+          "imap_mode",
+          "smtp_host",
+          "smtp_port",
+          "smtp_mode",
+          "help_url",
+          "help_hint"
+        ],
+        "type": "object"
+      },
       "ExecuteScheduleRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2705,6 +2820,17 @@
         ],
         "type": "object"
       },
+      "GetEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetFirstRunGuideResponse": {
         "properties": {
           "data": {
@@ -2867,6 +2993,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/MemoryVaultSharing"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryVaultSummaryStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultSummaryStatus"
           }
         },
         "required": [
@@ -3050,6 +3187,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Schedule"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetScheduleToolsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScheduleTools"
           }
         },
         "required": [
@@ -6457,6 +6605,18 @@
         ],
         "type": "object"
       },
+      "MemoryVaultSummaryStatus": {
+        "properties": {
+          "summary_pending": {
+            "description": "True when the newest turn summary for this vault failed and has not been made yet.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "summary_pending"
+        ],
+        "type": "object"
+      },
       "MetricsUnit": {
         "enum": [
           "count",
@@ -6747,6 +6907,11 @@
             "exclusiveMinimum": 0,
             "type": "integer"
           },
+          "max_concurrent_requests": {
+            "description": "How many requests may be sent to this model at once; a further reply waits for one to finish. Absent means 1 for a model on a custom provider, and no limit for other providers.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
           "max_output_tokens": {
             "description": "Maximum output tokens the model can generate.",
             "exclusiveMinimum": 0,
@@ -6946,6 +7111,36 @@
           "relevance_judge"
         ],
         "type": "string"
+      },
+      "ModelWaitingPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "message": {
+            "description": "The plain line shown in the chat while the reply waits.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when a model step waits for another reply on the same model.",
+            "enum": [
+              "aman.model.waiting"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
       },
       "MoonshotModelProvider": {
         "additionalProperties": false,
@@ -7871,6 +8066,17 @@
         ],
         "type": "object"
       },
+      "RemoveEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -8154,6 +8360,15 @@
         "properties": {},
         "type": "object"
       },
+      "RunAt": {
+        "default": null,
+        "description": "The single time a one-time schedule runs: ISO 8601 with a UTC offset, like 2026-10-26T18:00:00-04:00.",
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "RuntimeConfig": {
         "default": {
           "ask_user_questions": {
@@ -8416,6 +8631,55 @@
         ],
         "type": "object"
       },
+      "SaveEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The email address to connect.",
+            "type": "string"
+          },
+          "imap_host": {
+            "description": "Incoming server, only for the other provider.",
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming port, only for the other provider.",
+            "type": "integer"
+          },
+          "password": {
+            "description": "The app password. Write-only: it is checked and passed to the sidecar, never stored or returned.",
+            "type": "string"
+          },
+          "provider_key": {
+            "description": "The picked provider key, or other for typed servers.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing server, only for the other provider.",
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing port, only for the other provider.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_key",
+          "address",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SaveEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -8459,11 +8723,25 @@
         ],
         "type": "object"
       },
+      "ScheduleKind": {
+        "default": "task",
+        "enum": [
+          "task",
+          "reminder"
+        ],
+        "type": "string"
+      },
       "ScheduleManifest": {
         "additionalProperties": false,
         "properties": {
           "cron": {
             "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
           },
           "status": {
             "$ref": "#/components/schemas/ScheduleStatus"
@@ -8478,8 +8756,7 @@
           }
         },
         "required": [
-          "task",
-          "cron"
+          "task"
         ],
         "type": "object"
       },
@@ -8553,7 +8830,56 @@
         "default": "active",
         "enum": [
           "active",
-          "paused"
+          "paused",
+          "done"
+        ],
+        "type": "string"
+      },
+      "ScheduleTools": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_name": {
+            "$ref": "#/components/schemas/ResourceName"
+          },
+          "connectors": {
+            "description": "Names of the connectors it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "sandbox_enabled": {
+            "description": "Whether it can use the sandbox. Skills need the sandbox.",
+            "type": "boolean"
+          },
+          "skills": {
+            "description": "Names of the skills it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ScheduleToolsSource"
+          }
+        },
+        "required": [
+          "source",
+          "agent_name",
+          "connectors",
+          "skills",
+          "sandbox_enabled"
+        ],
+        "type": "object"
+      },
+      "ScheduleToolsSource": {
+        "enum": [
+          "schedule",
+          "saved_agent"
         ],
         "type": "string"
       },
@@ -8611,7 +8937,7 @@
       "SentinelUserSettings": {
         "properties": {
           "maps_without_asking": {
-            "description": "While on, map requests run without asking unless private data was read in this chat.",
+            "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "offline_mode": {
@@ -8652,7 +8978,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Approve for this chat\" (server:tool pairs) and \"Allow searches in this chat\".",
+            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -9011,6 +9337,9 @@
           },
           {
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
           }
         ]
       },
@@ -9051,7 +9380,8 @@
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
-          "aman.sandbox.provisioning"
+          "aman.sandbox.provisioning",
+          "aman.model.waiting"
         ],
         "type": "string"
       },
@@ -10386,22 +10716,22 @@
         "type": "object"
       },
       "Tier3Persona": {
-        "description": "The specialist a chat call adds, shown in full.",
+        "description": "The persona a chat call adds, shown in full.",
         "properties": {
           "description": {
-            "description": "One line on what the specialist is for.",
+            "description": "One line on what the persona is for.",
             "type": "string"
           },
           "instructions": {
-            "description": "The whole instruction text the specialist follows.",
+            "description": "The whole instruction text the persona follows.",
             "type": "string"
           },
           "model_name": {
-            "description": "The model the specialist answers with.",
+            "description": "The model the persona answers with.",
             "type": "string"
           },
           "name": {
-            "description": "Specialist name in plain words.",
+            "description": "Persona name in plain words.",
             "type": "string"
           }
         },
@@ -12350,6 +12680,7 @@
             "agent.context.compaction_started": "#/components/schemas/ContextCompactionStartedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
+            "aman.model.waiting": "#/components/schemas/ModelWaitingPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
@@ -12428,6 +12759,9 @@
           },
           {
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
@@ -12630,6 +12964,39 @@
         "required": [
           "name",
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateScheduleToolsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "connectors": {
+            "description": "Names of the connectors it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "sandbox_enabled": {
+            "description": "Whether it can use the sandbox. Skills need the sandbox.",
+            "type": "boolean"
+          },
+          "skills": {
+            "description": "Names of the skills it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          }
+        },
+        "required": [
+          "connectors",
+          "skills",
+          "sandbox_enabled"
         ],
         "type": "object"
       },
@@ -15763,6 +16130,85 @@
         "x-fern-sdk-method-name": "update_sharing"
       }
     },
+    "/api/v1/memory/vault/summary-status": {
+      "get": {
+        "description": "Say whether one vault namespace is still owed a turn summary after a failed attempt.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryVaultSummaryStatusResponse"
+                }
+              }
+            },
+            "description": "Whether a turn summary is still owed for the namespace."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Get memory vault summary status",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "get_summary_status"
+      }
+    },
     "/api/v1/memory/vault/{entry_id}": {
       "delete": {
         "description": "Delete one entry. The daily log is append-only, so the old entry stays and a delete marker hides it from listings and recall.",
@@ -18093,6 +18539,152 @@
         "x-fern-sdk-method-name": "list_runs"
       }
     },
+    "/api/v1/schedules/{schedule_id}/tools": {
+      "get": {
+        "description": "The connectors, skills and sandbox a schedule runs with, and whether they are its own or come from a saved agent.",
+        "parameters": [
+          {
+            "description": "Immutable schedule identifier.",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable schedule identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetScheduleToolsResponse"
+                }
+              }
+            },
+            "description": "The schedule tools."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot read the schedule."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not found."
+          }
+        },
+        "summary": "Get what a schedule runs with",
+        "tags": [
+          "Schedules"
+        ],
+        "x-fern-sdk-group-name": [
+          "schedules"
+        ],
+        "x-fern-sdk-method-name": "get_tools"
+      },
+      "put": {
+        "description": "Replace the connectors, skills and sandbox of a schedule with its own tools. Refused for a schedule that runs as a saved agent.",
+        "parameters": [
+          {
+            "description": "Immutable schedule identifier.",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable schedule identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScheduleToolsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetScheduleToolsResponse"
+                }
+              }
+            },
+            "description": "The updated schedule tools."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not the schedule creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The schedule runs as a saved agent, or another schedule already has this name with these tools."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A connector or skill is not available, or skills are chosen without the sandbox."
+          }
+        },
+        "summary": "Change what a schedule runs with",
+        "tags": [
+          "Schedules"
+        ],
+        "x-fern-sdk-group-name": [
+          "schedules"
+        ],
+        "x-fern-sdk-method-name": "update_tools"
+      }
+    },
     "/api/v1/session-folders": {
       "get": {
         "responses": {
@@ -18983,7 +19575,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 20,
+              "maxItems": 21,
               "minItems": 1,
               "type": "array"
             }
@@ -23106,6 +23698,182 @@
           "briefItems"
         ],
         "x-fern-sdk-method-name": "undo"
+      }
+    },
+    "/api/v1/user/settings/email": {
+      "delete": {
+        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request did not come from Aman, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Remove the email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "remove_account"
+      },
+      "post": {
+        "description": "Checks the sign-in with the mail server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEmailAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The details could not be used, the password was refused, or the server could not be reached."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request did not come from Aman, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Connect an email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "save_account"
+      }
+    },
+    "/api/v1/user/settings/email/status": {
+      "get": {
+        "description": "Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account status and the provider table."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Get the email account status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

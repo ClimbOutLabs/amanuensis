@@ -64,7 +64,7 @@
     "push-sandbox-image-to-daytona": "pnpm --filter @truefoundry/trueforge push-sandbox-image-to-daytona",
     "test:frontend": "pnpm --filter frontend test",
     "test:trueforge-sdk": "pnpm --filter @truefoundry/trueforge-sdk test:wire",
-    "test:aman-guide": "node --test tests/aman-guide-build.test.mjs",
+    "test:aman-guide": "node --test tests/aman-guide-build.test.mjs tests/aman-guide-labels.test.mjs",
     "test:aman-installer": "pnpm --filter @truefoundry/aman-installer test",
     "test:chart-version": "bash tests/scripts/resolve-chart-version.test.sh",
     "test:installer": "bash installer/tests/run.sh",

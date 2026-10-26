@@ -148,7 +148,7 @@ describe('the approval card', () => {
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York). Google emails lin@example.com and sam@example.com about it. This change sends an invitation to other people, so Aman always asks.',
+      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it. This change sends an invitation to other people, so Aman always asks.',
     );
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });

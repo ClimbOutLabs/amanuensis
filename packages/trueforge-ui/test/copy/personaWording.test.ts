@@ -38,4 +38,23 @@ describe('persona wording', () => {
     const offenders = PERSONA_SCREENS.filter(path => /\bagents?\b/i.test(codeOf(join(root, path))));
     expect(offenders).toEqual([]);
   });
+
+  it('never says "agent" in the words the held action and approval cards show', () => {
+    const offenders = sourceFiles(join(root, 'src/sentinel'))
+      .filter(path => /\bagents?\b/i.test(codeOf(path)))
+      .map(path => relative(root, path));
+    expect(offenders).toEqual([]);
+  });
+
+  it('never calls the chat persona an agent in the grant hints or the always allow confirm steps', () => {
+    const grantCopy = [
+      'src/sentinel/approvalChoices.ts',
+      'src/sentinel/HeldActionCard.tsx',
+      'src/sentinel/PermissionApprovalCard.tsx',
+    ];
+    const offenders = grantCopy.filter(path =>
+      /the agent will|ask the agent/i.test(readFileSync(join(root, path), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+  });
 });

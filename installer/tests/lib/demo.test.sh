@@ -86,6 +86,50 @@ test_demo_seed_command_reseeds_and_resets() {
   sandbox_drop
 }
 
+test_demo_seed_fresh_passes_through() {
+  t_begin "instance demo-seed --fresh passes --fresh to the app, in plain words, and never combines with --reset"
+  sandbox_new
+  install_demo
+  run_install instance demo-seed --fresh --instance main
+  assert_rc 0
+  assert_eq "$(seed_count)" 2
+  assert_contains "$(seed_runs | tail -n 1)" "aman demo-seed --user $OWNER --fresh"
+  assert_not_contains "$(seed_runs | tail -n 1)" "--reset"
+  assert_flat_contains "$OUT" "Removing everything $OWNER made on instance main"
+  run_install instance demo-seed --fresh --reset
+  assert_rc 2
+  assert_flat_contains "$ERR" "either --fresh or --reset"
+  assert_eq "$(seed_count)" 2 "the refused run started nothing"
+  run_install --help
+  assert_flat_contains "$OUT" "--fresh"
+  sandbox_drop
+}
+
+test_demo_seed_fresh_refuses_a_non_demo_instance() {
+  t_begin "instance demo-seed --fresh on an instance without demo mode refuses in plain words and removes nothing"
+  sandbox_new
+  install_machine
+  run_install instance demo-seed --fresh
+  assert_rc 1
+  assert_flat_contains "$ERR" "Start fresh only works on a demo instance"
+  assert_flat_contains "$ERR" "Nothing was removed"
+  assert_flat_contains "$ERR" "install.sh --demo --name main"
+  assert_eq "$(seed_count)" 0
+  sandbox_drop
+}
+
+test_demo_seed_fresh_can_run_twice() {
+  t_begin "instance demo-seed --fresh twice in a row passes --fresh both times"
+  sandbox_new
+  install_demo
+  run_install instance demo-seed --fresh
+  assert_rc 0
+  run_install instance demo-seed --fresh
+  assert_rc 0
+  assert_eq "$(seed_runs | grep -c -- '--fresh' || true)" 2
+  sandbox_drop
+}
+
 test_demo_seed_refuses_a_non_demo_instance() {
   t_begin "instance demo-seed on an instance without demo mode points to install.sh --demo and runs nothing"
   sandbox_new
@@ -204,6 +248,9 @@ test_option_validation() {
   assert_flat_contains "$ERR" "--demo applies to install and instance add"
   run_install instance demo-seed --demo
   assert_rc 2
+  run_install --fresh
+  assert_rc 2
+  assert_flat_contains "$ERR" "--fresh applies to instance demo-seed"
   run_install instance demo-seed extra
   assert_rc 2
   assert_eq "$(seed_count)" 0
@@ -242,6 +289,9 @@ test_demo_install_turns_demo_mode_on_and_seeds_the_owner
 test_install_without_demo_never_seeds
 test_demo_user_is_not_an_option
 test_demo_seed_command_reseeds_and_resets
+test_demo_seed_fresh_passes_through
+test_demo_seed_fresh_refuses_a_non_demo_instance
+test_demo_seed_fresh_can_run_twice
 test_demo_seed_refuses_a_non_demo_instance
 test_demo_seed_before_install_is_refused
 test_demo_seed_needs_a_running_instance
