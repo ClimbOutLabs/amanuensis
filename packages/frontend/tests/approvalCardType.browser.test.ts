@@ -9,11 +9,9 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const KINDS = ['email', 'calendar', 'shell', 'space', 'connector'] as const;
-/** 1.125rem at 1rem = 16px. */
-const TITLE_MAX_PX = 18;
 
 test(
-  'every approval card is set in the body font, with a title no larger than 1.125rem',
+  'every approval card is set in the body font, with a title at the chat body size',
   { timeout: 180_000 },
   async () => {
     const server = await createServer({
@@ -76,7 +74,7 @@ test(
             };
           });
 
-          assert.ok(card.title.size <= TITLE_MAX_PX, `${kind} (${theme}): title is ${card.title.size}px`);
+          assert.equal(`${card.title.size}px`, chat.size, `${kind} (${theme}): title is the chat's body size`);
           assert.equal(card.title.weight, '600', `${kind} (${theme}): title is semibold`);
           assert.equal(card.title.family, chat.family, `${kind} (${theme}): title uses the body font`);
           for (const line of card.text) {
