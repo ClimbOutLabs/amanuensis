@@ -1,7 +1,7 @@
 'use client';
 
 import type { TrueFoundryAgentConfig, UseTrueFoundryAgentRuntimeOptions } from '@truefoundry/assistant-ui-runtime';
-import { lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 
 import { AgentConfigInstructionsProvider } from '../atoms/draft/AgentConfigInstructionsContext.js';
@@ -19,6 +19,12 @@ import { RemoteIdRouteBridge } from '../routing/RemoteIdRouteBridge.js';
 import { ResolvedRoutesProvider } from '../routing/ResolvedRoutesContext.js';
 import type { ResolvedRoutes, RoutesConfig } from '../routing/types.js';
 import { AgentDetailsPreferenceProvider } from '../server/AgentDetailsPreferenceContext.js';
+import {
+  ChatConnectorChoiceProvider,
+  createChatConnectorChoiceStore,
+  createSessionWithConnectorChoice,
+  useChatConnectorChoiceStore,
+} from '../server/ChatConnectorChoiceContext.js';
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
 import { ServerProvider } from '../server/ServerContext.js';
@@ -26,7 +32,7 @@ import { createSessionListCache, withSessionListCache } from '../server/sessionL
 import { DEFAULT_AGENT_CONFIG, ShellModeProvider, useShellMode, type AgentConfig } from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
 import type { TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
-import type { AgentUIServer, CreateSessionRequest } from '../server/types.js';
+import type { AgentUIServer } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
@@ -205,6 +211,10 @@ function ChatProviderFromShell({
   // Keep one isolated cache per shell, preserved across chat runtime remounts.
   const [sessionListCache] = useState(createSessionListCache);
 
+  const connectorChoice = useChatConnectorChoiceStore();
+  // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
+  useEffect(() => connectorChoice?.clearPending(), [connectorChoice, runtimeKey]);
+
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
     return {
       ...server,
@@ -212,16 +222,15 @@ function ChatProviderFromShell({
         if (request.agentSpec === undefined) {
           return server.createSession(request);
         }
-        const withMetadata: CreateSessionRequest & { metadata: Record<string, string> } = {
-          ...request,
-          metadata: {
-            [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent),
-          },
-        };
-        return server.createSession(withMetadata);
+        return createSessionWithConnectorChoice({
+          server,
+          store: connectorChoice,
+          metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
+          request,
+        });
       },
     };
-  }, [server, isCreateAgent]);
+  }, [server, isCreateAgent, connectorChoice]);
 
   const cachedRuntimeServer = useMemo(
     () => withSessionListCache({ server: serverWithCreateIntent, cache: sessionListCache }),
@@ -314,6 +323,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
   } = props;
 
   const resolved = useResolvedServer(serverConfig, onError);
+  const [connectorChoice] = useState(createChatConnectorChoiceStore);
   const [activeRemoteId, setActiveRemoteId] = useState<string | undefined>(undefined);
   // The internal route sync only consumes `activeRemoteId`; the host callback reports the
   // same id outward so per-session UI can live outside the chat tree. The bridge reports
@@ -377,17 +387,19 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
         <CustomActionRenderersProvider renderers={customActionRenderers}>
           <ServerProvider server={server}>
             <AgentDetailsPreferenceProvider>
-              <ChatFolderProvider store={chatFolders}>
-                <SpaceProvider store={spaces}>
-                  <RemindersProvider>
-                    {resolvedRoutes != null ? (
-                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                    ) : (
-                      visibilityTree
-                    )}
-                  </RemindersProvider>
-                </SpaceProvider>
-              </ChatFolderProvider>
+              <ChatConnectorChoiceProvider store={connectorChoice}>
+                <ChatFolderProvider store={chatFolders}>
+                  <SpaceProvider store={spaces}>
+                    <RemindersProvider>
+                      {resolvedRoutes != null ? (
+                        <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                      ) : (
+                        visibilityTree
+                      )}
+                    </RemindersProvider>
+                  </SpaceProvider>
+                </ChatFolderProvider>
+              </ChatConnectorChoiceProvider>
             </AgentDetailsPreferenceProvider>
           </ServerProvider>
         </CustomActionRenderersProvider>

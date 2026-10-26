@@ -342,6 +342,9 @@ function toAvailableMcpServer(params: { record: McpServerRecord; authStatus: Mcp
     url: params.record.manifest.url,
     ...(authType !== undefined ? { auth: { type: authType } } : {}),
     auth_status: params.authStatus,
+    ...(params.record.manifest.type === 'remote' && params.record.manifest.search_provider === true
+      ? { search_provider: true }
+      : {}),
   };
 }
 
