@@ -1630,6 +1630,8 @@ export class AgentThread {
 
   private contextBusy = false;
   private preSendRanThisTurn = false;
+  // True only while execute() prepares a thread that goes straight to its tool step, with no new message.
+  private resumingIntoToolStep = false;
   // One AgentThread instance lives for one turn (a fresh instance is built per
   // turn by the harness), so this needs no snapshot/restore: it starts false
   // for every turn and latches true the first time the grounding nudge fires,
@@ -1781,7 +1783,10 @@ export class AgentThread {
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
-      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      new OpenToolCallCloser({
+        deniedApprovalIdentities: () => this.toolCallMemo.deniedApprovalIdentities,
+        readsRunNext: () => this.resumingIntoToolStep,
+      }),
       ...capabilityPreSend,
     ];
 
@@ -5286,11 +5291,16 @@ export class AgentThread {
       }
 
       if (!this.preSendRanThisTurn) {
-        for await (const event of this.executeContextProcessors('preSend', signal)) {
-          if (signal?.aborted) {
-            return;
+        this.resumingIntoToolStep = true;
+        try {
+          for await (const event of this.executeContextProcessors('preSend', signal)) {
+            if (signal?.aborted) {
+              return;
+            }
+            yield event;
           }
-          yield event;
+        } finally {
+          this.resumingIntoToolStep = false;
         }
         if (signal?.aborted) {
           return;

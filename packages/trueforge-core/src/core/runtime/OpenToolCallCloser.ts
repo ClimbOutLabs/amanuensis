@@ -132,10 +132,15 @@ function unresolvedCallOutcome(
  * coming for it, and leaving it open blocks every later user message with nothing on screen
  * to explain why. Closing it states the outcome the user already chose. An undecided call that
  * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
+ *
+ * When `readsRunNext` is set, the turn goes straight to its tool step, so a read that is open, whether it
+ * was allowed or needed no answer, is left for that step to run. Repeating a read is harmless, and closing
+ * it would throw away an answer the person already gave.
  */
 export function getClosableOpenToolCallOutcomes(
   context: ContextMessage[],
   deniedApprovalIdentities: ReadonlySet<string>,
+  options: { readsRunNext: boolean } = { readsRunNext: false },
 ): Map<string, ClosableToolOutcome> {
   const lastIdx = context.findLastIndex(
     (msg): msg is InternalEnrichedAssistantMessage =>
@@ -175,7 +180,11 @@ export function getClosableOpenToolCallOutcomes(
     if (toolCall.tool_info.is_thread_creation === true) {
       continue;
     }
+    const leftToRun = options.readsRunNext && isReadOnlyCall(toolCall.tool_info);
     if (toolCall.tool_info.is_approval_required !== true) {
+      if (leftToRun) {
+        continue;
+      }
       closable.set(
         toolCall.id,
         unresolvedCallOutcome(
@@ -201,6 +210,9 @@ export function getClosableOpenToolCallOutcomes(
         remediation: REPEATED_DENIAL_REMEDIATION,
         admissionProvenance: { source: 'automatic' },
       });
+      continue;
+    }
+    if (decision.status === 'allow' && leftToRun) {
       continue;
     }
     closable.set(
@@ -250,13 +262,21 @@ export function getClosableOpenToolCalls(
 }
 
 export class OpenToolCallCloser implements PreSendContextProcessor {
-  constructor(private readonly deniedApprovalIdentities: () => ReadonlySet<string>) {}
+  private readonly deniedApprovalIdentities: () => ReadonlySet<string>;
+  private readonly readsRunNext: () => boolean;
+
+  constructor(input: { deniedApprovalIdentities: () => ReadonlySet<string>; readsRunNext: () => boolean }) {
+    this.deniedApprovalIdentities = input.deniedApprovalIdentities;
+    this.readsRunNext = input.readsRunNext;
+  }
 
   // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
   async *processPreSend(
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorAppendContext, void, unknown> {
-    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities());
+    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities(), {
+      readsRunNext: this.readsRunNext(),
+    });
     if (closable.size === 0) {
       return;
     }

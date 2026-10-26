@@ -4,7 +4,10 @@ import { approvalGrantKey } from '../../../src/core/mcp/approvalGrant';
 import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils';
-import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
+import {
+  getClosableOpenToolCallOutcomes,
+  getClosableOpenToolCalls,
+} from '../../../src/core/runtime/OpenToolCallCloser';
 import '../harnessMocks';
 
 const NOT_EXECUTED = JSON.stringify({
@@ -229,5 +232,37 @@ describe('getClosableOpenToolCalls', () => {
 
   it('returns empty when there is no assistant message with tool calls', () => {
     expect(getClosableOpenToolCalls([{ role: 'user', content: 'hello' }], NO_DENIALS)).toEqual(new Map());
+  });
+
+  describe('when the turn goes straight to its tool step', () => {
+    const READS_RUN_NEXT = { readsRunNext: true };
+
+    it('leaves an allowed read and an open read for the tool step to run', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-space', { effect: 'inspect' }),
+          makeToolCall('tc-mail', { is_approval_required: true, read_only_hint: true }),
+        ]),
+        decisionFor('tc-mail', { status: 'allow' }),
+      ];
+      expect(getClosableOpenToolCallOutcomes(context, NO_DENIALS, READS_RUN_NEXT)).toEqual(new Map());
+    });
+
+    it('still closes an allowed change, a denied read, and a read that already has its result', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-change', { is_approval_required: true, effect: 'edit' }),
+          makeToolCall('tc-denied', { is_approval_required: true, read_only_hint: true }),
+          makeToolCall('tc-done', { effect: 'inspect' }),
+        ]),
+        decisionFor('tc-change', { status: 'allow' }),
+        decisionFor('tc-denied', { status: 'deny' }),
+        { role: 'tool', tool_call_id: 'tc-done', content: 'done' },
+      ];
+      expect([...getClosableOpenToolCallOutcomes(context, NO_DENIALS, READS_RUN_NEXT).keys()]).toEqual([
+        'tc-change',
+        'tc-denied',
+      ]);
+    });
   });
 });
