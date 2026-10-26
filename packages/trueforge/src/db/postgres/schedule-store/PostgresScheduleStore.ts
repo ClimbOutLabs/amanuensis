@@ -186,7 +186,13 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
     try {
       row = await db
         .updateTable('schedule')
-        .set({ name: input.name, manifest: json(input.manifest), status: input.manifest.status, updated_at: now() })
+        .set({
+          name: input.name,
+          manifest: json(input.manifest),
+          status: input.manifest.status,
+          ...(input.agent === undefined ? {} : { agent_id: input.agent.agent_id, agent_name: input.agent.agent_name }),
+          updated_at: now(),
+        })
         .where('tenant_id', '=', input.tenant_id)
         .where('id', '=', input.id)
         .returningAll()
@@ -194,7 +200,7 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ScheduleNameConflictError(
-          { tenant_id: input.tenant_id, agent_name: previous.agent_name, name: input.name },
+          { tenant_id: input.tenant_id, agent_name: input.agent?.agent_name ?? previous.agent_name, name: input.name },
           { cause: error },
         );
       }

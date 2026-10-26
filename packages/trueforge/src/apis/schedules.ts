@@ -9,6 +9,7 @@ import {
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import {
@@ -61,18 +62,26 @@ import {
   deleteScheduleRoute,
   executeScheduleRunRoute,
   getScheduleRoute,
+  getScheduleToolsRoute,
   listScheduleRunsRoute,
   listSchedulesRoute,
   putScheduleRoute,
+  putScheduleToolsRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { scheduleRunsAs } from '../runtime/chatAssistant';
+import {
+  chatAssistantAgentName,
+  ChatAssistantUnavailableError,
+  getOrCreateChatAssistantAgent,
+  scheduleRunsAs,
+} from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { deliverReminder, ReminderAgentNotFoundError } from '../runtime/reminderDelivery';
-import { resolveSandboxProvider } from '../runtime/sessionResources';
+import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
+import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import type { Schedule, ScheduleRun } from '../schemas/schedule';
@@ -618,6 +627,141 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
     return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
   };
 
+  /** The agent a schedule is bound to, which holds the tools it runs with. */
+  const scheduleAgent = async (record: ScheduleRecord): Promise<AgentRecord | undefined> =>
+    deps.agentStore.getAgent({ tenant_id: record.tenant_id, id: record.agent_id });
+
+  const getToolsHandler: RouteHandler<typeof getScheduleToolsRoute> = async c => {
+    const { schedule_id: scheduleId } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.scheduleStore.getSchedule({ tenant_id: requestContext.tenant_id, id: scheduleId });
+    if (record === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: record.agent_id,
+        created_by_subject_id: record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
+    }
+    const agent = await scheduleAgent(record);
+    if (agent === undefined) {
+      return c.json({ error: { message: `Agent not found: ${record.agent_name}` } }, 404);
+    }
+    return c.json({ data: scheduleToolsOf({ schedule: record, agent }) }, 200);
+  };
+
+  /**
+   * Gives the schedule its own agent built from its current one with only the tools swapped, then points the
+   * schedule at it. A saved agent is never edited, because other chats and schedules use it. The agent is made
+   * the way a chat schedule's is, so schedules with the same setup share it.
+   */
+  const putToolsHandler: RouteHandler<typeof putScheduleToolsRoute> = async c => {
+    const { schedule_id: scheduleId } = c.req.valid('param');
+    const tools = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const existing = await deps.scheduleStore.getSchedule({ tenant_id: requestContext.tenant_id, id: scheduleId });
+    if (existing === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    if (!isScheduleOwner(requestContext, existing.created_by_subject.subject_id)) {
+      return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
+    }
+    const current = await scheduleAgent(existing);
+    if (current === undefined) {
+      return c.json({ error: { message: `Agent not found: ${existing.agent_name}` } }, 404);
+    }
+    if (scheduleToolsOf({ schedule: existing, agent: current }).source === 'saved_agent') {
+      return c.json(
+        {
+          error: {
+            message: `The tools of this schedule come from the agent ${current.name}. Change them on that agent's page.`,
+          },
+        },
+        409,
+      );
+    }
+    if (tools.skills.length > 0 && !tools.sandbox_enabled) {
+      return c.json({ error: { message: 'Skills need the sandbox. Turn the sandbox on or remove the skills.' } }, 422);
+    }
+    const next = specWithTools({ spec: current.manifest, tools });
+    if (!next.ok) {
+      return c.json({ error: { message: next.message } }, 422);
+    }
+    try {
+      await validateAgentSpec({
+        spec: next.spec,
+        tenant_id: requestContext.tenant_id,
+        modelProviderStore: deps.resolveModelProviderStore(c, current),
+        mcpServerStore: deps.resolveMcpServerStore(c, current),
+        skillStore: deps.resolveSkillStore(c),
+        sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+      });
+    } catch (error) {
+      if (error instanceof HTTPException && error.status === 422) {
+        return c.json(
+          { error: { message: `${error.message}. Pick from the tools the form lists, then save again.` } },
+          422,
+        );
+      }
+      throw error;
+    }
+    let agent: AgentRecord;
+    try {
+      agent = await getOrCreateChatAssistantAgent({
+        tenant_id: requestContext.tenant_id,
+        owner: existing.created_by_subject,
+        name: chatAssistantAgentName({ owner: existing.created_by_subject, spec: next.spec }),
+        spec: next.spec,
+        agentStore: deps.agentStore,
+      });
+    } catch (error) {
+      if (error instanceof ChatAssistantUnavailableError) {
+        return c.json({ error: { message: error.message } }, 409);
+      }
+      throw error;
+    }
+
+    let record: ScheduleRecord | undefined;
+    try {
+      record = await deps.withTransaction(async transaction => {
+        const result = await deps.scheduleStore.updateScheduleAndRun(
+          {
+            tenant_id: requestContext.tenant_id,
+            id: scheduleId,
+            name: existing.name,
+            manifest: existing.manifest,
+            agent: { agent_id: agent.id, agent_name: agent.name },
+            runFrom: new Date(),
+          },
+          transaction,
+        );
+        return result?.schedule;
+      });
+    } catch (error) {
+      if (error instanceof ScheduleNameConflictError) {
+        return c.json(
+          {
+            error: {
+              message: 'You already have a schedule with this name and these tools. Rename one, then try again.',
+            },
+          },
+          409,
+        );
+      }
+      throw error;
+    }
+    if (record === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    return c.json({ data: scheduleToolsOf({ schedule: record, agent }) }, 200);
+  };
+
   const deleteHandler: RouteHandler<typeof deleteScheduleRoute> = async c => {
     const { schedule_id: scheduleId } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
@@ -645,6 +789,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
   router.openapi(createScheduleRoute, createHandler);
   router.openapi(getScheduleRoute, getHandler);
   router.openapi(putScheduleRoute, putHandler);
+  router.openapi(getScheduleToolsRoute, getToolsHandler);
+  router.openapi(putScheduleToolsRoute, putToolsHandler);
   router.openapi(deleteScheduleRoute, deleteHandler);
   return router;
 }

@@ -21,6 +21,7 @@ import {
   type ScheduleFormValues,
 } from './cadence.js';
 import { ScheduleFormFields } from './ScheduleFormFields.js';
+import { ScheduleToolsSection } from './ScheduleToolsSection.js';
 import { TestScheduleScreen } from './TestScheduleScreen.js';
 
 export type ScheduleFormDrawerProps = {
@@ -122,6 +123,11 @@ function ScheduleFormDrawerBody({
     savedFromCreate?.agentName ??
     schedule?.agentName ??
     (agentId.length > 0 ? agentId : '');
+
+  // The saved schedule being edited, whose tools and runner the form shows.
+  const editing = isCreatedEdit && view.kind === 'form' ? view.saved : isExternalEdit ? schedule : undefined;
+
+  const runsAs = editing === undefined ? undefined : (editing.runsAs ?? editing.agentName ?? editing.agentId);
 
   const mcpMounts = useMemo(() => {
     const mounts = selectedAgent?.agentSpec?.mcpServers ?? [];
@@ -319,6 +325,7 @@ function ScheduleFormDrawerBody({
                     if (nextId.length === 0) setSelectedAgent(null);
                   }
             }
+            {...(runsAs === undefined ? {} : { runsAs })}
             onAgentPicked={setSelectedAgent}
             agentPickerDisabled={isExternalEdit || isCreatedEdit}
             onBuildAgent={
@@ -330,6 +337,22 @@ function ScheduleFormDrawerBody({
                 : undefined
             }
           />
+          {editing === undefined || runsAs === undefined ? null : (
+            <div className="px-5 pb-4">
+              <ScheduleToolsSection
+                scheduleId={editing.id}
+                runsAs={runsAs}
+                onOpenAgent={
+                  shell === null
+                    ? undefined
+                    : () => {
+                        onOpenChange(false);
+                        shell.openLibraryAgent(editing.agentId);
+                      }
+                }
+              />
+            </div>
+          )}
         </form>
       )}
     </SideDrawer>

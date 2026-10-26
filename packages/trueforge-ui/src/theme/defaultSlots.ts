@@ -61,8 +61,9 @@ import { DraftAgentConfigTrigger } from '../atoms/draft/DraftAgentConfigTrigger.
 import { DraftCapabilitiesPanel } from '../atoms/draft/DraftCapabilitiesPanel.js';
 import { DraftComposerActionsMenu } from '../atoms/draft/DraftComposerActionsMenu.js';
 import { DraftComposerLeftSection, DraftComposerRightSection } from '../atoms/draft/DraftComposerSections.js';
-import { CatalogRow, ConnectorConnectButton, DraftCompositeSelector } from '../atoms/draft/DraftCompositeSelector.js';
+import { DraftCompositeSelector } from '../atoms/draft/DraftCompositeSelector.js';
 import { DraftModelSelector } from '../atoms/draft/DraftModelSelector.js';
+import { CatalogRow, ConnectorConnectButton } from '../atoms/draft/DraftToolPicker.js';
 import { HistoryLoader } from '../atoms/HistoryLoader.js';
 import { HtmlArtifactPreview } from '../atoms/HtmlArtifactPreview.js';
 import { Markdown } from '../atoms/Markdown.js';
