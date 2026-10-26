@@ -148,7 +148,7 @@ function makeHarness(
     searchProvider?: boolean;
     secrets?: readonly string[];
     /** Sends go through the Email connector; `listed` is the Email list and `add` answers each add. */
-    mail?: { listed: readonly string[]; add: MailAddRecipientsResult; clash?: boolean };
+    mail?: { listed: readonly string[]; add: MailAddRecipientsResult; clash?: boolean; hostOwned?: boolean };
   } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
@@ -193,6 +193,8 @@ function makeHarness(
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
+        // The Email connector in these tests is the host's own sidecar, the only one whose sends check the Email list.
+        firstParty: options.mail !== undefined && options.mail.hostOwned !== false,
         searchProvider:
           options.searchProviderAsks === true || options.searchProvider === true
             ? { tools: ['web_search'], plumbing_fields: [] }
@@ -685,9 +687,12 @@ describe('approving a held mail send to an address not on the Email list', () =>
   }
 
   /** The unattended run holds the send; the harness then answers it. */
-  async function heldSend(listed: readonly string[], options: { call?: CallSpec; clash?: boolean } = {}) {
+  async function heldSend(
+    listed: readonly string[],
+    options: { call?: CallSpec; clash?: boolean; hostOwned?: boolean } = {},
+  ) {
     const h = makeHarness([() => toolCallsStream([options.call ?? mailSendCall])], {
-      mail: { listed, add: 'loaded', clash: options.clash === true },
+      mail: { listed, add: 'loaded', clash: options.clash === true, hostOwned: options.hostOwned !== false },
     });
     const { thread } = await runBrief(h);
     return { h, context: heldContext(thread) };
@@ -714,6 +719,15 @@ describe('approving a held mail send to an address not on the Email list', () =>
       expect.objectContaining({ status: 'allow' }),
       expect.anything(),
     );
+  });
+
+  it('leaves the Email list alone for a connector that only carries the name Email, and still sends once approved', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], { hostOwned: false });
+    await answer(h, context, [approve('call-mail')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.mailLoaded).not.toHaveBeenCalled();
+    expect(h.callTool).toHaveBeenCalledTimes(1);
   });
 
   it('a send under a clashing name adds the addresses on its card, then sends', async () => {

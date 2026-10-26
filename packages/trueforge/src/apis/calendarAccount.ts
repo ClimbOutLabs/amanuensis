@@ -8,7 +8,7 @@ import {
   caldavProviderKeyForUrl,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 import type { Logger } from 'winston';
-import configuration, { calendarMcpUrlFromAccountUrl } from '../config';
+import configuration from '../config';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import { calendarAccountRoutes } from '../routes/calendarAccountRoutes';
 import {
@@ -78,7 +78,7 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
       provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : caldavProviderKeyForUrl(state.account.url),
       providers: providerTable(),
     }),
-    readState: () => getCalendarAccountState(clientDeps()),
+    readState: options => getCalendarAccountState(clientDeps(), options),
     save: request =>
       saveCalendarAccount(clientDeps(), {
         provider_key: request.provider_key,
@@ -91,8 +91,7 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
     sync: state =>
       syncCalendarConnectorWithAccount({
         state,
-        mcpUrl:
-          configuration.CALENDAR_CONNECTOR_URL ?? calendarMcpUrlFromAccountUrl(configuration.CALENDAR_ACCOUNT_URL),
+        mcpUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
         mcpServerStore: deps.mcpServerStore,
         tenant_id: TENANT_ID,
         logger: deps.logger,

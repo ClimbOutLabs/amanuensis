@@ -12,6 +12,7 @@ import type { ILLM, IToolSet } from '@truefoundry/trueforge-core/core';
 import { isAuthRequired } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { createLogger } from 'winston';
 import { PERSONA_CONTEXT_VERSION, type PersonaContext } from '../../../src/personas/persona';
@@ -426,6 +427,39 @@ describe('web search, email and calendar on by default in every chat', () => {
     expect(chosen?.name).toBe(EMAIL);
     expect(chosen?.constructor).toBe(mounted?.constructor);
     expect(byChoice.definition.toolSets).toHaveLength(byList.definition.toolSets?.length ?? -1);
+  });
+
+  describe('a mount that carries the name Email', () => {
+    const listedEmail = () =>
+      AgentSpecSchema.parse({
+        model: { name: CHAT_MODEL },
+        instructions: 'Answer the user.',
+        mcp_servers: [{ name: EMAIL }],
+      });
+
+    function takesAttachments(resolved: Awaited<ReturnType<typeof resolve>>): boolean {
+      return (resolved.extraCapabilities ?? []).some(capability =>
+        (capability.toolResponseProcessors ?? []).some(processor => processor instanceof MailAttachmentProcessor),
+      );
+    }
+
+    it("is narrowed to the mail tools and has its attachments placed only when it is the host's own", async () => {
+      const resolved = await resolve(chatResolver({ setUp: [EMAIL] }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(true);
+      expect(takesAttachments(resolved)).toBe(true);
+    });
+
+    it('is left as listed, with no attachments placed, when the host has no Email of its own set up', async () => {
+      const resolved = await resolve(chatResolver({ setUp: [SEARCH_SERVER] }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(false);
+      expect(takesAttachments(resolved)).toBe(false);
+    });
+
+    it('is still narrowed, but places no attachments, when the set-up list cannot be read', async () => {
+      const resolved = await resolve(chatResolver({ setUp: undefined }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(true);
+      expect(takesAttachments(resolved)).toBe(false);
+    });
   });
 
   it('adds nothing to a sub-agent', async () => {

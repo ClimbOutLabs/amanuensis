@@ -145,6 +145,28 @@ test_an_older_instance_gets_a_secret() {
   sandbox_drop
 }
 
+test_a_settings_file_without_a_managed_part_gets_the_secret() {
+  t_begin "a settings file with no managed part gets the calendar secret at its end, and nothing else changes"
+  sandbox_new
+  install_for_calendar
+  local env=$AMAN_HOME/instances/main/.env before after
+  printf '%s\n' 'OWN_SETTING=kept' 'ANOTHER=also-kept' >"$env"
+  chmod 600 "$env"
+  before=$(cat "$env")
+  run_install instance calendar main --remove
+  assert_rc 0
+  after=$(cat "$env")
+  assert_eq "$(grep -c '^CALENDAR_ACCOUNT_SECRET=' "$env")" 1 "the secret is there once"
+  assert_eq "$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env" | wc -c | tr -d ' ')" 65 "64 characters and a newline"
+  assert_eq "$(printf '%s\n' "$after" | grep -v '^CALENDAR_ACCOUNT_SECRET=')" "$before" "every other line is as it was"
+  assert_mode "$env" 600
+  local first
+  first=$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env")
+  run_install instance calendar main --remove
+  assert_eq "$(sed -n 's/^CALENDAR_ACCOUNT_SECRET=//p' "$env")" "$first" "a later run never changes it"
+  sandbox_drop
+}
+
 test_connect_prompt_yes_asks_the_calendar_questions() {
   t_begin "Yes at Connect a calendar? asks for the provider, address, login and app password, then connects it"
   sandbox_new
@@ -332,6 +354,7 @@ test_url_refusals
 test_secret_rules
 test_agent_secret_and_network
 test_an_older_instance_gets_a_secret
+test_a_settings_file_without_a_managed_part_gets_the_secret
 test_install_with_calendar_flags
 test_connector_starts_with_the_instance
 test_connect_prompt_yes_asks_the_calendar_questions

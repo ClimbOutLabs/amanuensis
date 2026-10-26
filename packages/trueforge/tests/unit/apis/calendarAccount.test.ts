@@ -2,7 +2,7 @@ import { CALDAV_PROVIDER_PRESETS } from '@truefoundry/trueforge-core/core/calend
 import { Hono } from 'hono';
 import { createLogger } from 'winston';
 import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from '../../../src/apis/calendarAccount';
-import configuration from '../../../src/config';
+import configuration, { firstPartyOriginsFor, hostCalendarMcpUrl } from '../../../src/config';
 import type {
   DeleteMcpServerInput,
   GetMcpServerInput,
@@ -10,6 +10,8 @@ import type {
   McpServerRecord,
   UpsertMcpServerInput,
 } from '../../../src/db/mcpServerStore';
+import { isFirstPartyOrigin } from '../../../src/mcp/firstParty';
+import { isHostOwnConnector, setUpConnectorNamesOf } from '../../../src/mcp/hostConnectors';
 import {
   CALENDAR_ADDRESS_NOT_ALLOWED_MESSAGE,
   CALENDAR_CERTIFICATE_MESSAGE,
@@ -111,7 +113,7 @@ function makeFakeStore() {
 
 describe('the calendar settings endpoints', () => {
   const originalAccountUrl = configuration.CALENDAR_ACCOUNT_URL;
-  const originalConnectorUrl = configuration.CALENDAR_CONNECTOR_URL;
+  const originalSidecarUrl = configuration.CALENDAR_SIDECAR_MCP_URL;
   const originalSecret = configuration.CALENDAR_ACCOUNT_SECRET;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
@@ -122,7 +124,7 @@ describe('the calendar settings endpoints', () => {
     fakeStore = makeFakeStore();
     configuration.CALENDAR_ACCOUNT_URL = ACCOUNT_URL;
     configuration.CALENDAR_ACCOUNT_SECRET = SECRET;
-    configuration.CALENDAR_CONNECTOR_URL = undefined;
+    configuration.CALENDAR_SIDECAR_MCP_URL = MCP_URL;
     const router = createCalendarAccountRouter({
       logger: createLogger({ silent: true }),
       fetchImpl: agent.fetchImpl,
@@ -134,7 +136,7 @@ describe('the calendar settings endpoints', () => {
 
   afterEach(() => {
     configuration.CALENDAR_ACCOUNT_URL = originalAccountUrl;
-    configuration.CALENDAR_CONNECTOR_URL = originalConnectorUrl;
+    configuration.CALENDAR_SIDECAR_MCP_URL = originalSidecarUrl;
     configuration.CALENDAR_ACCOUNT_SECRET = originalSecret;
   });
 
@@ -460,7 +462,7 @@ describe('the calendar settings endpoints', () => {
     expect(fakeStore.rows.size).toBe(1);
   });
 
-  it('removes the connector when the saved login is refused, and does not register it', async () => {
+  it('keeps the connector registered when a saved login is refused on a status read, and shows the stopped state', async () => {
     agent.script([
       { status: 200, body: CONNECTED },
       { status: 200, body: { ...CONNECTED, sign_in: 'refused' } },
@@ -469,7 +471,10 @@ describe('the calendar settings endpoints', () => {
     expect(fakeStore.rows.size).toBe(1);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
-    expect(fakeStore.rows.size).toBe(0);
+    expect(fakeStore.rows.size).toBe(1);
+  });
+
+  it('registers nothing for a save the server refuses', async () => {
     agent.script([{ status: 400, body: { error: 'sign_in_refused' } }]);
     await call({ method: 'POST', path: '/', body: { provider_key: 'fastmail', email: EMAIL, password: CANARY } });
     expect(fakeStore.rows.size).toBe(0);
@@ -567,6 +572,33 @@ describe('the calendar settings endpoints', () => {
     });
     expect(JSON.parse(text).error.message).toContain('app password has a character that cannot be saved');
     expect(text).not.toContain(CANARY);
+  });
+
+  it("a calendar saved through the account agent is the host's own: attached by default and first-party, with no connector link set", async () => {
+    // The installer links only the account agent, so the sidecar address is the one derived from it, as config.ts resolves it.
+    configuration.CALENDAR_SIDECAR_MCP_URL = hostCalendarMcpUrl({
+      calendarMcpUrl: undefined,
+      calendarAccountUrl: ACCOUNT_URL,
+    });
+    agent.script([{ status: 200, body: CONNECTED }]);
+    const saved = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'fastmail', email: EMAIL, password: CANARY },
+    });
+    expect(saved.status).toBe(201);
+    const row = [...fakeStore.rows.values()][0];
+    if (row?.manifest.type !== 'remote') {
+      throw new Error('the Calendar connector was not registered as a remote connector');
+    }
+    expect(row.manifest.url).toBe(MCP_URL);
+    expect(row.first_party).toBe(true);
+    expect(isHostOwnConnector({ name: 'Calendar', url: row.manifest.url })).toBe(true);
+    // Attached by default, which is what makes the chat's password rule apply.
+    expect(setUpConnectorNamesOf([{ name: 'Calendar', manifest: { url: row.manifest.url } }])).toEqual(['Calendar']);
+    // The origin is trusted, so the read-only calendar tools run without a card.
+    const origins = firstPartyOriginsFor({ raw: undefined, calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL });
+    expect(isFirstPartyOrigin({ url: row.manifest.url, origins })).toBe(true);
   });
 
   it('refuses a form post from another site: no JSON body, no save', async () => {

@@ -321,9 +321,15 @@ calendar_migrate_old_file() { # name
   grep -q "^  $CALENDAR_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 1
   dc "$name" up -d --no-deps "$CALENDAR_SERVICE" >/dev/null 2>&1 || return 1
   answer=$(dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true)
-  if [ "$answer" = none ]; then
-    dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin <"$old" >/dev/null 2>&1 || return 1
-  fi
+  # The old file goes only once the connector is known to hold an account: the agent printed one of its known words,
+  # or the old account was just saved. An empty or unknown answer means the check did not run, so the file stays.
+  case "$answer" in
+    none)
+      dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin <"$old" >/dev/null 2>&1 || return 1
+      ;;
+    ok | login | server | blocked | certificate | redirect) ;;
+    *) return 1 ;;
+  esac
   rm -f -- "$old"
   calendar_link_remove "$dir/.env" || true
 }

@@ -119,10 +119,15 @@ describe('the Calendar connector follows the saved account', () => {
     expect(rows.size).toBe(0);
   });
 
-  it('does not register a saved login the server refuses', async () => {
+  it('registers a saved account at boot even when its login is refused, and drops it only when none is saved', async () => {
     const { rows, store } = makeStore();
     await registerCalendarConnectorFromSavedAccountInBackground({
       ...bootDeps(replyingWith([connectedReply('refused')])),
+      mcpServerStore: store,
+    });
+    expect(rows.size).toBe(1);
+    await registerCalendarConnectorFromSavedAccountInBackground({
+      ...bootDeps(replyingWith([emptyReply()])),
       mcpServerStore: store,
     });
     expect(rows.size).toBe(0);

@@ -103,8 +103,11 @@ const mailKind: ConnectorAccountKind<PublicMailAccount> = {
 const mailClient = createConnectorAccountClient(mailKind);
 
 /** The saved account's state, asking the agent (which re-checks a stale sign-in answer). */
-export function getMailAccountState(deps: ConnectorAccountClientDeps): Promise<MailAccountState> {
-  return mailClient.getState(deps);
+export function getMailAccountState(
+  deps: ConnectorAccountClientDeps,
+  options?: { timeoutMs?: number | undefined },
+): Promise<MailAccountState> {
+  return mailClient.getState(deps, options);
 }
 
 /**

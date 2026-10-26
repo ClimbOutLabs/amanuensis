@@ -11,8 +11,8 @@ import type { CreateTrueForgeClientOptions } from '../client.js';
 /** The connection state as the routes send it, shared by every account card. */
 export const AccountConnectionStateWireSchema = z.enum(ACCOUNT_CONNECTION_STATES);
 
-/** The server's plain failure line, when the body carries one; the server only sends fixed lines. */
-function serverErrorMessage(body: unknown): string | undefined {
+/** One text field of the error the server answered with, or undefined when the body carries none. */
+function serverErrorField({ body, field }: { body: unknown; field: 'message' | 'type' }): string | undefined {
   if (typeof body !== 'object' || body === null) {
     return undefined;
   }
@@ -20,13 +20,15 @@ function serverErrorMessage(body: unknown): string | undefined {
   if (typeof error !== 'object' || error === null) {
     return undefined;
   }
-  const message = new Map(Object.entries(error)).get('message');
-  return typeof message === 'string' && message !== '' ? message : undefined;
+  const value = new Map(Object.entries(error)).get(field);
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 const COULD_NOT_REACH_LINE = "Couldn't reach the server. Check your internet connection and try again.";
 const SIGNED_OUT_LINE = 'You are signed out. Sign in again, then try again.';
 const OWNER_ONLY_LINE = 'Only the owner can change this. Sign in as the owner, then try again.';
+const OTHER_SITE_LINE =
+  "This request came from another website, so it was stopped. Open this page from the app's own address, then try again.";
 const SERVER_TROUBLE_LINE = 'Something went wrong on the server. Wait a minute, then try again.';
 const NOT_UNDERSTOOD_LINE = 'The server answered in a way this page cannot read. Reload the page, then try again.';
 const DID_NOT_WORK_LINE = 'That did not work. Try again.';
@@ -37,12 +39,13 @@ function failureLine({ status, body }: { status: number; body: unknown }): strin
     return SIGNED_OUT_LINE;
   }
   if (status === 403) {
-    return OWNER_ONLY_LINE;
+    // Two different refusals share the status: the cross-site check names itself, the owner check does not.
+    return serverErrorField({ body, field: 'type' }) === 'cross_site_request' ? OTHER_SITE_LINE : OWNER_ONLY_LINE;
   }
   if (status >= 500 && status !== 502) {
     return SERVER_TROUBLE_LINE;
   }
-  return serverErrorMessage(body) ?? DID_NOT_WORK_LINE;
+  return serverErrorField({ body, field: 'message' }) ?? DID_NOT_WORK_LINE;
 }
 
 export function createAccountSetupRequest<TWire, TStatus>({

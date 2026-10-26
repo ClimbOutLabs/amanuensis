@@ -723,7 +723,8 @@ case "$cmd" in
             echo "removed"
             ;;
           *--check*)
-            if [ -s "$store" ]; then echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
+            # STUB_CALENDAR_CHECK=silent models a check that printed nothing.
+            if [ -s "$store" ]; then [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
             ;;
         esac
         exit 0

@@ -128,9 +128,9 @@ services:
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
       # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
       CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
-      # Guards the calendar account port; the same value goes to calendar-caldav. The default only keeps this
-      # throwaway smoke stack working, so set CALENDAR_ACCOUNT_SECRET in the shell for anything else.
-      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:-smoke-stack-calendar-secret-0123456789abcdef}
+      # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
+      # makes a random one for each run, and for plain `docker compose` set it in the shell (openssl rand -hex 32).
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -263,7 +263,7 @@ services:
       CALENDAR_ACCOUNT_FILE: /account/.env.calendar
       CALENDAR_ACCOUNT_PORT: '9560'
       # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
-      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:-smoke-stack-calendar-secret-0123456789abcdef}
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # A network of its own, shared with the app's `loopback` only, so the mail connector cannot reach the account port.
     networks:
       - calendar

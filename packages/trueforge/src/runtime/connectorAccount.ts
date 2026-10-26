@@ -70,9 +70,11 @@ export interface ConnectorRegistration {
   unregister(): Promise<void>;
 }
 
-const SAVE_TIMEOUT_MS = 45_000;
-const STATUS_TIMEOUT_MS = 45_000;
-const REMOVE_TIMEOUT_MS = 15_000;
+/**
+ * How long each call to the agent may take. A save or removal that times out is followed by one short re-read, and
+ * the two together stay under a minute, which is within what a proxy in front of the app allows.
+ */
+export const ACCOUNT_AGENT_TIMEOUTS_MS = { save: 45_000, status: 45_000, remove: 15_000, reconcile: 10_000 };
 
 function signInAnswer(value: unknown): SignInAnswer {
   return value === 'refused' ? 'refused' : value === 'unreachable' ? 'unreachable' : 'ok';
@@ -121,8 +123,14 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
 
   return {
     /** The saved account's state, asking the agent (which re-checks a stale sign-in answer). */
-    async getState(deps: ConnectorAccountClientDeps): Promise<ConnectorAccountState<TAccount>> {
-      const { status, body } = await call(deps, { method: 'GET', timeoutMs: STATUS_TIMEOUT_MS });
+    async getState(
+      deps: ConnectorAccountClientDeps,
+      options: { timeoutMs?: number | undefined } = {},
+    ): Promise<ConnectorAccountState<TAccount>> {
+      const { status, body } = await call(deps, {
+        method: 'GET',
+        timeoutMs: options.timeoutMs ?? ACCOUNT_AGENT_TIMEOUTS_MS.status,
+      });
       if (status !== 200) {
         deps.logger.warn(`${kind.label} account agent answered a status request with an error`);
         throw unreachable({ message: kind.statusUnreachableMessage });
@@ -135,7 +143,7 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
      * unreachable check saves nothing, and the answer is the kind's fixed plain line.
      */
     async save(deps: ConnectorAccountClientDeps, payload: unknown): Promise<ConnectorAccountState<TAccount>> {
-      const { status, body } = await call(deps, { method: 'POST', payload, timeoutMs: SAVE_TIMEOUT_MS });
+      const { status, body } = await call(deps, { method: 'POST', payload, timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.save });
       if (status === 200) {
         return stateFromBody(body);
       }
@@ -149,7 +157,7 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
 
     /** Removes the saved account through the agent; the password is deleted from the account file. */
     async remove(deps: ConnectorAccountClientDeps): Promise<ConnectorAccountState<TAccount>> {
-      const { status, body } = await call(deps, { method: 'DELETE', timeoutMs: REMOVE_TIMEOUT_MS });
+      const { status, body } = await call(deps, { method: 'DELETE', timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.remove });
       if (status !== 200) {
         deps.logger.warn(`${kind.label} account agent refused a removal with an unexpected answer`);
         throw unreachable({ message: kind.connectorUnreachableMessage });
@@ -173,16 +181,13 @@ export function connectionStateOf<TAccount>(
       : 'connected';
 }
 
-/** The connector is registered while an account is saved and its sign-in has not been refused. */
-function shouldRegisterConnector<TAccount>(state: ConnectorAccountState<TAccount>): boolean {
-  return state.connected && state.sign_in !== 'refused';
-}
-
 /**
  * Brings the connector's registration in line with the agent's real answer: registered while an account is
- * saved and working, removed when none is or its sign-in was refused. A connector left registered with no
- * working account behind it would offer tools that can only fail. Best effort: the account itself is already
- * saved or removed, so a failure here is logged, never thrown, and the next status read or boot settles it.
+ * saved, removed only when none is. A refused or unreachable sign-in on a saved account keeps the connector
+ * registered, since a mail server's passing error can look like a refusal, and detaching the connector from
+ * every chat for it would flap with each boot. A save the server refuses never saves an account, so nothing
+ * is registered for it. Best effort: the account itself is already saved or removed, so a failure here is
+ * logged, never thrown, and the next status read or boot settles it.
  */
 export async function syncConnectorRegistration<TAccount>({
   state,
@@ -196,7 +201,7 @@ export async function syncConnectorRegistration<TAccount>({
   label: string;
 }): Promise<void> {
   try {
-    if (shouldRegisterConnector(state)) {
+    if (state.connected) {
       await registration.register();
     } else {
       await registration.unregister();

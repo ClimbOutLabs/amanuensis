@@ -129,8 +129,11 @@ const calendarKind: ConnectorAccountKind<PublicCalendarAccount> = {
 const calendarClient = createConnectorAccountClient(calendarKind);
 
 /** The saved account's state, asking the agent (which re-checks a stale sign-in answer). */
-export function getCalendarAccountState(deps: ConnectorAccountClientDeps): Promise<CalendarAccountState> {
-  return calendarClient.getState(deps);
+export function getCalendarAccountState(
+  deps: ConnectorAccountClientDeps,
+  options?: { timeoutMs?: number | undefined },
+): Promise<CalendarAccountState> {
+  return calendarClient.getState(deps, options);
 }
 
 /**
@@ -205,8 +208,8 @@ export function removeCalendarAccount(deps: ConnectorAccountClientDeps): Promise
 }
 
 /**
- * Registers the Calendar connector while an account is saved and working, and removes it otherwise, so
- * "set up" for the chat defaults means a working calendar. The removal touches only a record at the
+ * Registers the Calendar connector while an account is saved, and removes it only when none is, so
+ * "set up" for the chat defaults follows the saved account. The removal touches only a record at the
  * calendar sidecar's own address, never another connector that happens to share the name.
  */
 export function syncCalendarConnectorWithAccount(deps: {

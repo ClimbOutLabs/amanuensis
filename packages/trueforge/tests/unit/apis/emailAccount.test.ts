@@ -95,7 +95,7 @@ function makeFakeStore() {
 
 describe('the email settings endpoints', () => {
   const originalAccountUrl = configuration.MAIL_EMAIL_ACCOUNT_URL;
-  const originalMcpUrl = configuration.MAIL_EMAIL_MCP_URL;
+  const originalMcpUrl = configuration.MAIL_SIDECAR_MCP_URL;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
   let app: Hono;
@@ -106,7 +106,7 @@ describe('the email settings endpoints', () => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = ACCOUNT_URL;
     // An instantly refused address: the registration sync also tries a first send-list fill
     // against it, and a real sidecar name would hang the test on DNS and retries.
-    configuration.MAIL_EMAIL_MCP_URL = 'http://127.0.0.1:1/mcp';
+    configuration.MAIL_SIDECAR_MCP_URL = 'http://127.0.0.1:1/mcp';
     const router = createEmailAccountRouter({
       logger: createLogger({ silent: true }),
       fetchImpl: agent.fetchImpl,
@@ -118,7 +118,7 @@ describe('the email settings endpoints', () => {
 
   afterEach(() => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = originalAccountUrl;
-    configuration.MAIL_EMAIL_MCP_URL = originalMcpUrl;
+    configuration.MAIL_SIDECAR_MCP_URL = originalMcpUrl;
   });
 
   async function call(input: {
@@ -189,6 +189,17 @@ describe('the email settings endpoints', () => {
     agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'unreachable' } }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('not_working');
+  });
+
+  it('keeps Email registered when the saved login is refused on a status read, since a passing mail error can look like a refusal', async () => {
+    agent.script([
+      { status: 200, body: CONNECTED },
+      { status: 200, body: { ...CONNECTED, sign_in: 'refused' } },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
+    expect([...fakeStore.rows.values()].map(row => row.name)).toEqual(['Email']);
   });
 
   it('every status read settles the registration from what the agent holds', async () => {

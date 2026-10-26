@@ -296,14 +296,39 @@ function mcpUrlFromAccountUrl({
   }
 }
 
-/** The mail sidecar's MCP endpoint, derived from its account agent's address (see MAIL_EMAIL_MCP_URL). */
-export function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+/** The mail sidecar's MCP endpoint, derived from its account agent's address. */
+function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
   return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9557 });
 }
 
-/** The calendar sidecar's MCP endpoint, derived from its account agent's address (see CALENDAR_CONNECTOR_URL). */
-export function calendarMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+/** The calendar sidecar's MCP endpoint, derived from its account agent's address. */
+function calendarMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
   return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9558 });
+}
+
+/** The mail sidecar's MCP endpoint this host owns: the installer's link, else the one derived from its account agent. */
+export function hostMailMcpUrl({
+  mailMcpUrl,
+  mailAccountUrl,
+}: {
+  mailMcpUrl: string | undefined;
+  mailAccountUrl: string | undefined;
+}): string | undefined {
+  return mailMcpUrl ?? mailMcpUrlFromAccountUrl(mailAccountUrl);
+}
+
+/**
+ * The calendar sidecar's MCP endpoint this host owns: the configured link, else the one derived from its account
+ * agent. The installer links only the account agent, so deciding from the link alone would miss the host's own Calendar.
+ */
+export function hostCalendarMcpUrl({
+  calendarMcpUrl,
+  calendarAccountUrl,
+}: {
+  calendarMcpUrl: string | undefined;
+  calendarAccountUrl: string | undefined;
+}): string | undefined {
+  return calendarMcpUrl ?? calendarMcpUrlFromAccountUrl(calendarAccountUrl);
 }
 
 /**
@@ -1200,11 +1225,21 @@ export interface SharedServerConfiguration {
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
   /**
+   * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
+   * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
+   */
+  MAIL_SIDECAR_MCP_URL: string | undefined;
+  /**
    * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
    * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
    * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
    */
   CALENDAR_CONNECTOR_URL: string | undefined;
+  /**
+   * The calendar sidecar's MCP endpoint this host owns, resolved once: CALENDAR_CONNECTOR_URL, else the one derived
+   * from CALENDAR_ACCOUNT_URL. A Calendar connector at this address is first-party. Default unset.
+   */
+  CALENDAR_SIDECAR_MCP_URL: string | undefined;
   /**
    * The calendar sidecar's account agent, such as `http://calendar-caldav:9560`. The Settings Calendar card reads
    * and changes the saved account through it, and the Calendar connector is registered only while an account is
@@ -2065,6 +2100,16 @@ const appDataDir = resolveAppDataDir({
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 
+const mailEmailMcpUrl = parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL'));
+const mailEmailAccountUrl = parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'));
+const calendarConnectorUrl = parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL'));
+const calendarAccountUrl = parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL'));
+const calendarSidecarMcpUrl = hostCalendarMcpUrl({
+  calendarMcpUrl: calendarConnectorUrl,
+  calendarAccountUrl,
+});
+const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2098,20 +2143,18 @@ const shared: SharedServerConfiguration = {
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
-      calendarUrl:
-        parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')) ??
-        calendarMcpUrlFromAccountUrl(parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL'))),
+      calendarUrl: calendarSidecarMcpUrl,
     }),
-    mailUrl:
-      parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')) ??
-      mailMcpUrlFromAccountUrl(parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'))),
+    mailUrl: mailSidecarMcpUrl,
   }),
-  MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
-  MAIL_EMAIL_ACCOUNT_URL: parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL')),
+  MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
+  MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
+  MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
-  CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
-  CALENDAR_ACCOUNT_URL: parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL')),
+  CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
+  CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
+  CALENDAR_ACCOUNT_URL: calendarAccountUrl,
   CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',

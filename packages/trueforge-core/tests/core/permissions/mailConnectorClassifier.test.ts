@@ -1,4 +1,9 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  approvalCardForGatedCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -25,6 +30,15 @@ function mailCall(
 /** A call on the Email connector that the host vouches for: the operator's own sidecar. */
 function firstPartyMailCall(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
   return { ...mailCall(tool_name, canonical_params, CLOSED_WORLD_READ), mcp_first_party: true };
+}
+
+/** A call on the Email connector with the hints it publishes, on the host's own sidecar. */
+function hostMailCall(
+  tool_name: string,
+  canonical_params: Record<string, unknown>,
+  mcp_hints: SentinelAction['mcp_hints'],
+): SentinelAction {
+  return { ...mailCall(tool_name, canonical_params, mcp_hints), mcp_first_party: true };
 }
 
 function makeCtx(): ClassifyContext {
@@ -188,7 +202,7 @@ describe('Email connector classifier', () => {
 
     it('a send to a listed address keeps the plain send card', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null });
@@ -198,7 +212,7 @@ describe('Email connector classifier', () => {
 
     it('a send to an address not on the list asks with the new-recipient card', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
@@ -211,7 +225,11 @@ describe('Email connector classifier', () => {
 
     it('one unlisted address among listed ones is still a new recipient', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], cc: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], cc: [STRANGER], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).toBe('mail_new_recipient');
@@ -220,7 +238,11 @@ describe('Email connector classifier', () => {
 
     it('matches the list ignoring case and edge space', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [' DANA@Example.com '], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall(
+          'send_email',
+          { recipients: [' DANA@Example.com '], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).not.toBe('mail_new_recipient');
@@ -228,7 +250,7 @@ describe('Email connector classifier', () => {
 
     it('with no list at all, every recipient is new', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([]),
       );
       expect(decision.reason).toBe('mail_new_recipient');
@@ -236,7 +258,7 @@ describe('Email connector classifier', () => {
 
     it('forward_email to an address not on the list asks with the new-recipient card', async () => {
       const decision = await classifyTier(
-        mailCall('forward_email', { email_id: 'e1', recipients: [STRANGER], subject: SUBJECT }, OUTBOUND_WRITE),
+        hostMailCall('forward_email', { email_id: 'e1', recipients: [STRANGER], subject: SUBJECT }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, reason: 'mail_new_recipient' });
@@ -245,25 +267,100 @@ describe('Email connector classifier', () => {
 
     it('save_draft is not a send, so it never asks about new recipients', async () => {
       const decision = await classifyTier(
-        mailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        hostMailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).toBe('connector_send');
       expect(decision.card?.plain_what).not.toContain('New recipient');
     });
+
+    it("a send through the host's own sidecar to a listed address asks under its own reason, and no answer covers it", async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('a connector that only shares the name never gets the new-recipient card or the send-list reason', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.reason).not.toBe('mail_new_recipient');
+      expect(decision.reason).not.toBe('mail_send');
+      expect(decision.card?.mail_new_recipients ?? null).toBeNull();
+    });
   });
 
   describe('unknown tools', () => {
     it('a tool the Email connector does not offer with a mail word in its name is never silent', async () => {
-      const decision = await classifyTier(mailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
+      const decision = await classifyTier(hostMailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
       expect(decision.tier).not.toBe(1);
       expect(decision.auto_deny).not.toBeNull();
     });
 
     it('a tool with no recognized name asks with a card and is never silent', async () => {
-      const decision = await classifyTier(mailCall('empty_trash', { mailbox: 'Trash' }, {}), makeCtx());
+      const decision = await classifyTier(hostMailCall('empty_trash', { mailbox: 'Trash' }, {}), makeCtx());
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'unrecognized_tool' });
       expect(decision.card).not.toBeNull();
+    });
+
+    it('the card for an unknown Email tool keeps a plain warning and shows its argument labels', async () => {
+      const decision = await classifyTier(hostMailCall('empty_trash', { mailbox: 'Trash', ids: ['1'] }, {}), makeCtx());
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+      expect(decision.card?.plain_what).toBe('Allow this new tool from Email?');
+      expect(decision.card?.outbound_text).toContain('ids (array): ["1"]');
+    });
+  });
+
+  describe('the card for a call that asks without a rule', () => {
+    it.each(['list_emails_metadata', 'get_emails_content', 'get_attachment_content', 'list_mailboxes'])(
+      'a gated %s read on the first-party Email sidecar is not called new and carries no warning',
+      tool => {
+        const card = approvalCardForGatedCall({
+          action: firstPartyMailCall(tool, { mailbox: 'INBOX' }),
+          agent_intent: null,
+        });
+        expect(card.plain_what).toBe('Allow reading your email?');
+        expect(card.cannot_be_undone).toBeNull();
+      },
+    );
+
+    it('a gated Email write keeps the warning, even on the first-party sidecar', () => {
+      const card = approvalCardForGatedCall({
+        action: firstPartyMailCall('archive_emails', { ids: ['1'] }),
+        agent_intent: null,
+      });
+      expect(card.cannot_be_undone).not.toBeNull();
+    });
+
+    it('a mail-read call on a connector named Email that is not first-party asks like any other connector', () => {
+      const card = approvalCardForGatedCall({
+        action: mailCall('list_emails_metadata', {}, CLOSED_WORLD_READ),
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Email?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a connector that only declares itself read-only still gets the warning', async () => {
+      const decision = await classifyTier(
+        mailCall('peek_trash', { mailbox: 'Trash' }, { read_only_hint: true, open_world_hint: true }),
+        makeCtx(),
+      );
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a mail-read name on another connector is still an unknown tool with the warning', () => {
+      const card = approvalCardForGatedCall({
+        action: { ...firstPartyMailCall('list_emails_metadata', {}), mcp_server_name: 'Mail Mirror' },
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Mail Mirror?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
     });
   });
 });

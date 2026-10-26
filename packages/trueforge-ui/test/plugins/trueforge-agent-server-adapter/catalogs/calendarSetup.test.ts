@@ -177,6 +177,21 @@ describe('createCalendarSetupApi', () => {
     }
   });
 
+  it('tells a cross-site refusal from an owner-only refusal, each with its own next step', async () => {
+    const crossSite = apiWith(async () =>
+      reply({ error: { message: 'Not from this app', type: 'cross_site_request' } }, 403),
+    );
+    const failure = await crossSite.api.getCalendarStatus().catch((caught: unknown) => caught);
+    expect(failure instanceof Error ? failure.message : '').toBe(
+      "This request came from another website, so it was stopped. Open this page from the app's own address, then try again.",
+    );
+    const ownerOnly = apiWith(async () => reply({ error: { message: 'Admin access required' } }, 403));
+    const other = await ownerOnly.api.getCalendarStatus().catch((caught: unknown) => caught);
+    expect(other instanceof Error ? other.message : '').toBe(
+      'Only the owner can change this. Sign in as the owner, then try again.',
+    );
+  });
+
   it('keeps the original failure as the cause of the plain line', async () => {
     const original = new TypeError('Failed to fetch');
     const { api } = apiWith(() => Promise.reject(original));

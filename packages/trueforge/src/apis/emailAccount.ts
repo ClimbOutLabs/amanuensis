@@ -9,7 +9,7 @@ import {
   mailProviderKeyForHosts,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/presets';
 import type { Logger } from 'winston';
-import configuration, { mailMcpUrlFromAccountUrl } from '../config';
+import configuration from '../config';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import { emailAccountRoutes } from '../routes/emailAccountRoutes';
 import { connectionStateOf } from '../runtime/connectorAccount';
@@ -61,7 +61,7 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
       provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : mailProviderKeyForHosts(state.account),
       providers: providerTable(),
     }),
-    readState: () => getMailAccountState(clientDeps()),
+    readState: options => getMailAccountState(clientDeps(), options),
     save: request =>
       saveMailAccount(clientDeps(), {
         provider_key: request.provider_key,
@@ -76,7 +76,7 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
     sync: state =>
       syncMailConnectorWithAccount({
         state,
-        mcpUrl: configuration.MAIL_EMAIL_MCP_URL ?? mailMcpUrlFromAccountUrl(configuration.MAIL_EMAIL_ACCOUNT_URL),
+        mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
         policyPath: configuration.MAIL_POLICY_FILE,
         mcpServerStore: deps.mcpServerStore,
         tenant_id: TENANT_ID,

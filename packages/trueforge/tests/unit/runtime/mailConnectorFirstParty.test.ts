@@ -4,9 +4,10 @@
  * must run on the host's own word that they are reads, while its sends still ask.
  */
 import { AgentSpecSchema, TurnResourceResolver } from '@truefoundry/trueforge-core/agent-session';
-import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
+import { allowsChatApproval, allowsToolGrant } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import type { IToolSet } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { createLogger } from 'winston';
+import configuration from '../../../src/config';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { registerMailConnector } from '../../../src/runtime/mailConnector';
 import { getMcpConnection, withGatewayMetadataHeaders } from '../../../src/runtime/sessionResources';
@@ -19,15 +20,18 @@ const OWNER = 'owner-1';
 describe('the Email connector on the real tool route', () => {
   let server: ApprovalTestServer;
   let sidecar: InertMcpServer;
+  const originalMailUrl = configuration.MAIL_SIDECAR_MCP_URL;
 
   beforeAll(async () => {
     server = await startApprovalTestServer();
     sidecar = await startInertMcpServer({ mail: true });
     // A terminal install: config lists the sidecar's origin as the operator's own.
     server.setFirstPartyOrigins([sidecar.origin]);
+    configuration.MAIL_SIDECAR_MCP_URL = sidecar.url;
   }, 120_000);
 
   afterAll(async () => {
+    configuration.MAIL_SIDECAR_MCP_URL = originalMailUrl;
     await sidecar.close();
     await server.close();
   });
@@ -107,6 +111,7 @@ describe('the Email connector on the real tool route', () => {
     expect(send.is_approval_required).toBe(true);
     // A send asks every time: its card never offers "Always allow this here".
     expect(allowsChatApproval(send)).toBe(false);
+    expect(allowsToolGrant(send)).toBe(false);
   }
 
   it('reads, lists and searches mail with no card right after boot, and sending still asks', async () => {
@@ -117,6 +122,67 @@ describe('the Email connector on the real tool route', () => {
     });
 
     await expectReadsRunAndSendsAsk();
+  });
+
+  it('reads with no card from an Email record an import or an edit left without its mark', async () => {
+    // Imports and Settings edits write the record with first_party false.
+    await new SqliteMcpServerStore(server.db()).upsertServer({
+      tenant_id: TENANT,
+      name: 'Email',
+      manifest: { type: 'remote', name: 'Email', url: sidecar.url, description: 'Imported.' },
+      first_party: false,
+    });
+
+    await expectReadsRunAndSendsAsk();
+  });
+
+  it('does not follow a redirect from an unmarked Email record trusted by name and address', async () => {
+    const origin = await startInertMcpServer({ mail: true });
+    const previousUrl = configuration.MAIL_SIDECAR_MCP_URL;
+    configuration.MAIL_SIDECAR_MCP_URL = origin.url;
+    server.setFirstPartyOrigins([origin.origin, sidecar.origin]);
+    sidecar.resetInvocations();
+    origin.redirectAllTo({ status: 307, to: sidecar.origin });
+    try {
+      const store = new SqliteMcpServerStore(server.db());
+      await store.upsertServer({
+        tenant_id: TENANT,
+        name: 'Email',
+        manifest: { type: 'remote', name: 'Email', url: origin.url, description: 'Imported.' },
+        first_party: false,
+      });
+      const connection = await getMcpConnection({ tenant_id: TENANT, name: 'Email', store, userRef: OWNER });
+      expect(connection?.first_party).toBe(true);
+
+      await expect(
+        emailToolSet().then(email => email.toolCallInfo({ name: 'list_mailboxes', arguments: {} }, true)),
+      ).rejects.toThrow();
+      expect(origin.requestsSeen()).toBeGreaterThan(0);
+      expect(sidecar.requestsSeen()).toBe(0);
+    } finally {
+      configuration.MAIL_SIDECAR_MCP_URL = previousUrl;
+      server.setFirstPartyOrigins([sidecar.origin]);
+      await origin.close();
+    }
+  });
+
+  it('asks for a read from an Email connector at another address, even when that origin is listed', async () => {
+    const other = await startInertMcpServer({ mail: true });
+    server.setFirstPartyOrigins([sidecar.origin, other.origin]);
+    try {
+      await new SqliteMcpServerStore(server.db()).upsertServer({
+        tenant_id: TENANT,
+        name: 'Email',
+        manifest: { type: 'remote', name: 'Email', url: other.url, description: 'Added by hand.' },
+        first_party: false,
+      });
+      const email = await emailToolSet();
+      const read = await email.toolCallInfo({ name: 'get_emails_content', arguments: { ids: ['m1'] } }, true);
+      expect({ tier: read.tier, asks: read.is_approval_required }).toEqual({ tier: 3, asks: true });
+    } finally {
+      server.setFirstPartyOrigins([sidecar.origin]);
+      await other.close();
+    }
   });
 
   it('still asks for a read when the person chose to approve every Email tool', async () => {

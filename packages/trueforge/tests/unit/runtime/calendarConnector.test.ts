@@ -1,6 +1,6 @@
 import {
-  calendarMcpUrlFromAccountUrl,
   firstPartyOriginsFor,
+  hostCalendarMcpUrl,
   parseCalendarAccountSecret,
   parseCalendarAccountUrl,
   parseCalendarConnectorUrl,
@@ -63,17 +63,31 @@ describe('CALENDAR_ACCOUNT_URL', () => {
     );
   });
 
-  it('derives the tool endpoint from the account agent address', () => {
-    expect(calendarMcpUrlFromAccountUrl('http://calendar-caldav:9560')).toBe(URL);
-    expect(calendarMcpUrlFromAccountUrl(undefined)).toBeUndefined();
-    expect(calendarMcpUrlFromAccountUrl('not a url')).toBeUndefined();
+  it('derives the tool endpoint from the account agent address when no link is configured', () => {
+    expect(hostCalendarMcpUrl({ calendarMcpUrl: undefined, calendarAccountUrl: 'http://calendar-caldav:9560' })).toBe(
+      URL,
+    );
+    expect(hostCalendarMcpUrl({ calendarMcpUrl: undefined, calendarAccountUrl: undefined })).toBeUndefined();
+    expect(hostCalendarMcpUrl({ calendarMcpUrl: undefined, calendarAccountUrl: 'not a url' })).toBeUndefined();
+  });
+
+  it('prefers the configured link over the derived one', () => {
+    expect(
+      hostCalendarMcpUrl({
+        calendarMcpUrl: 'http://own-host:9558/mcp',
+        calendarAccountUrl: 'http://calendar-caldav:9560',
+      }),
+    ).toBe('http://own-host:9558/mcp');
   });
 
   it('makes the derived endpoint first-party, so the read-only calendar tools run without asking', () => {
     expect(
       firstPartyOriginsFor({
         raw: undefined,
-        calendarUrl: calendarMcpUrlFromAccountUrl('http://calendar-caldav:9560'),
+        calendarUrl: hostCalendarMcpUrl({
+          calendarMcpUrl: undefined,
+          calendarAccountUrl: 'http://calendar-caldav:9560',
+        }),
       }),
     ).toEqual(['http://calendar-caldav:9558']);
   });

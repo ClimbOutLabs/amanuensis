@@ -5,7 +5,11 @@
  * password passes through the save call to the sidecar's account agent and is never stored here, never logged
  * and never returned; responses are built only from the account's public view.
  */
-import { ConnectorAccountError, type ConnectorAccountState } from '../runtime/connectorAccount';
+import {
+  ACCOUNT_AGENT_TIMEOUTS_MS,
+  ConnectorAccountError,
+  type ConnectorAccountState,
+} from '../runtime/connectorAccount';
 
 interface ErrorBody {
   error: { message: string; type: string };
@@ -20,7 +24,8 @@ export interface ConnectorAccountHandlerKind<TAccount, TRequest, TStatus> {
   isAvailable(): boolean;
   unavailableBody(): TStatus;
   statusBody(state: ConnectorAccountState<TAccount>): TStatus;
-  readState(): Promise<ConnectorAccountState<TAccount>>;
+  /** Reads the agent's state; a caller that is already late asks for a shorter wait. */
+  readState(options: { timeoutMs?: number | undefined }): Promise<ConnectorAccountState<TAccount>>;
   save(request: TRequest): Promise<ConnectorAccountState<TAccount>>;
   remove(): Promise<ConnectorAccountState<TAccount>>;
   /** Brings the connector's registration in line with the agent's answer; never throws. */
@@ -36,14 +41,14 @@ export function createConnectorAccountHandlers<TAccount, TRequest, TStatus>(
 ) {
   /**
    * A call that could not reach the agent may still have changed the account, such as a save that took longer
-   * than the wait. The registration follows what the agent really holds, so it is asked again and synced.
+   * than the wait. The registration follows what the agent really holds, so it is asked again, briefly, and synced.
    */
   async function reconcileAfterUnreachable(caught: ConnectorAccountError): Promise<void> {
     if (caught.failure !== 'connector_unreachable') {
       return;
     }
     try {
-      await kind.sync(await kind.readState());
+      await kind.sync(await kind.readState({ timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.reconcile }));
     } catch {
       // Still unreachable: the next status read or boot settles it.
     }
@@ -55,7 +60,7 @@ export function createConnectorAccountHandlers<TAccount, TRequest, TStatus>(
         return { status: 200, body: { data: kind.unavailableBody() } };
       }
       try {
-        const state = await kind.readState();
+        const state = await kind.readState({});
         // Every status read settles the registration, so a save that was cut off still ends up attached.
         await kind.sync(state);
         return { status: 200, body: { data: kind.statusBody(state) } };

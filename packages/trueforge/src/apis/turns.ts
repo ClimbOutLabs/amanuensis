@@ -70,6 +70,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
@@ -584,7 +585,7 @@ function createTurnResolver(deps: {
         };
       },
       setUpConnectorNames: async () =>
-        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+        setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
