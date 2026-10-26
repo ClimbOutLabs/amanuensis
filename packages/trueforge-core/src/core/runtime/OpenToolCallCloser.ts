@@ -82,11 +82,12 @@ export function unknownOutcomeCloseout(admissionProvenance: ToolAdmissionProvena
 }
 
 /**
- * A read the host itself judged, so running it again is harmless: inspection it classified, or a read of its own
- * mail or calendar, or of a connector it marked first-party. A connector's own read-only claim does not count.
+ * A read that is safe to run again because the host itself vouches for it: one of its own tools it classed as
+ * inspection, or a read of its own mail or calendar, or of a connector it marked first-party. For a connector's
+ * tool the effect comes from the connector's own annotations, so only the host's reason counts there.
  */
-function isHostVouchedRead(info: InternalToolCallInfo): boolean {
-  return info.effect === 'inspect' || isHostVouchedReadReason(info.tier_reason);
+function isSafeToRepeatRead(info: InternalToolCallInfo): boolean {
+  return (info.type === 'truefoundry-system' && info.effect === 'inspect') || isHostVouchedReadReason(info.tier_reason);
 }
 
 function unresolvedCallOutcome(
@@ -143,10 +144,10 @@ function unresolvedCallOutcome(
  * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
  *
  * When `resuming` is set, the turn goes straight to its tool step, so calls that step can safely run are left open
- * for it. That is a read the host itself vouched for (never a connector's own read-only claim), and an allowed
- * change that never reached dispatch: its tracking marker is written before dispatch and a decision with a binding
- * only exists in contexts that write it, so no marker proves the change never ran. The step still checks the
- * single-use approval again before anything is sent.
+ * for it. That is a read the host itself vouches for (never a connector's own read-only claim), and an allowed
+ * change that never reached dispatch: its tracking marker and its start event are written together before dispatch,
+ * and a decision with a binding only exists in contexts that write them, so no marker proves the change never ran.
+ * The step still checks the single-use approval again before anything is sent.
  */
 export function getClosableOpenToolCallOutcomes(
   context: ContextMessage[],
@@ -192,7 +193,7 @@ export function getClosableOpenToolCallOutcomes(
       continue;
     }
     if (toolCall.tool_info.is_approval_required !== true) {
-      if (options.resuming && isHostVouchedRead(toolCall.tool_info)) {
+      if (options.resuming && isSafeToRepeatRead(toolCall.tool_info)) {
         continue;
       }
       closable.set(
@@ -225,10 +226,8 @@ export function getClosableOpenToolCallOutcomes(
     if (
       options.resuming &&
       decision.status === 'allow' &&
-      (isHostVouchedRead(toolCall.tool_info) ||
-        (!isReadOnlyCall(toolCall.tool_info) &&
-          !preparedToolCallIds.has(toolCall.id) &&
-          !startedToolCallIds.has(toolCall.id)))
+      (isSafeToRepeatRead(toolCall.tool_info) ||
+        (!isReadOnlyCall(toolCall.tool_info) && !preparedToolCallIds.has(toolCall.id)))
     ) {
       continue;
     }

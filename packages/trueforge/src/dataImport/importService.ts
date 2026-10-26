@@ -41,7 +41,8 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
-import { reservedNameRefusalForHost } from '../mcp/hostConnectors';
+import { isReservedConnectorName } from '../mcp/firstParty';
+import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
@@ -963,6 +964,7 @@ function pluralize(count: number, singular: string, plural: string): string {
 function buildSummary({
   result,
   connectorNames,
+  leftOutConnectorNames,
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
@@ -973,6 +975,8 @@ function buildSummary({
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
+  /** Email or Calendar copies from the export that are not this computer's own; it sets those up in Settings. */
+  leftOutConnectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
   /** Rows of the left-out table: internal details from an older version that did not come over. */
@@ -1004,6 +1008,11 @@ function buildSummary({
   }
   if (connectorNames.length > 0) {
     notes.push(`Connectors (${connectorNames.join(', ')}) come without an agent. Attach them on the Agents page.`);
+  }
+  if (leftOutConnectorNames.length > 0) {
+    notes.push(
+      `${leftOutConnectorNames.join(' and ')} ${leftOutConnectorNames.length === 1 ? 'was' : 'were'} left out. This computer sets up its own Email and Calendar. Connect ${leftOutConnectorNames.length === 1 ? 'it' : 'them'} in Settings.`,
+    );
   }
   if (standInAgentNames.length === 1) {
     notes.push(
@@ -1336,14 +1345,18 @@ async function importArchive<TTransaction>(
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
-  const connectors = normalizeImportedConnectors(contents.connectors);
-  for (const connector of connectors) {
-    const reserved = reservedNameRefusalForHost({ name: connector.name, url: connector.manifest.url });
-    if (reserved !== undefined) {
-      throw new DataImportError(`${reserved} Nothing was imported.`, 400);
-    }
-  }
-  const connectorNames = new Set(connectors.map(connector => connector.name));
+  const exportedConnectors = normalizeImportedConnectors(contents.connectors);
+  // This computer sets up its own Email and Calendar, so the export's copy of one that is not at this host's address
+  // is left out. Everything else comes along, and nothing from an import is ever first-party.
+  const connectors = exportedConnectors.filter(
+    connector =>
+      !isReservedConnectorName(connector.name) ||
+      isHostOwnConnector({ name: connector.name, url: connector.manifest.url }),
+  );
+  const leftOutConnectorNames = exportedConnectors
+    .filter(connector => !connectors.includes(connector))
+    .map(connector => connector.name);
+  const connectorNames = new Set(exportedConnectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
     subject_type: 'user',
@@ -1500,6 +1513,7 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
@@ -1815,6 +1829,7 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,

@@ -277,6 +277,8 @@ export interface TierDecision {
   grant_host: string | null;
   /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
   secret_path_read: boolean;
+  /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
+  mail_send: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -314,6 +316,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     inspection: false,
     grant_host: null,
     secret_path_read: false,
+    mail_send: false,
   };
 }
 
@@ -333,6 +336,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     inspection: false,
     grant_host: null,
     secret_path_read: false,
+    mail_send: false,
   };
 }
 
@@ -393,6 +397,7 @@ export function tier3Decision(input: {
   inspection?: boolean | undefined;
   grant_host?: string | null | undefined;
   secret_path_read?: boolean | undefined;
+  mail_send?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -409,6 +414,7 @@ export function tier3Decision(input: {
     inspection: input.inspection === true,
     grant_host: input.grant_host ?? null,
     secret_path_read: input.secret_path_read === true,
+    mail_send: input.mail_send === true,
   };
 }
 

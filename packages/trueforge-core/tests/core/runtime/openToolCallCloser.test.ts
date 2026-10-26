@@ -240,7 +240,7 @@ describe('getClosableOpenToolCalls', () => {
     it('leaves reads the host vouched for, allowed or not, for the tool step to run', () => {
       const context: ContextMessage[] = [
         ...assistantWithToolCalls([
-          makeToolCall('tc-space', { effect: 'inspect' }),
+          makeToolCall('tc-space', { type: 'truefoundry-system', effect: 'inspect' }),
           makeToolCall('tc-calendar', { tier_reason: 'caldav_private_read' }),
           makeToolCall('tc-mail', { is_approval_required: true, tier_reason: 'mail_read' }),
         ]),
@@ -249,16 +249,19 @@ describe('getClosableOpenToolCalls', () => {
       expect(getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING)).toEqual(new Map());
     });
 
-    it('closes a read that only the connector says is read-only, allowed or not', () => {
+    it('closes a connector read whose only mark is its own claim or annotations, allowed or not', () => {
       const context: ContextMessage[] = [
         ...assistantWithToolCalls([
           makeToolCall('tc-claim', { read_only_hint: true }),
-          makeToolCall('tc-claim-allowed', { is_approval_required: true, read_only_hint: true }),
+          // A connector's annotations alone also stamp this effect, so it is not the host's word.
+          makeToolCall('tc-annotated', { effect: 'inspect', read_only_hint: true, open_world_hint: false }),
+          makeToolCall('tc-claim-allowed', { is_approval_required: true, effect: 'inspect' }),
         ]),
         decisionFor('tc-claim-allowed', { status: 'allow' }),
       ];
       expect([...getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING).keys()]).toEqual([
         'tc-claim',
+        'tc-annotated',
         'tc-claim-allowed',
       ]);
     });
@@ -323,7 +326,7 @@ describe('getClosableOpenToolCalls', () => {
     it('closes the same calls as before when a new message from the person is what comes next', () => {
       const context: ContextMessage[] = [
         ...assistantWithToolCalls([
-          makeToolCall('tc-space', { effect: 'inspect' }),
+          makeToolCall('tc-space', { type: 'truefoundry-system', effect: 'inspect' }),
           makeToolCall('tc-mail', { is_approval_required: true, tier_reason: 'mail_read' }),
         ]),
         decisionFor('tc-mail', { status: 'allow' }),

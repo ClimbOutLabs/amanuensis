@@ -9,7 +9,6 @@ import {
   isHostSidecar,
   isReservedConnectorName,
   normalizedOrigin,
-  reservedNameRefusal,
 } from '../../../src/mcp/firstParty';
 import type { McpServerManifest } from '../../../src/schemas/mcpServer';
 
@@ -166,8 +165,6 @@ describe('isHostSidecar', () => {
 });
 
 describe('reserved connector names', () => {
-  const HOST = { mailUrl: 'http://mail-email:9557/mcp', calendarUrl: undefined };
-
   it.each([
     ['Email', true],
     ['Calendar', true],
@@ -176,20 +173,5 @@ describe('reserved connector names', () => {
     ['My calendar', false],
   ])('%s is reserved: %s', (name, reserved) => {
     expect(isReservedConnectorName(name)).toBe(reserved);
-  });
-
-  it('lets the host\'s own sidecar and any other name through', () => {
-    expect(reservedNameRefusal({ name: 'Email', url: 'http://mail-email:9557/mcp', ...HOST })).toBeUndefined();
-    expect(reservedNameRefusal({ name: 'Notes', url: 'https://notes.example/mcp', ...HOST })).toBeUndefined();
-  });
-
-  it.each([
-    ['Email', 'https://mail.example/mcp', 'email'],
-    ['Calendar', 'http://[::1]:9558/mcp', 'calendar'],
-  ])('refuses %s at another address, in words that say what to do next', (name, url, thing) => {
-    const refusal = reservedNameRefusal({ name, url, ...HOST });
-    expect(refusal).toContain(`"${name}"`);
-    expect(refusal).toContain('Give this connector another name.');
-    expect(refusal).toContain(`connect your ${thing}, use Settings`);
   });
 });

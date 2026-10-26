@@ -2122,21 +2122,47 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       configuration.CALENDAR_CONNECTOR_URL = originalCalendar;
     });
 
-    it.each([
-      ['Email', 'https://mail.example.com/mcp'],
-      ['Calendar', HOST_MAIL_URL],
-    ])('refuses a connector named %s at %s, says what to do, and writes nothing', async (name, url) => {
+    async function importNames(name: string[]): Promise<{ names: string[]; summary: string; marks: boolean[] }> {
       const { source, archive } = await seededArchive();
       const target = await makeInstance('target-reserved-name');
       try {
-        const tampered = await withConnectors(archive, [connectorRecord(name, { name: 'borrowed-name', url }, true)]);
-        const error = await importError(target, tampered);
-        expect(error).toBeInstanceOf(DataImportError);
-        expect(error).toMatchObject({ status: 400 });
-        const message = error instanceof Error ? error.message : '';
-        expect(message).toContain(`"${name}"`);
-        expect(message).toContain('Give this connector another name.');
-        expect(message).toContain('Nothing was imported.');
+        const records = [
+          connectorRecord('Email', { name: 'email-sidecar', url: 'https://mail.example.com/mcp' }, true),
+          connectorRecord('Calendar', { name: 'calendar-sidecar', url: HOST_MAIL_URL }, true),
+          connectorRecord('plain-one', { url: 'https://plain.example.com/mcp' }),
+        ].filter(record => name.includes(record.name));
+        const result = await runDataImport(importDeps(target), importRequest(await withConnectors(archive, records)));
+        const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
+        return {
+          names: servers.map(server => server.name).sort(),
+          summary: result.summary,
+          marks: servers.map(server => server.first_party),
+        };
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    }
+
+    it("leaves out an Email or Calendar that is not at this host's address, brings in the rest, and says so", async () => {
+      const imported = await importNames(['Email', 'Calendar', 'plain-one']);
+
+      expect(imported.names).toEqual(['plain-one']);
+      expect(imported.summary).toContain('Email and Calendar were left out.');
+      expect(imported.summary).toContain('Connect them in Settings.');
+    });
+
+    it('says the same in plain words for one left-out connector, and for a dry run', async () => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-dry');
+      try {
+        const tampered = await withConnectors(archive, [
+          connectorRecord('Email', { name: 'email-sidecar', url: 'https://mail.example.com/mcp' }, true),
+        ]);
+        const dry = await runDataImport(importDeps(target), { ...importRequest(tampered), dryRun: true });
+        expect(dry.summary).toContain(
+          'Email was left out. This computer sets up its own Email and Calendar. Connect it in Settings.',
+        );
         expect(await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined })).toEqual([]);
       } finally {
         await source.close();
@@ -2144,20 +2170,29 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       }
     });
 
-    it('brings in Email at the address the host was set up with, without a first-party mark', async () => {
+    it('brings in Email at the address this host was set up with, without a first-party mark', async () => {
       const { source, archive } = await seededArchive();
       const target = await makeInstance('target-reserved-host');
       try {
         const imported = await withConnectors(archive, [
           connectorRecord('Email', { name: 'email-sidecar', url: HOST_MAIL_URL }, true),
         ]);
-        await runDataImport(importDeps(target), importRequest(imported));
+        const result = await runDataImport(importDeps(target), importRequest(imported));
         const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
         expect(servers.map(server => [server.name, server.first_party])).toEqual([['Email', false]]);
+        expect(result.summary).not.toContain('left out.');
       } finally {
         await source.close();
         await target.close();
       }
+    });
+
+    it("imports onto a host with no Email set up by leaving the export's Email out", async () => {
+      configuration.MAIL_SIDECAR_MCP_URL = undefined;
+      const imported = await importNames(['Email', 'plain-one']);
+
+      expect(imported.names).toEqual(['plain-one']);
+      expect(imported.marks).toEqual([false]);
     });
   });
 

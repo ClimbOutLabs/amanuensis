@@ -129,7 +129,7 @@ import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
-import { isHostMailSendReason, isHostVouchedReadReason } from '../permissions/connectorTrust';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -2221,8 +2221,9 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      // Only a send the host itself judged to go through its own Email sidecar touches the Email list.
-      if (call === undefined || !isHostMailSendReason(call.tool_info.tier_reason)) {
+      // Only a send the host itself judged to go through its own Email sidecar touches the Email list, however the
+      // card was later reworded.
+      if (call?.tool_info.mail_send !== true) {
         continue;
       }
       const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];

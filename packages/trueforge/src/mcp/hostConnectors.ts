@@ -1,5 +1,5 @@
 import configuration from '../config';
-import { isHostSidecar, isReservedConnectorName, reservedNameRefusal } from './firstParty';
+import { isHostSidecar, isReservedConnectorName } from './firstParty';
 
 /**
  * Whether a connector record is the host's own Email or Calendar sidecar, judged by the addresses the host
@@ -7,16 +7,6 @@ import { isHostSidecar, isReservedConnectorName, reservedNameRefusal } from './f
  */
 export function isHostOwnConnector({ name, url }: { name: string; url: string }): boolean {
   return isHostSidecar({
-    name,
-    url,
-    mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-    calendarUrl: configuration.CALENDAR_CONNECTOR_URL,
-  });
-}
-
-/** The plain-words refusal for a connector that takes a reserved name without being the host's sidecar. */
-export function reservedNameRefusalForHost({ name, url }: { name: string; url: string }): string | undefined {
-  return reservedNameRefusal({
     name,
     url,
     mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
