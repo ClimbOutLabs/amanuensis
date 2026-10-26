@@ -1440,4 +1440,9 @@ describe('a search follows the same whole-link rule as a lookup', () => {
     const decision = await classifyTier(fetchOf(`${PAGE} as shown`), ctxWithPage());
     expect(decision).toMatchObject({ tier: 3, reason: SEARCH_STEERED_REASON });
   });
+
+  it('asks when the link carries an ideographic space after it, which a reader keeps', async () => {
+    const decision = await classifyTier(fetchOf(`${PAGE}\u3000`), ctxWithPage());
+    expect(decision).toMatchObject({ tier: 3, reason: SEARCH_STEERED_REASON });
+  });
 });

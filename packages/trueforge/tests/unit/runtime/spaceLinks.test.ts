@@ -319,6 +319,81 @@ describe('a space link value that carries more than the link itself', () => {
   });
 });
 
+describe('a space link value that ends in a space only some readers drop', () => {
+  // Whitespace to the language's own trim, but a URL reader keeps each of these and
+  // percent-encodes it into the link it opens, so the value is a longer link than the
+  // one the chat saw. The plain space is the only ending every reader drops.
+  const WIDER_SPACES: { name: string; char: string }[] = [
+    { name: 'an ideographic space', char: '\u3000' },
+    { name: 'a line separator', char: '\u2028' },
+    { name: 'a non-breaking space', char: '\u00A0' },
+    { name: 'a byte order mark', char: '\uFEFF' },
+  ];
+
+  describe.each(WIDER_SPACES)('$name', ({ char }) => {
+    it('refuses an HTML picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `<img src="${SEEN}${char}" alt="Fox">`, format: 'html', web_search })).toContain(
+        "Open the picture's page first",
+      );
+    });
+
+    it('refuses a markdown picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `![Fox](${SEEN}${char})`, format: 'markdown', web_search })).toContain(
+        "Open the picture's page first",
+      );
+    });
+
+    it('refuses a CSS picture whose link ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(
+        refusalOf({
+          body: `<div style="background-image: url('${SEEN}${char}')">Fox</div>`,
+          format: 'html',
+          web_search,
+        }),
+      ).toContain("Open the picture's page first");
+    });
+
+    it('refuses a link whose address ends in it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(refusalOf({ body: `<a href="${SEEN}${char}">Fox</a>`, format: 'html', web_search })).toContain(
+        'Use the link exactly as it appeared',
+      );
+    });
+
+    it('keeps a srcset picture whose link ends in it, since a candidate is read only up to the space after it', () => {
+      const web_search = webSearchAfterOpeningPage();
+      expect(
+        refusalOf({ body: `<img src="${SEEN}" srcset="${SEEN}${char} 2x">`, format: 'html', web_search }),
+      ).toBeUndefined();
+    });
+  });
+});
+
+describe('a markdown picture written as a reference to a definition', () => {
+  const UNSEEN_HOST_PICTURE = 'https://images.picturestack.net/fox.jpg';
+
+  it('refuses a reference picture on a site nothing in the chat named', () => {
+    const web_search = createWebSearchTurnState();
+    const body = `![Fox][fox]\n\n[fox]: ${UNSEEN_HOST_PICTURE}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toContain("Open the picture's page first");
+  });
+
+  it('keeps a reference picture an opened page showed', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const body = `![Fox][fox]\n\n[fox]: ${SEEN}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toBeUndefined();
+  });
+
+  it('still reads a definition a link uses as a link, not a picture', () => {
+    const web_search = webSearchAfterOpeningPage();
+    const body = `[Fox][fox]\n\n[fox]: ${SEEN}`;
+    expect(refusalOf({ body, format: 'markdown', web_search })).toBeUndefined();
+  });
+});
+
 describe('a space link carrying a private detail of the person', () => {
   const OWN_ADDRESS = 'sam@postbox.net';
   const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;

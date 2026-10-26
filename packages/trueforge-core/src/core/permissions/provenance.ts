@@ -87,7 +87,7 @@ function isWholeUrl(value: string): boolean {
   return WHOLE_HOST.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(value) || /^www\.\S+$/i.test(value);
 }
 
-/** A link an outbound value names, and whether it is the whole value, edge whitespace aside. */
+/** A link an outbound value names, and whether it is the whole value, the edge characters a reader drops aside. */
 interface NamedLink {
   url: string;
   /**
@@ -98,9 +98,32 @@ interface NamedLink {
   whole: boolean;
 }
 
+/**
+ * A value with the edge characters a URL reader drops removed: the C0 controls and the space at
+ * either end. Wider spaces and format characters stay, since a reader keeps them.
+ */
+function readerTrimmed(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
 /** The links an outbound value names: the value itself when it is one, else those written inside it. */
 function linksOf(value: string): NamedLink[] {
-  const trimmed = value.trim();
+  const trimmed = readerTrimmed(value);
+  // Wider spaces and format characters survive the reader's edge trim, which drops only the
+  // characters above, and are percent-encoded into the link the reader opens. A value ending
+  // in one therefore opens as a different link from the trimmed text, so it is not the link
+  // itself: only the links written inside it count, and none of them is whole.
+  if (/^\s/.test(trimmed) || /\s$/.test(trimmed)) {
+    return urlsInText(value).map(url => ({ url, whole: false }));
+  }
   return isWholeUrl(trimmed) ? [{ url: trimmed, whole: true }] : urlsInText(value).map(url => ({ url, whole: false }));
 }
 

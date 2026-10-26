@@ -85,6 +85,18 @@ describe('space picture service', () => {
     expect(seen).toEqual([PICTURE]);
   });
 
+  it('serves a picture a stored space names through a reference definition', async () => {
+    const { get } = service({ body: `![chart][c]\n\n[c]: ${PICTURE}` });
+    await expect(get(PICTURE)).resolves.toEqual({ status: 'shown', bytes: PNG, mime: 'image/png' });
+  });
+
+  it('serves the recorded picture when the stored page wrote its link with a trailing space', async () => {
+    // The page rewrite hands the route the link as the write-time check saved it, without the
+    // trailing space the author left in the attribute; that is the value asked for here.
+    const { get } = service({ body: `<img src="${PICTURE} ">`, format: 'html' });
+    await expect(get(PICTURE)).resolves.toEqual({ status: 'shown', bytes: PNG, mime: 'image/png' });
+  });
+
   it('refuses a URL that no stored space of the owner contains, without fetching it', async () => {
     const { seen, get } = service({ body: `![chart](${PICTURE})` });
     await expect(get('https://cdn.photos.test/other.png')).resolves.toEqual({ status: 'not_in_spaces' });

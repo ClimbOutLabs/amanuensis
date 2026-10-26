@@ -144,6 +144,46 @@ describe('checkLookup when a value carries more than the link itself', () => {
   });
 });
 
+describe('checkLookup when a value ends in a space only some readers drop', () => {
+  // Each of these is whitespace to the language's own trim, but a URL reader keeps it and
+  // percent-encodes it into the link it opens, so the value a reader opens is a longer link
+  // than the one that was recorded. Only the plain space is dropped by every reader.
+  const WIDER_SPACES: { name: string; char: string }[] = [
+    { name: 'an ideographic space', char: '\u3000' },
+    { name: 'a line separator', char: '\u2028' },
+    { name: 'a non-breaking space', char: '\u00A0' },
+    { name: 'a byte order mark', char: '\uFEFF' },
+  ];
+
+  function searchReturnedPicture(): ChatProvenance {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url: PAGE_LINK }] })] });
+    return provenance;
+  }
+
+  describe.each(WIDER_SPACES)('$name', ({ char }) => {
+    it('reports an embed link with it after the link, since the reader opens a longer link', () => {
+      const check = checkOf({ provenance: searchReturnedPicture(), url: `${PAGE_LINK}${char}`, use: 'embed' });
+      expect(check.steered).toEqual([PAGE_LINK]);
+    });
+
+    it('reports a lookup link copied from read content with it after the link', () => {
+      const provenance = emptyChatProvenance();
+      recordUntrustedText({ provenance, text: PAGE_LINK, source: 'page' });
+      const check = checkOf({ provenance, url: `${PAGE_LINK}${char}`, use: 'lookup' });
+      expect(check.steered).toEqual([PAGE_LINK]);
+    });
+
+    it('reports a lookup link the person gave with it after the link, when read content named its site', () => {
+      const provenance = emptyChatProvenance();
+      recordPersonText({ provenance, text: `My fox picture: ${PAGE_LINK}` });
+      recordUntrustedText({ provenance, text: 'More foxes at upload.wikimedia.org', source: 'page' });
+      const check = checkOf({ provenance, url: `${PAGE_LINK}${char}`, use: 'lookup' });
+      expect(check.steered).toEqual([PAGE_LINK]);
+    });
+  });
+});
+
 describe('checkLookup private details', () => {
   const OWN_ADDRESS = 'sam@postbox.net';
   const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;
