@@ -115,7 +115,8 @@ export function BugReportDialog() {
 
 function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: BugReportDialogControl }) {
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
-  const { open, setOpen, returnFocusRef } = dialog;
+  const { open, setOpen, registerDialog, returnFocusRef } = dialog;
+  useEffect(registerDialog, [registerDialog]);
   const [description, setDescription] = useState('');
   // Off by default and reset with the modal: including the chat is a per-report choice, never sticky.
   const [includeChat, setIncludeChat] = useState(false);

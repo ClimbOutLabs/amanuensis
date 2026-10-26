@@ -9,6 +9,7 @@ import { AgentConfigInstructionsProvider } from '../atoms/draft/AgentConfigInstr
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { DraftSpecPreferenceBridge } from '../atoms/draft/DraftSpecPreferenceBridge.js';
 import { cn } from '../atoms/lib/cn.js';
+import { CompactHostProvider } from '../atoms/lib/CompactLayoutContext.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
@@ -374,9 +375,11 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
         onRemoteIdChange={handleRemoteIdChange}
         {...providerRest}
       >
-        {layoutTree}
-        {/* Once, outside any layout or menu, so every BugReportButton can open it. */}
-        <BugReportDialog />
+        <CompactHostProvider>
+          {layoutTree}
+          {/* Once, outside any layout or menu, so every BugReportButton can open it. */}
+          <BugReportDialog />
+        </CompactHostProvider>
       </ChatProviderFromShell>
     </ShellModeProvider>
   );

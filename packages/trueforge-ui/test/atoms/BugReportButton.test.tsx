@@ -149,6 +149,53 @@ describe('BugReportButton and BugReportDialog', () => {
     expect(getBugReportHandoff).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores a click made while no dialog is mounted, so the form does not pop up later', async () => {
+    const view = render(
+      <BugReportProvider api={makeApi()}>
+        <RuntimeHarness messages={[]}>
+          <BugReportButton />
+        </RuntimeHarness>
+      </BugReportProvider>,
+    );
+
+    fireEvent.click(openButton());
+    view.rerender(
+      <BugReportProvider api={makeApi()}>
+        <Page />
+      </BugReportProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Report a bug' });
+    expect(document.querySelector('dialog[open]')).toBeNull();
+    expect(getBugReportHandoff).not.toHaveBeenCalled();
+  });
+
+  it('closes the form when the dialog unmounts, so a new one does not start open', async () => {
+    const view = render(
+      <BugReportProvider api={makeApi()}>
+        <Page />
+      </BugReportProvider>,
+    );
+    fireEvent.click(openButton());
+    await screen.findByRole('dialog', { name: 'Report a bug' });
+
+    view.rerender(
+      <BugReportProvider api={makeApi()}>
+        <RuntimeHarness messages={[]}>
+          <BugReportButton />
+        </RuntimeHarness>
+      </BugReportProvider>,
+    );
+    view.rerender(
+      <BugReportProvider api={makeApi()}>
+        <Page />
+      </BugReportProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Report a bug' });
+    expect(document.querySelector('dialog[open]')).toBeNull();
+  });
+
   it('returns focus to the button that opened it', async () => {
     render(
       <BugReportProvider api={makeApi()}>
