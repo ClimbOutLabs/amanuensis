@@ -1,7 +1,9 @@
 // The one sign-in check: ask the calendar server who this login is, the way the tool server's own first
 // step does. Returns one fixed word and never anything the server said, because a server's answer can
 // echo the login.
+import { Buffer } from 'node:buffer';
 import { request as httpsRequest } from 'node:https';
+import { URL } from 'node:url';
 
 import { allowedAddresses, hostOf } from './account.mjs';
 

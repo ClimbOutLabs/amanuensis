@@ -10,6 +10,7 @@
 //   server's own text never reaches the app.
 // - Nothing is logged: the server prints no request lines, and an unexpected failure prints only the
 //   exception's type name.
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,

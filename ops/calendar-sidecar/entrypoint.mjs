@@ -4,7 +4,7 @@
 // started at all, so no calendar tools are offered.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 
 import { allowedAddresses, hostOf, parseAccount } from './account.mjs';
 import {

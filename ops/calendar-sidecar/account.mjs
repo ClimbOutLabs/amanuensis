@@ -4,6 +4,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
+import { URL } from 'node:url';
 
 export const ACCOUNT_FILE_HEADER =
   '# Written by the installer for the Calendar connector. Keep it private: it holds the app password.';
