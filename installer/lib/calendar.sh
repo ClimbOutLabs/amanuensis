@@ -1,9 +1,11 @@
 # shellcheck shell=bash
-# Optional calendar connection for one instance. The calendar service reads its own file of settings, and the
-# instance only learns where that service is. The app password lives in that file and nowhere else.
+# Optional calendar connection for one instance. The calendar connector keeps the account in a volume it owns,
+# and the installer saves it there through the connector's account agent. The app password lives in that volume
+# and nowhere else.
 
 CALENDAR_SIDECAR_URL=http://calendar-caldav:9558/mcp
 CALENDAR_SERVICE=calendar-caldav
+CALENDAR_AGENT=/app/agent.mjs
 
 # The answers of this run. Nothing is written until calendar_apply or calendar_remove.
 CAL_PROVIDER=
@@ -39,21 +41,21 @@ calendar_provider_name() { # key -> the name a person sees
   esac
 }
 
-# Built-in addresses, each from the provider's own help pages. Empty when there is none, and then the address is typed.
-# iCloud and Zoho have no verified address here, so they go under Other.
+# Built-in addresses, each from the provider's own help pages. One row per address: the provider key, or
+# gmx:DOMAIN for GMX because its address depends on the domain, then the address. A provider with no row, and GMX
+# with another domain, has its address typed. iCloud and Zoho have no verified address here, so they go under Other.
+# The Settings Calendar card reads the same table from packages/trueforge-core (CALDAV_PROVIDER_PRESETS); a test there
+# fails if the two differ.
+CALENDAR_PRESETS='fastmail https://caldav.fastmail.com/dav/
+yahoo https://caldav.calendar.yahoo.com
+gmx:gmx.com https://caldav.gmx.com/
+gmx:gmx.net https://caldav.gmx.net/
+webde https://caldav.web.de'
+
 calendar_preset_url() { # provider email
-  local domain=${2##*@}
-  case "$1" in
-    fastmail) echo 'https://caldav.fastmail.com/dav/' ;;
-    yahoo) echo 'https://caldav.calendar.yahoo.com' ;;
-    gmx)
-      case "$(lowercase "$domain")" in
-        gmx.com) echo 'https://caldav.gmx.com/' ;;
-        gmx.net) echo 'https://caldav.gmx.net/' ;;
-      esac
-      ;;
-    webde) echo 'https://caldav.web.de' ;;
-  esac
+  local key=$1
+  if [ "$key" = gmx ]; then key=gmx:$(lowercase "${2##*@}"); fi
+  printf '%s\n' "$CALENDAR_PRESETS" | awk -v key="$key" '$1 == key { print $2 }'
 }
 
 calendar_is_gmail() { # email
@@ -81,6 +83,8 @@ calendar_url_problem() {
         echo "The calendar address must not hold a name or password. Remove the part before the @, then type it again."
       elif ! matches_whole "$1" '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/@%+=,:-]*)?$'; then
         echo "The calendar address has a character that is not allowed. Copy the address from your provider's help page."
+      elif [[ ${host%%:*} != *.* ]]; then
+        echo "The calendar address needs a full server name with dots, such as caldav.example.com. Copy the address from your provider's help page."
       fi
       ;;
     *) echo "The calendar address must start with https://. Type the full address, for example https://caldav.fastmail.com/dav/." ;;
@@ -110,7 +114,7 @@ calendar_require_flags() {
 }
 
 # The app password is read without echo on a terminal, or taken from its line of the input. It never goes on the
-# command line, and it is cleared once the file is written.
+# command line, and it is cleared once it is saved.
 calendar_ask_password() {
   local tries=0 problem
   if [ "$OPT_CAL_PASSWORD_STDIN" = 1 ]; then
@@ -206,62 +210,97 @@ calendar_collect() { # install|instance
   ui_line "Calendar: $(calendar_provider_name "$CAL_PROVIDER") at $CAL_URL, signed in as $CAL_USER."
 }
 
-calendar_start_command() { # name
-  local dir
-  dir=$(instance_dir "$1")
-  printf 'docker compose --project-name aman-%s --project-directory %s -f %s/compose.yaml up -d %s' \
-    "$1" "$dir" "$dir" "$CALENDAR_SERVICE"
-}
-
 # The plan row for the install. Nothing is shown when the calendar was not asked for or was skipped.
 calendar_plan_row() {
   [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ] && [ -n "$CAL_TARGET" ] || return 0
   plan_add todo "Connect the calendar of $CAL_EMAIL to instance $CAL_TARGET" \
-    "The calendar service keeps the app password in a file only you can read." \
-    "Then start the calendar service: $(calendar_start_command "$CAL_TARGET")"
+    "The calendar connector keeps the app password in its own private storage."
 }
 
-# Writes the calendar file of the instance, adds the connector line to its settings, and restarts only that instance
-# when the line was new. The calendar service itself is started by the person, with the printed command.
+# Saves the account in the connector, checks the sign-in once, and restarts the app so it learns the calendar is set
+# up. The connector starts with the instance, and its tool server starts by itself when the account is saved. A failed
+# check is reported and the saved account stays, so the next step is only to fix the password.
 calendar_apply() { # name
-  local name=$1 dir changed=0
-  dir=$(instance_dir "$name")
-  calendar_write_file "$dir"
-  if calendar_link_add "$dir/.env"; then changed=1; fi
+  local name=$1
+  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  calendar_service_up "$name"
+  calendar_agent_write "$name"
+  calendar_check "$name"
   CAL_PASSWORD=
-  if [ "$changed" = 1 ]; then
-    instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-    instance_up "$name" recreate
+  calendar_app_restart "$name"
+  ui_ok "Calendar connected to instance $name."
+}
+
+# Starts the connector alone, so an instance from before the connector ran without it picks it up.
+calendar_service_up() { # name
+  local name=$1
+  if ! dc "$name" up -d --no-deps "$CALENDAR_SERVICE" >/dev/null 2>&1; then
+    die "The calendar connector could not start. Run: install.sh instance calendar $name"
   fi
-  ui_ok "Calendar connected to instance $name. Start the calendar service with:"
-  ui_line "$(calendar_start_command "$name")"
 }
 
-calendar_write_file() { # instance folder
-  local dir=$1
-  ensure_private_dir "$dir"
-  {
-    printf 'CALDAV_URL=%s\n' "$CAL_URL"
-    printf 'CALDAV_USERNAME=%s\n' "$CAL_USER"
-    printf 'CALDAV_PASSWORD=%s\n' "$CAL_PASSWORD"
-    printf 'CALDAV_USER_EMAIL=%s\n' "$CAL_EMAIL"
-  } | write_if_changed "$dir/.env.calendar" 600 || true
+# Saves the account into the connector's volume through its account agent, run as a one-off container on the
+# instance's own compose project. The password travels on stdin only, never on a command line or in a host file.
+# The agent refuses an address it may not sign in to, and the installer says so in plain words.
+calendar_agent_write() { # name
+  local name=$1 rc=0
+  calendar_env_text | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) die "That calendar address cannot be used here. Use the address your provider gives you, then run: install.sh instance calendar $name" ;;
+    *) die "The calendar account could not be saved in the connector. Run: install.sh instance calendar $name" ;;
+  esac
 }
 
-# Adds the connector line below the installer's block, where the owner's own settings go. Returns 0 when it changed.
-calendar_link_add() { # env file
-  local env=$1
-  if [ "$(env_key_values "$env" CALENDAR_CONNECTOR_URL)" = "$CALENDAR_SIDECAR_URL" ]; then return 1; fi
-  env_drop_outside_block "$env" CALENDAR_CONNECTOR_URL
-  {
-    cat "$env"
-    [ -z "$(tail -c1 "$env")" ] || printf '\n'
-    printf 'CALENDAR_CONNECTOR_URL=%s\n' "$CALENDAR_SIDECAR_URL"
-  } | write_if_changed "$env" 600 || true
-  return 0
+# Deletes the account in the connector's volume through its account agent. Returns 0 when the compose file has no
+# connector service, so an instance from before the connector still removes cleanly.
+calendar_agent_remove() { # name
+  local name=$1 dir
+  dir=$(instance_dir "$name")
+  grep -q "^  $CALENDAR_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 0
+  if ! dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --remove >/dev/null 2>&1; then
+    die "The saved app password could not be removed from the connector. Run: install.sh instance calendar $name --remove"
+  fi
 }
 
-# Returns 0 when a connector line was there and is now removed.
+# Restarts only the app, so it registers the Calendar connector from the saved account, or drops it.
+calendar_app_restart() { # name
+  local name=$1
+  if ! dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app >/dev/null 2>&1; then
+    ui_warn "The app could not restart to pick up the calendar change." "Run: aman doctor instance --fix"
+  fi
+}
+
+# The account in the agent's file format. The agent checks every value again before it stores anything.
+calendar_env_text() {
+  printf '%s\n' \
+    "CALDAV_URL=$CAL_URL" \
+    "CALDAV_USERNAME=$CAL_USER" \
+    "CALDAV_PASSWORD=$CAL_PASSWORD" \
+    "CALDAV_USER_EMAIL=$CAL_EMAIL"
+}
+
+# Signs in once, from inside the connector, with the saved account. It prints one word: ok, login (the server
+# refused the sign-in), server (the server could not be reached or trusted) or blocked.
+calendar_check() { # name
+  local name=$1 answer
+  answer=$(dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  case "$answer" in
+    ok)
+      ui_ok "Signed in to $CAL_URL as $CAL_USER. The calendar connector can read this calendar."
+      ;;
+    login)
+      ui_warn "$CAL_URL did not accept this login and app password." \
+        "Check both, make a new app password if needed, then run: install.sh instance calendar $name"
+      ;;
+    *)
+      ui_warn "Could not reach $CAL_URL, or its security certificate was refused." \
+        "Check the calendar address and this computer's internet connection, then run: install.sh instance calendar $name"
+      ;;
+  esac
+}
+
+# Drops the connector line an older installer wrote below its block. Returns 0 when a line was there.
 calendar_link_remove() { # env file
   local had
   had=$(env_key_values "$1" CALENDAR_CONNECTOR_URL)
@@ -271,7 +310,7 @@ calendar_link_remove() { # env file
 }
 
 cmd_instance_calendar() {
-  local name=${OPT_NAME:-} dir changed=0
+  local name=${OPT_NAME:-} dir
   [ -n "$name" ] || usage_die "usage: install.sh instance calendar <name> [--remove]"
   valid_name "$name" || usage_die "$(name_problem "$name")"
   reg_exists "$name" || die "Instance $name does not exist."
@@ -282,15 +321,17 @@ cmd_instance_calendar() {
   warn_if_installed_older
   dir=$(instance_dir "$name")
   if [ "$OPT_REMOVE" = 1 ]; then
-    if [ -f "$dir/.env.calendar" ]; then rm -f -- "$dir/.env.calendar"; fi
-    if calendar_link_remove "$dir/.env"; then changed=1; fi
-    if [ "$changed" = 1 ]; then
-      instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-      instance_up "$name" recreate
-    fi
+    # The saved password is deleted for good from the connector's volume, through its account agent.
+    # The file an older installer kept in the instance folder, and its settings line, go too.
+    calendar_agent_remove "$name"
+    rm -f -- "$dir/.env.calendar"
+    calendar_link_remove "$dir/.env" || true
+    calendar_app_restart "$name"
     ui_ok "The Calendar connector is removed. Any saved app password has been deleted from this computer."
     return 0
   fi
+  [ -n "$REL_CALENDAR_TAG" ] ||
+    die "The installed version of Aman has no calendar connector yet. Run install.sh upgrade first, then run this command again."
   calendar_collect instance
   if [ -n "$CAL_SKIP" ]; then return 0; fi
   calendar_apply "$name"

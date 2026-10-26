@@ -122,6 +122,8 @@ services:
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
       # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+      # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
+      CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -241,19 +243,23 @@ services:
 
   # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private to the
   # Compose network: `expose` only, never `ports`. The server reaches it as http://calendar-caldav:9558/mcp.
-  # Calendar credentials come only from this optional file, which is git-ignored.
+  # The calendar login lives in a volume this sidecar owns, which the Settings Calendar card saves
+  # through the sidecar's account agent on port 9560. The tool server runs only while a login is saved.
   calendar-caldav:
     build:
       context: ./ops/calendar-sidecar
-    env_file:
-      - path: ./.env.calendar
-        required: false
     environment:
       # Only these tools are offered. Writes need the confirm token, not an interactive prompt.
       CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
       ELICITATION: 'false'
+      # The account agent: the account file it owns and its private-network port.
+      CALENDAR_ACCOUNT_FILE: /account/.env.calendar
+      CALENDAR_ACCOUNT_PORT: '9560'
+    volumes:
+      - calendar-account:/account
     expose:
       - '9558'
+      - '9560'
     restart: unless-stopped
 
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
@@ -341,6 +347,8 @@ volumes:
   mail-email-data:
   # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
   mail-account:
+  # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
+  calendar-account:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).

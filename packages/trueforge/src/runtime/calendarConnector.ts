@@ -49,3 +49,17 @@ export async function registerCalendarConnectorAtBoot({
     logger.warn('Calendar connector could not be registered', extractErrorLogFields(error));
   }
 }
+
+/**
+ * Removes the Calendar connector's registration, when the saved account is removed. A connector left
+ * registered with no account behind it would offer calendar tools that can only fail.
+ */
+export async function unregisterCalendarConnector({
+  mcpServerStore,
+  tenant_id,
+}: {
+  mcpServerStore: Pick<IMcpServerStore, 'deleteServer'>;
+  tenant_id: string;
+}): Promise<void> {
+  await mcpServerStore.deleteServer({ tenant_id, name: CALDAV_SERVER_NAME });
+}

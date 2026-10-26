@@ -1,10 +1,12 @@
-// Starts the Dockerfile's own CMD (supergateway around the real @ni-c/caldav-mcp) and
-// checks the HTTP tool list. No CalDAV server is needed: tools/list never contacts one.
+// Starts the Dockerfile's own CMD (the entrypoint, which runs supergateway around the real
+// @ni-c/caldav-mcp once an account is saved) and checks the HTTP tool list. No CalDAV server is
+// needed: tools/list never contacts one.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -23,26 +25,6 @@ const CALENDAR_TOOLS = [
   'respond_to_event',
 ];
 
-// The Dockerfile's CMD, with /app mapped to this folder, a free port and loopback only.
-function serverCommand(port) {
-  const dockerfile = readFileSync(resolve(SIDECAR_ROOT, 'Dockerfile'), 'utf8');
-  const cmdLine = dockerfile.split('\n').find(line => line.startsWith('CMD '));
-  if (cmdLine === undefined) {
-    throw new Error('Dockerfile has no CMD line');
-  }
-  const argv = JSON.parse(cmdLine.slice('CMD '.length)).map(arg => arg.replaceAll('/app', SIDECAR_ROOT));
-  const withValue = (flag, value) => {
-    const index = argv.indexOf(flag);
-    if (index === -1) {
-      throw new Error(`Dockerfile CMD has no ${flag}`);
-    }
-    argv[index + 1] = value;
-  };
-  withValue('--port', String(port));
-  withValue('--host', '127.0.0.1');
-  return argv;
-}
-
 function freePort() {
   return new Promise((done, failed) => {
     const probe = createServer();
@@ -54,14 +36,25 @@ function freePort() {
   });
 }
 
-// The child gets only what the Compose service would give it; no credentials are real.
-function childEnv() {
+// The CMD from the Dockerfile must be the entrypoint this test starts.
+function entrypointFromDockerfile() {
+  const dockerfile = readFileSync(resolve(SIDECAR_ROOT, 'Dockerfile'), 'utf8');
+  const cmdLine = dockerfile.split('\n').find(line => line.startsWith('CMD '));
+  if (cmdLine === undefined) {
+    throw new Error('Dockerfile has no CMD line');
+  }
+  return JSON.parse(cmdLine.slice('CMD '.length)).map(arg => arg.replaceAll('/app', SIDECAR_ROOT));
+}
+
+// The child gets only what the Compose service would give it, plus the account file it reads. No
+// credentials are real.
+function childEnv({ accountFile, port, agentPort }) {
   return {
     PATH: process.env.PATH ?? '',
-    CALDAV_URL: 'http://127.0.0.1:9/',
-    CALDAV_USERNAME: 'test-user',
-    CALDAV_PASSWORD: 'test-password',
-    CALDAV_USER_EMAIL: 'test@example.com',
+    CALENDAR_ACCOUNT_FILE: accountFile,
+    CALENDAR_ACCOUNT_PORT: String(agentPort),
+    CALENDAR_MCP_HOST: '127.0.0.1',
+    CALENDAR_MCP_PORT: String(port),
     CALDAV_ALLOW_TOOLS: CALENDAR_TOOLS.join(','),
     ELICITATION: 'false',
   };
@@ -77,6 +70,7 @@ const sleep = ms => new Promise(wake => setTimeout(wake, ms));
 describe('calendar sidecar over HTTP', () => {
   let child;
   let mcpUrl;
+  let folder;
   let stderr = '';
 
   async function rpc(method, params = {}) {
@@ -90,9 +84,21 @@ describe('calendar sidecar over HTTP', () => {
 
   before(async () => {
     const port = await freePort();
+    const agentPort = await freePort();
     mcpUrl = `http://127.0.0.1:${port}/mcp`;
-    const [command, ...args] = serverCommand(port);
-    child = spawn(command, args, { cwd: SIDECAR_ROOT, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    folder = mkdtempSync(join(tmpdir(), 'calendar-sidecar-'));
+    const accountFile = join(folder, '.env.calendar');
+    writeFileSync(
+      accountFile,
+      'CALDAV_URL=https://203.0.113.10/dav/\nCALDAV_USERNAME=owner@example.invalid\nCALDAV_PASSWORD=test-password\nCALDAV_USER_EMAIL=owner@example.invalid\n',
+      { mode: 0o600 },
+    );
+    const [command, ...args] = entrypointFromDockerfile();
+    child = spawn(command, args, {
+      cwd: SIDECAR_ROOT,
+      env: childEnv({ accountFile, port, agentPort }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     child.stderr.on('data', chunk => {
       stderr += chunk;
     });
@@ -118,6 +124,9 @@ describe('calendar sidecar over HTTP', () => {
 
   after(() => {
     child?.kill('SIGTERM');
+    if (folder !== undefined) {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it('offers exactly the eight calendar tools', async () => {
@@ -129,5 +138,63 @@ describe('calendar sidecar over HTTP', () => {
   it('refuses a tool that is not on the allow list', async () => {
     const reply = await rpc('tools/call', { name: 'delete_task', arguments: {} });
     assert.ok(reply.error !== undefined || reply.result?.isError === true, JSON.stringify(reply));
+  });
+});
+
+async function listeningAt(url) {
+  try {
+    await fetch(url, { method: 'POST' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const listening = port => listeningAt(`http://127.0.0.1:${port}/mcp`);
+
+async function waitFor(check, what) {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (!(await check())) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${what}`);
+    }
+    await sleep(300);
+  }
+}
+
+describe('calendar sidecar follows the saved account', () => {
+  let child;
+  let folder;
+
+  after(() => {
+    child?.kill('SIGTERM');
+    if (folder !== undefined) {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('offers no tools until an account is saved, and none again once it is removed', async () => {
+    const port = await freePort();
+    const agentPort = await freePort();
+    folder = mkdtempSync(join(tmpdir(), 'calendar-sidecar-'));
+    const accountFile = join(folder, '.env.calendar');
+    const [command, ...args] = entrypointFromDockerfile();
+    child = spawn(command, args, {
+      cwd: SIDECAR_ROOT,
+      env: childEnv({ accountFile, port, agentPort }),
+      stdio: 'ignore',
+    });
+    await waitFor(() => listeningAt(`http://127.0.0.1:${agentPort}/account`), 'the account agent');
+    assert.equal(await listening(port), false, 'no tool server without an account');
+
+    writeFileSync(
+      accountFile,
+      'CALDAV_URL=https://203.0.113.10/dav/\nCALDAV_USERNAME=owner@example.invalid\nCALDAV_PASSWORD=test-password\nCALDAV_USER_EMAIL=owner@example.invalid\n',
+      { mode: 0o600 },
+    );
+    await waitFor(() => listening(port), 'the tool server to start');
+
+    rmSync(accountFile);
+    await waitFor(async () => !(await listening(port)), 'the tool server to stop');
   });
 });

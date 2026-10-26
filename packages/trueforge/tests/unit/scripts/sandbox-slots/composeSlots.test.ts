@@ -103,14 +103,17 @@ describe('docker-compose.slots.yml', () => {
 });
 
 /**
- * The installer's instance template with the sandbox on and no https front end of either kind, for an instance named
- * main. The calendar connector block is kept only when `calendar` is true, as the installer keeps or drops it.
+ * The installer's instance template with the sandbox on, no email connector and no https front end of either kind, for
+ * an instance named main. The calendar connector block is kept only when `calendar` is true, as the installer keeps or
+ * drops it.
  */
 function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
   const text = readFileSync(resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'), 'utf8');
   const rendered = text
     .split('\n')
-    .filter(line => !line.startsWith('@@IF_EDGE@@') && !line.startsWith('@@IF_TLS@@'))
+    .filter(
+      line => !line.startsWith('@@IF_EDGE@@') && !line.startsWith('@@IF_TLS@@') && !line.startsWith('@@IF_EMAIL@@'),
+    )
     .filter(line => calendar || !line.startsWith('@@IF_CALENDAR@@'))
     .map(line => line.replace('@@IF_SANDBOX@@', '').replace('@@IF_CALENDAR@@', ''))
     .join('\n')
@@ -198,8 +201,39 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
         ports: z.never().optional(),
       })
       .parse(services(true)['calendar-caldav']);
-    expect(connector.expose).toEqual(['9558']);
+    expect(connector.expose).toEqual(['9558', '9560']);
     expect(connector.cap_drop).toEqual(['ALL']);
     expect(connector.security_opt).toEqual(['no-new-privileges:true']);
+  });
+
+  test('the connector starts with the instance, keeps its login in its own volume and reads no host file', () => {
+    const rendered = z
+      .object({
+        services: z.object({
+          'calendar-caldav': z.object({
+            profiles: z.never().optional(),
+            env_file: z.never().optional(),
+            volumes: z.array(z.string()),
+            environment: z.record(z.string(), z.string()),
+          }),
+          app: z.object({ environment: z.record(z.string(), z.string()) }),
+        }),
+        volumes: z.record(z.string(), z.object({ name: z.string() })),
+      })
+      .parse(renderInstanceTemplate({ calendar: true }));
+    const connector = rendered.services['calendar-caldav'];
+    expect(connector.volumes).toEqual(['calendar-account:/account']);
+    expect(connector.environment['CALENDAR_ACCOUNT_FILE']).toBe('/account/.env.calendar');
+    expect(connector.environment['CALENDAR_ACCOUNT_PORT']).toBe('9560');
+    expect(Object.keys(connector.environment).filter(key => /PASSWORD|TOKEN|USERNAME/i.test(key))).toEqual([]);
+    expect(rendered.volumes['calendar-account']?.name).toBe('aman_main_calendar_account');
+    expect(rendered.services.app.environment['CALENDAR_ACCOUNT_URL']).toBe('http://calendar-caldav:9560');
+  });
+
+  test('the app is told nothing about a calendar agent when the connector is left out', () => {
+    const app = z
+      .object({ services: z.object({ app: z.object({ environment: z.record(z.string(), z.string()) }) }) })
+      .parse(renderInstanceTemplate({ calendar: false }));
+    expect(app.services.app.environment['CALENDAR_ACCOUNT_URL']).toBeUndefined();
   });
 });

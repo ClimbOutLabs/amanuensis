@@ -72,6 +72,8 @@ services:
 @@IF_EMAIL@@      MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
 @@IF_EMAIL@@      # The sidecar's account agent, which the Settings Email card talks to. Fixed inside the private network.
 @@IF_EMAIL@@      MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+@@IF_CALENDAR@@      # The calendar sidecar's account agent, which the Settings Calendar card talks to. Fixed inside the private network.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
     volumes:
       - data:/data
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
@@ -141,20 +143,25 @@ services:
 @@IF_TLS@@      retries: 10
 @@IF_TLS@@    restart: unless-stopped
 
-# Calendar connector. It starts only when named, so an instance without a calendar never runs it. The app reaches it at
-# http://calendar-caldav:9558/mcp on this project's private network. Nothing is published, and the credentials come only from .env.calendar.
+# Calendar connector. It starts with the instance whenever the release has its image, so the Settings Calendar card can
+# set it up. The app reaches it at http://calendar-caldav:9558/mcp on this project's private network. Nothing is published.
+# The calendar login lives in a volume this sidecar owns, which the installer writes through the sidecar's account agent
+# and the Settings Calendar card changes through the same agent on port 9560, also private-network only.
+# The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
 @@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
 @@IF_CALENDAR@@    pull_policy: never
-@@IF_CALENDAR@@    profiles: ['calendar']
-@@IF_CALENDAR@@    env_file:
-@@IF_CALENDAR@@      - path: ./.env.calendar
-@@IF_CALENDAR@@        required: false
 @@IF_CALENDAR@@    environment:
 @@IF_CALENDAR@@      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
 @@IF_CALENDAR@@      ELICITATION: 'false'
+@@IF_CALENDAR@@      # The account agent: the account file it owns and its private-network port.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_FILE: /account/.env.calendar
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_PORT: '9560'
+@@IF_CALENDAR@@    volumes:
+@@IF_CALENDAR@@      - calendar-account:/account
 @@IF_CALENDAR@@    expose:
 @@IF_CALENDAR@@      - '9558'
+@@IF_CALENDAR@@      - '9560'
 @@IF_CALENDAR@@    cap_drop:
 @@IF_CALENDAR@@      - ALL
 @@IF_CALENDAR@@    security_opt:
@@ -258,6 +265,11 @@ volumes:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_account
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_CALENDAR@@  # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_CALENDAR@@  calendar-account:
+@@IF_CALENDAR@@    name: aman_@@NAME@@_calendar_account
+@@IF_CALENDAR@@    labels:
+@@IF_CALENDAR@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1

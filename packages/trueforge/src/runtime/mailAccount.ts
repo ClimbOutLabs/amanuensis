@@ -22,6 +22,7 @@ import {
 } from '@truefoundry/trueforge-core/core/email/mailConnector/presets';
 import type { Logger } from 'winston';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import { agentErrorKind, agentField, callAccountAgent } from './connectorAccountAgent';
 import { prepareMailPolicyAtBoot, registerMailConnector, unregisterMailConnector } from './mailConnector';
 
 export const MAIL_SIGN_IN_REFUSED_MESSAGE = 'That password was refused. Make a new app password and try again.';
@@ -66,11 +67,6 @@ export interface MailAccountSaveRequest {
   imap_port: number | undefined;
   smtp_host: string | undefined;
   smtp_port: number | undefined;
-}
-
-/** One field of an agent response body; the body is untrusted, so every field stays unknown until checked. */
-function agentField(body: object, key: string): unknown {
-  return new Map<string, unknown>(Object.entries(body)).get(key);
 }
 
 /** The agent's public account view, as parsed from its response; unknown shapes parse to null. */
@@ -127,42 +123,22 @@ function stateFromAgentBody(body: unknown): MailAccountState {
   };
 }
 
-function agentErrorKind(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) {
-    return null;
-  }
-  const error = agentField(body, 'error');
-  return typeof error === 'string' ? error : null;
-}
-
-/**
- * One call to the account agent. Only the response's shape is read; its text is never logged or
- * forwarded. A request that cannot be made at all is the connector being unreachable.
- */
+/** One call to the mail account agent; an unreachable agent is the connector being unreachable. */
 async function callAgent(
   deps: MailAccountClientDeps,
   input: { method: 'GET' | 'POST' | 'DELETE'; payload?: unknown; timeoutMs: number },
 ): Promise<{ status: number; body: unknown }> {
-  if (deps.accountUrl === undefined) {
+  const answer = await callAccountAgent({
+    accountUrl: deps.accountUrl,
+    fetchImpl: deps.fetchImpl,
+    logger: deps.logger,
+    label: 'Email',
+    ...input,
+  });
+  if (answer === null) {
     throw new MailAccountError('connector_unreachable', MAIL_CONNECTOR_UNREACHABLE_MESSAGE);
   }
-  const doFetch = deps.fetchImpl ?? fetch;
-  let response: Response;
-  try {
-    response = await doFetch(`${deps.accountUrl}/account`, {
-      method: input.method,
-      headers: input.payload === undefined ? {} : { 'Content-Type': 'application/json' },
-      ...(input.payload === undefined ? {} : { body: JSON.stringify(input.payload) }),
-      signal: AbortSignal.timeout(input.timeoutMs),
-    });
-  } catch {
-    // No error text is logged: a failed request's message can carry the address it went to,
-    // and this module never risks printing anything that travelled with the password.
-    deps.logger.warn('Email account agent could not be reached');
-    throw new MailAccountError('connector_unreachable', MAIL_CONNECTOR_UNREACHABLE_MESSAGE);
-  }
-  const body: unknown = await response.json().catch(() => null);
-  return { status: response.status, body };
+  return answer;
 }
 
 /** The saved account's state, asking the agent (which re-checks a stale sign-in answer). */

@@ -1154,6 +1154,87 @@
         ],
         "type": "object"
       },
+      "CalendarAccountStatus": {
+        "properties": {
+          "available": {
+            "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "email": {
+            "description": "The email address of the connected account; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_key": {
+            "description": "The provider of the connected account, worked out from its address; the picker default otherwise.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "The provider picker table, in display order.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarProvider"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Connected, not connected, or connected but the saved sign-in no longer works.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "email",
+          "provider_key",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "CalendarProvider": {
+        "properties": {
+          "help_hint": {
+            "description": "One plain sentence on how to get an app password.",
+            "type": "string"
+          },
+          "help_url": {
+            "description": "The provider's own help page for making an app password; null when none could be checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "Stable provider key, such as fastmail or other.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person sees in the provider picker.",
+            "type": "string"
+          },
+          "server_url": {
+            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "server_url",
+          "help_url",
+          "help_hint"
+        ],
+        "type": "object"
+      },
       "CancelSessionRequest": {
         "description": "Empty request body. Cancel identifies the session via the path only.",
         "properties": {},
@@ -2802,6 +2883,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/BugReportHandoff"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
           }
         },
         "required": [
@@ -8066,6 +8158,17 @@
         ],
         "type": "object"
       },
+      "RemoveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "RemoveEmailAccountResponse": {
         "properties": {
           "data": {
@@ -8628,6 +8731,47 @@
           "auto_stop_interval_in_minutes",
           "auto_archive_interval_in_minutes",
           "auto_delete_interval_in_minutes"
+        ],
+        "type": "object"
+      },
+      "SaveCalendarAccountRequest": {
+        "properties": {
+          "calendar_url": {
+            "description": "The https calendar address, only for the other provider.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address of the calendar account.",
+            "type": "string"
+          },
+          "password": {
+            "description": "The app password. Write-only: it is checked and passed to the sidecar, never stored or returned.",
+            "type": "string"
+          },
+          "provider_key": {
+            "description": "The picked provider key, or other for a typed calendar address.",
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name, when it is not the email address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_key",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SaveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -23698,6 +23842,182 @@
           "briefItems"
         ],
         "x-fern-sdk-method-name": "undo"
+      }
+    },
+    "/api/v1/user/settings/calendar": {
+      "delete": {
+        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Remove the calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "remove_account"
+      },
+      "post": {
+        "description": "Checks the sign-in with the calendar server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCalendarAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The details could not be used, the address is not allowed, the password was refused, or the server could not be reached."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Connect a calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "save_account"
+      }
+    },
+    "/api/v1/user/settings/calendar/status": {
+      "get": {
+        "description": "Returns whether a calendar account is connected, its email and provider, and the provider table for the picker. The app password is never returned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account status and the provider table."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Get the calendar account status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/email": {

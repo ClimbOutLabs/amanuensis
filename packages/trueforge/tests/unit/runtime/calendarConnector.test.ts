@@ -1,5 +1,14 @@
-import { firstPartyOriginsFor, parseCalendarConnectorUrl } from '../../../src/config';
-import { registerCalendarConnector, registerCalendarConnectorAtBoot } from '../../../src/runtime/calendarConnector';
+import {
+  calendarMcpUrlFromAccountUrl,
+  firstPartyOriginsFor,
+  parseCalendarAccountUrl,
+  parseCalendarConnectorUrl,
+} from '../../../src/config';
+import {
+  registerCalendarConnector,
+  registerCalendarConnectorAtBoot,
+  unregisterCalendarConnector,
+} from '../../../src/runtime/calendarConnector';
 
 const TENANT = 'tenant-1';
 const URL = 'http://calendar-caldav:9558/mcp';
@@ -22,6 +31,35 @@ describe('CALENDAR_CONNECTOR_URL', () => {
 
   it('refuses a URL that carries credentials', () => {
     expect(() => parseCalendarConnectorUrl('http://user:pass@calendar-caldav:9558/mcp')).toThrow();
+  });
+});
+
+describe('CALENDAR_ACCOUNT_URL', () => {
+  it('is unset when blank, so the Settings Calendar card is not offered', () => {
+    expect(parseCalendarAccountUrl(undefined)).toBeUndefined();
+    expect(parseCalendarAccountUrl('  ')).toBeUndefined();
+  });
+
+  it('accepts the compose sidecar account agent and refuses anything else', () => {
+    expect(parseCalendarAccountUrl(' http://calendar-caldav:9560 ')).toBe('http://calendar-caldav:9560');
+    expect(() => parseCalendarAccountUrl('calendar-caldav:9560')).toThrow(
+      'CALENDAR_ACCOUNT_URL must be an http(s) URL',
+    );
+  });
+
+  it('derives the tool endpoint from the account agent address', () => {
+    expect(calendarMcpUrlFromAccountUrl('http://calendar-caldav:9560')).toBe(URL);
+    expect(calendarMcpUrlFromAccountUrl(undefined)).toBeUndefined();
+    expect(calendarMcpUrlFromAccountUrl('not a url')).toBeUndefined();
+  });
+
+  it('makes the derived endpoint first-party, so the read-only calendar tools run without asking', () => {
+    expect(
+      firstPartyOriginsFor({
+        raw: undefined,
+        calendarUrl: calendarMcpUrlFromAccountUrl('http://calendar-caldav:9560'),
+      }),
+    ).toEqual(['http://calendar-caldav:9558']);
   });
 });
 
@@ -83,5 +121,13 @@ describe('Calendar connector registration', () => {
       }),
     ).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith('Calendar connector could not be registered', expect.anything());
+  });
+});
+
+describe('Calendar connector removal', () => {
+  it('deletes the registration under the name Calendar', async () => {
+    const deleteServer = jest.fn().mockResolvedValue(true);
+    await unregisterCalendarConnector({ mcpServerStore: { deleteServer }, tenant_id: TENANT });
+    expect(deleteServer).toHaveBeenCalledWith({ tenant_id: TENANT, name: 'Calendar' });
   });
 });

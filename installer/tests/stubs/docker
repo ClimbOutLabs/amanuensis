@@ -685,27 +685,40 @@ case "$cmd" in
         exit 0
         ;;
       run)
-        # The connector's account agent, run one-off: it reads the account from stdin or empties
-        # it, in the named volume the compose project owns. The service must exist in the file,
-        # as in Compose. The account text arrives on stdin only, never in the logged command.
+        # A connector's account agent, run one-off: it reads the account from stdin, empties it, or checks
+        # it, in the named volume the compose project owns. The service must exist in the file, as in
+        # Compose. The account text arrives on stdin only, never in the logged command. The calendar agent
+        # can be made to refuse an address (STUB_CALENDAR_REFUSES) or to report a sign-in answer
+        # (STUB_CALENDAR_CHECK, default ok).
         svc=
         while [ "$#" -gt 0 ]; do
           case "$1" in
-            --rm) shift ;;
+            --rm | --no-deps) shift ;;
             --entrypoint) shift 2 ;;
             *) svc=$1; break ;;
           esac
         done
         [ -n "$svc" ] || exit 1
         grep -q "^  $svc:" "$file" 2>/dev/null || { echo "no such service: $svc" >&2; exit 1; }
+        case "$svc" in
+          calendar-caldav) store="$S/calendar-account-$proj" ;;
+          *) store="$S/mail-account-$proj" ;;
+        esac
         case "$*" in
           *--write-stdin*)
-            cat >"$S/mail-account-$proj"
+            if [ "$svc" = calendar-caldav ] && [ -n "${STUB_CALENDAR_REFUSES:-}" ]; then
+              cat >/dev/null
+              exit 3
+            fi
+            cat >"$store"
             echo "saved"
             ;;
           *--remove*)
-            : >"$S/mail-account-$proj"
+            : >"$store"
             echo "removed"
+            ;;
+          *--check*)
+            if [ -s "$store" ]; then echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
             ;;
         esac
         exit 0
