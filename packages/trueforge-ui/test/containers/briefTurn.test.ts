@@ -1,4 +1,7 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import {
+  MORNING_BRIEF_CARD_PROMPT,
+  MORNING_BRIEF_PROMPT,
+} from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { describe, expect, it } from 'vitest';
 
 import { answersBriefPrompt, briefRequestDate, messageText } from '@/containers/briefTurn.js';
@@ -17,6 +20,11 @@ describe('messageText', () => {
 describe('answersBriefPrompt', () => {
   it('is true for an answer right after a morning brief request', () => {
     const messages = [user('u1', MORNING_BRIEF_PROMPT), assistant('a1')];
+    expect(answersBriefPrompt(messages, 'a1')).toBe(true);
+  });
+
+  it('is true for an answer right after the brief card prompt, which shares the opening', () => {
+    const messages = [user('u1', MORNING_BRIEF_CARD_PROMPT), assistant('a1')];
     expect(answersBriefPrompt(messages, 'a1')).toBe(true);
   });
 
@@ -39,5 +47,11 @@ describe('briefRequestDate', () => {
     ];
     expect(briefRequestDate(withBrief)).toBe(when);
     expect(briefRequestDate([{ ...user('u2', 'Plan my week'), createdAt: when }])).toBeNull();
+  });
+
+  it('gives the day of a brief started from the home card', () => {
+    const when = new Date(2026, 9, 21, 7, 5);
+    const fromCard = [{ ...user('u1', MORNING_BRIEF_CARD_PROMPT), createdAt: when }];
+    expect(briefRequestDate(fromCard)).toBe(when);
   });
 });

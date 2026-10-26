@@ -1,4 +1,4 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { describe, expect, it } from 'vitest';
 
@@ -151,9 +151,9 @@ describe('card text', () => {
     }
   });
 
-  it('fills only the morning brief prompt for the brief card, with no rules', () => {
-    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_PROMPT);
-    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_PROMPT);
+  it('fills only the morning brief card prompt for the brief card, with no rules', () => {
+    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
+    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_CARD_PROMPT);
     expect(everyCard.filter(card => card.sharedRules === false)).toEqual([CARDS.brief]);
   });
 

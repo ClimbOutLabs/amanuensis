@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
@@ -146,12 +146,12 @@ describe('AmanTour home', () => {
     expect(props.onFill).not.toHaveBeenCalled();
   });
 
-  it('sends only the morning brief prompt, with no rules, from the brief card', () => {
+  it('sends only the morning brief card prompt, with no rules, from the brief card', () => {
     const { props } = renderTour({ capabilities: connected });
 
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
     expect(props.onSend).toHaveBeenCalledTimes(1);
-    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_PROMPT);
+    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_CARD_PROMPT);
   });
 
   it('puts the same card under two pills, sent the same way', () => {
