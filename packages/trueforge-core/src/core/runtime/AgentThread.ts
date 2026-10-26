@@ -117,6 +117,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import { stepNotFinishedNotice } from '../mcp/ownerRefusalNotice';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import {
@@ -3891,7 +3892,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: `One of the actions in this reply could not run: ${problem} Ask again to try it once more.`,
+                owner_message: stepNotFinishedNotice(assistantDisplayName(this.definition.identity?.assistantName)),
               },
             },
           };

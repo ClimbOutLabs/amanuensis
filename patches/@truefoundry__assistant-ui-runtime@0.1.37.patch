@@ -72,7 +72,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryCancelledTurn, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce9aad9a94 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..206aeb448ad1d0530805d77f95f95de359b6949c 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -518,6 +518,22 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
  function emptyRequiredActionsOverlay() {
    return {
      approvals: /* @__PURE__ */ new Map(),
+@@ -1305,13 +1447,13 @@ function turnToSessionRecord(turn) {
+     input: turn.input
+   };
+ }
+-function sessionEventsToSessionRecord(turnId, createdEvent, doneEvent, rootModelMessageIds, sandboxId) {
++function sessionEventsToSessionRecord(turnId, createdEvent, state, rootModelMessageIds, sandboxId) {
+   const userText = extractTurnUserText(createdEvent.input);
+   return {
+     id: turnId,
+     ...userText !== void 0 ? { userText } : {},
+     createdAt: createdEvent.createdAt,
+-    state: doneEvent.state,
++    state,
+     input: createdEvent.input,
+     rootModelMessageIds,
+     ...sandboxId != null ? { sandboxId } : {}
 @@ -1351,7 +1493,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
    if (!hasDone) {
      return "incomplete";
@@ -558,26 +574,81 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        done: newerBucket.done || olderBucket.done,
        ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
        ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
-@@ -1491,6 +1650,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1484,41 +1643,46 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+   let currentCreatedEvent = null;
+   let currentContentEvents = [];
+   let beforeCount = 0;
++  const finishCurrentTurn = (state) => {
++    if (currentTurnId == null || currentCreatedEvent == null) {
++      return;
++    }
++    const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
++    const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
++      beforeCount
++    );
++    const sandboxEvent = currentContentEvents.find(
++      (ev) => ev.type === "sandbox.created"
++    );
++    snapshot.turns.push(
++      sessionEventsToSessionRecord(
++        currentTurnId,
++        currentCreatedEvent,
++        state,
++        rootModelMessageIds,
++        sandboxEvent?.sandboxId
++      )
++    );
++    onTurnComplete?.(replaceSessionSnapshot(snapshot, {}));
++    currentTurnId = null;
++    currentCreatedEvent = null;
++    currentContentEvents = [];
++  };
+   for (const item of items) {
+     const { turnId, event } = item;
+     if (event.type === "turn.created") {
++      finishCurrentTurn({
++        status: "cancelled",
++        reason: "unfinished",
++        completedAt: event.createdAt
++      });
+       currentTurnId = turnId;
        currentCreatedEvent = event;
        currentContentEvents = [];
        beforeCount = snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
 +      applyUserToolResponsesToFold(snapshot.fold, currentCreatedEvent.input ?? []);
      } else if (event.type === "turn.done") {
-       if (currentTurnId == null || currentCreatedEvent == null) {
-         continue;
-@@ -1502,10 +1662,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
-       const sandboxEvent = currentContentEvents.find(
-         (ev) => ev.type === "sandbox.created"
-       );
+-      if (currentTurnId == null || currentCreatedEvent == null) {
+-        continue;
+-      }
+-      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+-      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
+-        beforeCount
+-      );
+-      const sandboxEvent = currentContentEvents.find(
+-        (ev) => ev.type === "sandbox.created"
+-      );
 -      applyUserToolResponsesToFold(
 -        snapshot.fold,
 -        currentCreatedEvent.input ?? []
 -      );
-       snapshot.turns.push(
-         sessionEventsToSessionRecord(
-           currentTurnId,
-@@ -1535,7 +1691,7 @@ function attachRunningTurn(snapshot, runningTurn) {
+-      snapshot.turns.push(
+-        sessionEventsToSessionRecord(
+-          currentTurnId,
+-          currentCreatedEvent,
+-          event,
+-          rootModelMessageIds,
+-          sandboxEvent?.sandboxId
+-        )
+-      );
+-      onTurnComplete?.(replaceSessionSnapshot(snapshot, {}));
+-      currentTurnId = null;
+-      currentCreatedEvent = null;
+-      currentContentEvents = [];
++      finishCurrentTurn(event.state);
+     } else {
+       if (currentTurnId != null) {
+         ingestTurnEvent(snapshot.fold, event);
+@@ -1535,7 +1699,7 @@ function attachRunningTurn(snapshot, runningTurn) {
    return replaceSessionSnapshot(snapshot, {
      runningTurn,
      unstable_resume: true,
@@ -586,7 +657,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      ...pendingUserText !== void 0 ? {
        pendingUser: {
          turnId: runningTurn.id,
-@@ -1844,6 +2000,9 @@ function rootModelMessageIdsSinceBaseline(foldState, baseline) {
+@@ -1844,6 +2008,9 @@ function rootModelMessageIdsSinceBaseline(foldState, baseline) {
    const baselineSet = new Set(baseline);
    return bucket.modelMessageIds.filter((id) => !baselineSet.has(id));
  }
@@ -596,7 +667,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
  function computeGroupRootBaseline(turns) {
    let groupStartIndex = turns.length - 1;
    while (groupStartIndex >= 0 && turns[groupStartIndex]?.userText == null) {
-@@ -2066,6 +2225,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -2066,6 +2233,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -609,7 +680,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2261,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2269,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -619,7 +690,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2331,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2339,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -627,7 +698,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2502,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2510,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -640,7 +711,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        }
        break;
      }
-@@ -3039,19 +3209,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3217,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -660,7 +731,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3241,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3249,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -683,7 +754,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3266,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3274,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -692,7 +763,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    }
  }
  
-@@ -3176,20 +3325,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3333,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -745,7 +816,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3241,6 +3419,17 @@ function resolveTurnInput(snapshot, turnId) {
+@@ -3241,6 +3427,17 @@ function resolveTurnInput(snapshot, turnId) {
    }
    return void 0;
  }
@@ -763,7 +834,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
  function useTrueFoundryAgentMessages({
    server,
    sessionId,
-@@ -3259,6 +3448,7 @@ function useTrueFoundryAgentMessages({
+@@ -3259,6 +3456,7 @@ function useTrueFoundryAgentMessages({
    const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState2(false);
    const [loadRetryTrigger, setLoadRetryTrigger] = useState2(0);
    const [resumeUnavailable, setResumeUnavailable] = useState2(false);
@@ -771,7 +842,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    const snapshotRef = useRef2(snapshot);
    snapshotRef.current = snapshot;
    const loadOlderInflightRef = useRef2(null);
-@@ -3273,6 +3463,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3471,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -782,7 +853,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3496,8 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3504,8 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -791,7 +862,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3506,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3514,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -803,7 +874,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3545,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3553,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -811,7 +882,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3565,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3573,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -863,7 +934,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
          }
        })();
        activeRunRef.current = run;
-@@ -3401,6 +3615,9 @@ function useTrueFoundryAgentMessages({
+@@ -3401,6 +3623,9 @@ function useTrueFoundryAgentMessages({
        setSnapshot(createEmptySessionSnapshot());
        return;
      }
@@ -873,7 +944,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      const isEarlyInitialLoad = isMain === false && isInitialSession === true && initialLoadStartedForRef.current !== sessionId;
      if (isMain === false) {
        if (!isEarlyInitialLoad) return;
-@@ -3447,6 +3664,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3672,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -881,7 +952,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3587,7 +3805,12 @@ function useTrueFoundryAgentMessages({
+@@ -3587,7 +3813,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { inputs: options.inputs, ...streamHeaders },
                  signal,
@@ -895,7 +966,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
                );
              }
              if ("resumeMcpAuth" in options) {
-@@ -3597,7 +3820,12 @@ function useTrueFoundryAgentMessages({
+@@ -3597,7 +3828,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { resumeMcpAuth: true, ...streamHeaders },
                  signal,
@@ -909,7 +980,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
                );
              }
              return streamTurnContent(
-@@ -3662,26 +3890,64 @@ function useTrueFoundryAgentMessages({
+@@ -3662,26 +3898,64 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -984,7 +1055,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3956,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3964,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -1016,7 +1087,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3987,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3995,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -1024,7 +1095,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +4004,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +4012,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -1032,7 +1103,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4159,8 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4167,8 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -1041,7 +1112,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4239,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4247,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -1050,7 +1121,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4010,9 +4293,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4301,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
            "This session has not been saved yet, so its files cannot be downloaded."
          );
        }
@@ -1060,7 +1131,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        return await server.downloadSandboxFile({
          sessionId,
          turnId,
-@@ -4047,6 +4327,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4335,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -1069,7 +1140,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4531,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4539,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -1085,7 +1156,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4585,8 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4593,8 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -1094,7 +1165,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4697,7 @@ export {
+@@ -4408,6 +4705,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -1102,7 +1173,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..1c259bd988603eb5361623661ed40bce
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4717,8 @@ export {
+@@ -4427,6 +4725,8 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -1392,10 +1463,18 @@ index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbe
  });
 -
 diff --git a/src/convertTurnMessages.ts b/src/convertTurnMessages.ts
-index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8def14d9a9 100644
+index b918b3e7eceff2af3c032ee032ad09ba77f14975..b711d296b3e58e6ce8931709363754222e92cd24 100644
 --- a/src/convertTurnMessages.ts
 +++ b/src/convertTurnMessages.ts
-@@ -46,6 +46,7 @@ import {
+@@ -10,6 +10,7 @@ import type {
+     McpAuthRequiredEvent,
+     Turn,
+     TurnCreatedEvent,
++    TurnState,
+     TurnDoneEvent,
+     TurnEvent,
+     TurnInputItem,
+@@ -46,6 +47,7 @@ import {
      type RequiredActionsOverlay,
      type GatewaySessionEventItem,
      type SessionHistoryPagination,
@@ -1403,7 +1482,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
      createEmptySessionSnapshot,
      emptyRequiredActionsOverlay,
      replaceSessionSnapshot,
-@@ -255,7 +256,7 @@ function oldestCompleteTurnGroupState(
+@@ -255,7 +257,7 @@ function oldestCompleteTurnGroupState(
      if (!hasDone) {
          return "incomplete";
      }
@@ -1412,7 +1491,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
          ? "user-group"
          : "continuation";
  }
-@@ -365,6 +366,12 @@ function cloneThreadBucket(bucket: ThreadBucket): ThreadBucket {
+@@ -365,6 +367,12 @@ function cloneThreadBucket(bucket: ThreadBucket): ThreadBucket {
          pendingApprovals: new Map(bucket.pendingApprovals),
          approvalDecisions: new Map(bucket.approvalDecisions),
          pendingResponses: new Map(bucket.pendingResponses),
@@ -1425,7 +1504,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
          done: bucket.done,
          ...(bucket.title != null ? { title: bucket.title } : {}),
          ...(bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}),
-@@ -414,6 +421,17 @@ export function prependFoldState(
+@@ -414,6 +422,17 @@ export function prependFoldState(
                  ...olderBucket.pendingResponses,
                  ...newerBucket.pendingResponses,
              ]),
@@ -1443,26 +1522,107 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
              done: newerBucket.done || olderBucket.done,
              ...(newerBucket.title != null || olderBucket.title != null
                  ? { title: newerBucket.title ?? olderBucket.title }
-@@ -461,6 +479,7 @@ function ingestSessionEventsIntoSnapshot(
+@@ -452,54 +471,61 @@ function ingestSessionEventsIntoSnapshot(
+     let currentContentEvents: TurnEvent[] = [];
+     let beforeCount = 0;
+ 
++    const finishCurrentTurn = (state: TurnState): void => {
++        if (currentTurnId == null || currentCreatedEvent == null) {
++            return;
++        }
++        const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
++        const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
++            beforeCount,
++        );
++
++        const sandboxEvent = currentContentEvents.find(
++            (ev): ev is Extract<TurnEvent, { type: "sandbox.created" }> =>
++                ev.type === "sandbox.created",
++        );
++
++        snapshot.turns.push(
++            sessionEventsToSessionRecord(
++                currentTurnId,
++                currentCreatedEvent,
++                state,
++                rootModelMessageIds,
++                sandboxEvent?.sandboxId,
++            ),
++        );
++
++        // Pass a new object reference so React's Object.is check in
++        // useState sees a changed value and schedules a re-render.
++        // The snapshot is mutated in place throughout this loop, so
++        // passing `snapshot` directly would make every tick look identical
++        // to React after the first setSnapshot call.
++        onTurnComplete?.(replaceSessionSnapshot(snapshot, {}));
++
++        currentTurnId = null;
++        currentCreatedEvent = null;
++        currentContentEvents = [];
++    };
++
+     for (const item of items) {
+         const { turnId, event } = item;
+ 
+         if (event.type === "turn.created") {
++            // A turn that left no `turn.done` (the worker stopped, the stream was cut) still
++            // happened: record it as cancelled so its reply stays out of the next group.
++            finishCurrentTurn({
++                status: "cancelled",
++                reason: "unfinished",
++                completedAt: event.createdAt,
++            });
+             currentTurnId = turnId;
+             currentCreatedEvent = event;
              currentContentEvents = [];
              beforeCount =
                  snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
 +            applyUserToolResponsesToFold(snapshot.fold, currentCreatedEvent.input ?? []);
          } else if (event.type === "turn.done") {
-             if (currentTurnId == null || currentCreatedEvent == null) {
-                 continue;
-@@ -476,10 +495,6 @@ function ingestSessionEventsIntoSnapshot(
-                     ev.type === "sandbox.created",
-             );
- 
+-            if (currentTurnId == null || currentCreatedEvent == null) {
+-                continue;
+-            }
+-
+-            const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+-            const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
+-                beforeCount,
+-            );
+-
+-            const sandboxEvent = currentContentEvents.find(
+-                (ev): ev is Extract<TurnEvent, { type: "sandbox.created" }> =>
+-                    ev.type === "sandbox.created",
+-            );
+-
 -            applyUserToolResponsesToFold(
 -                snapshot.fold,
 -                currentCreatedEvent.input ?? [],
 -            );
-             snapshot.turns.push(
-                 sessionEventsToSessionRecord(
-                     currentTurnId,
-@@ -520,7 +535,10 @@ function attachRunningTurn(
+-            snapshot.turns.push(
+-                sessionEventsToSessionRecord(
+-                    currentTurnId,
+-                    currentCreatedEvent,
+-                    event,
+-                    rootModelMessageIds,
+-                    sandboxEvent?.sandboxId,
+-                ),
+-            );
+-
+-            // Pass a new object reference so React's Object.is check in
+-            // useState sees a changed value and schedules a re-render.
+-            // The snapshot is mutated in place throughout this loop, so
+-            // passing `snapshot` directly would make every tick look identical
+-            // to React after the first setSnapshot call.
+-            onTurnComplete?.(replaceSessionSnapshot(snapshot, {}));
+-
+-            currentTurnId = null;
+-            currentCreatedEvent = null;
+-            currentContentEvents = [];
++            finishCurrentTurn(event.state);
+         } else {
+             if (currentTurnId != null) {
+                 ingestTurnEvent(snapshot.fold, event as TurnEvent);
+@@ -520,7 +546,10 @@ function attachRunningTurn(
      return replaceSessionSnapshot(snapshot, {
          runningTurn,
          unstable_resume: true as const,
@@ -1474,7 +1634,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
          ...(pendingUserText !== undefined
              ? {
                    pendingUser: {
-@@ -742,6 +760,7 @@ export async function prependOlderSessionHistory(
+@@ -742,6 +771,7 @@ export async function prependOlderSessionHistory(
  export type ConvertTurnsResult = {
      messages: ThreadMessage[];
      foldState: PeerThreadFoldState;
@@ -1482,7 +1642,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
      runningTurn?: Turn;
      unstable_resume?: boolean;
  };
-@@ -981,6 +1000,14 @@ export function rootModelMessageIdsSinceBaseline(
+@@ -981,6 +1011,14 @@ export function rootModelMessageIdsSinceBaseline(
      return bucket.modelMessageIds.filter((id) => !baselineSet.has(id));
  }
  
@@ -1497,7 +1657,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
  export function computeGroupRootBaseline(turns: SessionTurnRecord[]): string[] {
      let groupStartIndex = turns.length - 1;
      while (groupStartIndex >= 0 && turns[groupStartIndex]?.userText == null) {
-@@ -1275,10 +1302,15 @@ export function projectSessionMessages(
+@@ -1275,10 +1313,15 @@ export function projectSessionMessages(
              snapshot.activeStream;
          const resolvedUpdate =
              streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
@@ -1514,7 +1674,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
          let assistantMessage = turnStreamUpdateToAssistantMessage(
              turnId,
              resolvedUpdate,
-@@ -1319,8 +1351,8 @@ function ingestTurnsIntoSnapshot(
+@@ -1319,8 +1362,8 @@ function ingestTurnsIntoSnapshot(
          const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
          const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
  
@@ -1524,7 +1684,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
  
          const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
          const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
-@@ -1438,6 +1470,7 @@ export async function convertTurnsToThreadMessages(
+@@ -1438,6 +1481,7 @@ export async function convertTurnsToThreadMessages(
      return {
          messages,
          foldState: snapshot.fold,
@@ -1532,7 +1692,7 @@ index b918b3e7eceff2af3c032ee032ad09ba77f14975..d96e2b2b69cdbe13ff16fbb699979e8d
          ...(snapshot.runningTurn != null
              ? {
                    runningTurn: snapshot.runningTurn,
-@@ -1698,7 +1731,11 @@ export async function* streamTurnEvents(
+@@ -1698,7 +1742,11 @@ export async function* streamTurnEvents(
  
          if (event.type === "turn.done") {
              if (event.state.status === "error") {
@@ -2500,10 +2660,18 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb63
    cron: string;
    timezone: string;
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
-index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..259611fdafa7296f8b5c6917b342c14826eaa3a6 100644
+index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..42d5b8c7eb7c931d14d64f7761e46662121af74d 100644
 --- a/src/sessionSnapshot.ts
 +++ b/src/sessionSnapshot.ts
-@@ -39,6 +39,37 @@ export type SessionTurnRecord = Pick<
+@@ -5,6 +5,7 @@ import type {
+     TurnDoneEvent,
+     TurnEvent,
+     TurnInputItem,
++    TurnState,
+ } from "./server/index.js";
+ 
+ import { extractTurnUserText } from "./extractTurnUserText.js";
+@@ -39,6 +40,37 @@ export type SessionTurnRecord = Pick<
      sandboxId?: string;
  };
  
@@ -2541,6 +2709,29 @@ index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..259611fdafa7296f8b5c6917b342c148
  export type RequiredActionsOverlay = {
      approvals: Map<string, StoredApprovalDecision>;
      toolResponses: Map<string, StoredToolResponse>;
+@@ -107,11 +139,11 @@ export function turnToSessionRecord(turn: Turn): SessionTurnRecord {
+     };
+ }
+ 
+-/** Builds a SessionTurnRecord from session-level TurnCreatedEvent + TurnDoneEvent data. */
++/** Builds a SessionTurnRecord from a session-level TurnCreatedEvent and the state the turn ended in. */
+ export function sessionEventsToSessionRecord(
+     turnId: string,
+     createdEvent: TurnCreatedEvent,
+-    doneEvent: TurnDoneEvent,
++    state: TurnState,
+     rootModelMessageIds: readonly string[],
+     sandboxId?: string,
+ ): SessionTurnRecord {
+@@ -120,7 +152,7 @@ export function sessionEventsToSessionRecord(
+         id: turnId,
+         ...(userText !== undefined ? { userText } : {}),
+         createdAt: createdEvent.createdAt,
+-        state: doneEvent.state,
++        state,
+         input: createdEvent.input,
+         rootModelMessageIds,
+         ...(sandboxId != null ? { sandboxId } : {}),
 diff --git a/src/streamTurn.test.ts b/src/streamTurn.test.ts
 index 1891a231eea56ea1f8b3993e775e4016998fa52d..4b2d31ab238a4d2f8b729c28d4d2424659084f2e 100644
 --- a/src/streamTurn.test.ts

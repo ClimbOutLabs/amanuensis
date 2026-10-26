@@ -148,6 +148,27 @@ describe('space capability', () => {
     expect(createSpace?.description).toContain('never by editing files in the sandbox');
   });
 
+  it('tells the model that a call too long is cut off, and to outline first then fill sections with edit_space', async () => {
+    const capability = spaceCapability({
+      store: makeStore(),
+      authority: { tenantId: 'default', userRef: 'user-a' },
+      tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const response = await toolSet.listTools();
+    const tools = 'result' in response ? response.result.tools : [];
+    for (const name of [CREATE_SPACE_TOOL_NAME, UPDATE_SPACE_TOOL_NAME]) {
+      const description = tools.find(tool => tool.name === name)?.description;
+      expect(description).toContain('cut off');
+      expect(description).toContain('edit_space');
+    }
+    expect(tools.find(tool => tool.name === CREATE_SPACE_TOOL_NAME)?.description).toContain('short outline');
+  });
+
   it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {
     const capability = spaceCapability({
       store: makeStore(),

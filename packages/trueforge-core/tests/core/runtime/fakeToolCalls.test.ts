@@ -247,6 +247,7 @@ function makeThread(input: {
   turnToolCallLedger?: TurnToolCallLedger | undefined;
   /** Research budget charged to web_search calls; absent means no budget. */
   searchBudget?: number;
+  assistantName?: string;
 }) {
   return new AgentThread({
     threadId: 'main',
@@ -262,6 +263,7 @@ function makeThread(input: {
       modelId: undefined,
       configuredModels: undefined,
       instruction: 'test',
+      ...(input.assistantName === undefined ? {} : { identity: { assistantName: input.assistantName } }),
       toolSets: [input.toolSet],
       ...(input.searchBudget === undefined
         ? {}
@@ -618,6 +620,45 @@ describe('argument checking', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.content).toContain('arguments were not complete');
   });
+});
+
+describe('what the person reads when a call is refused', () => {
+  it.each([
+    { configured: undefined, shown: 'Aman' },
+    { configured: 'Juniper', shown: 'Juniper' },
+  ])(
+    'shows one plain line naming $shown and no tool, while the model keeps its instruction',
+    async ({ configured, shown }) => {
+      const toolSet = makeToolSet();
+      let round = 0;
+      const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+        round += 1;
+        if (round === 1) {
+          return replyStream({
+            calls: [{ id: 'call-1', name: 'create_event', args: '{"title": "Dentist", "start": {"date_time": "2026' }],
+          });
+        }
+        return finalAnswerStream();
+      });
+      const thread = makeThread({
+        toolSet,
+        create,
+        ...(configured === undefined ? {} : { assistantName: configured }),
+      });
+      await drain(thread);
+      const content = toolResults(thread)[0]?.content;
+      const envelope: unknown = JSON.parse(content ?? '{}');
+      const outcome = isRecord(envelope) ? envelope['outcome'] : undefined;
+      const remediation = isRecord(outcome) ? outcome['remediation'] : undefined;
+      expect(remediation).toEqual({
+        reason_code: 'tool_pre_dispatch_failed',
+        message: `${shown} couldn't finish one of the steps in this reply. Ask again to try once more.`,
+        suggested_action: 'contact_user',
+      });
+      expect(refusalError(content)).toContain('put long content into several smaller calls');
+      expect(refusalError(content)).toContain('create_event');
+    },
+  );
 });
 
 describe('duplicates, floods and dependent reads', () => {
