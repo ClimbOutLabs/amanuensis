@@ -75,8 +75,8 @@ export function approvalSentLine(card: SentinelApprovalCard, time: string): stri
 export type ApprovalStub = {
   /** What the ticket is, in a few words: "New schedule", "Changed event". */
   what: string;
-  /** What it holds: the event or the schedule name. Null when the card names nothing more than its title does. */
-  detail: string | null;
+  /** What it holds: the event or the schedule name. */
+  detail: string;
 };
 
 function stubWhat(card: SentinelApprovalCard): string {
@@ -87,12 +87,12 @@ function stubWhat(card: SentinelApprovalCard): string {
   return 'Action';
 }
 
-function stubDetail(card: SentinelApprovalCard): string | null {
+function stubDetail(card: SentinelApprovalCard): string {
   const { calendar_event: event, schedule, persona } = card;
   if (event !== null) return event.title;
   if (schedule !== null) return schedule.name;
   if (persona !== null) return persona.name;
-  return card.destination ?? card.recipient;
+  return card.destination ?? card.recipient ?? 'Open Details to see what it does';
 }
 
 /** The stub of a ticket that is not a mail: what it is and what it holds. The header pill is the one status line, so the stub carries no state. */

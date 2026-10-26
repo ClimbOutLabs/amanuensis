@@ -59,7 +59,8 @@ describe('approval copy', () => {
       destination_host: 'Tavily',
     });
     const stub = approvalStub(card);
-    expect(stub.detail).toBeNull();
+    expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
+    expect(stub.detail).toBe('Open Details to see what it does');
   });
 
   it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
@@ -144,7 +145,7 @@ describe('approval copy', () => {
     expect(approvalSentLine(card, '09:14')).toBe('Done · 09:14');
     expect(approvalSentLine(cardWith({ email: reply }), '09:14')).toBe('Sent to Rui · 09:14');
     const stub = approvalStub(card);
-    expect(stub).toEqual({ what: 'Action', detail: null });
+    expect(stub).toEqual({ what: 'Action', detail: 'Open Details to see what it does' });
     expect('state' in stub).toBe(false);
   });
 });

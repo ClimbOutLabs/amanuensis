@@ -202,7 +202,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const stubContent = (
     <>
       <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
-      {stub.detail !== null && <p className="aui-ticket__detail text-text-primary">{stub.detail}</p>}
+      <p className="aui-ticket__detail text-text-primary">{stub.detail}</p>
     </>
   );
 
