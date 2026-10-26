@@ -239,6 +239,7 @@ import {
   blockedCallsStopMessage,
   findUnbackedClaim,
   REPEATED_ACTION_RESULT,
+  repetitionStopMessage,
   stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
@@ -3636,11 +3637,11 @@ export class AgentThread {
             throw error;
           }
           if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-            // A repetition fault carries its own actionable guidance, and only a context-length
+            // A repetition fault gets its own actionable guidance, and only a context-length
             // fault is blamed on the chat's length; anything else would mislead the user.
             const message =
               error instanceof ModelOutputRepetitionError
-                ? error.message
+                ? repetitionStopMessage(assistantDisplayName(this.definition.identity?.assistantName))
                 : isContextLengthError(error)
                   ? CHAT_TOO_LONG_MESSAGE
                   : "The model's reply broke off twice in a row. Try again, or use a different model if it keeps happening.";

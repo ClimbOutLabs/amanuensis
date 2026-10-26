@@ -1,9 +1,11 @@
 /**
  * The one check on links a space body adds. A new picture or link must pass the same check a web lookup
- * of that URL passes before it runs without asking: the outbound secret guard, and no read content chose
- * its link. It must also be https when it is a picture and never name a placeholder domain. A space page
- * loads its pictures from the host itself, so a link the person never chose would send their browser there.
- * Links already in the body before a write are left alone, so an unrelated edit never trips over an older picture.
+ * of that URL passes before it runs without asking: the outbound secret guard, and no private details in
+ * the link. The link test weighs who loads the link. A link is opened only when the person follows it, so
+ * it follows the lookup rule: read content may name it, but may not change it. A picture is loaded by the
+ * person's own browser every time the space opens, so only a link the person, a search, or a page the chat
+ * opened chose may be one. A picture must also be https and never name a placeholder domain. Links already
+ * in the body before a write are left alone, so an unrelated edit never trips over an older picture.
  */
 import { checkLookup, collectOutboundStrings, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
@@ -23,8 +25,17 @@ export class SpaceLinkRefusedError extends Error {
   }
 }
 
-const LOOKUP_RULE_MESSAGE =
-  'This link was changed from what the page or message showed, or it would carry private details. Use the link exactly as it appeared, or search for it first.';
+const GUARD_RULE_MESSAGE =
+  'This link cannot be used, because its text trips a safety check. Search for the page, then use a link from the results.';
+
+const STEERED_LINK_MESSAGE =
+  'This link was changed from what the page or message showed. Use the link exactly as it appeared, or search for it first.';
+
+const UNCHOSEN_PICTURE_MESSAGE =
+  "This picture did not come from the person, a search result, or a page this chat opened. Open the picture's page first, then use the image link from that page.";
+
+const PRIVATE_DETAIL_MESSAGE =
+  "This link would carry one of the person's own private details. Take the detail out of the link, or search for the page first.";
 
 const UNSTABLE_MARKUP_MESSAGE =
   'This page has markup that cannot be checked for links safely. Simplify the markup, then try again.';
@@ -82,15 +93,23 @@ function refusalFor(
     return `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`;
   }
   // The lookup check compares the text the model wrote; a value the parser only resolved is checked as resolved.
+  // A picture is an embed the person's browser loads, a link is a lookup the person chooses to open.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
-  const { verdict, steered } = checkLookup({
+  const check = checkLookup({
     strings: collectOutboundStrings({ url: candidate }),
     secrets: input.secrets,
     earlier: input.web_search.sentText,
     provenance: input.web_search.provenance,
+    use: kind === 'picture' ? 'embed' : 'lookup',
   });
-  if (!verdict.ok || steered.length > 0) {
-    return LOOKUP_RULE_MESSAGE;
+  if (!check.verdict.ok) {
+    return GUARD_RULE_MESSAGE;
+  }
+  if (check.steered.length > 0) {
+    return kind === 'picture' ? UNCHOSEN_PICTURE_MESSAGE : STEERED_LINK_MESSAGE;
+  }
+  if (check.privateDetails.length > 0) {
+    return PRIVATE_DETAIL_MESSAGE;
   }
   return undefined;
 }

@@ -233,9 +233,7 @@ describe('Token Factory repetition stops', () => {
       expect(caught.stop.guard).toBe('streaming_shingles');
       expect(caught.stop.channel).toBe('reasoning');
       expect(caught.stop.words).toBeGreaterThanOrEqual(512);
-      expect(caught.message).toBe(
-        "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-      );
+      expect(caught.message).toBe("The model's reasoning stopped making progress.");
     }
   });
 

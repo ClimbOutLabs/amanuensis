@@ -43,6 +43,7 @@ import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
 import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
+import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import {
   SEED_AUDIT,
@@ -1091,6 +1092,67 @@ describe('runDataImport reads schedules from before one-time schedules', () => {
       expect(daily?.status).toBe('paused');
       expect(daily?.manifest).toMatchObject({ run_at: null, kind: 'task', status: 'paused' });
       expect(daily?.manifest.cron).not.toBeNull();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reads chat schedules from before schedules could change their tools', () => {
+  it("keeps a chat's schedule on its agent, with its connectors, skills and sandbox, when the export did not yet mark the host-made agent", async () => {
+    const source = await makeInstance('source-chat-schedule');
+    const target = await makeInstance('target-chat-schedule');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      const owner = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+      const hidden = await source.stores.agentStore.createAgent({
+        host_managed: true,
+        tenant_id: TENANT,
+        created_by_subject: owner,
+        name: 'assistant-0123456789abcdef',
+        description: 'Runs the schedules you make in a chat.',
+        manifest: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          mcp_servers: [{ name: 'calendar' }],
+          skills: [{ name: 'digest' }],
+          config: { sandbox: { enabled: true } },
+        }),
+        external_id: null,
+      });
+      await source.stores.scheduleStore.createScheduleAndRun({
+        id: 'schedule-from-chat',
+        tenant_id: TENANT,
+        agent_id: hidden.id,
+        agent_name: hidden.name,
+        name: 'morning-brief',
+        persona_id: null,
+        manifest: ScheduleManifestSchema.parse({ task: 'Brief me', cron: '0 8 * * *', timezone: 'UTC' }),
+        created_by_subject: owner,
+        runFrom: new Date('2026-10-01T00:00:00Z'),
+      });
+      const archive = await exportArchive(source);
+      const older = await repack(archive, entries => {
+        const agents = listAt(parseJson(entries.get('agents.json') ?? Buffer.alloc(0), 'agents.json'), 'agents.json');
+        for (const agent of agents) {
+          Reflect.deleteProperty(recordAt(agent, 'agent'), 'host_managed');
+        }
+        entries.set('agents.json', Buffer.from(JSON.stringify(agents)));
+      });
+
+      await runDataImport(importDeps(target), importRequest(older));
+      const schedule = await target.stores.scheduleStore.getSchedule({ tenant_id: TENANT, id: 'schedule-from-chat' });
+      expect(schedule?.agent_name).toBe('assistant-0123456789abcdef');
+      const restored = await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: schedule?.agent_name ?? '' });
+      expect(restored?.manifest.mcp_servers?.map(server => server.name)).toEqual(['calendar']);
+      expect(restored?.manifest.skills?.map(skill => skill.name)).toEqual(['digest']);
+      expect(restored?.manifest.config.sandbox.enabled).toBe(true);
     } finally {
       await source.close();
       await target.close();

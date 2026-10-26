@@ -1342,9 +1342,7 @@ export class ModelOutputRepetitionError extends ModelStreamFault {
   readonly stop: RepetitionStop;
 
   constructor({ words }: { words?: number | undefined } = {}) {
-    super(
-      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-    );
+    super("The model's reasoning stopped making progress.");
     this.name = 'ModelOutputRepetitionError';
     this.stop = { guard: 'streaming_shingles', channel: 'reasoning', ...(words !== undefined ? { words } : {}) };
   }

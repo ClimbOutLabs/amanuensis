@@ -49,8 +49,8 @@ const AUTHORITY = { tenantId: 'default', userRef: 'user-a' };
 const COLLIE_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Border_Collie_working.jpg';
 const POODLE_URL = 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Standard_Poodle.jpg';
 
-const CHANGED_LINK_MESSAGE =
-  'This link was changed from what the page or message showed, or it would carry private details. Use the link exactly as it appeared, or search for it first.';
+const UNCHOSEN_PICTURE_MESSAGE =
+  "This picture did not come from the person, a search result, or a page this chat opened. Open the picture's page first, then use the image link from that page.";
 
 function textOf(response: CallToolResponse): string {
   if (!('result' in response)) {
@@ -172,7 +172,7 @@ async function errorOf(response: CallToolResponse): Promise<string> {
 }
 
 describe('space pictures and links come only from this chat', () => {
-  it('refuses a picture link that an opened page steers, with the message the model acts on', async () => {
+  it('refuses a picture link changed from the one an opened page showed, with the message the model acts on', async () => {
     const webSearch = createWebSearchTurnState();
     recordToolResultProvenance({
       state: webSearch,
@@ -184,7 +184,7 @@ describe('space pictures and links come only from this chat', () => {
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs(`<img src="${COLLIE_URL.replace('Border_Collie_working', 'Border_Collie_cropped')}" alt="Collie">`),
     });
-    expect(await errorOf(response)).toBe(CHANGED_LINK_MESSAGE);
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
   it('refuses a placeholder domain even when a search result returned it', async () => {
@@ -229,15 +229,16 @@ describe('space pictures and links come only from this chat', () => {
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs(`<img src="${COLLIE_URL}?email=person%40example.org" alt="Collie">`),
     });
-    expect(await errorOf(response)).toBe(CHANGED_LINK_MESSAGE);
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
-  it('allows a picture link copied exactly from an email, as a lookup of it would run', async () => {
+  it('refuses a picture link copied exactly from an email, since a browser loads a picture on its own', async () => {
     const webSearch = createWebSearchTurnState();
     recordEmailText({ provenance: webSearch.provenance, text: `<img src="${POODLE_URL}">` });
     const call = setup(webSearch);
     const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${POODLE_URL}" alt="Poodle">`) });
-    expect(isErrorResponse(response)).toBe(false);
+    expect(isErrorResponse(response)).toBe(true);
+    expect(await errorOf(response)).toBe(UNCHOSEN_PICTURE_MESSAGE);
   });
 
   it('refuses an http picture even when a result returned it', async () => {

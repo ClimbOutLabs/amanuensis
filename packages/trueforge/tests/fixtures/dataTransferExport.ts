@@ -59,7 +59,7 @@ export async function exportInstanceArchive<TTransaction>({
     listAgents: async () =>
       (
         await stores.agentStore.listAgents({
-          include_host_managed: false,
+          include_host_managed: true,
           tenant_id: tenantId,
           agent_name: undefined,
           limit: undefined,

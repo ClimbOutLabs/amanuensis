@@ -405,6 +405,23 @@ describe('maps without asking', () => {
     expect(decision.tier).toBe(1);
   });
 
+  it("asks when a place carries one of the person's own details and the chat has read content", async () => {
+    const ctx = makeCtx(maps_on);
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'My email is sam@postbox.net' });
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'read_email',
+      argument_values: ['m1'],
+      texts: ['From: Dana Wolfe <dana@example.org>\nLunch on Friday.'],
+    });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'sam@postbox.net' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('maps_tool');
+    expect(decision.reason_detail).toBe(
+      'This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
+    );
+  });
+
   it("runs a map of the person's own city from their profile", async () => {
     const ctx = makeCtx(maps_on);
     recordPersonText({

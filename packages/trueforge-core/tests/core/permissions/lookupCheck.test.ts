@@ -1,8 +1,26 @@
-import { checkLookup } from '../../../src/core/permissions/lookupCheck';
+import { checkLookup, type LookupUse } from '../../../src/core/permissions/lookupCheck';
 import { collectOutboundStrings } from '../../../src/core/permissions/outboundGuard';
-import { emptyChatProvenance, recordUntrustedText } from '../../../src/core/permissions/provenance';
+import {
+  emptyChatProvenance,
+  recordPageImageUrls,
+  recordPersonText,
+  recordSearchResults,
+  recordUntrustedText,
+  type ChatProvenance,
+} from '../../../src/core/permissions/provenance';
 
 const PAGE_LINK = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
+const UNSEEN_PICTURE = 'https://images.picturestack.net/fox.jpg';
+
+function checkOf(input: { provenance: ChatProvenance; url: string; use: LookupUse }) {
+  return checkLookup({
+    strings: collectOutboundStrings({ url: input.url }),
+    secrets: [],
+    earlier: undefined,
+    provenance: input.provenance,
+    use: input.use,
+  });
+}
 
 describe('checkLookup', () => {
   it('is uninspectable when the lookup has no text to read', () => {
@@ -11,19 +29,15 @@ describe('checkLookup', () => {
       secrets: [],
       earlier: undefined,
       provenance: emptyChatProvenance(),
+      use: 'lookup',
     });
-    expect(check).toEqual({ verdict: { ok: false, rule: 'uninspectable' }, steered: [] });
+    expect(check).toEqual({ verdict: { ok: false, rule: 'uninspectable' }, steered: [], privateDetails: [] });
   });
 
   it('passes a link copied exactly from read content', () => {
     const provenance = emptyChatProvenance();
     recordUntrustedText({ provenance, text: PAGE_LINK, source: 'page' });
-    const check = checkLookup({
-      strings: collectOutboundStrings({ url: PAGE_LINK }),
-      secrets: [],
-      earlier: undefined,
-      provenance,
-    });
+    const check = checkOf({ provenance, url: PAGE_LINK, use: 'lookup' });
     expect(check.verdict.ok).toBe(true);
     expect(check.steered).toEqual([]);
   });
@@ -32,12 +46,87 @@ describe('checkLookup', () => {
     const provenance = emptyChatProvenance();
     recordUntrustedText({ provenance, text: PAGE_LINK, source: 'page' });
     const altered = `${PAGE_LINK}?size=2`;
-    const check = checkLookup({
-      strings: collectOutboundStrings({ url: altered }),
-      secrets: [],
-      earlier: undefined,
-      provenance,
-    });
+    const check = checkOf({ provenance, url: altered, use: 'lookup' });
     expect(check.steered).toEqual([altered]);
+  });
+
+  it('passes a lookup link on a host nothing named, since a lookup runs once', () => {
+    const check = checkOf({ provenance: emptyChatProvenance(), url: UNSEEN_PICTURE, use: 'lookup' });
+    expect(check.verdict.ok).toBe(true);
+    expect(check.steered).toEqual([]);
+  });
+});
+
+describe('checkLookup for an embed, which a browser loads on its own', () => {
+  it('reports an embed link on a host nothing named', () => {
+    const check = checkOf({ provenance: emptyChatProvenance(), url: UNSEEN_PICTURE, use: 'embed' });
+    expect(check.steered).toEqual([UNSEEN_PICTURE]);
+  });
+
+  it('reports an embed link copied exactly from read content', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: PAGE_LINK, source: 'page' });
+    const check = checkOf({ provenance, url: PAGE_LINK, use: 'embed' });
+    expect(check.steered).toEqual([PAGE_LINK]);
+  });
+
+  it('passes an embed link the person gave', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `Use this picture: ${UNSEEN_PICTURE}` });
+    const check = checkOf({ provenance, url: UNSEEN_PICTURE, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+
+  it('passes an embed link a search returned', () => {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url: PAGE_LINK }] })] });
+    const check = checkOf({ provenance, url: PAGE_LINK, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+
+  it('passes an embed link recorded as a picture on a page the chat opened', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: `<img src="${PAGE_LINK}">`, source: 'page' });
+    recordPageImageUrls({ provenance, urls: [PAGE_LINK] });
+    const check = checkOf({ provenance, url: PAGE_LINK, use: 'embed' });
+    expect(check.steered).toEqual([]);
+  });
+});
+
+describe('checkLookup private details', () => {
+  const OWN_ADDRESS = 'sam@postbox.net';
+  const CARRYING = `https://maps.picturestack.net/route?to=${OWN_ADDRESS}`;
+
+  function chatThatReadContent(): ChatProvenance {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `My email is ${OWN_ADDRESS}` });
+    recordUntrustedText({ provenance, text: 'A page about the roads north of the city.', source: 'page' });
+    return provenance;
+  }
+
+  it("reports a detail of the person's that the text carries once the chat has read content", () => {
+    const check = checkOf({ provenance: chatThatReadContent(), url: CARRYING, use: 'lookup' });
+    expect(check.privateDetails).toEqual([OWN_ADDRESS]);
+  });
+
+  it('reports the detail however the text spells the address', () => {
+    const spelled = `https://maps.picturestack.net/route?to=sam+alerts@postbox.net`;
+    const check = checkOf({ provenance: chatThatReadContent(), url: spelled, use: 'lookup' });
+    expect(check.privateDetails).toEqual([OWN_ADDRESS]);
+  });
+
+  it('reports nothing when the chat has read no content', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: `My email is ${OWN_ADDRESS}` });
+    const check = checkOf({ provenance, url: CARRYING, use: 'lookup' });
+    expect(check.privateDetails).toEqual([]);
+  });
+
+  it('reports the detail on an embed link that was itself chosen', () => {
+    const provenance = chatThatReadContent();
+    recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url: CARRYING }] })] });
+    const check = checkOf({ provenance, url: CARRYING, use: 'embed' });
+    expect(check.steered).toEqual([]);
+    expect(check.privateDetails).toEqual([OWN_ADDRESS]);
   });
 });

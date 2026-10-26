@@ -172,8 +172,8 @@ function recordText(side: ProvenanceValues, text: string): string[] {
   return found;
 }
 
-/** A phone number as written, with its spaces and marks: `+1 415 555 0132`. */
-const PHONE_CANDIDATE = /\+?\d(?:[\s().-]?\d){6,}/g;
+/** A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits. */
+const PHONE_CANDIDATE = /\+?\d(?:[\s().-]{0,3}\d){6,}/g;
 /** Fewest digits a phone number has, when written with a leading plus sign. */
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
@@ -198,9 +198,55 @@ function phoneDetails(text: string): string[] {
   return found;
 }
 
-/** The person's own details in a text: its email addresses, folded lower case, and its phone numbers, folded. */
+const MAX_DECODE_ROUNDS = 3;
+/** Characters that show nothing, which a writer can hide inside a value to break an exact match. */
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
+
+/** One round of undoing percent coding; a value whose coding is broken is spelled out character by character. */
+function decodeOnce(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value.replace(/%([0-9A-Fa-f]{2})/g, (_whole: string, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+  }
+}
+
+/** Compatibility forms folded to plain ones (a full-width `＠` becomes `@`) and hidden characters removed. */
+function plainForm(value: string): string {
+  return value.normalize('NFKC').replace(INVISIBLE, '');
+}
+
+/**
+ * A text as it will be read where it arrives: plain characters, coding spelled out until it stops changing, and
+ * the spaces people leave around an at sign folded away. The one place a detail's spelling is settled, for the
+ * text the person gave and for the text a call sends alike.
+ */
+function foldSpelling(text: string): string {
+  let folded = plainForm(text);
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    const next = plainForm(decodeOnce(folded));
+    if (next === folded) {
+      break;
+    }
+    folded = next;
+  }
+  return folded.replace(/\s*@\s*/g, '@');
+}
+
+/** A mailbox however it is addressed: lower case, with a `+tag` dropped from the part before the at sign. */
+function mailboxKey(address: string): string {
+  const lower = address.toLowerCase();
+  const at = lower.lastIndexOf('@');
+  const tag = lower.indexOf('+');
+  return tag > 0 && tag < at ? `${lower.slice(0, tag)}${lower.slice(at)}` : lower;
+}
+
+/** The person's own details in a text: its mailboxes and its phone numbers, each folded so any writing of one matches. */
 function detailsInText(text: string): string[] {
-  return [...text.matchAll(EMAIL)].map(match => match[0].toLowerCase()).concat(phoneDetails(text));
+  const folded = foldSpelling(text);
+  return [...folded.matchAll(EMAIL)].map(match => mailboxKey(match[0])).concat(phoneDetails(folded));
 }
 
 /** Keeps a text's details among the person's own; past the cap the set overflows and every detail counts. */
@@ -409,6 +455,22 @@ export function steeredLinks(input: { provenance: ChatProvenance; values: readon
   );
 }
 
+/**
+ * Links in values that nobody chose to load: not exactly a link the person gave, a search returned, or a
+ * page the chat opened showed as a picture. A lookup runs once on the person's behalf, so read content may
+ * name its links; an embed is loaded by the person's own browser every time it is shown, so only a chosen
+ * link may be one. Copying a link exactly as read content wrote it is not a choice.
+ */
+export function unchosenLinks(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
+  const { provenance } = input;
+  return input.values.flatMap(value =>
+    urlsOf(value).filter(url => {
+      const key = urlKey(url);
+      return key === undefined || !provenance.trusted.urls.has(key);
+    }),
+  );
+}
+
 /** Whether only read content named an address: the person never gave it, and it is not the reply's own sender. */
 function steeredAddress(input: { provenance: ChatProvenance; address: string; reply_sender: string | null }): boolean {
   const address = input.address.trim().toLowerCase();
@@ -471,36 +533,18 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
 }
 
 /**
- * A copy of a sent value written as it will be read where it arrives: coded characters spelled out, and
- * the spaces people leave around an at sign folded away. A value whose coding is broken is spelled out
- * character by character instead, so it is always safe to check.
- */
-function asReadOnArrival(value: string): string {
-  let spelled: string;
-  try {
-    spelled = decodeURIComponent(value);
-  } catch {
-    spelled = value.replace(/%([0-9A-Fa-f]{2})/g, (_whole: string, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)),
-    );
-  }
-  return spelled.replace(/\s*@\s*/g, '@');
-}
-
-/**
  * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
- * words, their mail or their events. A detail only read content named is not one of these; it is that
- * content's own value, and sending it back to its source is ordinary. Each value is checked as written and
- * as it will be read where it arrives, so a detail counts however the value spells it.
+ * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
+ * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
+ * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
+ * folded the same way the record was, so a detail counts however the value spells it.
  */
 export function carriedPrivateDetails(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
   const carried = new Set<string>();
   for (const value of input.values) {
-    for (const writing of [value, asReadOnArrival(value)]) {
-      for (const detail of detailsInText(writing)) {
-        if (input.provenance.own_details_overflowed || input.provenance.own_details.has(detail)) {
-          carried.add(detail);
-        }
+    for (const detail of detailsInText(value)) {
+      if (input.provenance.own_details_overflowed || input.provenance.own_details.has(detail)) {
+        carried.add(detail);
       }
     }
   }
