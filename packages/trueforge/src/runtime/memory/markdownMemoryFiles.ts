@@ -160,6 +160,11 @@ export function withoutSessionMarker(text: string): string {
   return text.replace(/\n\n<!-- session_id: [A-Za-z0-9_-]{1,128} -->(?=\n\n> Source: read content$|$)/, '');
 }
 
+/** The day an entry was written, read from the daily file name in its id. */
+export function entryDay(entryId: string): string | undefined {
+  return /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entryId)?.[1];
+}
+
 /** Curated long-term memory file inside a namespace directory. */
 export const CURATED_MEMORY_FILE = 'MEMORY.md';
 

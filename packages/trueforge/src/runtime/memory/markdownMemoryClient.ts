@@ -47,6 +47,7 @@ import {
 import {
   appendVaultTombstone,
   clearSummaryPending,
+  entryDay,
   entryMetadata,
   estimateTokens,
   formatRetainEntry,
@@ -254,11 +255,13 @@ export class MarkdownMemoryClient implements MemoryClient {
       );
       for (const item of interleaveRanked(rankedLists)) {
         const metadata = entryMetadata(item.text);
-        // The chat id travels as metadata so recall can skip notes from the current chat; the model reads only the facts.
+        const day = entryDay(item.id);
+        // The day and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
           text: withoutSessionMarker(item.text),
           type: 'markdown',
+          ...(day !== undefined && { occurred_start: day }),
           ...(metadata && { metadata }),
         });
         if (!ok) {
