@@ -1074,6 +1074,19 @@ journey('16. no friction: "What are my three newest emails" reads mail', SCENARI
   }),
 );
 
+journey('16b. no friction: "Open my newest email" reads it in full', SCENARIO_LIMIT_MS, () =>
+  withoutFriction({
+    message: 'Open my newest email',
+    plan: results => {
+      if (results.length === 0) return { match: 'list_emails_metadata', argumentsJson: JSON.stringify({ limit: 1 }) };
+      if (results.length > 1) return undefined;
+      const ids = [...(results[0] ?? '').matchAll(/mail-\d+/g)].map(match => match[0]);
+      return { match: 'get_emails_content', argumentsJson: JSON.stringify({ email_ids: [...new Set(ids)] }) };
+    },
+    tools: [connectorTool('list_emails_metadata'), connectorTool('get_emails_content')],
+  }),
+);
+
 journey('17. no friction: "What\'s on my calendar today" reads the calendar', SCENARIO_LIMIT_MS, () => {
   const day = new Date().toISOString().slice(0, 10);
   return withoutFriction({

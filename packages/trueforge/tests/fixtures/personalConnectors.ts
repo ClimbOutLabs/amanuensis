@@ -56,6 +56,11 @@ function inventedEvents(now: Date) {
 
 const READ = { readOnlyHint: true, openWorldHint: false };
 const WRITE = { readOnlyHint: false, openWorldHint: true };
+/**
+ * The annotations the real mail server publishes for get_emails_content: not read-only, only because
+ * its optional mark-as-read choice can change the mailbox. A plain read leaves that choice off.
+ */
+const CONTENT_READ = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 const optionalDate = z.string().nullable().optional();
 
 function json(value: unknown) {
@@ -101,8 +106,13 @@ function buildMailServer(count: (tool: string) => void): McpServer {
     'get_emails_content',
     {
       description: 'Read the full content of emails by id.',
-      inputSchema: { ...account, email_ids: z.array(z.string()), mailbox: z.string().optional() },
-      annotations: READ,
+      inputSchema: {
+        ...account,
+        email_ids: z.array(z.string()),
+        mailbox: z.string().optional(),
+        mark_as_read: z.boolean().optional(),
+      },
+      annotations: CONTENT_READ,
     },
     ({ email_ids }) => {
       count('get_emails_content');
