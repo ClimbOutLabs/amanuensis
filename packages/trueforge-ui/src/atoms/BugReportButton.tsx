@@ -58,10 +58,16 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
   };
 }
 
+/** A menu row unmounts as it opens the dialog, so focus goes back to the menu's trigger instead. */
+function focusTargetFor(button: HTMLElement): HTMLElement {
+  const menuId = button.closest('[role="menu"]')?.id;
+  if (menuId == null || menuId === '') return button;
+  return document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menuId)}"]`) ?? button;
+}
+
 /**
- * "Report a bug" icon button in `ShellActions`, after Sessions, or a labeled row in the rail's More
- * menu. It only asks `BugReportDialog` to open: a menu row unmounts when the menu closes, so the
- * dialog cannot live inside it. Renders nothing when no host has wired a `BugReportProvider`.
+ * "Report a bug" button: an icon, or a labeled row for menus. Opens the app's bug report form.
+ * Renders nothing when no host has wired a `BugReportProvider`.
  */
 export function BugReportButton({
   row = false,
@@ -83,7 +89,10 @@ export function BugReportButton({
           ? auiButtonClass({ variant: 'ghost', className: railMenuRowClassName })
           : auiButtonClass({ variant: 'ghost', size: 'icon' })
       }
-      onClick={() => dialog.setOpen(true)}
+      onClick={event => {
+        dialog.returnFocusRef.current = focusTargetFor(event.currentTarget);
+        dialog.setOpen(true);
+      }}
     >
       <Icon name="bug" size={row ? 14 : undefined} />
       {row ? 'Report a bug' : null}
@@ -92,13 +101,8 @@ export function BugReportButton({
 }
 
 /**
- * The bug report modal. Each layout mounts it once, outside the More menu. Opens a compact modal to
- * fetch a redacted diagnostic bundle, for the current session when a chat is open or an app-level
- * bundle otherwise (build version and config flags only), then download it, copy it, or hand it off
- * to the issue tracker.
- *
- * The null checks run before `ConnectedBugReportDialog`, which needs an assistant-ui runtime
- * (`useAuiState`), so a host that never wires a provider never pays for that dependency.
+ * The bug report form, mounted once by the app shell. The null checks run before
+ * `ConnectedBugReportDialog`, which needs an assistant-ui runtime (`useAuiState`).
  */
 export function BugReportDialog() {
   const api = useOptionalBugReport();
@@ -111,7 +115,7 @@ export function BugReportDialog() {
 
 function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: BugReportDialogControl }) {
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
-  const { open, setOpen } = dialog;
+  const { open, setOpen, returnFocusRef } = dialog;
   const [description, setDescription] = useState('');
   // Off by default and reset with the modal: including the chat is a per-report choice, never sticky.
   const [includeChat, setIncludeChat] = useState(false);
@@ -147,13 +151,19 @@ function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: 
     setIncludeChat(false);
   }, [sessionId, clearGeneratedState]);
 
-  // Resolve the handoff target once per open, however the dialog was opened. A host without one
-  // configured simply gets no "File on GitHub" button. A failure here must not block the rest of the modal.
+  // Read through a ref so a host passing a fresh `api` object each render does not rerun the lookup.
+  const apiRef = useRef(api);
+  useEffect(() => {
+    apiRef.current = api;
+  }, [api]);
+
+  // Resolve the handoff target once per open. A host without one configured simply gets no
+  // "File on GitHub" button, and a failure here must not block the rest of the modal.
   useEffect(() => {
     if (!open) return;
     setHandoff('loading');
     const requestId = (handoffRequestRef.current += 1);
-    void api
+    void apiRef.current
       .getBugReportHandoff()
       .then(target => {
         if (handoffRequestRef.current === requestId) setHandoff(target);
@@ -165,7 +175,7 @@ function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: 
     return () => {
       handoffRequestRef.current += 1;
     };
-  }, [open, api]);
+  }, [open]);
 
   const handleOpenChange = (next: boolean): void => {
     setOpen(next);
@@ -177,6 +187,14 @@ function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: 
     setIncludeChat(false);
     setHandoff(null);
   };
+
+  // Runs after the modal has closed, when the page behind it can take focus again.
+  useEffect(() => {
+    if (open) return;
+    const returnTo = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (returnTo?.isConnected) returnTo.focus();
+  }, [open, returnFocusRef]);
 
   const handleGenerate = (): void => {
     if (loading) return;

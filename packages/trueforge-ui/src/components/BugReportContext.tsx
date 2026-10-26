@@ -1,7 +1,7 @@
 'use client';
 
 import type { serialization } from '@truefoundry/trueforge-sdk';
-import { createContext, useContext, useMemo, useState, type FC, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useRef, useState, type FC, type ReactNode, type RefObject } from 'react';
 
 /**
  * The bug-report wire contract, as it crosses the wire (snake_case). The generated SDK is the
@@ -49,8 +49,13 @@ export type BugReportApi = {
   getBugReportHandoff: () => Promise<BugReportHandoffTarget>;
 };
 
-/** Open state of the one bug report dialog. Buttons ask for it open; each layout mounts the dialog itself. */
-export type BugReportDialogControl = { open: boolean; setOpen: (open: boolean) => void };
+/** Open state of the one bug report dialog, which the app shell mounts. Buttons only ask for it open. */
+export type BugReportDialogControl = {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  /** Where focus goes on close, for openers that unmount as they open (menu rows). */
+  returnFocusRef: RefObject<HTMLElement | null>;
+};
 
 const BugReportContext = createContext<BugReportApi | null>(null);
 const BugReportDialogContext = createContext<BugReportDialogControl | null>(null);
@@ -58,7 +63,8 @@ const BugReportDialogContext = createContext<BugReportDialogControl | null>(null
 /** The open flag lives above the layouts so a menu row can open the dialog and then unmount safely. */
 export const BugReportProvider: FC<{ api: BugReportApi; children: ReactNode }> = ({ api, children }) => {
   const [open, setOpen] = useState(false);
-  const dialog = useMemo<BugReportDialogControl>(() => ({ open, setOpen }), [open]);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const dialog = useMemo<BugReportDialogControl>(() => ({ open, setOpen, returnFocusRef }), [open]);
   return (
     <BugReportContext.Provider value={api}>
       <BugReportDialogContext.Provider value={dialog}>{children}</BugReportDialogContext.Provider>

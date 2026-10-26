@@ -4,6 +4,7 @@ import type { TrueFoundryAgentConfig, UseTrueFoundryAgentRuntimeOptions } from '
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 
+import { BugReportDialog } from '../atoms/BugReportButton.js';
 import { AgentConfigInstructionsProvider } from '../atoms/draft/AgentConfigInstructionsContext.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { DraftSpecPreferenceBridge } from '../atoms/draft/DraftSpecPreferenceBridge.js';
@@ -374,6 +375,8 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
         {...providerRest}
       >
         {layoutTree}
+        {/* Once, outside any layout or menu, so every BugReportButton can open it. */}
+        <BugReportDialog />
       </ChatProviderFromShell>
     </ShellModeProvider>
   );

@@ -4,7 +4,6 @@ import { lazy, Suspense, useRef } from 'react';
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
-import { BugReportDialog } from '../atoms/BugReportButton.js';
 import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
@@ -69,7 +68,6 @@ export function DrawerLayout({ className }: { className?: string }) {
   return (
     <div className={cn('relative flex h-full min-h-0 w-full bg-primary-bg', className)}>
       <HelpNewChatBridge />
-      <BugReportDialog />
       {showAgentConfig ? (
         <aside
           role="dialog"

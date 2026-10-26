@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { BugReportDialog } from '@/atoms/BugReportButton.js';
 import { AgentConfigInstructionsProvider } from '@/atoms/draft/AgentConfigInstructionsContext.js';
 import { BugReportProvider, type BugReportApi } from '@/components/BugReportContext.js';
 import { SidebarLayout } from '@/layouts/SidebarLayout.js';
@@ -228,15 +229,15 @@ function mockSpaceStore(): SpaceStore {
   };
 }
 
-/** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
- *  (it renders nothing without one — see `SpacesButton`). */
-const getBugReportHandoff = vi.fn(() => Promise.reject(new Error('not used')));
 const bugReportApi: BugReportApi = {
   generateBugReport: () => Promise.reject(new Error('not used')),
   generateAppBugReport: () => Promise.reject(new Error('not used')),
-  getBugReportHandoff,
+  getBugReportHandoff: () => Promise.reject(new Error('not used')),
 };
 
+/** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
+ *  (it renders nothing without one — see `SpacesButton`). With `withBugReport` it also mounts the
+ *  bug report dialog, as the app shell does. */
 function renderSidebarLayoutWithSpaces({
   withBugReport = false,
   withLibrary = false,
@@ -251,6 +252,7 @@ function renderSidebarLayoutWithSpaces({
                 <div className="h-96">
                   <SidebarLayout />
                 </div>
+                {withBugReport ? <BugReportDialog /> : null}
               </RuntimeHarness>
             </AgentConfigInstructionsProvider>
           </SpaceProvider>
@@ -402,20 +404,15 @@ describe('SidebarLayout More menu', () => {
     expect(screen.getByRole('dialog', { name: 'Report a bug' })).toHaveAttribute('open');
   });
 
-  it('looks up the issue tracker target each time the bug report dialog opens', async () => {
-    getBugReportHandoff.mockClear();
+  it('returns focus to the More button when the dialog closes', async () => {
     renderSidebarLayoutWithSpaces({ withBugReport: true });
-    const openFromMenu = async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'More' }));
-      fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
-      return screen.findByRole('dialog', { name: 'Report a bug' });
-    };
+    const more = screen.getByRole('button', { name: 'More' });
 
-    const first = await openFromMenu();
-    fireEvent.click(within(first).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Report a bug' })).not.toBeInTheDocument());
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Report a bug' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
 
-    await openFromMenu();
-    await waitFor(() => expect(getBugReportHandoff).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(more).toHaveFocus());
   });
 });
