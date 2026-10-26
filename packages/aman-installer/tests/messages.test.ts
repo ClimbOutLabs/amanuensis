@@ -12,8 +12,8 @@ import {
   MEMORY_NOT_REPORTED,
   NOT_INSTALLED,
   STATE_BUSY,
+  STATE_IMAGE_UNAVAILABLE,
   STATE_UNREADABLE,
-  STATE_VALUE_NOT_ALLOWED,
   UNKNOWN_DOCTOR_CHECK,
   allMessageLines,
   problemText,
@@ -53,7 +53,7 @@ function allProblems(): Problem[] {
     NOT_INSTALLED,
     STATE_UNREADABLE,
     STATE_BUSY,
-    STATE_VALUE_NOT_ALLOWED,
+    STATE_IMAGE_UNAVAILABLE,
   ];
   for (const record of [
     DOCKER_NOT_INSTALLED,

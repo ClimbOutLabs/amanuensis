@@ -1,4 +1,5 @@
 import type { SystemKind } from './host/host.ts';
+import { LOCK_TIMING } from './state/lockTiming.ts';
 
 // Every sentence a person can read lives in this file, as a Problem with two
 // fields: what happened, and what to do (one sentence, one action). A test in
@@ -147,16 +148,16 @@ export const STATE_UNREADABLE: Problem = {
   fix: 'Run the installer again from the folder Aman was installed from, then run aman status again.',
 };
 
+// The wait is the lock's dead limit: an install stopped without cleaning up
+// leaves its lock until its beats have been missing that long.
 export const STATE_BUSY: Problem = {
   happened: 'Another install is running right now.',
-  fix: 'Wait for it to finish, then run aman status again.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman status again.`,
 };
 
-// The wording for a StateValueError refusal, for the first command that
-// writes state and prints it.
-export const STATE_VALUE_NOT_ALLOWED: Problem = {
-  happened: 'A value to save has a line break in it, or its name has an equals sign in it.',
-  fix: 'Take the line break or equals sign out, then try again.',
+export const STATE_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then run aman status again.',
 };
 
 export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
@@ -174,20 +175,26 @@ export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
   },
 };
 
+// The name and the address come from files in the state home, so a control
+// character in them must not reach the screen as a terminal command.
+function printable(text: string): string {
+  return text.replace(/\p{Cc}/gu, '');
+}
+
 export function statusInstalledLine(version: string): string {
-  return `Aman is installed, version ${version}.`;
+  return `Aman is installed, version ${printable(version)}.`;
 }
 
 export type InstanceState = 'running' | 'partly running' | 'stopped' | 'unknown';
 
 export function statusInstanceLine(name: string, state: InstanceState, address: string | null): string {
   if (state === 'unknown') {
-    return `Instance ${name}: whether it is running is unknown.`;
+    return `Instance ${printable(name)}: whether it is running is unknown.`;
   }
   if (address === null) {
-    return `Instance ${name} is ${state}.`;
+    return `Instance ${printable(name)} is ${state}.`;
   }
-  return `Instance ${name} is ${state} at ${address}.`;
+  return `Instance ${printable(name)} is ${state} at ${printable(address)}.`;
 }
 
 export const NO_INSTANCES_LINE = 'No instance has been made yet.';
@@ -215,7 +222,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(NOT_INSTALLED));
   lines.push(problemText(STATE_UNREADABLE));
   lines.push(problemText(STATE_BUSY));
-  lines.push(problemText(STATE_VALUE_NOT_ALLOWED));
+  lines.push(problemText(STATE_IMAGE_UNAVAILABLE));
   lines.push(statusInstalledLine('aman-app:0'));
   lines.push(statusInstanceLine('main', 'running', 'http://127.0.0.1:8791'));
   lines.push(statusInstanceLine('main', 'partly running', 'http://127.0.0.1:8791'));

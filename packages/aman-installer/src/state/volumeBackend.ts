@@ -1,65 +1,94 @@
+import pins from '../../../../installer/release.json' with { type: 'json' };
 import type { ProcessRunner } from '../runner/processRunner.ts';
-import { StateBusyError, StateDockerError, StateStoreError, type StateBackend } from './state.ts';
+import { LOCK_TIMING, type LockTiming } from './lockTiming.ts';
+import { StateBusyError, StateDockerError, StateImageError, StateStoreError, type StateBackend } from './state.ts';
 import { buildTar, parseTar } from './tar.ts';
 
 // The Windows shape: state lives in the aman_home volume, as the starter
 // left it, and each command runs one short-lived container against it.
-// SETUP_IMAGE is the image those containers run, pinned by digest so the
-// image cannot change under its tag: the containers it starts mount the
-// volume that holds the install's secrets. The starter builds its setup
-// image from this base; this is the one place that names the image.
-export const SETUP_IMAGE = 'docker:cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb';
+// The containers mount the volume that holds the install's secrets, so the
+// image is pinned by digest. installer/release.json owns the pin, next to
+// the other images, so a bump there is the only place it ever changes.
+export const SETUP_IMAGE = pins.setup_image;
 export const STATE_VOLUME = 'aman_home';
 export const VOLUME_HOME = '/root/.amanuensis';
 
 const MOUNT = `${STATE_VOLUME}:${VOLUME_HOME}`;
 const MOUNT_READ_ONLY = `${MOUNT}:ro`;
 
-// How long a lock in the volume counts as held, in seconds. A write under
-// this lock unpacks a few small files and takes seconds, so a lock older
-// than this is one whose holder stopped without removing it.
-const LOCK_STALE_SECONDS = 900;
+function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
 
-// The lock folder's age evidence: when it was last changed, in seconds.
-const LOCK_TIME = 'stat -c %Y state/lock 2>/dev/null';
-
-// The shell's lock folder and write shape, as one script: take state/lock
-// or take it over from a dead holder, then do the write. Exit 3 is the
-// shell's "another install is running". On a host folder the pid decides
-// whether the holder is alive (folderLock.ts), but in the volume the
-// holder ran inside its own short-lived container, whose shell is process
-// 1, so the pid it wrote names that container's processes and says
-// nothing about whether the holder is still running; a leftover lock's
-// pid 1 would read as alive inside every later container, forever. The
-// lock folder's age is the evidence that works here, because the holder
-// and the checker read the same clock: younger than LOCK_STALE_SECONDS is
-// a run still going, and older is a holder that died. The pid file is
-// still written, as the lock keeps it. The trap removes the folder only
-// while its stamp is still the one this run took, so a holder whose lock
-// was taken over cannot remove the new holder's lock when it finally
-// exits.
-function lockSteps(home: string): readonly string[] {
+// The shell installer's lock (common.sh) as one script, followed by the
+// command to run under it. installer/STATE.md ("The lock") is the contract:
+// the holder refreshes state/lock/beat while it runs, and a lock whose beat
+// is older than the dead limit belongs to a holder that stopped. A pid or a
+// folder age cannot say that here: the holder ran in its own container, so
+// its pid means nothing to this one, and a long install keeps the lock far
+// longer than any fixed age.
+// Taking over a dead lock first moves the old folder to a name of its own
+// (only one run can win that move), checks it really was the dead one, then
+// removes it. Exit 3 means another run holds the lock.
+export function volumeLockedScript(options: { home: string; command: string; timing?: LockTiming }): string {
+  const timing = options.timing ?? LOCK_TIMING;
+  const dead = String(timing.deadSeconds);
+  // One line, every statement ended with a semicolon: the script is a single command-line argument.
   return [
-    `cd ${home} || exit 1`,
-    'mkdir -p state',
-    'chmod 700 state',
-    `if ! mkdir state/lock 2>/dev/null; then taken=$(${LOCK_TIME}); now=$(date +%s); if [ -z "$taken" ] || [ $((now - taken)) -lt ${String(LOCK_STALE_SECONDS)} ]; then exit 3; fi; rm -rf state/lock; mkdir state/lock || exit 1; fi`,
-    'printf \'%s\\n\' "$$" > state/lock/pid',
-    `stamp=$(${LOCK_TIME})`,
-    `trap 'if [ "$(${LOCK_TIME})" = "$stamp" ]; then rm -rf state/lock; fi' EXIT`,
-  ];
+    `cd ${shellQuote(options.home)} || exit 1;`,
+    'mkdir -p state;',
+    'chmod 700 state;',
+    'beat_age() { b=$(cat "$1/beat" 2>/dev/null); case "$b" in \'\'|*[!0-9]*) return 1 ;; esac; echo $(( $(date +%s) - b )); };',
+    // A lock with no beat yet is a holder between mkdir and its first beat, so it is given a moment.
+    `is_live() { [ -d "$1" ] || return 1; n=0; while [ "$n" -lt 3 ]; do if a=$(beat_age "$1"); then [ "$a" -lt ${dead} ]; return; fi; n=$((n + 1)); sleep 1; done; return 1; };`,
+    'tries=0;',
+    'while ! mkdir state/lock 2>/dev/null; do',
+    'tries=$((tries + 1));',
+    '[ "$tries" -le 5 ] || exit 3;',
+    'is_live state/lock && exit 3;',
+    'old="state/lock.old.$$.$(date +%s)";',
+    'if [ ! -e "$old" ] && mv state/lock "$old" 2>/dev/null; then',
+    // The folder moved may be a live lock another run made a moment ago: put it back.
+    `if a=$(beat_age "$old") && [ "$a" -lt ${dead} ]; then`,
+    'if [ -e state/lock ]; then rm -rf "$old"; else mv "$old" state/lock 2>/dev/null || rm -rf "$old"; fi;',
+    'exit 3;',
+    'fi;',
+    'rm -rf "$old";',
+    'fi;',
+    'done;',
+    'token="$$-$(date +%s)";',
+    'beat() { date +%s > "state/lock/beat.$$" && mv -f "state/lock/beat.$$" state/lock/beat; };',
+    'printf \'%s\\n\' "$token" > state/lock/owner;',
+    'beat;',
+    'printf \'%s\\n\' "$$" > state/lock/pid;',
+    // The beat stops with the holder, and never touches a lock another run took over.
+    `( while sleep ${String(timing.beatSeconds)}; do kill -0 "$$" 2>/dev/null || exit 0; [ "$(cat state/lock/owner 2>/dev/null)" = "$token" ] || exit 0; beat; done ) </dev/null >/dev/null 2>&1 &`,
+    'beater=$!;',
+    // Only the run that still owns the lock removes it.
+    'trap \'kill "$beater" 2>/dev/null; if [ "$(cat state/lock/owner 2>/dev/null)" = "$token" ]; then rm -rf state/lock; fi\' EXIT;',
+    options.command,
+  ].join(' ');
 }
 
-export function volumeWriteScript(home: string): string {
-  return [...lockSteps(home), 'tar -x -f -'].join('; ');
-}
+const WRITE_COMMAND = 'tar -x -f -';
+const REMOVE_COMMAND = 'rm -f -- "$1"';
+const WRITE_SCRIPT = volumeLockedScript({ home: VOLUME_HOME, command: WRITE_COMMAND });
+const REMOVE_SCRIPT = volumeLockedScript({ home: VOLUME_HOME, command: REMOVE_COMMAND });
 
-export function volumeRemoveScript(home: string): string {
-  return [...lockSteps(home), 'rm -f -- "$1"'].join('; ');
-}
+// Docker's own words when the engine is off. Exit 125 alone cannot say so:
+// it is also what a failed image pull returns.
+const DOCKER_OFF =
+  /cannot connect to the docker daemon|error during connect|failed to connect to the docker api|is the docker daemon running/i;
 
-const WRITE_SCRIPT = volumeWriteScript(VOLUME_HOME);
-const REMOVE_SCRIPT = volumeRemoveScript(VOLUME_HOME);
+function dockerFailure(result: { started: boolean; exitCode: number; stderr: string }): StateStoreError | null {
+  if (!result.started || (result.exitCode !== 0 && DOCKER_OFF.test(result.stderr))) {
+    return new StateDockerError('docker did not answer the state command');
+  }
+  if (result.exitCode === 125) {
+    return new StateImageError('docker could not get the helper image for the state volume');
+  }
+  return null;
+}
 
 export function volumeBackend(runner: ProcessRunner): StateBackend {
   let files: Map<string, string> | null = null;
@@ -89,12 +118,12 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
       ],
       new Uint8Array(),
     );
-    // Exit 125 is docker itself refusing the run, and a run that never
-    // started means the docker command is not there: either way Docker
-    // did not answer, which the status command reports as its own
-    // problem (start Docker), not as an unreadable record.
-    if (!result.started || result.exitCode === 125) {
-      throw new StateDockerError('docker did not answer the state read');
+    const failure = dockerFailure(result);
+    if (failure !== null) {
+      throw failure;
+    }
+    if (result.exitCode !== 0) {
+      throw new StateStoreError('the state volume could not be read');
     }
     files = parseTar(result.stdout);
     return files;
@@ -109,7 +138,11 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
     if (result.exitCode === 3) {
       throw new StateBusyError('another install is running right now');
     }
-    if (!result.started || result.exitCode !== 0) {
+    const failure = dockerFailure(result);
+    if (failure !== null) {
+      throw failure;
+    }
+    if (result.exitCode !== 0) {
       throw new StateStoreError('the state volume could not be written');
     }
     files = null;
@@ -148,7 +181,12 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
         '-1',
         `${VOLUME_HOME}/${dir}`,
       ]);
-      if (!result.started || result.exitCode !== 0) {
+      const failure = dockerFailure(result);
+      if (failure !== null) {
+        throw failure;
+      }
+      // A folder the volume does not have yet lists as empty.
+      if (result.exitCode !== 0) {
         return [];
       }
       return result.stdout

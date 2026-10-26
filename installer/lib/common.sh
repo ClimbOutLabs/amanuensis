@@ -227,25 +227,93 @@ ensure_private_dir() {
   chmod 700 "$1"
 }
 
-# A mkdir lock is atomic everywhere; a dead holder's lock is taken over.
-lock_acquire() {
-  local lock="$STATE_DIR/lock" pid
-  ensure_private_dir "$STATE_DIR"
-  if ! mkdir "$lock" 2>/dev/null; then
-    pid=$(cat "$lock/pid" 2>/dev/null || true)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      die "Another install is running right now (process $pid). Wait for it to finish, then run this again."
-    fi
-    rm -rf "$lock"
-    mkdir "$lock" || die "Could not mark this run as active at $lock. If no other install is running, remove that folder and try again."
-  fi
-  printf '%s\n' "$$" >"$lock/pid"
-  LOCK_HELD=1
+# The run lock, as installer/STATE.md ("The lock") writes it down. state/lock is a folder made with mkdir,
+# which is atomic everywhere. The holder refreshes state/lock/beat every LOCK_BEAT_SECONDS for as long as it
+# runs, so a long image build never looks stopped; a lock whose beat is older than LOCK_DEAD_SECONDS belongs to a
+# holder that stopped without cleaning up. The pid file is for people: when the home is a Docker volume the holder
+# ran in its own container, so its pid means nothing to the next run. The TypeScript installer and the volume
+# script follow the same contract, so keep the three in step.
+LOCK_BEAT_SECONDS=15
+LOCK_DEAD_SECONDS=120
+
+# Seconds since the lock folder's last beat, or nothing when there is no readable beat.
+lock_beat_age() {
+  local beat
+  beat=$(cat "$1/beat" 2>/dev/null || true)
+  case $beat in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' $(($(date +%s) - beat))
 }
 
+# A lock with no beat yet is a holder between mkdir and its first beat, so it is given a moment.
+lock_is_live() {
+  local tries=0 age
+  [ -d "$1" ] || return 1
+  while [ "$tries" -lt 3 ]; do
+    if age=$(lock_beat_age "$1"); then
+      [ "$age" -lt "$LOCK_DEAD_SECONDS" ]
+      return
+    fi
+    tries=$((tries + 1))
+    sleep 1
+  done
+  return 1
+}
+
+lock_write_beat() {
+  date +%s >"$1/beat.$$" && mv -f "$1/beat.$$" "$1/beat"
+}
+
+# Taking over a stopped holder's lock moves its folder to a name of its own first, so of two runs that both
+# see the old lock only one wins the move; it then checks that what it moved was the stopped lock, not a live
+# one another run had just made, and puts a live one back.
+lock_acquire() {
+  local lock="$STATE_DIR/lock" tries=0 claimed age
+  ensure_private_dir "$STATE_DIR"
+  while ! mkdir "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -le 5 ] || lock_busy
+    lock_is_live "$lock" && lock_busy
+    claimed="$lock.old.$$.$(date +%s).$tries"
+    if mv "$lock" "$claimed" 2>/dev/null; then
+      if age=$(lock_beat_age "$claimed") && [ "$age" -lt "$LOCK_DEAD_SECONDS" ]; then
+        if [ -e "$lock" ]; then rm -rf "$claimed"; else mv "$claimed" "$lock" 2>/dev/null || rm -rf "$claimed"; fi
+        lock_busy
+      fi
+      rm -rf "$claimed"
+    fi
+  done
+  LOCK_TOKEN="$$-$(date +%s)"
+  printf '%s\n' "$LOCK_TOKEN" >"$lock/owner"
+  lock_write_beat "$lock"
+  printf '%s\n' "$$" >"$lock/pid"
+  LOCK_HELD=1
+  lock_beat_start "$lock"
+}
+
+lock_busy() {
+  die "Another install is running right now. Wait for it to finish, or wait $((LOCK_DEAD_SECONDS / 60)) minutes if you stopped an install a moment ago, then run this again."
+}
+
+# The beat stops with the holder, and never touches a lock another run took over.
+lock_beat_start() {
+  local lock=$1 holder=$$ token=$LOCK_TOKEN
+  (
+    while sleep "$LOCK_BEAT_SECONDS"; do
+      kill -0 "$holder" 2>/dev/null || exit 0
+      [ "$(cat "$lock/owner" 2>/dev/null)" = "$token" ] || exit 0
+      lock_write_beat "$lock"
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  LOCK_BEAT_PID=$!
+}
+
+# Only the run that still owns the lock removes it.
 lock_release() {
   if [ "${LOCK_HELD:-0}" = 1 ]; then
-    rm -rf "$STATE_DIR/lock"
+    if [ -n "${LOCK_BEAT_PID:-}" ]; then kill "$LOCK_BEAT_PID" 2>/dev/null || true; fi
+    if [ "$(cat "$STATE_DIR/lock/owner" 2>/dev/null)" = "$LOCK_TOKEN" ]; then
+      rm -rf "$STATE_DIR/lock"
+    fi
     LOCK_HELD=0
   fi
 }

@@ -11,10 +11,9 @@ export class StateBusyError extends StateStoreError {}
 // answer: it is not running, or its command never started.
 export class StateDockerError extends StateStoreError {}
 
-// A key or value the line formats cannot hold: a line break in a key or a
-// value would render as extra lines the shell reader would take for real
-// settings, and an equals sign in a key would move where a line splits.
-export class StateValueError extends StateStoreError {}
+// The helper image Docker needs for the state volume could not be got, for
+// example because the computer is offline the first time it is needed.
+export class StateImageError extends StateStoreError {}
 
 export const REGISTRY_DIR = 'state/instances';
 export const RELEASE_FILE = 'release/release.json';
@@ -23,6 +22,7 @@ export const BACKUPS_DIR = 'backups';
 export const BACKUPS_MODE_FILE = 'state/backups';
 export const SOURCE_FILE = 'state/source';
 export const INSTALLED_FILE = 'state/installed';
+const INSTANCE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 // One line of a registry file. A line with no key is kept as it is, the way
 // the shell's writer keeps lines it does not touch.
@@ -67,18 +67,24 @@ export function registryValue(entries: readonly RegistryEntry[], key: string): s
   return null;
 }
 
-function checkedRegistryKey(key: string): string {
-  if (key.includes('=') || key.includes('\n') || key.includes('\r')) {
-    throw new StateValueError('a registry key cannot hold an equals sign or a line break');
+// A line that would read back as a different setting than the one written
+// is refused: a line break adds lines the shell reader would take for real
+// settings, an equals sign in a key moves where a line splits, and a line
+// with no key but an equals sign would read back as a key.
+function checkedEntry(entry: RegistryEntry): RegistryEntry {
+  if (entry.value.includes('\n') || entry.value.includes('\r')) {
+    throw new StateStoreError('a value to save cannot hold a line break');
   }
-  return key;
-}
-
-function checkedLineValue(value: string): string {
-  if (value.includes('\n') || value.includes('\r')) {
-    throw new StateValueError('a value to save cannot hold a line break');
+  if (entry.key === null) {
+    if (entry.value.includes('=')) {
+      throw new StateStoreError('a line with no name cannot hold an equals sign');
+    }
+    return entry;
   }
-  return value;
+  if (entry.key === '' || entry.key.includes('=') || entry.key.includes('\n') || entry.key.includes('\r')) {
+    throw new StateStoreError('a registry name cannot be empty or hold an equals sign or a line break');
+  }
+  return entry;
 }
 
 // Replaces the key's line where it stands, or adds it at the end.
@@ -87,8 +93,7 @@ export function withRegistryValue(
   key: string,
   value: string,
 ): readonly RegistryEntry[] {
-  checkedRegistryKey(key);
-  checkedLineValue(value);
+  checkedEntry({ key, value });
   const index = entries.findIndex(entry => entry.key === key);
   if (index === -1) {
     return [...entries, { key, value }];
@@ -190,9 +195,12 @@ export interface StateStore {
 }
 
 async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
+  // A name found by listing the volume is untrusted until it fits the
+  // instance name rule, since status prints it.
   const names = (await backend.listNames(REGISTRY_DIR))
     .filter(name => name.endsWith('.conf'))
     .map(name => name.slice(0, -'.conf'.length))
+    .filter(name => INSTANCE_NAME.test(name))
     .sort();
   const instances: InstanceRecord[] = [];
   for (const name of names) {
@@ -222,10 +230,22 @@ async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
 }
 
 function checkedInstanceName(name: string): string {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+  if (!INSTANCE_NAME.test(name)) {
     throw new StateStoreError(`instance name is not one the registry can hold: ${name}`);
   }
   return name;
+}
+
+// The shell reads the release record line by line, so a field with a quote,
+// a backslash or a control character in it would be read back wrong. JSON
+// escapes those correctly, but the shell's reader does not undo the escapes.
+const RELEASE_FIELD = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/;
+
+function checkedReleaseField(field: string): string {
+  if (!RELEASE_FIELD.test(field)) {
+    throw new StateStoreError('a release record field can hold only an image name or an id');
+  }
+  return field;
 }
 
 // The writers compare before they write, like the shell's write_if_changed,
@@ -242,12 +262,7 @@ export function createStateStore(backend: StateBackend): StateStore {
   return {
     readSummary: () => readSummaryFrom(backend),
     writeInstance: async record => {
-      for (const entry of record.entries) {
-        if (entry.key !== null) {
-          checkedRegistryKey(entry.key);
-        }
-        checkedLineValue(entry.value);
-      }
+      record.entries.forEach(checkedEntry);
       return writeOneIfChanged(
         `${REGISTRY_DIR}/${checkedInstanceName(record.name)}.conf`,
         renderRegistry(record.entries),
@@ -273,7 +288,7 @@ export function createStateStore(backend: StateBackend): StateStore {
         record.mailEmailImage,
       ]) {
         if (field !== null) {
-          checkedLineValue(field);
+          checkedReleaseField(field);
         }
       }
       const text = renderRelease(record);

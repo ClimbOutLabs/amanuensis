@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/
 import { dirname, join } from 'node:path';
 
 import { withFolderLock } from './folderLock.ts';
+import { LOCK_TIMING, type LockTiming } from './lockTiming.ts';
 import { StateStoreError, type StateBackend } from './state.ts';
 
 function errorCode(error: unknown): string | null {
@@ -15,7 +16,7 @@ function errorCode(error: unknown): string | null {
 // The state home as a plain folder: the Mac and Linux shape, and the one
 // tests use. Writes take the state lock, and each file goes through a temp
 // file next to its target, the shell's write_if_changed shape.
-export function folderBackend(home: string): StateBackend {
+export function folderBackend(home: string, timing: LockTiming = LOCK_TIMING): StateBackend {
   return {
     readText: async path => {
       try {
@@ -38,21 +39,29 @@ export function folderBackend(home: string): StateBackend {
       }
     },
     writeChangedFiles: async files => {
-      await withFolderLock(home, async () => {
-        for (const file of files) {
-          const target = join(home, file.path);
-          const dir = dirname(target);
-          await mkdir(dir, { recursive: true, mode: 0o700 });
-          await chmod(dir, 0o700);
-          const temp = `${target}.tmp-${String(process.pid)}`;
-          await writeFile(temp, file.text, { mode: 0o600 });
-          await rename(temp, target);
-        }
+      await withFolderLock({
+        home,
+        timing,
+        run: async () => {
+          for (const file of files) {
+            const target = join(home, file.path);
+            const dir = dirname(target);
+            await mkdir(dir, { recursive: true, mode: 0o700 });
+            await chmod(dir, 0o700);
+            const temp = `${target}.tmp-${String(process.pid)}`;
+            await writeFile(temp, file.text, { mode: 0o600 });
+            await rename(temp, target);
+          }
+        },
       });
     },
     removeFile: async path => {
-      await withFolderLock(home, async () => {
-        await rm(join(home, path), { force: true });
+      await withFolderLock({
+        home,
+        timing,
+        run: async () => {
+          await rm(join(home, path), { force: true });
+        },
       });
     },
   };

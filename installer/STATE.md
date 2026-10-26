@@ -28,7 +28,7 @@ Paths below are relative to the home.
 | `state/source`                         | One line: the checkout folder the install came from. Written by `instance.sh`.                                       |
 | `state/installed`                      | One line: the UTC time of the install or upgrade, then the app image it left running. Written by `plan.sh`.          |
 | `state/backups`                        | One word, `daily` or `off`: whether daily backups are on. Written by `schedule.sh`.                                  |
-| `state/lock/`                          | The run lock: a folder holding one `pid` file, taken with `mkdir` by `common.sh`. See "The lock".                    |
+| `state/lock/`                          | The run lock: a folder taken with `mkdir`, holding `owner`, `beat` and `pid`. See "The lock".                        |
 | `state/logs/`                          | One log file per install step, written by `common.sh`.                                                               |
 | `release/release.json`                 | The record of what is installed. Written by `release.sh` on install and upgrade.                                     |
 | `release/previous.release.json`        | The release record from before the last upgrade, kept so an upgrade can roll back.                                   |
@@ -45,8 +45,8 @@ Paths below are relative to the home.
 | `runtime/`                             | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
 
 The `release.json` in a checkout's `installer/` folder is a different file:
-it is the pins manifest the installer ships (image digests and the Node
-version), not state. Only `release/release.json` in the home is state.
+it is the pins manifest the installer ships (image digests, among them the
+helper image the Windows state commands run, and the Node version), not state. Only `release/release.json` in the home is state.
 
 ## The registry file
 
@@ -97,22 +97,62 @@ backups are pruned to the newest seven.
 
 ## The lock
 
-Only one install run works on a home at a time. The lock is the folder
-`state/lock`, taken by `mkdir`, which is atomic everywhere, with the
-holder's process id written to `state/lock/pid`. How a run that finds the
-folder tells a live holder from a leftover lock depends on where the home
-lives. On a folder on the computer itself, the run reads the pid: if that
-process is still alive, the run stops and says another install is
-running; if it is gone, the run removes the folder and takes the lock
-itself. In the `aman_home` volume, writes run inside a short-lived
-container whose own shell is process 1, so a pid written there names that
-container's processes, not the holder, and cannot say whether the holder
-is still running. There the run reads the lock folder's age instead: a
-lock younger than fifteen minutes is a run still going, and an older one
-is a holder that stopped without removing it, so the run removes the
-folder and takes the lock itself. Writes under this lock take seconds, so
-fifteen minutes only ever means a holder that died. The holder removes
-the folder when it finishes.
+Only one run works on a home at a time. The lock is the folder `state/lock`,
+taken with `mkdir`, which is atomic everywhere. Three programs follow this
+contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
+TypeScript installer's folder lock, and the script the TypeScript installer
+runs against the `aman_home` volume. Each run, shell or TypeScript, uses the
+same rules, so a lock taken by one is honoured by the others.
+
+What the lock folder holds:
+
+| File    | What it holds                                                                                |
+| ------- | -------------------------------------------------------------------------------------------- |
+| `owner` | A token only the holder knows. The holder removes the lock only while this is still its own. |
+| `beat`  | The time of the holder's last sign of life, as whole seconds since 1970. Written by rename.  |
+| `pid`   | The holder's process id, for people reading the folder. No run decides anything from it.     |
+
+The rules:
+
+- **The holder beats while it runs.** From the moment it holds the lock, the
+  holder rewrites `beat` every 15 seconds, for as long as the run lasts. A
+  run that builds images for an hour beats for an hour. The beat stops when
+  the run ends or the holder process is gone, and it only ever touches a lock
+  whose `owner` is still the holder's token.
+- **A lock is dead only when its beat stopped.** A lock whose `beat` is more
+  than 120 seconds old belongs to a holder that stopped without cleaning up.
+  Age since the lock was made means nothing: a live holder can be an hour in.
+  The pid means nothing either, because in the volume the holder ran in its
+  own container, whose shell is process 1, so a pid there names that
+  container's processes. The wait after a crash is therefore up to two
+  minutes, and the busy message says so.
+- **A lock with no beat yet gets a moment.** A holder is between `mkdir` and
+  its first beat for a few milliseconds. A run that finds a lock with no
+  readable `beat` looks again, up to three times a second apart, before it
+  counts as dead.
+- **Taking a dead lock is atomic.** The run first moves the dead folder to a
+  name of its own (`lock.old.<pid>.<time>`) with `mv`, and only one run can win
+  that move. It then reads the moved folder's `beat`. If it turns out to be
+  fresh (another run took over a moment earlier), it puts the folder back and
+  reports busy. If it was dead, it removes the folder and makes the lock with
+  `mkdir`. A run that loses the move simply tries `mkdir` again, finds a live
+  lock and reports busy. One window is left: a second run that moves aside
+  the new holder's lock in the few milliseconds before that holder writes its
+  first `beat` cannot tell it from a dead one. The new holder then finds its
+  `owner` gone and does not remove the other run's lock when it ends.
+- **Only the owner removes the lock.** At the end of a run, the holder removes
+  `state/lock` only if `owner` still holds its token. A holder whose lock was
+  taken over leaves the new holder's lock alone.
+- **Busy is exit code 3** in the volume script, and the busy message in every
+  program names the wait: wait for the run to finish, or two minutes if an
+  install was stopped a moment ago.
+
+The numbers (15 and 120 seconds) are `LOCK_BEAT_SECONDS` and
+`LOCK_DEAD_SECONDS` in `lib/common.sh`, and `LOCK_TIMING` in
+`packages/aman-installer/src/state/lockTiming.ts`. Tests in
+`installer/tests/lib/lock.test.sh` and `packages/aman-installer/tests/state`
+run the real code with a short clock, including each program holding the lock
+longer than the dead limit while the others stay out.
 
 ## Rules every writer follows
 

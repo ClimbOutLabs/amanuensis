@@ -4,6 +4,7 @@ import {
   NOT_INSTALLED,
   NO_INSTANCES_LINE,
   STATE_BUSY,
+  STATE_IMAGE_UNAVAILABLE,
   STATE_UNREADABLE,
   problemText,
   statusInstalledLine,
@@ -11,7 +12,14 @@ import {
   type InstanceState,
 } from '../messages.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
-import { StateBusyError, StateDockerError, registryValue, type StateStore, type StateSummary } from '../state/state.ts';
+import {
+  StateBusyError,
+  StateDockerError,
+  StateImageError,
+  registryValue,
+  type StateStore,
+  type StateSummary,
+} from '../state/state.ts';
 
 export interface StatusDeps {
   host: Host;
@@ -45,7 +53,7 @@ async function instanceState(runner: ProcessRunner, name: string): Promise<Insta
 
 // aman status: what is installed, each instance's address, and whether it
 // is running, read from the state home (on Windows, through one short-lived
-// read container against the volume).
+// container that mounts the volume read-only).
 export async function runStatus(deps: StatusDeps): Promise<number> {
   const { host, runner, store, print } = deps;
   let summary: StateSummary;
@@ -58,6 +66,10 @@ export async function runStatus(deps: StatusDeps): Promise<number> {
     }
     if (error instanceof StateDockerError) {
       print(problemText(DOCKER_NOT_ANSWERING[host.kind]));
+      return 1;
+    }
+    if (error instanceof StateImageError) {
+      print(problemText(STATE_IMAGE_UNAVAILABLE));
       return 1;
     }
     print(problemText(STATE_UNREADABLE));

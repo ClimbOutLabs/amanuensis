@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,15 +13,17 @@ import {
   type ProcessResult,
   type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
+import type { LockTiming } from '../../src/state/lockTiming.ts';
 import {
   createStateStore,
   parseRegistry,
   StateBusyError,
   StateDockerError,
+  StateImageError,
   StateStoreError,
 } from '../../src/state/state.ts';
 import { buildTar, parseTar } from '../../src/state/tar.ts';
-import { volumeBackend, volumeRemoveScript, volumeWriteScript } from '../../src/state/volumeBackend.ts';
+import { SETUP_IMAGE, volumeBackend, volumeLockedScript } from '../../src/state/volumeBackend.ts';
 
 const RELEASE_TEXT = `{
   "schema": "1",
@@ -123,7 +125,9 @@ test('the volume command lines match the golden file', async () => {
   await store.writeInstance({ name: 'main', entries: parseRegistry('name=main\nhealthy=1\n') });
   await store.removeInstance('main');
   const golden = await readFile(new URL('../golden/status-volume-commands.txt', import.meta.url), 'utf8');
-  assert.equal(`${runner.lines.join('\n')}\n`, golden);
+  // The pin lives in installer/release.json, so the golden file names it by a placeholder.
+  const lines = runner.lines.map(line => line.replaceAll(SETUP_IMAGE, '<setup image>'));
+  assert.equal(`${lines.join('\n')}\n`, golden);
 });
 
 test('a busy answer from the lock script surfaces as the busy error', async () => {
@@ -136,18 +140,36 @@ test('a busy answer from the lock script surfaces as the busy error', async () =
   );
 });
 
-test('docker refusing the read surfaces as the state error', async () => {
+const DOCKER_OFF_TEXT =
+  'docker: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?';
+const PULL_FAILED_TEXT =
+  'Unable to find image locally\ndocker: Error response from daemon: Get "https://registry-1.docker.io/v2/": dial tcp: lookup registry-1.docker.io: no such host.';
+
+function failingWith(exitCode: number, stderr: string): FakeVolumeRunner {
   const runner = new FakeVolumeRunner();
-  runner.runBytes = () => Promise.resolve({ exitCode: 125, stdout: new Uint8Array(), stderr: '', started: true });
-  const store = createStateStore(volumeBackend(runner));
-  await assert.rejects(store.readSummary(), (error: unknown) => error instanceof StateStoreError);
+  runner.runBytes = () => Promise.resolve({ exitCode, stdout: new Uint8Array(), stderr, started: true });
+  runner.run = () => Promise.resolve({ exitCode, stdout: '', stderr, started: true });
+  return runner;
+}
+
+test('docker off on the read is the docker error, so status can say to start Docker', async () => {
+  const store = createStateStore(volumeBackend(failingWith(125, DOCKER_OFF_TEXT)));
+  await assert.rejects(store.readSummary(), (error: unknown) => error instanceof StateDockerError);
 });
 
-test('docker refusing the read is the docker error, so status can say to start Docker', async () => {
-  const runner = new FakeVolumeRunner();
-  runner.runBytes = () => Promise.resolve({ exitCode: 125, stdout: new Uint8Array(), stderr: '', started: true });
-  const store = createStateStore(volumeBackend(runner));
+test('docker off on Windows wording is the docker error too', async () => {
+  const text =
+    'failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if the daemon is running';
+  const store = createStateStore(volumeBackend(failingWith(1, text)));
   await assert.rejects(store.readSummary(), (error: unknown) => error instanceof StateDockerError);
+});
+
+test('exit 125 from a failed image download is not read as docker being off', async () => {
+  const store = createStateStore(volumeBackend(failingWith(125, PULL_FAILED_TEXT)));
+  await assert.rejects(
+    store.readSummary(),
+    (error: unknown) => error instanceof StateImageError && !(error instanceof StateDockerError),
+  );
 });
 
 test('a docker command that never starts is the docker error too', async () => {
@@ -157,48 +179,191 @@ test('a docker command that never starts is the docker error too', async () => {
   await assert.rejects(store.readSummary(), (error: unknown) => error instanceof StateDockerError);
 });
 
-// The lock tests below run the real script the backend sends, against a
-// folder standing in for the volume home, because the lock's judgement
-// (the folder's age, not the pid) only exists inside that script.
+test('a write with docker off is the docker error, so the next command that writes says to start Docker', async () => {
+  const store = createStateStore(volumeBackend(failingWith(125, DOCKER_OFF_TEXT)));
+  await assert.rejects(
+    store.writeInstance({ name: 'main', entries: parseRegistry('name=main\n') }),
+    (error: unknown) => error instanceof StateDockerError,
+  );
+});
 
-async function homeWithLock(ageSeconds: number, pidText: string): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'aman-volume-lock-'));
-  await mkdir(join(home, 'state', 'lock'), { recursive: true });
-  await writeFile(join(home, 'state', 'lock', 'pid'), pidText);
-  const when = new Date(Date.now() - ageSeconds * 1000);
-  await utimes(join(home, 'state', 'lock'), when, when);
-  return home;
-}
+test('a write whose image could not be downloaded is the image error', async () => {
+  const store = createStateStore(volumeBackend(failingWith(125, PULL_FAILED_TEXT)));
+  await assert.rejects(store.removeInstance('main'), (error: unknown) => error instanceof StateImageError);
+});
 
+test('a folder listing with docker off is an error, not an empty list', async () => {
+  const runner = failingWith(125, DOCKER_OFF_TEXT);
+  const backend = volumeBackend(runner);
+  await assert.rejects(backend.listNames('backups'), (error: unknown) => error instanceof StateDockerError);
+});
+
+test('another failure of the lock script is the plain write error', async () => {
+  const runner = seededRunner();
+  runner.writeExitCode = 1;
+  const store = createStateStore(volumeBackend(runner));
+  await assert.rejects(
+    store.writeInstance({ name: 'main', entries: parseRegistry('name=main\n') }),
+    (error: unknown) =>
+      error instanceof StateStoreError && !(error instanceof StateBusyError) && !(error instanceof StateDockerError),
+  );
+});
+
+// The lock tests below run the real script the backend sends, in a plain sh
+// against a folder standing in for the volume home. They use no GNU-only
+// tool, so they run the same on a Mac. The clock is short (a beat each
+// second, dead after three) so a "long" run takes seconds.
+
+const FAST: LockTiming = { beatSeconds: 1, deadSeconds: 3 };
+const WRITE = 'tar -x -f -';
 const ONE_FILE = [{ path: 'state/instances/main.conf', mode: 0o600, text: 'name=main\n' }];
 
-test('the real write script refuses a lock that was just taken, whatever its pid says', async () => {
-  const home = await homeWithLock(0, '999999\n');
-  const result = spawnSync('sh', ['-c', volumeWriteScript(home)], { input: Buffer.from(buildTar(ONE_FILE)) });
+async function freshHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'aman-volume-lock-'));
+}
+
+async function leaveLock(options: { home: string; owner: string; beatAgeSeconds: number | null }): Promise<string> {
+  const lockDir = join(options.home, 'state', 'lock');
+  await mkdir(lockDir, { recursive: true });
+  await writeFile(join(lockDir, 'pid'), '1\n');
+  if (options.owner !== '') {
+    await writeFile(join(lockDir, 'owner'), `${options.owner}\n`);
+  }
+  if (options.beatAgeSeconds !== null) {
+    await writeFile(join(lockDir, 'beat'), `${String(Math.floor(Date.now() / 1000) - options.beatAgeSeconds)}\n`);
+  }
+  return lockDir;
+}
+
+function runScript(options: { home: string; command: string; input?: Uint8Array; env?: NodeJS.ProcessEnv }) {
+  return spawnSync('sh', ['-c', volumeLockedScript({ home: options.home, command: options.command, timing: FAST })], {
+    input: Buffer.from(options.input ?? new Uint8Array()),
+    env: options.env ?? process.env,
+  });
+}
+
+function startScript(options: { home: string; command: string }) {
+  const child = spawn(
+    'sh',
+    ['-c', volumeLockedScript({ home: options.home, command: options.command, timing: FAST })],
+    {
+      stdio: 'ignore',
+    },
+  );
+  const exited = new Promise<number | null>(resolve => {
+    child.on('close', code => {
+      resolve(code);
+    });
+  });
+  return { child, exited };
+}
+
+function pause(milliseconds: number): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+test('the script uses no tool the Mac lacks', () => {
+  const script = volumeLockedScript({ home: '/h', command: WRITE });
+  assert.equal(/\bstat\b/.test(script), false);
+});
+
+test('the real script refuses a lock with a fresh beat, whatever its pid says', async () => {
+  const home = await freshHome();
+  const lockDir = await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 0 });
+  const result = runScript({ home, command: WRITE, input: buildTar(ONE_FILE) });
   assert.equal(result.status, 3, result.stderr.toString());
+  assert.equal((await readFile(join(lockDir, 'owner'), 'utf8')).trim(), 'other-run');
   await assert.rejects(readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'));
 });
 
-test('the real write script takes over a lock left by a dead holder, even one naming a live pid', async () => {
-  const home = await homeWithLock(3600, `${String(process.pid)}\n`);
-  const result = spawnSync('sh', ['-c', volumeWriteScript(home)], { input: Buffer.from(buildTar(ONE_FILE)) });
+test('the real script takes over a lock whose beat stopped, even one holding the pid of a crashed container', async () => {
+  const home = await freshHome();
+  const lockDir = await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  const result = runScript({ home, command: WRITE, input: buildTar(ONE_FILE) });
   assert.equal(result.status, 0, result.stderr.toString());
   assert.equal(await readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'), 'name=main\n');
+  await assert.rejects(access(lockDir));
+});
+
+test('the real script takes over a lock a crash left with no beat at all', async () => {
+  const home = await freshHome();
+  await leaveLock({ home, owner: '', beatAgeSeconds: null });
+  const result = runScript({ home, command: WRITE, input: buildTar(ONE_FILE) });
+  assert.equal(result.status, 0, result.stderr.toString());
+});
+
+test('the real remove script also takes over a lock whose beat stopped', async () => {
+  const home = await freshHome();
+  await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  await mkdir(join(home, 'state', 'instances'), { recursive: true });
+  await writeFile(join(home, 'state', 'instances', 'main.conf'), 'name=main\n');
+  const result = spawnSync('sh', [
+    '-c',
+    volumeLockedScript({ home, command: 'rm -f -- "$1"', timing: FAST }),
+    'sh',
+    'state/instances/main.conf',
+  ]);
+  assert.equal(result.status, 0, result.stderr.toString());
+  await assert.rejects(access(join(home, 'state', 'instances', 'main.conf')));
+});
+
+test('a holder that keeps beating keeps its lock long past the dead limit', async () => {
+  const home = await freshHome();
+  const holder = startScript({ home, command: 'sleep 7' });
+  await pause(5000);
+  const second = runScript({ home, command: WRITE, input: buildTar(ONE_FILE) });
+  assert.equal(second.status, 3, 'a lock older than the dead limit that still beats is busy');
+  assert.equal(await holder.exited, 0);
   await assert.rejects(access(join(home, 'state', 'lock')));
 });
 
-test('the real write script takes over the lock a crashed run left, whose pid reads as alive here', async () => {
-  const home = await homeWithLock(3600, '1\n');
-  const result = spawnSync('sh', ['-c', volumeWriteScript(home)], { input: Buffer.from(buildTar(ONE_FILE)) });
-  assert.equal(result.status, 0, result.stderr.toString());
-  assert.equal(await readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'), 'name=main\n');
+test('a holder killed without cleanup stops beating, and its lock is then taken over', async () => {
+  const home = await freshHome();
+  const holder = startScript({ home, command: 'sleep 6' });
+  await pause(1500);
+  holder.child.kill('SIGKILL');
+  await holder.exited;
+  await pause(5000);
+  const second = runScript({ home, command: WRITE, input: buildTar(ONE_FILE) });
+  assert.equal(second.status, 0, second.stderr.toString());
 });
 
-test('the real remove script also takes over a dead holder lock', async () => {
-  const home = await homeWithLock(3600, '1\n');
-  await mkdir(join(home, 'state', 'instances'), { recursive: true });
-  await writeFile(join(home, 'state', 'instances', 'main.conf'), 'name=main\n');
-  const result = spawnSync('sh', ['-c', volumeRemoveScript(home), 'sh', 'state/instances/main.conf']);
+test('a holder whose lock was taken over leaves the new holder lock in place', async () => {
+  const home = await freshHome();
+  const takeover = 'rm -rf state/lock; mkdir state/lock; echo new-run > state/lock/owner; date +%s > state/lock/beat';
+  const result = runScript({ home, command: takeover });
   assert.equal(result.status, 0, result.stderr.toString());
-  await assert.rejects(access(join(home, 'state', 'instances', 'main.conf')));
+  assert.equal((await readFile(join(home, 'state', 'lock', 'owner'), 'utf8')).trim(), 'new-run');
+});
+
+test('a live lock moved aside by mistake is put back and the run is told it is busy', async () => {
+  const home = await freshHome();
+  await leaveLock({ home, owner: 'old-run', beatAgeSeconds: 3600 });
+  // A stand-in mv that, on the first move of the lock, lets another run take it over first.
+  const bin = await mkdtemp(join(tmpdir(), 'aman-volume-bin-'));
+  const realMv = spawnSync('sh', ['-c', 'command -v mv']).stdout.toString().trim();
+  const marker = join(bin, 'raced');
+  await writeFile(
+    join(bin, 'mv'),
+    [
+      '#!/bin/sh',
+      `if [ "$1" = state/lock ] && [ ! -e '${marker}' ]; then`,
+      `  : > '${marker}'`,
+      '  rm -rf state/lock; mkdir state/lock; echo other-run > state/lock/owner; date +%s > state/lock/beat',
+      'fi',
+      `exec '${realMv}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  await chmod(join(bin, 'mv'), 0o755);
+  const result = runScript({
+    home,
+    command: WRITE,
+    input: buildTar(ONE_FILE),
+    env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}` },
+  });
+  assert.equal(result.status, 3, result.stderr.toString());
+  assert.equal((await readFile(join(home, 'state', 'lock', 'owner'), 'utf8')).trim(), 'other-run');
 });

@@ -4,6 +4,8 @@
 // stream and writes changed files back as one, the same shape the shell's
 // backup code already uses for volumes.
 
+import { StateStoreError } from './state.ts';
+
 export interface TarFile {
   path: string;
   mode: number;
@@ -58,7 +60,8 @@ export function buildTar(files: readonly TarFile[]): Uint8Array {
     parts.push(headerBlock({ name: `${path}/`, mode: 0o700, size: 0, type: '5' }));
   };
   for (const file of files) {
-    if (file.path.length > 100) {
+    // The header field is 100 bytes, and a non-ASCII name takes more bytes than characters.
+    if (encoder.encode(file.path).length > 100) {
       throw new Error(`state file name is too long for the volume stream: ${file.path}`);
     }
     const segments = file.path.split('/');
@@ -112,6 +115,10 @@ export function parseTar(bytes: Uint8Array): Map<string, string> {
     const size = Number.parseInt(sizeText, 8);
     if (Number.isNaN(size)) {
       break;
+    }
+    // A negative size would move the offset backwards and read the same block forever.
+    if (size < 0) {
+      throw new StateStoreError('the state stream is damaged');
     }
     const type = String.fromCharCode(block[156] ?? 0);
     const dataStart = offset + BLOCK;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { StateStoreError } from '../../src/state/state.ts';
 import { buildTar, parseTar } from '../../src/state/tar.ts';
 
 test('a built tar parses back to the same files', () => {
@@ -47,4 +48,18 @@ test('file text with multi-byte characters survives the round trip', () => {
 test('a file name too long for the header is refused', () => {
   const longPath = `state/${'a'.repeat(120)}.conf`;
   assert.throws(() => buildTar([{ path: longPath, mode: 0o600, text: 'x' }]));
+});
+
+test('a name too long in bytes, though short in characters, is refused', () => {
+  const longPath = `state/${'é'.repeat(50)}.conf`;
+  assert.ok(longPath.length < 100);
+  assert.throws(() => buildTar([{ path: longPath, mode: 0o600, text: 'x' }]));
+});
+
+test('a stream with a negative size stops with an error instead of looping', () => {
+  const bytes = buildTar([{ path: 'state/source', mode: 0o600, text: 'x\n' }]);
+  // Rewrite the size field (offset 124, 12 bytes) of the file header to a negative number.
+  const damaged = bytes.slice();
+  damaged.set(new TextEncoder().encode('-00000000512\0'), 124 + 512);
+  assert.throws(() => parseTar(damaged), StateStoreError);
 });

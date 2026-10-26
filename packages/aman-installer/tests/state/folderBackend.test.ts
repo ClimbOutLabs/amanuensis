@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { folderBackend } from '../../src/state/folderBackend.ts';
+import { withFolderLock } from '../../src/state/folderLock.ts';
+import type { LockTiming } from '../../src/state/lockTiming.ts';
 import { createStateStore, parseRegistry, StateBusyError } from '../../src/state/state.ts';
 
 async function tempHome(): Promise<string> {
@@ -41,24 +43,85 @@ test('the lock is released after a write, so the next write runs', async () => {
   assert.equal(await readFile(join(home, 'state', 'instances', 'main.conf'), 'utf8'), 'name=main\nhealthy=1\n');
 });
 
-test('a lock held by a live process refuses the write', async () => {
-  const home = await tempHome();
-  const lockDir = join(home, 'state', 'lock');
-  await mkdir(lockDir, { recursive: true });
-  await writeFile(join(lockDir, 'pid'), `${String(process.pid)}\n`);
-  const store = createStateStore(folderBackend(home));
-  await assert.rejects(
-    store.writeInstance({ name: 'main', entries: parseRegistry('name=main\n') }),
-    (error: unknown) => error instanceof StateBusyError,
-  );
-});
+const FAST: LockTiming = { beatSeconds: 1, deadSeconds: 3 };
 
-test('a lock left by a dead process is taken over', async () => {
-  const home = await tempHome();
-  const lockDir = join(home, 'state', 'lock');
+async function leaveLock(options: { home: string; owner: string; beatAgeSeconds: number }): Promise<string> {
+  const lockDir = join(options.home, 'state', 'lock');
   await mkdir(lockDir, { recursive: true });
-  // A pid far above any real one cannot be alive.
+  await writeFile(join(lockDir, 'owner'), `${options.owner}\n`);
+  await writeFile(join(lockDir, 'beat'), `${String(Math.floor(Date.now() / 1000) - options.beatAgeSeconds)}\n`);
+  return lockDir;
+}
+
+const ONE_INSTANCE = { name: 'main', entries: parseRegistry('name=main\n') };
+
+test('a lock with a fresh beat refuses the write, whatever process it names', async () => {
+  const home = await tempHome();
+  const lockDir = await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 0 });
   await writeFile(join(lockDir, 'pid'), '999999999\n');
   const store = createStateStore(folderBackend(home));
-  assert.equal(await store.writeInstance({ name: 'main', entries: parseRegistry('name=main\n') }), true);
+  await assert.rejects(store.writeInstance(ONE_INSTANCE), (error: unknown) => error instanceof StateBusyError);
+  assert.equal((await readFile(join(lockDir, 'owner'), 'utf8')).trim(), 'other-run');
+});
+
+test('a lock whose beat stopped is taken over, even when its pid names a live process', async () => {
+  const home = await tempHome();
+  const lockDir = await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  await writeFile(join(lockDir, 'pid'), `${String(process.pid)}\n`);
+  const store = createStateStore(folderBackend(home));
+  assert.equal(await store.writeInstance(ONE_INSTANCE), true);
+  await assert.rejects(access(lockDir));
+});
+
+test('a run longer than the dead limit keeps its lock by beating', async () => {
+  const home = await tempHome();
+  const lockDir = join(home, 'state', 'lock');
+  let sawLiveAfterLimit = false;
+  await withFolderLock({
+    home,
+    timing: FAST,
+    run: async () => {
+      await new Promise(resolve => setTimeout(resolve, 4500));
+      const second = createStateStore(folderBackend(home, FAST));
+      await assert.rejects(second.writeInstance(ONE_INSTANCE), (error: unknown) => error instanceof StateBusyError);
+      sawLiveAfterLimit = true;
+    },
+  });
+  assert.equal(sawLiveAfterLimit, true);
+  await assert.rejects(access(lockDir));
+});
+
+test('a holder whose lock was taken over leaves the new holder lock in place', async () => {
+  const home = await tempHome();
+  const lockDir = join(home, 'state', 'lock');
+  await withFolderLock({
+    home,
+    timing: FAST,
+    run: async () => {
+      await rm(lockDir, { recursive: true });
+      await leaveLock({ home, owner: 'new-run', beatAgeSeconds: 0 });
+    },
+  });
+  assert.equal((await readFile(join(lockDir, 'owner'), 'utf8')).trim(), 'new-run');
+});
+
+test('two runs that start together on a dead lock end with a write or a busy answer, never another error', async () => {
+  const home = await tempHome();
+  await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  const results = await Promise.allSettled(
+    [1, 2].map(async number => {
+      const store = createStateStore(folderBackend(home, FAST));
+      // Each run holds the lock a moment, so the second one meets a live lock.
+      return store.writeInstance({
+        name: `run-${String(number)}`,
+        entries: parseRegistry(`name=run-${String(number)}\n`),
+      });
+    }),
+  );
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      assert.ok(result.reason instanceof StateBusyError, String(result.reason));
+    }
+  }
+  assert.ok(results.some(result => result.status === 'fulfilled'));
 });

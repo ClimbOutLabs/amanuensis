@@ -31,8 +31,8 @@ Docker has 0 GB of memory to work with, which is enough.
 Docker is ready for Aman on this computer.
 Aman is not installed on this computer yet. Install Aman on this computer, then run aman status again.
 The record of what is installed could not be read. Run the installer again from the folder Aman was installed from, then run aman status again.
-Another install is running right now. Wait for it to finish, then run aman status again.
-A value to save has a line break in it, or its name has an equals sign in it. Take the line break or equals sign out, then try again.
+Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman status again.
+Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman status again.
 Aman is installed, version aman-app:0.
 Instance main is running at http://127.0.0.1:8791.
 Instance main is partly running at http://127.0.0.1:8791.

@@ -16,6 +16,8 @@ const execFileAsync = promisify(execFile);
 
 const FIXTURE_HOME = new URL('../fixtures/state-home', import.meta.url).pathname;
 const GOLDEN_SUMMARY = new URL('../fixtures/state-summary.json', import.meta.url).pathname;
+const RELEASE_PINS = new URL('../../../../installer/release.json', import.meta.url).pathname;
+const RELEASE_SCHEMA = new URL('../../../../installer/release.schema.json', import.meta.url).pathname;
 const DOCTOR = new URL('../../../../installer/doctor/aman', import.meta.url).pathname;
 
 // Every file under the fixture home, as volume-relative paths with text.
@@ -124,4 +126,16 @@ test('the shell doctor names the same instances as the reader, from the same hom
     Object.keys(instances).sort(),
     summary.instances.map(instance => instance.name),
   );
+});
+
+const DIGEST_PIN = /^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
+
+test('the setup image is the digest pin in installer/release.json, which the schema names', async () => {
+  const pins: unknown = JSON.parse(await readFile(RELEASE_PINS, 'utf8'));
+  const schema: unknown = JSON.parse(await readFile(RELEASE_SCHEMA, 'utf8'));
+  assert.ok(typeof pins === 'object' && pins !== null && 'setup_image' in pins);
+  assert.equal(SETUP_IMAGE, pins.setup_image);
+  assert.match(SETUP_IMAGE, DIGEST_PIN);
+  assert.ok(typeof schema === 'object' && schema !== null && 'properties' in schema);
+  assert.ok(typeof schema.properties === 'object' && schema.properties !== null && 'setup_image' in schema.properties);
 });
