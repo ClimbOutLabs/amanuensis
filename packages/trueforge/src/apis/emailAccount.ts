@@ -12,7 +12,7 @@ import {
 } from '@truefoundry/trueforge-core/core/email/mailConnector/presets';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
-import configuration, { mailMcpUrlFromAccountUrl } from '../config';
+import configuration from '../config';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import {
   getEmailAccountStatusRoute,
@@ -67,8 +67,7 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
     fetchImpl: deps.fetchImpl,
     logger: deps.logger,
   });
-  const effectiveMcpUrl = () =>
-    configuration.MAIL_EMAIL_MCP_URL ?? mailMcpUrlFromAccountUrl(configuration.MAIL_EMAIL_ACCOUNT_URL);
+  const effectiveMcpUrl = () => configuration.MAIL_SIDECAR_MCP_URL;
 
   const syncConnector = async (state: MailAccountState) => {
     await syncMailConnectorWithAccount({

@@ -29,6 +29,7 @@ import type { InternalEnrichedAssistantMessage, InternalToolCallInfo, LLMToolMes
 import { awaitsApproval } from '../mcp/approvalGrant';
 import { isReadOnlyCall } from '../mcp/executeToolCalls';
 import { deniedToolCallRemediation, deniedToolCallText, REPEATED_DENIAL_REMEDIATION } from '../mcp/ToolSet';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import type { ContextMessage } from './AgentThread.types';
 import { InternalEventType } from './AgentThread.types';
 import { mergeCurrentContextUsage } from './contextUsage';
@@ -78,6 +79,15 @@ export function unknownOutcomeCloseout(admissionProvenance: ToolAdmissionProvena
     },
     admissionProvenance,
   };
+}
+
+/**
+ * A read that is safe to run again because the host itself vouches for it: one of its own tools it classed as
+ * inspection, or a read of its own mail or calendar, or of a connector it marked first-party. For a connector's
+ * tool the effect comes from the connector's own annotations, so only the host's reason counts there.
+ */
+function isSafeToRepeatRead(info: InternalToolCallInfo): boolean {
+  return (info.type === 'truefoundry-system' && info.effect === 'inspect') || isHostVouchedReadReason(info.tier_reason);
 }
 
 function unresolvedCallOutcome(
@@ -132,10 +142,17 @@ function unresolvedCallOutcome(
  * coming for it, and leaving it open blocks every later user message with nothing on screen
  * to explain why. Closing it states the outcome the user already chose. An undecided call that
  * repeats a "no" from earlier in the turn never got a card, so it is closed as that same "no".
+ *
+ * When `resuming` is set, the turn goes straight to its tool step, so calls that step can safely run are left open
+ * for it. That is a read the host itself vouches for (never a connector's own read-only claim), and an allowed
+ * change that never reached dispatch: its tracking marker and its start event are written together before dispatch,
+ * and a decision with a binding only exists in contexts that write them, so no marker proves the change never ran.
+ * The step still checks the single-use approval again before anything is sent.
  */
 export function getClosableOpenToolCallOutcomes(
   context: ContextMessage[],
   deniedApprovalIdentities: ReadonlySet<string>,
+  options: { resuming: boolean } = { resuming: false },
 ): Map<string, ClosableToolOutcome> {
   const lastIdx = context.findLastIndex(
     (msg): msg is InternalEnrichedAssistantMessage =>
@@ -176,6 +193,9 @@ export function getClosableOpenToolCallOutcomes(
       continue;
     }
     if (toolCall.tool_info.is_approval_required !== true) {
+      if (options.resuming && isSafeToRepeatRead(toolCall.tool_info)) {
+        continue;
+      }
       closable.set(
         toolCall.id,
         unresolvedCallOutcome(
@@ -201,6 +221,14 @@ export function getClosableOpenToolCallOutcomes(
         remediation: REPEATED_DENIAL_REMEDIATION,
         admissionProvenance: { source: 'automatic' },
       });
+      continue;
+    }
+    if (
+      options.resuming &&
+      decision.status === 'allow' &&
+      (isSafeToRepeatRead(toolCall.tool_info) ||
+        (!isReadOnlyCall(toolCall.tool_info) && !preparedToolCallIds.has(toolCall.id)))
+    ) {
       continue;
     }
     closable.set(
@@ -250,13 +278,21 @@ export function getClosableOpenToolCalls(
 }
 
 export class OpenToolCallCloser implements PreSendContextProcessor {
-  constructor(private readonly deniedApprovalIdentities: () => ReadonlySet<string>) {}
+  private readonly deniedApprovalIdentities: () => ReadonlySet<string>;
+  private readonly resuming: () => boolean;
+
+  constructor(input: { deniedApprovalIdentities: () => ReadonlySet<string>; resuming: () => boolean }) {
+    this.deniedApprovalIdentities = input.deniedApprovalIdentities;
+    this.resuming = input.resuming;
+  }
 
   // eslint-disable-next-line @typescript-eslint/require-await -- async *: AsyncIterable contract; body is sync
   async *processPreSend(
     execution: Readonly<AgentThreadExecutionContext>,
   ): AsyncGenerator<AgentContextProcessorAppendContext, void, unknown> {
-    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities());
+    const closable = getClosableOpenToolCallOutcomes(execution.context, this.deniedApprovalIdentities(), {
+      resuming: this.resuming(),
+    });
     if (closable.size === 0) {
       return;
     }

@@ -20,6 +20,10 @@ export function isMailReadToolName(tool_name: string): boolean {
 /** Tools that deliver a message to recipients, so each recipient must be on the Email list. */
 export const MAIL_SEND_TOOL_NAMES = ['send_email', 'forward_email'] as const;
 
+export function isMailSendToolName(tool_name: string): boolean {
+  return MAIL_SEND_TOOL_NAMES.some(name => name === tool_name);
+}
+
 export const MAIL_WRITE_TOOL_NAMES = ['save_draft', ...MAIL_SEND_TOOL_NAMES, 'archive_emails'] as const;
 
 /** Every tool the model is offered on the Email connector, reads first. */

@@ -16,7 +16,7 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
-import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
+import { NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
@@ -129,6 +129,7 @@ import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -1060,6 +1061,8 @@ function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; 
         canonical_params: unwrapped,
         tool_type: tool_info.type,
         mcp_server_name: tool_info.mcp_server_name,
+        // The host's own verdict on the call, not the connector's claim: only its own sidecars read as mail or calendar.
+        mcp_first_party: isHostVouchedReadReason(tool_info.tier_reason),
         mcp_hints: {},
       },
     }),
@@ -1627,6 +1630,8 @@ export class AgentThread {
 
   private contextBusy = false;
   private preSendRanThisTurn = false;
+  // True only while execute() prepares a thread that goes straight to its tool step, with no new message.
+  private resumingIntoToolStep = false;
   // One AgentThread instance lives for one turn (a fresh instance is built per
   // turn by the harness), so this needs no snapshot/restore: it starts false
   // for every turn and latches true the first time the grounding nudge fires,
@@ -1778,7 +1783,10 @@ export class AgentThread {
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
-      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      new OpenToolCallCloser({
+        deniedApprovalIdentities: () => this.toolCallMemo.deniedApprovalIdentities,
+        resuming: () => this.resumingIntoToolStep,
+      }),
       ...capabilityPreSend,
     ];
 
@@ -2213,13 +2221,9 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      if (
-        call === undefined ||
-        !isMailSend({
-          mcp_server_name: call.tool_info.mcp_server_name,
-          tool_name: call.tool_info.original_tool_name,
-        })
-      ) {
+      // Only a send the host itself judged to go through its own Email sidecar touches the Email list, however the
+      // card was later reworded.
+      if (call?.tool_info.mail_send !== true) {
         continue;
       }
       const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
@@ -5283,11 +5287,16 @@ export class AgentThread {
       }
 
       if (!this.preSendRanThisTurn) {
-        for await (const event of this.executeContextProcessors('preSend', signal)) {
-          if (signal?.aborted) {
-            return;
+        this.resumingIntoToolStep = true;
+        try {
+          for await (const event of this.executeContextProcessors('preSend', signal)) {
+            if (signal?.aborted) {
+              return;
+            }
+            yield event;
           }
-          yield event;
+        } finally {
+          this.resumingIntoToolStep = false;
         }
         if (signal?.aborted) {
           return;

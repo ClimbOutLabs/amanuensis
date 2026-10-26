@@ -203,6 +203,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
     ),
+  mail_send: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
