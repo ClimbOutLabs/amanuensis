@@ -67,7 +67,7 @@ function endEvents({ turnId, endState }: { turnId: string; endState: EndState })
   return endState === 'never-ended' ? [] : [turnDone({ turnId, endState })];
 }
 
-function asItem(event: TurnStreamData['event'], turnId: string): SessionEventItem {
+function asItem(event: SessionEventItem['event'], turnId: string): SessionEventItem {
   return { turnId, event };
 }
 
