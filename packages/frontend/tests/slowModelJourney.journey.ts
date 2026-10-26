@@ -791,11 +791,20 @@ const CHAT_PREFERENCES = {
 };
 
 let connectors: PersonalConnectors | undefined;
+/** What the journey found configured before it pointed the host at its fake sidecars. */
+let configuredSidecars:
+  | { mail: string | undefined; calendar: string | undefined; calendarSidecar: string | undefined }
+  | undefined;
 let maps: ReturnType<typeof installRecordedMaps> | undefined;
 let personalInstall: Promise<void> | undefined;
 
 after(async () => {
   maps?.restore();
+  if (configuredSidecars !== undefined) {
+    configuration.MAIL_SIDECAR_MCP_URL = configuredSidecars.mail;
+    configuration.CALENDAR_CONNECTOR_URL = configuredSidecars.calendar;
+    configuration.CALENDAR_SIDECAR_MCP_URL = configuredSidecars.calendarSidecar;
+  }
   await connectors?.close();
 });
 
@@ -808,6 +817,15 @@ async function setUpPersonalInstall(): Promise<void> {
   connectors = await startPersonalConnectors();
   maps = installRecordedMaps();
   api.setFirstPartyOrigins([connectors.origin]);
+  // The installer links each sidecar by its address, and the host trusts Email and Calendar only at that address.
+  configuredSidecars = {
+    mail: configuration.MAIL_SIDECAR_MCP_URL,
+    calendar: configuration.CALENDAR_CONNECTOR_URL,
+    calendarSidecar: configuration.CALENDAR_SIDECAR_MCP_URL,
+  };
+  configuration.MAIL_SIDECAR_MCP_URL = connectors.mailUrl;
+  configuration.CALENDAR_CONNECTOR_URL = connectors.calendarUrl;
+  configuration.CALENDAR_SIDECAR_MCP_URL = connectors.calendarUrl;
   await registerMailConnector({ url: connectors.mailUrl, mcpServerStore: api.mcpServerStore(), tenant_id: TENANT_ID });
   await registerCalendarConnector({
     url: connectors.calendarUrl,
