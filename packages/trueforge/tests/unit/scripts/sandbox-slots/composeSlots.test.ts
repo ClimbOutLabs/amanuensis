@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -103,20 +104,48 @@ describe('docker-compose.slots.yml', () => {
 });
 
 /**
- * The installer's instance template with the sandbox on and no https front end of either kind, for an instance named
- * main. The calendar connector block is kept only when `calendar` is true, as the installer keeps or drops it.
+ * The installer's instance template, rendered by the installer's own `render_template` with the pairs
+ * `instance.sh` passes, for an instance named main with the sandbox on, the email connector off and no https
+ * front end of either kind. The calendar connector block is kept only when `calendar` is true.
  */
 function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
-  const text = readFileSync(resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'), 'utf8');
-  const rendered = text
-    .split('\n')
-    .filter(line => !line.startsWith('@@IF_EDGE@@') && !line.startsWith('@@IF_TLS@@'))
-    .filter(line => calendar || !line.startsWith('@@IF_CALENDAR@@'))
-    .map(line => line.replace('@@IF_SANDBOX@@', '').replace('@@IF_CALENDAR@@', ''))
-    .join('\n')
-    .replace(/@@NAME@@/g, 'main')
-    .replace('@@APP_PORTS@@', "      - '127.0.0.1:1:8790'")
-    .replace(/@@[A-Z_]+@@/g, '1');
+  const pairs = [
+    'NAME=main',
+    `IF_CALENDAR=${calendar ? '1' : '0'}`,
+    'CALENDAR_IMAGE=calendar-test:1',
+    'IF_EMAIL=0',
+    'MAIL_EMAIL_IMAGE=mail-test:1',
+    'STT_NETWORK=aman_main_speech',
+    'APP_IMAGE=app-test:1',
+    'DEX_IMAGE=dex-test:1',
+    'APP_PORT=8790',
+    'IF_SANDBOX=1',
+    'IF_EDGE=0',
+    'LOGIN_HOST=login.test',
+    'LOGIN_PORT=5556',
+    'DEX_TELEMETRY_PORT=5558',
+    "APP_PORTS=      - '127.0.0.1:1:8790'",
+    'IF_TLS=0',
+    'CADDY_IMAGE=caddy-test:1',
+    'TLS_USER=1000:1000',
+    'TLS_LEAF_DIR=/tmp/leaf',
+    'TLS_TRUST_DIR=/tmp/trust',
+    'TLS_HTTP_IN=8080',
+  ];
+  // `die` lives in a library that needs the whole installer; the renderer only needs it to stop with a message.
+  const script = 'die() { printf "%s\\n" "$*" >&2; exit 1; }; . "$1"; shift; render_template "$@"';
+  const rendered = execFileSync(
+    'bash',
+    [
+      '-c',
+      script,
+      'bash',
+      resolve(REPO_ROOT, 'installer/lib/templates.sh'),
+      resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'),
+      ...pairs,
+    ],
+    { encoding: 'utf8' },
+  );
   return parse(rendered);
 }
 
