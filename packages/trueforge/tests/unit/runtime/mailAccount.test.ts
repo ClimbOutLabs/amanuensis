@@ -8,10 +8,11 @@ import type {
   McpServerRecord,
   UpsertMcpServerInput,
 } from '../../../src/db/mcpServerStore';
+import { ConnectorAccountError } from '../../../src/runtime/connectorAccount';
 import {
   getMailAccountState,
   MAIL_SIGN_IN_REFUSED_MESSAGE,
-  MailAccountError,
+  registerMailConnectorFromSavedAccountInBackground,
   resolveMailAccountSave,
   saveMailAccount,
   syncMailConnectorWithAccount,
@@ -144,7 +145,7 @@ describe('the account agent client', () => {
     const failure = await getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger }).catch(
       (caught: unknown) => caught,
     );
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
   });
 
@@ -162,8 +163,8 @@ describe('the account agent client', () => {
         smtp_port: undefined,
       },
     ).catch((caught: unknown) => caught);
-    expect(failure).toBeInstanceOf(MailAccountError);
-    expect(failure instanceof MailAccountError ? failure.failure : '').toBe('sign_in_refused');
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
+    expect(failure instanceof ConnectorAccountError ? failure.failure : '').toBe('sign_in_refused');
     expect(failure instanceof Error ? failure.message : '').toBe(MAIL_SIGN_IN_REFUSED_MESSAGE);
   });
 
@@ -183,7 +184,7 @@ describe('the account agent client', () => {
         smtp_port: undefined,
       },
     ).catch((caught: unknown) => caught);
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
   });
 
@@ -191,7 +192,7 @@ describe('the account agent client', () => {
     const failure = await getMailAccountState({ accountUrl: undefined, fetchImpl: undefined, logger }).catch(
       (caught: unknown) => caught,
     );
-    expect(failure).toBeInstanceOf(MailAccountError);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
   });
 });
 
@@ -236,5 +237,55 @@ describe('keeping the connector registration in step', () => {
     expect(row?.manifest).toMatchObject({ type: 'remote', url: 'http://127.0.0.1:1/mcp' });
     await syncMailConnectorWithAccount({ ...deps, state: NOT_CONNECTED_STATE });
     expect(fake.rows.size).toBe(0);
+  });
+
+  describe('at boot, on an instance the installer never linked', () => {
+    const logger = createLogger({ silent: true });
+    const sleep = (): Promise<void> => Promise.resolve();
+    const settled = async (done: () => boolean): Promise<void> => {
+      for (let tries = 0; tries < 200 && !done(); tries += 1) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    };
+    const boot = (fetchImpl: typeof fetch, store: ReturnType<typeof makeFakeStore>['store']) =>
+      registerMailConnectorFromSavedAccountInBackground({
+        accountUrl: ACCOUNT_URL,
+        mcpUrl: 'http://127.0.0.1:1/mcp',
+        policyPath: undefined,
+        fetchImpl,
+        mcpServerStore: store,
+        tenant_id: 't1',
+        logger,
+        backoff: { initialDelayMs: 1, maxDelayMs: 2, attempts: 5 },
+        sleep,
+      });
+
+    it('registers Email for a saved account whose login is refused, and drops it only when none is saved', async () => {
+      const fake = makeFakeStore();
+      boot(
+        async () => new Response(JSON.stringify({ ...AGENT_CONNECTED, sign_in: 'refused' }), { status: 200 }),
+        fake.store,
+      );
+      await settled(() => fake.rows.size === 1);
+      expect(fake.rows.size).toBe(1);
+      boot(async () => new Response(JSON.stringify({ connected: false }), { status: 200 }), fake.store);
+      await settled(() => fake.rows.size === 0);
+      expect(fake.rows.size).toBe(0);
+    });
+
+    it('keeps asking while the mail agent is still starting, then registers', async () => {
+      const fake = makeFakeStore();
+      let calls = 0;
+      boot(async () => {
+        calls += 1;
+        if (calls < 3) {
+          throw new Error('connection refused');
+        }
+        return new Response(JSON.stringify(AGENT_CONNECTED), { status: 200 });
+      }, fake.store);
+      await settled(() => fake.rows.size === 1);
+      expect(calls).toBe(3);
+      expect(fake.rows.size).toBe(1);
+    });
   });
 });

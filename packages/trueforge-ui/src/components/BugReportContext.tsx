@@ -1,7 +1,17 @@
 'use client';
 
 import type { serialization } from '@truefoundry/trueforge-sdk';
-import { createContext, useContext, type FC, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 
 /**
  * The bug-report wire contract, as it crosses the wire (snake_case). The generated SDK is the
@@ -49,11 +59,52 @@ export type BugReportApi = {
   getBugReportHandoff: () => Promise<BugReportHandoffTarget>;
 };
 
-const BugReportContext = createContext<BugReportApi | null>(null);
+/** Open state of the one bug report dialog, which the app shell mounts. Buttons only ask for it open. */
+export type BugReportDialogControl = {
+  open: boolean;
+  /** Asking to open is ignored while no dialog is mounted, so a stale request cannot pop up later. */
+  setOpen: (open: boolean) => void;
+  /** A mounted dialog registers here; the returned function unregisters it and closes the form. */
+  registerDialog: () => () => void;
+  /** Where focus goes on close, for openers that unmount as they open (menu rows). */
+  returnFocusRef: RefObject<HTMLElement | null>;
+};
 
-export const BugReportProvider: FC<{ api: BugReportApi; children: ReactNode }> = ({ api, children }) => (
-  <BugReportContext.Provider value={api}>{children}</BugReportContext.Provider>
-);
+const BugReportContext = createContext<BugReportApi | null>(null);
+const BugReportDialogContext = createContext<BugReportDialogControl | null>(null);
+
+/** The open flag lives above the layouts so a menu row can open the dialog and then unmount safely. */
+export const BugReportProvider: FC<{ api: BugReportApi; children: ReactNode }> = ({ api, children }) => {
+  const [open, setOpen] = useState(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const mountedDialogs = useRef(0);
+  const requestOpen = useCallback((next: boolean) => {
+    if (next && mountedDialogs.current === 0) return;
+    setOpen(next);
+  }, []);
+  const registerDialog = useCallback(() => {
+    mountedDialogs.current += 1;
+    returnFocusRef.current = null;
+    return () => {
+      mountedDialogs.current -= 1;
+      if (mountedDialogs.current === 0) setOpen(false);
+    };
+  }, []);
+  const dialog = useMemo<BugReportDialogControl>(
+    () => ({ open, setOpen: requestOpen, registerDialog, returnFocusRef }),
+    [open, requestOpen, registerDialog],
+  );
+  return (
+    <BugReportContext.Provider value={api}>
+      <BugReportDialogContext.Provider value={dialog}>{children}</BugReportDialogContext.Provider>
+    </BugReportContext.Provider>
+  );
+};
+
+/** Null when no host has wired a `BugReportProvider`. */
+export function useOptionalBugReportDialog(): BugReportDialogControl | null {
+  return useContext(BugReportDialogContext);
+}
 
 /** Null when no host has wired a `BugReportProvider` — callers hide the "Report a bug" control in that case. */
 export function useOptionalBugReport(): BugReportApi | null {

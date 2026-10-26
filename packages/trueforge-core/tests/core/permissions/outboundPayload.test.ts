@@ -534,7 +534,7 @@ describe('card copy', () => {
   test.each([
     ['delete_note', "Once deleted, it's gone for good."],
     ['install_package', "Once this runs, it can't be undone."],
-    ['frobnicate', 'This might change something for good.'],
+    ['frobnicate', 'It is not clear whether this can be undone.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);

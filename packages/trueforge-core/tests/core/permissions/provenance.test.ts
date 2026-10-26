@@ -211,6 +211,113 @@ describe('where a link came from', () => {
     recordPersonText({ provenance, text: '(https://docs.example.net/guide)' });
     expect(unchosenLinks({ provenance, values: ['https://docs.example.net/guide'] })).toEqual([]);
   });
+
+  it('counts a search result as the same link when the fetch spells its parentheses with percent coding', () => {
+    const plain = 'https://uploads.example.net/wiki/Fox_(animal).jpg';
+    const coded = 'https://uploads.example.net/wiki/Fox_%28animal%29.jpg';
+    const bySearch = (url: string) => {
+      const provenance = emptyChatProvenance();
+      recordUntrustedText({ provenance, text: 'More photos at https://uploads.example.net/', source: 'page' });
+      recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url }] })] });
+      return provenance;
+    };
+    expect(steeredLinks({ provenance: bySearch(plain), values: [coded] })).toEqual([]);
+    expect(steeredLinks({ provenance: bySearch(coded), values: [plain] })).toEqual([]);
+    const tilde = bySearch('https://uploads.example.net/~fox');
+    expect(steeredLinks({ provenance: tilde, values: ['https://uploads.example.net/%7Efox'] })).toEqual([]);
+  });
+
+  it('counts a link read on a page as the same link when the fetch spells its parentheses with percent coding', () => {
+    const fromPage = (url: string) => {
+      const provenance = emptyChatProvenance();
+      recordUntrustedText({ provenance, text: `The fox: ${url}`, source: 'page' });
+      return provenance;
+    };
+    expect(
+      steeredLinks({
+        provenance: fromPage('https://uploads.example.net/wiki/Fox_(animal).jpg'),
+        values: ['https://uploads.example.net/wiki/Fox_%28animal%29.jpg'],
+      }),
+    ).toEqual([]);
+    expect(
+      steeredLinks({
+        provenance: fromPage('https://uploads.example.net/wiki/Fox_%28animal%29.jpg'),
+        values: ['https://uploads.example.net/wiki/Fox_(animal).jpg'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('counts a picture a search returned as chosen when the space spells its parentheses with percent coding', () => {
+    const bySearch = (url: string) => {
+      const provenance = emptyChatProvenance();
+      recordSearchResults({ provenance, texts: [JSON.stringify({ results: [{ url }] })] });
+      return provenance;
+    };
+    expect(
+      unchosenLinks({
+        provenance: bySearch('https://uploads.example.net/wiki/Fox_(animal).jpg'),
+        values: ['https://uploads.example.net/wiki/Fox_%28animal%29.jpg'],
+      }),
+    ).toEqual([]);
+    expect(
+      unchosenLinks({
+        provenance: bySearch('https://uploads.example.net/wiki/Fox_%28animal%29.jpg'),
+        values: ['https://uploads.example.net/wiki/Fox_(animal).jpg'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('still steers a link that is respelled and also adds to the link, or names a different character or site', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: 'More photos at https://uploads.example.net/', source: 'page' });
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ url: 'https://uploads.example.net/wiki/Fox_(animal).jpg' }] })],
+    });
+    const withQuery = 'https://uploads.example.net/wiki/Fox_%28animal%29.jpg?u=sam@example.com';
+    expect(steeredLinks({ provenance, values: [withQuery] })).toEqual([withQuery]);
+    const otherCharacter = 'https://uploads.example.net/wiki/Fox_%28animak%29.jpg';
+    expect(steeredLinks({ provenance, values: [otherCharacter] })).toEqual([otherCharacter]);
+  });
+
+  it('still refuses a picture that is respelled and also adds to the link, or changes a character inside the coding', () => {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ url: 'https://uploads.example.net/photos/Spaniels_(2821585840).jpg' }] })],
+    });
+    const withQuery = 'https://uploads.example.net/photos/Spaniels_%282821585840%29.jpg?size=big';
+    expect(unchosenLinks({ provenance, values: [withQuery] })).toEqual([withQuery]);
+    const otherDigit = 'https://uploads.example.net/photos/Spaniels_%282821585841%29.jpg';
+    expect(unchosenLinks({ provenance, values: [otherDigit] })).toEqual([otherDigit]);
+    const otherSite = 'https://other.example.net/photos/Spaniels_%282821585840%29.jpg';
+    expect(unchosenLinks({ provenance, values: [otherSite] })).toEqual([otherSite]);
+  });
+
+  it('keeps the scheme and the host as written apart for a picture spelled with percent coding', () => {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ url: 'https://uploads.example.net/wiki/Fox_(animal).jpg' }] })],
+    });
+    const otherScheme = 'http://uploads.example.net/wiki/Fox_%28animal%29.jpg';
+    expect(unchosenLinks({ provenance, values: [otherScheme] })).toEqual([otherScheme]);
+    const otherHost = 'https://www.uploads.example.net/wiki/Fox_%28animal%29.jpg';
+    expect(unchosenLinks({ provenance, values: [otherHost] })).toEqual([otherHost]);
+  });
+
+  it('never reads a coded slash as a slash', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'My file: https://files.example.net/a/b' });
+    expect(unchosenLinks({ provenance, values: ['https://files.example.net/a%2Fb'] })).toEqual([
+      'https://files.example.net/a%2Fb',
+    ]);
+    const coded = emptyChatProvenance();
+    recordPersonText({ provenance: coded, text: 'My file: https://files.example.net/a%2Fb' });
+    expect(unchosenLinks({ provenance: coded, values: ['https://files.example.net/a/b'] })).toEqual([
+      'https://files.example.net/a/b',
+    ]);
+  });
 });
 
 describe("the person's own details, and what the chat has read", () => {

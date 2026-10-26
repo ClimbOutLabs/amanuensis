@@ -188,26 +188,53 @@ function hostKey(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
-/** A link's path as both keys write it: one trailing slash folds away, and the root path adds nothing. */
-function foldedPath(url: URL): string {
-  const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
-  return path === '/' ? '' : path;
+/**
+ * Characters a percent coding may name without changing what a link names: letters, digits and the
+ * marks below split nothing in a path or a query, so the coded spelling and the plain one are the
+ * same character in the link. Any other character stays coded: a coded slash is not a slash, and a
+ * coded `&`, `=` or `+` still splits a query, so those spellings name different links.
+ */
+const PLAINLY_SPELLED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$'()*+,;:@";
+
+const PERCENT_CODED = /%([0-9A-Fa-f]{2})/g;
+
+/**
+ * One spelling of a link's path or query: a percent coding of a character that splits nothing folds
+ * to the character itself, and a coding that stays is written with capital letters, so two spellings
+ * of one link (a file name's parentheses plain, or coded as %28 and %29) share a key.
+ */
+function settledSpelling(part: string): string {
+  return part.replace(PERCENT_CODED, (_whole: string, hex: string) => {
+    const character = String.fromCharCode(Number.parseInt(hex, 16));
+    return PLAINLY_SPELLED.includes(character) ? character : `%${hex.toUpperCase()}`;
+  });
 }
 
-/** One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away. */
+/** A link's path as both keys write it: one trailing slash folds away, and the root path adds nothing. */
+function foldedPath(url: URL): string {
+  const path = settledSpelling(url.pathname);
+  const trimmed = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+  return trimmed === '/' ? '' : trimmed;
+}
+
+/**
+ * One page however it is spelled: http or https, host case, `www.`, one trailing slash, the fragment
+ * and a percent coding of a character that splits nothing fold away.
+ */
 function urlKey(value: string): string | undefined {
   const url = parsedUrl(value);
   if (url === undefined || url.hostname === '') {
     return undefined;
   }
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${foldedPath(url)}${url.search}`;
+  return `${hostKey(url.hostname)}${port}${foldedPath(url)}${settledSpelling(url.search)}`;
 }
 
 /**
  * One picture as it would be fetched: the scheme and the host exactly as written stay, only the
- * host's case, one trailing slash and the fragment fold away. A picture is loaded as written, so
- * the `www.` host and the plain host can serve different files, and so can the two schemes.
+ * host's case, one trailing slash, the fragment and a percent coding of a character that splits
+ * nothing fold away. A picture is loaded as written, so the `www.` host and the plain host can
+ * serve different files, and so can the two schemes.
  */
 function pictureKey(value: string): string | undefined {
   const url = parsedUrl(value);
@@ -215,7 +242,7 @@ function pictureKey(value: string): string | undefined {
     return undefined;
   }
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${url.protocol}//${url.hostname.toLowerCase()}${port}${foldedPath(url)}${url.search}`;
+  return `${url.protocol}//${url.hostname.toLowerCase()}${port}${foldedPath(url)}${settledSpelling(url.search)}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {

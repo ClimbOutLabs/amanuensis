@@ -23,6 +23,7 @@ import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
@@ -35,7 +36,6 @@ export interface MemoryTurnContext {
   config: MemoryConfig;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle: string | undefined;
   /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
@@ -44,6 +44,10 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
+  summarize: SummarizeTurnContext | undefined;
+  /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
+  clientTimezone?: string | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
    * the turn's tool policy can block web_search as a substitute for recall.
@@ -69,8 +73,9 @@ function memoryCapabilitiesForTurn(input: {
       logger: input.logger,
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
-      sessionTitle: memory.sessionTitle,
       recallEnabled: memory.recallEnabled,
+      keepsFullExchange: memory.summarize === undefined,
+      timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
     }),
@@ -105,9 +110,18 @@ function withMemoryProviderNarrowedToReads(spec: AgentSpec, providerServerName: 
   };
 }
 
-/** The Email connector's attachments go into the sandbox on every thread that mounts the connector. */
-function mailAttachmentCapabilities(spec: AgentSpec): AgentCapability[] {
-  if (!spec.mcp_servers?.some(entry => entry.name === MAIL_CONNECTOR_NAME)) {
+/**
+ * The Email connector's attachments go into the sandbox on every thread that mounts the host's own Email
+ * connector. A connector that only carries the name is not it, so its results are never placed in the sandbox.
+ */
+function mailAttachmentCapabilities({
+  spec,
+  hostOwnsMail,
+}: {
+  spec: AgentSpec;
+  hostOwnsMail: boolean;
+}): AgentCapability[] {
+  if (!hostOwnsMail || !spec.mcp_servers?.some(entry => entry.name === MAIL_CONNECTOR_NAME)) {
     return [];
   }
   return [{ toolResponseProcessors: [new MailAttachmentProcessor()] }];
@@ -176,21 +190,24 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       designatedSearchProvider !== undefined && turnedOff.has(connectorOffKey(designatedSearchProvider))
         ? undefined
         : designatedSearchProvider;
+    // The list holds Email and Calendar only when they are the host's own, so it also decides what is trusted by name.
+    const setUpConnectorNames = await this.setUpConnectorNames;
     const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);
     const narrowedSpec =
       providerServerName === undefined || isSubAgent
         ? defaultedSpec
         : withMemoryProviderNarrowedToReads(defaultedSpec, providerServerName);
-    // The Email connector is offered only its eight tools on every thread, sub-agents included.
-    const mailNarrowedSpec = narrowConnectorTools(narrowedSpec, {
-      server_name: MAIL_CONNECTOR_NAME,
-      tools: MAIL_CONNECTOR_TOOL_NAMES,
-    });
-    // The Calendar connector is offered only its eight tools on every thread, sub-agents included.
-    const calendarNarrowedSpec = narrowConnectorTools(mailNarrowedSpec, {
-      server_name: CALDAV_SERVER_NAME,
-      tools: CALDAV_TOOL_NAMES,
-    });
+    // Narrowing only takes tools away, so it also applies while the set-up list cannot be read.
+    const narrowsHostConnector = (name: string): boolean =>
+      setUpConnectorNames === undefined || setUpConnectorNames.includes(name);
+    // The host's Email connector is offered only its eight tools on every thread, sub-agents included.
+    const mailNarrowedSpec = narrowsHostConnector(MAIL_CONNECTOR_NAME)
+      ? narrowConnectorTools(narrowedSpec, { server_name: MAIL_CONNECTOR_NAME, tools: MAIL_CONNECTOR_TOOL_NAMES })
+      : narrowedSpec;
+    // The host's Calendar connector is offered only its eight tools on every thread, sub-agents included.
+    const calendarNarrowedSpec = narrowsHostConnector(CALDAV_SERVER_NAME)
+      ? narrowConnectorTools(mailNarrowedSpec, { server_name: CALDAV_SERVER_NAME, tools: CALDAV_TOOL_NAMES })
+      : mailNarrowedSpec;
     const effectiveSpec =
       searchProviderServerName === undefined
         ? calendarNarrowedSpec
@@ -209,7 +226,10 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const extraCapabilities = [
       ...memoryCapabilities,
       ...(outputScreen === undefined ? [] : [outputScreen]),
-      ...mailAttachmentCapabilities(effectiveSpec),
+      ...mailAttachmentCapabilities({
+        spec: effectiveSpec,
+        hostOwnsMail: setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME) === true,
+      }),
     ];
     if (extraCapabilities.length === 0) {
       return resolved;

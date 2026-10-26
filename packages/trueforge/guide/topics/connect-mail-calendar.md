@@ -6,7 +6,7 @@ covers:
 
 You connect email and calendar in one place, in Settings. You do not need the terminal.
 
-You need a Google account. Aman uses a Google app that you make once in your own Google account. This takes about ten minutes.
+Google email and Google Calendar use a Google app that you make once in your own Google account. This takes about ten minutes. A calendar from another provider, such as Fastmail, connects with an app password instead. See "Connect a calendar with an app password" below.
 
 If Aman is in offline mode, turn it off first. Click **More**, click **Settings**, click **Permissions**, and turn off **Offline mode**.
 
@@ -35,6 +35,26 @@ The panel then says it is connected and shows your Google address.
 2. Open the Calendar API link in the Calendar section. On Google's page, click Enable.
 3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
 4. To let Aman add events, click the button that starts with "Allow" and ends with "to add events". It shows Aman's name in the middle. You still approve each event first. Aman cannot delete events.
+
+## Connect a calendar with an app password
+
+Use this for a calendar that is not Google Calendar. Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
+
+An app password is a separate password for apps like this one. It is not your usual password. You make it at your calendar provider.
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find **Calendar** in the list and click **Connect**.
+3. Pick your provider in **Calendar provider**. For a provider that is not on the list, pick Other.
+4. If you picked Other, type the **Calendar address**. Your provider's help pages give it. It starts with https://.
+5. Type your **Email address**. If you sign in to the calendar with a different name, type that name in the login box.
+6. Make an app password at your provider. The panel shows a short note for your provider. For some providers it also shows a link, **How to make an app password**.
+7. Type it in **App password**, then click **Connect**.
+
+The app signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
+
+To change the calendar, click **Manage**, then click the button that starts with "Change". To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good. If the card says the sign-in stopped working, or that the calendar is not working right now, click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+
+The app stores the app password only on your computer, in the calendar connector. Your assistant never sees it. Never paste the password into a chat. A chat cannot connect a calendar. Use Settings.
 
 ## Later
 

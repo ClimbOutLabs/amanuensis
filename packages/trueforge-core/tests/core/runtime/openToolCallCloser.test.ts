@@ -4,7 +4,10 @@ import { approvalGrantKey } from '../../../src/core/mcp/approvalGrant';
 import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils';
-import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
+import {
+  getClosableOpenToolCallOutcomes,
+  getClosableOpenToolCalls,
+} from '../../../src/core/runtime/OpenToolCallCloser';
 import '../harnessMocks';
 
 const NOT_EXECUTED = JSON.stringify({
@@ -229,5 +232,106 @@ describe('getClosableOpenToolCalls', () => {
 
   it('returns empty when there is no assistant message with tool calls', () => {
     expect(getClosableOpenToolCalls([{ role: 'user', content: 'hello' }], NO_DENIALS)).toEqual(new Map());
+  });
+
+  describe('when the turn goes straight to its tool step', () => {
+    const RESUMING = { resuming: true };
+
+    it('leaves reads the host vouched for, allowed or not, for the tool step to run', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-space', { type: 'truefoundry-system', effect: 'inspect' }),
+          makeToolCall('tc-calendar', { tier_reason: 'caldav_private_read' }),
+          makeToolCall('tc-mail', { is_approval_required: true, tier_reason: 'mail_read' }),
+        ]),
+        decisionFor('tc-mail', { status: 'allow' }),
+      ];
+      expect(getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING)).toEqual(new Map());
+    });
+
+    it('closes a connector read whose only mark is its own claim or annotations, allowed or not', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-claim', { read_only_hint: true }),
+          // A connector's annotations alone also stamp this effect, so it is not the host's word.
+          makeToolCall('tc-annotated', { effect: 'inspect', read_only_hint: true, open_world_hint: false }),
+          makeToolCall('tc-claim-allowed', { is_approval_required: true, effect: 'inspect' }),
+        ]),
+        decisionFor('tc-claim-allowed', { status: 'allow' }),
+      ];
+      expect([...getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING).keys()]).toEqual([
+        'tc-claim',
+        'tc-annotated',
+        'tc-claim-allowed',
+      ]);
+    });
+
+    it('leaves an allowed change that never reached dispatch, and closes one that did', () => {
+      const change = makeToolCall('tc-change', { is_approval_required: true, effect: 'edit' });
+      const never: ContextMessage[] = [
+        ...assistantWithToolCalls([change]),
+        decisionFor('tc-change', { status: 'allow' }),
+      ];
+      expect(getClosableOpenToolCallOutcomes(never, NO_DENIALS, RESUMING)).toEqual(new Map());
+
+      const tracked: ContextMessage[] = [
+        ...never,
+        { type: 'internal.tool.execution_tracking', tool_call_ids: ['tc-change'] },
+      ];
+      expect(getClosableOpenToolCallOutcomes(tracked, NO_DENIALS, RESUMING).get('tc-change')?.disposition).toBe(
+        'never_ran',
+      );
+
+      const started: ContextMessage[] = [
+        ...tracked,
+        {
+          type: EventType.TOOL_EXECUTION_STARTED,
+          id: 'event-1',
+          thread_id: 'main',
+          tool_call_id: 'tc-change',
+          tool_name: 'test_tool',
+          created_at: '2026-08-26T00:00:00.000Z',
+        },
+      ];
+      expect(getClosableOpenToolCallOutcomes(started, NO_DENIALS, RESUMING).get('tc-change')?.disposition).toBe(
+        'outcome_unknown',
+      );
+    });
+
+    it('still closes a denied call, an unmarked change nobody allowed, and a call that already has its result', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-denied', { is_approval_required: true, read_only_hint: true }),
+          makeToolCall('tc-auto-change', { effect: 'edit' }),
+          makeToolCall('tc-done', { effect: 'inspect' }),
+        ]),
+        decisionFor('tc-denied', { status: 'deny' }),
+        { role: 'tool', tool_call_id: 'tc-done', content: 'done' },
+      ];
+      expect([...getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING).keys()]).toEqual([
+        'tc-denied',
+        'tc-auto-change',
+      ]);
+    });
+
+    it('closes nothing while any call is still undecided', () => {
+      const context = assistantWithToolCalls([
+        makeToolCall('tc-space', { effect: 'inspect' }),
+        makeToolCall('tc-claim', { read_only_hint: true }),
+        makeToolCall('tc-pending', { is_approval_required: true }),
+      ]);
+      expect(getClosableOpenToolCallOutcomes(context, NO_DENIALS, RESUMING)).toEqual(new Map());
+    });
+
+    it('closes the same calls as before when a new message from the person is what comes next', () => {
+      const context: ContextMessage[] = [
+        ...assistantWithToolCalls([
+          makeToolCall('tc-space', { type: 'truefoundry-system', effect: 'inspect' }),
+          makeToolCall('tc-mail', { is_approval_required: true, tier_reason: 'mail_read' }),
+        ]),
+        decisionFor('tc-mail', { status: 'allow' }),
+      ];
+      expect([...getClosableOpenToolCallOutcomes(context, NO_DENIALS).keys()]).toEqual(['tc-space', 'tc-mail']);
+    });
   });
 });

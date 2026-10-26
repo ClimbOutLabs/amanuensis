@@ -52,8 +52,8 @@ const USER_MESSAGE_3 = 'Just checking in, no tools needed here.';
 function cannedRecallResponse() {
   return {
     results: [
-      { id: 'mem-1', text: CANNED_ITEM_TEXT, type: 'observation', occurred_start: '2026-01-05T00:00:00.000Z' },
-      { id: 'mem-2', text: CANNED_SECOND_ITEM_TEXT, type: 'world', occurred_start: '2026-02-10T00:00:00.000Z' },
+      { id: 'mem-1', text: CANNED_ITEM_TEXT, occurred_start: '2026-01-05T00:00:00.000Z' },
+      { id: 'mem-2', text: CANNED_SECOND_ITEM_TEXT, occurred_start: '2026-02-10T00:00:00.000Z' },
     ],
     entities: {
       [CANNED_ENTITY_NAME]: {
