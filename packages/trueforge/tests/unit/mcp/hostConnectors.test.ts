@@ -9,16 +9,16 @@ const MAIL_URL = 'http://mail-email:9557/mcp';
 const CALENDAR_URL = 'http://[::1]:9558/mcp';
 
 describe("the host's own connectors", () => {
-  const original = { mail: configuration.MAIL_SIDECAR_MCP_URL, calendar: configuration.CALENDAR_CONNECTOR_URL };
+  const original = { mail: configuration.MAIL_SIDECAR_MCP_URL, calendar: configuration.CALENDAR_SIDECAR_MCP_URL };
 
   beforeEach(() => {
     configuration.MAIL_SIDECAR_MCP_URL = MAIL_URL;
-    configuration.CALENDAR_CONNECTOR_URL = CALENDAR_URL;
+    configuration.CALENDAR_SIDECAR_MCP_URL = CALENDAR_URL;
   });
 
   afterAll(() => {
     configuration.MAIL_SIDECAR_MCP_URL = original.mail;
-    configuration.CALENDAR_CONNECTOR_URL = original.calendar;
+    configuration.CALENDAR_SIDECAR_MCP_URL = original.calendar;
   });
 
   it('knows the sidecars by name and address together, IPv6 included', () => {

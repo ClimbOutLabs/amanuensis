@@ -10,7 +10,7 @@ export function isHostOwnConnector({ name, url }: { name: string; url: string })
     name,
     url,
     mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-    calendarUrl: configuration.CALENDAR_CONNECTOR_URL,
+    calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
   });
 }
 

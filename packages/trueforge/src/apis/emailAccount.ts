@@ -1,64 +1,42 @@
 /**
- * Email account API under /api/v1/user/settings/email: the Settings Email card's endpoints.
- * Browser session only (mounted behind the UI-session middleware, like Google's), so no agent
- * or API token can read or change the account. The app password passes through the save call to
- * the sidecar's account agent and is never stored here, never logged, and never returned; the
- * responses are built only from the account's public view.
+ * Email account API under /api/v1/user/settings/email: the Settings Email card's endpoints. What each call
+ * does is shared with Calendar (see connectorAccountHandlers.ts); this file holds Email's own status shape.
  */
-import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import type { PublicMailAccount } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
 import {
   EMAIL_PROVIDER_PRESETS,
   mailProviderKeyForHosts,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/presets';
 import type { Logger } from 'winston';
-import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { IMcpServerStore } from '../db/mcpServerStore';
-import {
-  getEmailAccountStatusRoute,
-  removeEmailAccountRoute,
-  saveEmailAccountRoute,
-} from '../routes/emailAccountRoutes';
+import { emailAccountRoutes } from '../routes/emailAccountRoutes';
+import { connectionStateOf } from '../runtime/connectorAccount';
 import {
   getMailAccountState,
-  MailAccountError,
   removeMailAccount,
   saveMailAccount,
   syncMailConnectorWithAccount,
-  type MailAccountState,
 } from '../runtime/mailAccount';
-import type { EmailAccountStatus } from '../schemas/emailAccount';
+import type { EmailAccountStatus, SaveEmailAccountRequest } from '../schemas/emailAccount';
+import { createConnectorAccountHandlers } from './connectorAccountHandlers';
 import { requireJsonOrSameOrigin } from './crossSite';
 import { TENANT_ID } from './sessions';
 
 export const EMAIL_SETTINGS_BASE_PATH = '/api/v1/user/settings/email';
 
 interface EmailAccountRouterDeps {
-  resolveRequestContext: ResolveRequestContext;
   logger: Logger;
   /** Replaceable so tests never reach a real sidecar. */
   fetchImpl: typeof fetch | undefined;
   mcpServerStore: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer'>;
 }
 
-function statusBody(state: MailAccountState): EmailAccountStatus {
-  return {
-    available: true,
-    state: !state.connected ? 'not_connected' : state.sign_in === 'refused' ? 'sign_in_stopped' : 'connected',
-    address: state.account?.address ?? null,
-    provider_key: state.account === null ? 'gmail' : mailProviderKeyForHosts(state.account),
-    providers: EMAIL_PROVIDER_PRESETS.map(preset => ({ ...preset })),
-  };
-}
+const DEFAULT_PROVIDER_KEY = 'gmail';
 
-function unavailableBody(): EmailAccountStatus {
-  return {
-    available: false,
-    state: 'not_connected',
-    address: null,
-    provider_key: 'gmail',
-    providers: EMAIL_PROVIDER_PRESETS.map(preset => ({ ...preset })),
-  };
+function providerTable(): EmailAccountStatus['providers'] {
+  return EMAIL_PROVIDER_PRESETS.map(preset => ({ ...preset }));
 }
 
 export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
@@ -67,80 +45,61 @@ export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
     fetchImpl: deps.fetchImpl,
     logger: deps.logger,
   });
-  const effectiveMcpUrl = () => configuration.MAIL_SIDECAR_MCP_URL;
-
-  const syncConnector = async (state: MailAccountState) => {
-    await syncMailConnectorWithAccount({
-      state,
-      mcpUrl: effectiveMcpUrl(),
-      policyPath: configuration.MAIL_POLICY_FILE,
-      mcpServerStore: deps.mcpServerStore,
-      tenant_id: TENANT_ID,
-      logger: deps.logger,
-    });
-  };
-
-  const statusHandler: RouteHandler<typeof getEmailAccountStatusRoute> = async c => {
-    if (configuration.MAIL_EMAIL_ACCOUNT_URL === undefined) {
-      return c.json({ data: unavailableBody() }, 200);
-    }
-    try {
-      return c.json({ data: statusBody(await getMailAccountState(clientDeps())) }, 200);
-    } catch (caught) {
-      if (caught instanceof MailAccountError) {
-        // A status read can only fail one way: the connector could not be reached.
-        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
-      }
-      throw caught;
-    }
-  };
-
-  const saveHandler: RouteHandler<typeof saveEmailAccountRoute> = async c => {
-    // The account is instance-wide and the router sits behind the browser-session middleware;
-    // resolving the caller is the owner check, the same pattern as the other settings routers.
-    deps.resolveRequestContext(c);
-    const body = c.req.valid('json');
-    try {
-      const state = await saveMailAccount(clientDeps(), {
-        provider_key: body.provider_key,
-        address: body.address,
-        password: body.password,
-        imap_host: body.imap_host,
-        imap_port: body.imap_port,
-        smtp_host: body.smtp_host,
-        smtp_port: body.smtp_port,
-      });
-      await syncConnector(state);
-      return c.json({ data: statusBody(state) }, 201);
-    } catch (caught) {
-      if (caught instanceof MailAccountError) {
-        return caught.failure === 'connector_unreachable'
-          ? c.json({ error: { message: caught.message, type: caught.failure } }, 502)
-          : c.json({ error: { message: caught.message, type: caught.failure } }, 400);
-      }
-      throw caught;
-    }
-  };
-
-  const removeHandler: RouteHandler<typeof removeEmailAccountRoute> = async c => {
-    deps.resolveRequestContext(c);
-    try {
-      const state = await removeMailAccount(clientDeps());
-      await syncConnector(state);
-      return c.json({ data: statusBody(state) }, 200);
-    } catch (caught) {
-      if (caught instanceof MailAccountError) {
-        // A removal can only fail one way: the connector could not be reached.
-        return c.json({ error: { message: caught.message, type: caught.failure } }, 502);
-      }
-      throw caught;
-    }
-  };
+  const handlers = createConnectorAccountHandlers<PublicMailAccount, SaveEmailAccountRequest, EmailAccountStatus>({
+    isAvailable: () => configuration.MAIL_EMAIL_ACCOUNT_URL !== undefined,
+    unavailableBody: () => ({
+      available: false,
+      state: 'not_connected',
+      address: null,
+      provider_key: DEFAULT_PROVIDER_KEY,
+      providers: providerTable(),
+    }),
+    statusBody: state => ({
+      available: true,
+      state: connectionStateOf(state),
+      address: state.account?.address ?? null,
+      provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : mailProviderKeyForHosts(state.account),
+      providers: providerTable(),
+    }),
+    readState: options => getMailAccountState(clientDeps(), options),
+    save: request =>
+      saveMailAccount(clientDeps(), {
+        provider_key: request.provider_key,
+        address: request.address,
+        password: request.password,
+        imap_host: request.imap_host,
+        imap_port: request.imap_port,
+        smtp_host: request.smtp_host,
+        smtp_port: request.smtp_port,
+      }),
+    remove: () => removeMailAccount(clientDeps()),
+    sync: state =>
+      syncMailConnectorWithAccount({
+        state,
+        mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
+        policyPath: configuration.MAIL_POLICY_FILE,
+        mcpServerStore: deps.mcpServerStore,
+        tenant_id: TENANT_ID,
+        logger: deps.logger,
+      }),
+  });
 
   const router = new OpenAPIHono();
   router.use('/', requireJsonOrSameOrigin());
-  router.openapi(getEmailAccountStatusRoute, statusHandler);
-  router.openapi(saveEmailAccountRoute, saveHandler);
-  router.openapi(removeEmailAccountRoute, removeHandler);
+  router.openapi(emailAccountRoutes.status, async c => {
+    const answer = await handlers.status();
+    return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
+  router.openapi(emailAccountRoutes.save, async c => {
+    const answer = await handlers.save(c.req.valid('json'));
+    if (answer.status === 201) {
+      return c.json(answer.body, 201);
+    }
+    return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
+  });
+  router.openapi(emailAccountRoutes.remove, async c => {
+    const answer = await handlers.remove();
+    return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
   return router;
 }

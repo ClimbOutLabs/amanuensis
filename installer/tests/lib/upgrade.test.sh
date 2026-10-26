@@ -91,6 +91,107 @@ test_upgrade_without_an_old_email_account_file_stays_quiet() {
   sandbox_drop
 }
 
+test_upgrade_notes_an_old_calendar_account_file() {
+  t_begin "upgrade says how to reconnect the calendar when the old account file is there, once"
+  sandbox_new
+  install_machine
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    >"$AMAN_HOME/instances/main/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_file "$AMAN_HOME/instances/main/.env.calendar"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  sandbox_drop
+}
+
+test_upgrade_moves_a_complete_old_calendar_account() {
+  t_begin "upgrade moves a complete old calendar account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel-91c2' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  printf 'CALENDAR_CONNECTOR_URL=http://calendar-caldav:9558/mcp\n' >>"$dir/.env"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_no_path "$dir/.env.calendar"
+  assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
+  assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_a_calendar_account_connected_again() {
+  t_begin "upgrade never replaces an account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.calendar"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
+  t_begin "upgrade keeps the old calendar file, and says so, when the connector's check printed nothing"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  STUB_CALENDAR_CHECK=silent run_install upgrade
+  assert_rc 0
+  assert_file "$dir/.env.calendar"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
+  t_begin "upgrade without the old calendar file says nothing about reconnecting the calendar"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_starts_the_calendar_connector_without_a_profile() {
+  t_begin "after an upgrade the instance's compose file starts the calendar connector with the instance"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "profiles: ['calendar']"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "calendar-account:/account"
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -651,6 +752,12 @@ test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
 test_upgrade_notes_an_old_email_account_file
 test_upgrade_without_an_old_email_account_file_stays_quiet
+test_upgrade_notes_an_old_calendar_account_file
+test_upgrade_moves_a_complete_old_calendar_account
+test_upgrade_keeps_a_calendar_account_connected_again
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing
+test_upgrade_without_an_old_calendar_account_file_stays_quiet
+test_upgrade_starts_the_calendar_connector_without_a_profile
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker

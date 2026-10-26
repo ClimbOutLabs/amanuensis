@@ -176,7 +176,10 @@ instance_render() {
   fi
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
-  [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  if [ -n "${REL_CALENDAR_TAG:-}" ]; then
+    calendar_on=1
+    calendar_secret_backfill "$name"
+  fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
@@ -226,6 +229,25 @@ owner_name_backfill() { # name
   if [ -f "$env" ] && grep -q '^# >>> managed by the installer' "$env" && ! grep -q '^OWNER_NAME=' "$env"; then
     env_managed_set "$env" OWNER_NAME "$current"
   fi
+}
+
+# The secret the app and the calendar connector share, so only the app can use the connector's account port. It is made
+# once, in the settings file, and an existing value is never changed. A file without the installer's managed part (an
+# older or hand-made one) gets the line at its end, so Compose never stops for the missing value. A missing file gets
+# nothing: the instance has no settings to run from, and the instance commands say so.
+calendar_secret_backfill() { # name
+  local env
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  grep -q '^CALENDAR_ACCOUNT_SECRET=.\{32,\}' "$env" && return 0
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" CALENDAR_ACCOUNT_SECRET "$(rand_hex 32)"
+    return 0
+  fi
+  {
+    grep -v '^CALENDAR_ACCOUNT_SECRET=' "$env" || true
+    printf 'CALENDAR_ACCOUNT_SECRET=%s\n' "$(rand_hex 32)"
+  } | write_if_changed "$env" 600 || true
 }
 
 # running, partial or stopped, from the containers Compose labelled for the project.

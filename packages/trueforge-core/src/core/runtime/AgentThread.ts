@@ -1,6 +1,7 @@
 import type { ChatCompletionContentPart, ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { createDocumentExtractionBudget, type DocumentFileProgress } from '../../documents/documentExtraction';
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import type { AgentCapability, CapabilityState, UntrustedTextScreen } from '../capabilities/AgentCapability';
 import type {
   AgentContextProcessorOutput,
@@ -174,6 +175,7 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
   EMAIL_PASSWORD_PROMPT,
@@ -1924,6 +1926,9 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+    }
+    if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
+      capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
     }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.

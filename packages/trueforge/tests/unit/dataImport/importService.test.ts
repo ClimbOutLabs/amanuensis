@@ -2201,16 +2201,16 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
   describe('the names Email and Calendar', () => {
     const HOST_MAIL_URL = 'http://mail-email:9557/mcp';
     const originalMail = configuration.MAIL_SIDECAR_MCP_URL;
-    const originalCalendar = configuration.CALENDAR_CONNECTOR_URL;
+    const originalCalendar = configuration.CALENDAR_SIDECAR_MCP_URL;
 
     beforeEach(() => {
       configuration.MAIL_SIDECAR_MCP_URL = HOST_MAIL_URL;
-      configuration.CALENDAR_CONNECTOR_URL = undefined;
+      configuration.CALENDAR_SIDECAR_MCP_URL = undefined;
     });
 
     afterAll(() => {
       configuration.MAIL_SIDECAR_MCP_URL = originalMail;
-      configuration.CALENDAR_CONNECTOR_URL = originalCalendar;
+      configuration.CALENDAR_SIDECAR_MCP_URL = originalCalendar;
     });
 
     async function importNames(name: string[]): Promise<{ names: string[]; summary: string; marks: boolean[] }> {
