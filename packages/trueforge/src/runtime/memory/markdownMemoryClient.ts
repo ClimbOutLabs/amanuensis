@@ -47,8 +47,8 @@ import {
 import {
   appendVaultTombstone,
   clearSummaryPending,
-  entryDay,
   entryMetadata,
+  entryOccurredAt,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
@@ -241,13 +241,13 @@ export class MarkdownMemoryClient implements MemoryClient {
       );
       for (const item of interleaveRanked(rankedLists)) {
         const metadata = entryMetadata(item.text);
-        const day = entryDay(item.id);
-        // The day and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
+        const occurredAt = entryOccurredAt(item);
+        // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
           text: withoutSessionMarker(item.text),
           type: 'markdown',
-          ...(day !== undefined && { occurred_start: day }),
+          ...(occurredAt !== undefined && { occurred_start: occurredAt }),
           ...(metadata && { metadata }),
         });
         if (!ok) {
@@ -370,6 +370,16 @@ export class MarkdownMemoryClient implements MemoryClient {
       return { ok: true };
     } catch (error) {
       return { ok: false, reason: failureReason('markdown retain failed', error) };
+    }
+  }
+
+  async completeOperation(operationId: string): Promise<void> {
+    try {
+      const seen = await this.readOperationIds();
+      seen.add(operationId);
+      await this.writeOperationIds(seen);
+    } catch {
+      // Best effort: a sweep that still finds the operation missing is covered by the recovery rule.
     }
   }
 

@@ -382,6 +382,8 @@ function createTurnResolver(deps: {
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
+  /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
+  memorySummarize?: SummarizeTurnContext | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -434,6 +436,7 @@ function createTurnResolver(deps: {
     memoryProviderServerName,
     memorySettings,
     previousTurnId,
+    memorySummarize,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
@@ -839,6 +842,8 @@ function createTurnResolver(deps: {
       turnedOffConnectorKeys: readTurnedOffConnectorKeys(session.record.metadata),
       // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
       recallEnabled: deps.unattended ? false : undefined,
+      summarize: memorySummarize,
+      clientTimezone,
       internalSourceState,
     },
     {
@@ -1128,6 +1133,8 @@ export interface DrainTurnEventsInput {
         userText: string;
         /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
         attachedFiles: boolean;
+        /** The person's IANA time zone, so a summary writes dates as the day they lived. */
+        timeZone?: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
          * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
@@ -1291,6 +1298,7 @@ async function runTurnFollowUp(params: {
         userText: memory.userText,
         assistantText: formatAssistantMessageText(state.output?.content),
         completedAt: state.completed_at,
+        timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
         summarize: memory.summarize,
@@ -1610,6 +1618,7 @@ async function beginAcceptedTurnExecution(
         memorySettings: effectiveMemorySettings,
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
+        memorySummarize,
         clientTimezone: deps.clientTimezone,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
@@ -1687,6 +1696,7 @@ async function beginAcceptedTurnExecution(
               client: deps.memoryClient,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
+              timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
     },
@@ -2823,6 +2833,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   client: memoryClient,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
+                  timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,
                   outcomeLog: {

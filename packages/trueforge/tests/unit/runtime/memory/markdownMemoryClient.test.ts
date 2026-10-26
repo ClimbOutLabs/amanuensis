@@ -214,7 +214,7 @@ describe('MarkdownMemoryClient', () => {
           expect(outcome.results).toHaveLength(1);
           expect(outcome.results[0]?.text).toContain('The person has a dog named Rex.');
           expect(outcome.results[0]?.text).not.toContain('session_id');
-          expect(outcome.results[0]?.occurred_start).toBe('2026-09-19');
+          expect(outcome.results[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
           expect(outcome.results[0]?.metadata).toEqual({ session_id: 'chat-4' });
         }
       } finally {

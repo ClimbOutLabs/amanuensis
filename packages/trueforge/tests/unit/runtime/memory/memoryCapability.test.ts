@@ -472,6 +472,30 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(result?.[0]?.content).toBe(event['injected_block']);
   });
 
+  it('shows a recalled memory day in the time zone of the person', async () => {
+    const recall = jest.fn().mockResolvedValue({
+      ok: true,
+      results: [{ id: '1', type: 'markdown', occurred_start: '2026-09-19T23:30:00.000Z', text: 'fact' }],
+      entities: [],
+    });
+    const capability = hindsightMemoryCapability({
+      client: makeClient({ recall }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      timeZone: 'Asia/Tokyo',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+
+    const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+
+    expect(passthroughEvent(events)['injected_block']).toContain('[markdown, 2026-09-20] fact');
+  });
+
   it('inserts the block as a system message just before the current message, without mutating the input array', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
@@ -670,7 +694,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(passthroughEvent(events)['sweep']).toMatchObject({ abandoned: 1, pending: 0 });
   });
 
-  it('recovers the previous turn vanished retain by resubmitting the exchange from context', async () => {
+  it('recovers the previous turn vanished retain by resubmitting the exchange from context when summaries are off', async () => {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
     const retain = jest.fn().mockResolvedValue({ ok: true });
     const capability = hindsightMemoryCapability({

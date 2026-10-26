@@ -79,6 +79,13 @@ export interface MemoryClient {
    * summarization itself. Never throws.
    */
   noteSummaryOutcome?(params: SummaryOutcomeNote): Promise<void>;
+
+  /**
+   * Optional: record a retain operation that stored nothing on purpose (a turn with no durable
+   * facts) as completed, so a later sweep does not treat it as vanished and rebuild it from the
+   * chat. Only the markdown client implements it. Never throws.
+   */
+  completeOperation?(operationId: string): Promise<void>;
 }
 
 /** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */
