@@ -70,6 +70,7 @@
     "test:installer": "bash installer/tests/run.sh",
     "test:installer-image": "bash installer/tests/image-runtime.sh",
     "test:installer-tls": "bash installer/tests/tls-live.sh",
+    "journey:slow": "pnpm --filter @truefoundry/trueforge build:gen && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend journey:slow",
     "lint:installer": "shellcheck installer/install.sh installer/doctor/aman installer/lib/*.sh installer/tests/*.sh installer/tests/lib/*.sh installer/tests/stubs/*",
     "test:trueforge-core": "pnpm --filter @truefoundry/trueforge-core test",
     "test:trueforge": "pnpm --filter @truefoundry/trueforge test",

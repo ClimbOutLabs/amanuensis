@@ -63,7 +63,13 @@ import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription'
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
-import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
+import {
+  INERT_SERVER_NAME,
+  INERT_WEB_FETCH_TOOL,
+  INERT_WEB_SEARCH_TOOL,
+  startInertMcpServer,
+  type InertMcpServer,
+} from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
@@ -91,15 +97,34 @@ export interface ApprovalTestServer {
   db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
+  /** Holds every later turn in admission, before the turn exists, for `ms`; 0 admits at once again. */
+  setAdmissionDelay: (ms: number) => void;
   close: () => Promise<void>;
+}
+
+/**
+ * Admission reads the chat's chosen persona before the turn exists. Holding that read stands in for
+ * slow admission work, such as a persona library check that waits on a slow model.
+ */
+function slowAdmission({ store, admission }: { store: SqlitePersonaStore; admission: { delayMs: number } }) {
+  const read = store.getLatestManualSessionPersona.bind(store);
+  // A read inside the store's own transaction is not admission, and must keep that transaction.
+  store.getLatestManualSessionPersona = async (input, transaction) => {
+    if (admission.delayMs > 0 && transaction === undefined) {
+      await new Promise(resolve => setTimeout(resolve, admission.delayMs));
+    }
+    return await read(input, transaction);
+  };
+  return store;
 }
 
 function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  admission: { delayMs: number };
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator } = input;
+  const { db, sandboxProvider, authenticator, admission } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -150,7 +175,7 @@ function buildApp(input: {
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
-    personaStore: new SqlitePersonaStore(db),
+    personaStore: slowAdmission({ store: new SqlitePersonaStore(db), admission }),
     modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
@@ -219,9 +244,12 @@ export async function startApprovalTestServer(options?: {
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
   inertWebSearch?: boolean | undefined;
+  /** Makes the inert connector the web search provider, with `web_search` and `web_fetch`. */
+  searchProvider?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
+  const searchProvider = options?.searchProvider === true;
+  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true, searchProvider });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -278,6 +306,7 @@ export async function startApprovalTestServer(options?: {
       name: INERT_SERVER_NAME,
       url: mcp.url,
       description: 'Inert connector used by approval-flow tests.',
+      ...(searchProvider ? { search_provider: true, search_tools: [INERT_WEB_SEARCH_TOOL, INERT_WEB_FETCH_TOOL] } : {}),
     },
     first_party: false,
   });
@@ -285,7 +314,8 @@ export async function startApprovalTestServer(options?: {
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+  const admission = { delayMs: 0 };
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, admission });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -298,13 +328,16 @@ export async function startApprovalTestServer(options?: {
       await app.guidesSettled();
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, admission });
     },
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
     sessionStore: () => new SqliteSessionStore(db),
     db: () => db,
+    setAdmissionDelay: ms => {
+      admission.delayMs = ms;
+    },
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },
