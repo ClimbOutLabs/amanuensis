@@ -282,6 +282,11 @@ describe('parseMorningBrief with a long digest', () => {
     expect(parseMorningBrief(answer({ digest, items: [] }))?.brief.digest.endsWith('about it.')).toBe(true);
   });
 
+  it('ends the digest at a full stop after a short name, which is not an abbreviation', () => {
+    const digest = `${'word '.repeat(30)}Please ask Bob. ${'word '.repeat(60)}end.`;
+    expect(parseMorningBrief(answer({ digest, items: [] }))?.brief.digest.endsWith('ask Bob.')).toBe(true);
+  });
+
   it('keeps a digest that is exactly at the limit', () => {
     const digest = 'y'.repeat(BRIEF_LIMITS.digest);
     expect(parseMorningBrief(answer({ digest, items: [] }))?.brief.digest).toBe(digest);
@@ -343,6 +348,63 @@ describe('parseMorningBrief with other ways of writing the JSON', () => {
   it('is not fooled by braces inside strings or in the prose around the object', () => {
     const tricky = { ...VALID, digest: 'Use } and { in text, "quoted" too.' };
     expect(parseMorningBrief(`A { stray brace first. ${JSON.stringify(tricky)}`)?.brief.digest).toBe(tricky.digest);
+  });
+});
+
+describe('parseMorningBrief and unreadableBriefText on hostile or odd answers', () => {
+  const json = JSON.stringify(VALID);
+
+  function milliseconds(run: () => unknown): number {
+    const started = performance.now();
+    run();
+    return performance.now() - started;
+  }
+
+  it('finishes fast on an unclosed fence followed by a long run of spaces', () => {
+    const text = `\`\`\`${' '.repeat(10000)}`;
+    expect(milliseconds(() => parseMorningBrief(text))).toBeLessThan(50);
+    expect(milliseconds(() => unreadableBriefText(text))).toBeLessThan(50);
+  });
+
+  it('finishes fast on tens of thousands of open braces', () => {
+    const text = '{'.repeat(40000);
+    expect(milliseconds(() => parseMorningBrief(text))).toBeLessThan(100);
+    expect(milliseconds(() => unreadableBriefText(text))).toBeLessThan(100);
+  });
+
+  it('finishes fast on many fence openers, quotes and backticks', () => {
+    const text = '```json {"a": "`'.repeat(5000) + '```'.repeat(5000);
+    expect(milliseconds(() => parseMorningBrief(text))).toBeLessThan(100);
+    expect(milliseconds(() => unreadableBriefText(text))).toBeLessThan(100);
+  });
+
+  it('keeps a fence open across backticks that sit inside a JSON string', () => {
+    const tricky = { ...VALID, digest: 'Use ``` to start a code block.' };
+    const text = `Here.\n\n\`\`\`json\n${JSON.stringify(tricky)}\n\`\`\``;
+    expect(parseMorningBrief(text)?.brief.digest).toBe('Use to start a code block.');
+    const broken = `Here.\n\n\`\`\`json\n{"digest": 5, "note": "see \`\`\` here", "items": []}\n\`\`\`\n\nBye.`;
+    expect(unreadableBriefText(broken)).toBe('Here.\nBye.');
+  });
+
+  it('finds a full brief after a cut-off object that is followed by a new line', () => {
+    const text = `Sorry {"digest": "One", "items": [{"sec\n\nTry again: ${json}`;
+    expect(parseMorningBrief(text)).toEqual({ brief: VALID, omittedCount: 0 });
+  });
+
+  it('finds a full brief inside an object that never closes and is not json', () => {
+    expect(parseMorningBrief(`{ not json at all ${json}`)?.brief).toEqual(VALID);
+  });
+
+  it('keeps fenced code in another language, even when it starts with a bracket or brace', () => {
+    expect(unreadableBriefText('Try this:\n\n```python\n[n * 2 for n in items]\n```')).toBeNull();
+    expect(unreadableBriefText('Try this:\n\n```text\n{ "not": json\n```')).toBeNull();
+    expect(unreadableBriefText('Try this:\n\n```python\n{"a": 1\n')).toBeNull();
+  });
+
+  it('drops a four-backtick fence without leaving its tag behind', () => {
+    expect(unreadableBriefText('Sorry.\n\n````json\n{"digest": 5}\n````')).toBe('Sorry.');
+    expect(unreadableBriefText('Sorry.\n\n````json\n{"digest": 5')).toBe('Sorry.');
+    expect(parseMorningBrief(`\`\`\`\`json\n${json}\n\`\`\`\``)?.brief).toEqual(VALID);
   });
 });
 

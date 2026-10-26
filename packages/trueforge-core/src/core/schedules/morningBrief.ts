@@ -87,17 +87,28 @@ export interface ReadBrief {
   omittedCount: number;
 }
 
-/** A code fence of any tag (json, JSON, or none), so the model's choice of tag never decides what is shown. */
-const FENCE = /```[^\S\n]*[A-Za-z0-9_-]*[^\S\n]*\n?([\s\S]*?)```/g;
+/**
+ * The most of an answer that is read for JSON. The longest valid brief is far shorter, so this only bounds the
+ * work a huge or hostile answer can cost.
+ */
+const SCAN_LIMIT = BRIEF_LIMITS.digestCeiling * 64;
 
-/** An opening fence that never closed and holds JSON, which is an answer cut off mid-brief. */
-const UNCLOSED_JSON_FENCE = /```[^\S\n]*(?:json\b[\s\S]*|\s*[{[][\s\S]*)$/i;
-
-/** A stretch of an answer that is JSON. `parsed` is null when it was cut off before it finished. */
+/** A stretch of an answer that is JSON. `parsed` is null when it was cut off or broken. */
 interface JsonSpan {
   start: number;
   end: number;
   parsed: { value: unknown } | null;
+}
+
+interface TextRange {
+  start: number;
+  end: number;
+}
+
+/** A bare `{` still waiting for its `}`, with the objects already closed inside it. */
+interface OpenObject {
+  start: number;
+  children: TextRange[];
 }
 
 /** The value of text that is a JSON object or list, or null when it is anything else, such as "[Note] hello". */
@@ -112,73 +123,180 @@ function parseJsonContainer(text: string): { value: unknown } | null {
   }
 }
 
-/** The index just after the `}` that closes the object opening at `start`, or null when it never closes. */
-function objectEnd({ text, start }: { text: string; start: number }): number | null {
-  let depth = 0;
-  let inString = false;
-  for (let index = start; index < text.length; index += 1) {
-    const char = text[index];
-    if (inString) {
-      if (char === '\\') {
-        index += 1;
-      } else if (char === '"') {
-        inString = false;
-      }
-    } else if (char === '"') {
-      inString = true;
-    } else if (char === '{') {
-      depth += 1;
-    } else if (char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return index + 1;
-      }
-    }
+function backtickRun({ text, from }: { text: string; from: number }): number {
+  let end = from;
+  while (text.charAt(end) === '`') {
+    end += 1;
   }
-  return null;
+  return end - from;
+}
+
+function skipBlanks({ text, from }: { text: string; from: number }): number {
+  let end = from;
+  while (text.charAt(end) === ' ' || text.charAt(end) === '\t') {
+    end += 1;
+  }
+  return end;
 }
 
 /**
- * Every piece of an answer that is JSON, in order: fenced blocks of any tag, a fence cut off mid-way, and a bare
- * JSON object written after prose. Text counts only if it really parses (or is a cut-off start), so words that
- * merely begin with "[" or "{" stay words.
+ * Reads the code fence that opens at `start` and returns where reading goes on. The span is set only for a block
+ * that parses as JSON or is clearly JSON that broke off: an untagged or json block that starts with `{` or `[`,
+ * so code in another language stays text. A backtick inside a JSON string never closes the fence, and an unclosed
+ * fence runs to the end, as in markdown.
  */
-function findJsonSpans(answer: string): JsonSpan[] {
-  const spans: JsonSpan[] = [];
-  let fencedEnd = 0;
-  for (const match of answer.matchAll(FENCE)) {
-    const end = match.index + match[0].length;
-    fencedEnd = end;
-    const content = match[1] ?? '';
-    // JSON that does not parse is still JSON to hide, so a broken block never leaks its fence or its braces.
-    if (/^\s*[{[]/.test(content)) {
-      spans.push({ start: match.index, end, parsed: parseJsonContainer(content) });
-    }
+function readFence({
+  text,
+  start,
+  ticks,
+  answerLength,
+}: {
+  text: string;
+  start: number;
+  ticks: number;
+  answerLength: number;
+}): { end: number; span: JsonSpan | null } {
+  let index = skipBlanks({ text, from: start + ticks });
+  const tagStart = index;
+  while (/[A-Za-z0-9_-]/.test(text.charAt(index))) {
+    index += 1;
   }
-  const unclosed = UNCLOSED_JSON_FENCE.exec(answer.slice(fencedEnd));
-  if (unclosed !== null) {
-    spans.push({ start: fencedEnd + unclosed.index, end: answer.length, parsed: null });
+  const tag = text.slice(tagStart, index).toLowerCase();
+  index = skipBlanks({ text, from: index });
+  if (text.charAt(index) === '\r') {
+    index += 1;
   }
-  for (let index = answer.indexOf('{'); index !== -1; index = answer.indexOf('{', index + 1)) {
-    const inside = spans.find(span => index >= span.start && index < span.end);
-    if (inside !== undefined) {
-      index = inside.end - 1;
-      continue;
-    }
-    const end = objectEnd({ text: answer, start: index });
-    if (end === null) {
-      if (/^\{\s*"/.test(answer.slice(index, index + 32))) {
-        spans.push({ start: index, end: answer.length, parsed: null });
+  if (text.charAt(index) === '\n') {
+    index += 1;
+  }
+  const contentStart = index;
+  let probe = contentStart;
+  while (/\s/.test(text.charAt(probe))) {
+    probe += 1;
+  }
+  const looksJson = text.charAt(probe) === '{' || text.charAt(probe) === '[';
+
+  let inString = false;
+  let closeStart = -1;
+  let closeEnd = text.length;
+  while (index < text.length) {
+    const char = text.charAt(index);
+    if (inString) {
+      if (char === '\\') {
+        index += 2;
+        continue;
+      }
+      // A JSON string never holds a raw line break, so one means the string was cut off.
+      if (char === '"' || char === '\n') {
+        inString = false;
+      }
+    } else if (char === '"' && looksJson) {
+      inString = true;
+    } else if (char === '`') {
+      const run = backtickRun({ text, from: index });
+      if (run >= ticks) {
+        closeStart = index;
+        closeEnd = index + run;
         break;
       }
+      index += run;
       continue;
     }
-    const parsed = parseJsonContainer(answer.slice(index, end));
-    if (parsed !== null) {
-      spans.push({ start: index, end, parsed });
-      index = end - 1;
-    }
+    index += 1;
   }
+
+  const closed = closeStart !== -1;
+  const parsed = parseJsonContainer(text.slice(contentStart, closed ? closeStart : text.length));
+  const plainTag = tag === '' || tag === 'json';
+  const brokenJson = closed ? plainTag && looksJson : tag === 'json' || (tag === '' && looksJson);
+  const span = parsed !== null || brokenJson ? { start, end: closed ? closeEnd : answerLength, parsed } : null;
+  return { end: closeEnd, span };
+}
+
+/**
+ * Every piece of an answer that is JSON, in order: fenced blocks of any tag, and a bare JSON object written after
+ * prose. It reads the text once, left to right, so a hostile answer cannot make it slow. Text counts only if it
+ * really parses (or is clearly cut off), so words that merely begin with "[" or "{" stay words.
+ */
+function findJsonSpans(answer: string): JsonSpan[] {
+  const text = answer.slice(0, SCAN_LIMIT);
+  const spans: JsonSpan[] = [];
+  const open: OpenObject[] = [];
+  let inString = false;
+
+  const addIfJson = (range: TextRange) => {
+    const parsed = parseJsonContainer(text.slice(range.start, range.end));
+    if (parsed !== null) {
+      spans.push({ ...range, parsed });
+    }
+  };
+
+  // An object that will not close is cut-off JSON when it opens like a brief. Otherwise it is prose, and only
+  // the objects that did close inside it are looked at, so a full brief after a broken start is still found.
+  const abandon = (end: number) => {
+    for (const entry of open) {
+      if (/^\{\s*"/.test(text.slice(entry.start, entry.start + 32))) {
+        spans.push({ start: entry.start, end, parsed: null });
+        break;
+      }
+      entry.children.forEach(addIfJson);
+    }
+    open.length = 0;
+    inString = false;
+  };
+
+  let index = 0;
+  while (index < text.length) {
+    const char = text.charAt(index);
+    if (inString) {
+      if (char === '\\') {
+        index += 2;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      } else if (char === '\n') {
+        // A JSON string never holds a raw line break, so this object was cut off here.
+        abandon(index);
+      }
+    } else if (char === '`') {
+      // JSON has no backticks outside strings, so an object still open here was cut off.
+      abandon(index);
+      const run = backtickRun({ text, from: index });
+      if (run >= 3) {
+        const fence = readFence({ text, start: index, ticks: run, answerLength: answer.length });
+        if (fence.span !== null) {
+          spans.push(fence.span);
+        }
+        index = fence.end;
+      } else {
+        index += run;
+      }
+      continue;
+    } else if (char === '{') {
+      open.push({ start: index, children: [] });
+    } else if (open.length > 0 && char === '"') {
+      inString = true;
+    } else if (open.length > 0 && char === '}') {
+      const entry = open.pop();
+      const parent = open.at(-1);
+      if (entry !== undefined) {
+        const range = { start: entry.start, end: index + 1 };
+        if (parent !== undefined) {
+          parent.children.push(range);
+        } else {
+          const parsed = parseJsonContainer(text.slice(range.start, range.end));
+          if (parsed === null) {
+            entry.children.forEach(addIfJson);
+          } else {
+            spans.push({ ...range, parsed });
+          }
+        }
+      }
+    }
+    index += 1;
+  }
+  abandon(answer.length);
   return spans.sort((first, second) => first.start - second.start);
 }
 
@@ -234,8 +352,8 @@ function plainItem(item: BriefItem): BriefItem | null {
 
 const SENTENCE_END = /[.!?]["')\]]?(?=\s|$)/g;
 
-/** A short title or initials before a full stop, such as "Dr." or "e.g.", which does not end a sentence. */
-const ABBREVIATION_BEFORE = /(?:^|[\s(])(?:[A-Z][a-z]{0,2}|(?:[a-z]\.)+[a-z])$/;
+/** A common abbreviation before a full stop, such as "Dr." or "e.g.", which does not end a sentence. */
+const ABBREVIATION_BEFORE = /(?:^|[\s(])(?:Dr|Mr|Mrs|Ms|St|Jr|Sr|e\.g|i\.e|etc)$/;
 
 /**
  * A digest cut to the display length at the end of a sentence, or else at a word with "…" after it. The digest is
