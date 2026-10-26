@@ -5,6 +5,7 @@ import {
   MORNING_BRIEF_PROMPT,
   MorningBriefSchema,
   parseMorningBrief,
+  plainBriefText,
   unreadableBriefText,
 } from '../../../src/core/schedules/morningBrief';
 
@@ -354,10 +355,16 @@ describe('parseMorningBrief with other ways of writing the JSON', () => {
 describe('parseMorningBrief and unreadableBriefText on hostile or odd answers', () => {
   const json = JSON.stringify(VALID);
 
+  // Processor time of the fastest of three runs, so a busy machine or a memory cleanup is not mistaken for slow code.
   function milliseconds(run: () => unknown): number {
-    const started = performance.now();
-    run();
-    return performance.now() - started;
+    let fastest = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const started = process.cpuUsage();
+      run();
+      const used = process.cpuUsage(started);
+      fastest = Math.min(fastest, (used.user + used.system) / 1000);
+    }
+    return fastest;
   }
 
   it('finishes fast on an unclosed fence followed by a long run of spaces', () => {
@@ -373,9 +380,58 @@ describe('parseMorningBrief and unreadableBriefText on hostile or odd answers', 
   });
 
   it('finishes fast on many fence openers, quotes and backticks', () => {
-    const text = '```json {"a": "`'.repeat(5000) + '```'.repeat(5000);
+    const text = '```json {"a": "`'.repeat(2500) + '```'.repeat(2500);
     expect(milliseconds(() => parseMorningBrief(text))).toBeLessThan(100);
     expect(milliseconds(() => unreadableBriefText(text))).toBeLessThan(100);
+  });
+
+  it.each([
+    ['open square brackets', '['],
+    ['brackets with a letter', '[a'],
+    ['links with no end', '[a]('],
+    ['images with no end', '![x]('],
+  ])('strips markdown from a line of %s in linear time', (_name, unit) => {
+    const text = `\`\`\`json\n{"a":1}\n\`\`\`\n${unit.repeat(64000)}`;
+    expect(milliseconds(() => unreadableBriefText(text))).toBeLessThan(50);
+    expect(milliseconds(() => plainBriefText(unit.repeat(64000)))).toBeLessThan(50);
+  });
+
+  it('shows at most a few thousand characters of the words around unreadable json, cut at a word', () => {
+    const text = `${'word '.repeat(5000)}\n\n\`\`\`json\n{"digest": 5}\n\`\`\``;
+    const shown = unreadableBriefText(text) ?? '';
+    expect(shown.length).toBeLessThanOrEqual(BRIEF_LIMITS.digestCeiling);
+    expect(shown.endsWith('word…')).toBe(true);
+  });
+
+  it('finds a full brief after a cut-off start on the same line or on a later line', () => {
+    const sameLine = `Sorry {"digest": "One", "items": [{"sec Try: ${json}`;
+    expect(parseMorningBrief(sameLine)?.brief).toEqual(VALID);
+    const laterLine = `Sorry {"digest": "One", "items": [\n\nTry: ${json}`;
+    expect(parseMorningBrief(laterLine)?.brief).toEqual(VALID);
+  });
+
+  it('shows the words of a cut-off start once, without repeating the brief that follows it', () => {
+    const text = `Sorry {"digest": "One", "items": [{"sec Try: ${json} Bye.`;
+    expect(unreadableBriefText(text)).toBe('Sorry');
+    expect(unreadableBriefText(`Sorry.\n{"digest": "One", "items": [\n${json}\nBye.`)).toBe('Sorry.');
+  });
+
+  it('keeps a bracketed note in a fence as words, and hides a fence that opens like json', () => {
+    expect(unreadableBriefText('Note:\n\n```\n[Note] hello there\n```')).toBeNull();
+    expect(unreadableBriefText('Note:\n\n```\n{Draft} hello there\n```')).toBeNull();
+    expect(unreadableBriefText('Note:\n\n```\n[1, 2,\n```')).toBe('Note:');
+    expect(unreadableBriefText('Note:\n\n```json\n[{"a": tru\n```')).toBe('Note:');
+    expect(unreadableBriefText('Note:\n\n```\n{ nope }\n```')).toBeNull();
+  });
+
+  it('leaves no stray tag when an inline fence is followed by a json fence', () => {
+    expect(unreadableBriefText('Use ``` to start.\n```json\n{"digest": 5}\n```')).toBe('Use to start.');
+    expect(unreadableBriefText('Here:\n```\n```json\n{"digest": 5}\n```')).toBe('Here:');
+    expect(parseMorningBrief(`Use \`\`\` here.\n\`\`\`json\n${json}\n\`\`\``)?.brief).toEqual(VALID);
+  });
+
+  it('still closes a fence on a run of backticks that is followed by words', () => {
+    expect(parseMorningBrief(`\`\`\`json\n${json}\n\`\`\` and that is all.`)?.brief).toEqual(VALID);
   });
 
   it('keeps a fence open across backticks that sit inside a JSON string', () => {

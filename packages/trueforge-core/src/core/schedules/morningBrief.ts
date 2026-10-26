@@ -139,22 +139,41 @@ function skipBlanks({ text, from }: { text: string; from: number }): number {
   return end;
 }
 
+/** What follows the opening bracket of a block that is JSON, or JSON that broke off, and not a note in brackets. */
+const JSON_START = /^\s*[{[]\s*(?:["\-\d{[\]}]|true\b|false\b|null\b)/;
+
+/** Whether a run of backticks at `at` is followed by a tag and a line break, so it opens a fence instead of closing one. */
+function opensFence({ text, at, limit }: { text: string; at: number; limit: number }): boolean {
+  let index = at;
+  while (/[A-Za-z0-9_-]/.test(text.charAt(index))) {
+    index += 1;
+  }
+  if (index === at) {
+    return false;
+  }
+  index = skipBlanks({ text, from: index });
+  return index >= limit || text.charAt(index) === '\n' || text.charAt(index) === '\r';
+}
+
 /**
  * Reads the code fence that opens at `start` and returns where reading goes on. The span is set only for a block
- * that parses as JSON or is clearly JSON that broke off: an untagged or json block that starts with `{` or `[`,
- * so code in another language stays text. A backtick inside a JSON string never closes the fence, and an unclosed
- * fence runs to the end, as in markdown.
+ * that parses as JSON or is clearly JSON that broke off: an untagged or json block that opens like JSON, so notes
+ * in brackets and code in another language stay text. A backtick inside a JSON string never closes the fence, an
+ * unclosed fence runs to the end as in markdown, and a run of backticks that is followed by a tag opens the next
+ * fence instead of closing this one.
  */
 function readFence({
   text,
   start,
   ticks,
-  answerLength,
+  limit,
+  spanLimit,
 }: {
   text: string;
   start: number;
   ticks: number;
-  answerLength: number;
+  limit: number;
+  spanLimit: number;
 }): { end: number; span: JsonSpan | null } {
   let index = skipBlanks({ text, from: start + ticks });
   const tagStart = index;
@@ -169,17 +188,18 @@ function readFence({
   if (text.charAt(index) === '\n') {
     index += 1;
   }
-  const contentStart = index;
+  const contentStart = Math.min(index, limit);
   let probe = contentStart;
   while (/\s/.test(text.charAt(probe))) {
     probe += 1;
   }
-  const looksJson = text.charAt(probe) === '{' || text.charAt(probe) === '[';
+  const looksJson = JSON_START.test(text.slice(probe, probe + 64));
 
   let inString = false;
   let closeStart = -1;
-  let closeEnd = text.length;
-  while (index < text.length) {
+  let closeEnd = limit;
+  let reopened = false;
+  while (index < limit) {
     const char = text.charAt(index);
     if (inString) {
       if (char === '\\') {
@@ -196,7 +216,8 @@ function readFence({
       const run = backtickRun({ text, from: index });
       if (run >= ticks) {
         closeStart = index;
-        closeEnd = index + run;
+        reopened = opensFence({ text, at: index + run, limit });
+        closeEnd = reopened ? index : index + run;
         break;
       }
       index += run;
@@ -205,21 +226,35 @@ function readFence({
     index += 1;
   }
 
-  const closed = closeStart !== -1;
-  const parsed = parseJsonContainer(text.slice(contentStart, closed ? closeStart : text.length));
+  const closed = closeStart !== -1 && !reopened;
+  const parsed = looksJson
+    ? parseJsonContainer(text.slice(contentStart, closeStart === -1 ? limit : closeStart))
+    : null;
   const plainTag = tag === '' || tag === 'json';
   const brokenJson = closed ? plainTag && looksJson : tag === 'json' || (tag === '' && looksJson);
-  const span = parsed !== null || brokenJson ? { start, end: closed ? closeEnd : answerLength, parsed } : null;
-  return { end: closeEnd, span };
+  const spanEnd = closeStart === -1 ? spanLimit : closeEnd;
+  return { end: closeEnd, span: parsed !== null || brokenJson ? { start, end: spanEnd, parsed } : null };
 }
 
 /**
- * Every piece of an answer that is JSON, in order: fenced blocks of any tag, and a bare JSON object written after
- * prose. It reads the text once, left to right, so a hostile answer cannot make it slow. Text counts only if it
- * really parses (or is clearly cut off), so words that merely begin with "[" or "{" stay words.
+ * Every piece of `text` before `limit` that is JSON: fenced blocks of any tag, and a bare JSON object written after
+ * prose. It reads left to right once, so a hostile answer cannot make it slow. Text counts only if it really parses
+ * (or is clearly cut off), so words that merely begin with "[" or "{" stay words. A cut-off start is read once more
+ * from its last open brace, so a full brief written right after it is still found.
  */
-function findJsonSpans(answer: string): JsonSpan[] {
-  const text = answer.slice(0, SCAN_LIMIT);
+function scanJson({
+  text,
+  from,
+  limit,
+  spanLimit,
+  canRescan,
+}: {
+  text: string;
+  from: number;
+  limit: number;
+  spanLimit: number;
+  canRescan: boolean;
+}): JsonSpan[] {
   const spans: JsonSpan[] = [];
   const open: OpenObject[] = [];
   let inString = false;
@@ -231,22 +266,28 @@ function findJsonSpans(answer: string): JsonSpan[] {
     }
   };
 
-  // An object that will not close is cut-off JSON when it opens like a brief. Otherwise it is prose, and only
+  // An object that will not close is cut-off JSON when it opens like a brief. Otherwise it is prose. Either way
   // the objects that did close inside it are looked at, so a full brief after a broken start is still found.
   const abandon = (end: number) => {
+    const deepest = open.at(-1);
+    let cutOff = false;
     for (const entry of open) {
+      entry.children.forEach(addIfJson);
       if (/^\{\s*"/.test(text.slice(entry.start, entry.start + 32))) {
         spans.push({ start: entry.start, end, parsed: null });
+        cutOff = true;
         break;
       }
-      entry.children.forEach(addIfJson);
+    }
+    if (cutOff && canRescan && deepest !== undefined) {
+      spans.push(...scanJson({ text, from: deepest.start + 1, limit: end, spanLimit: end, canRescan: false }));
     }
     open.length = 0;
     inString = false;
   };
 
-  let index = 0;
-  while (index < text.length) {
+  let index = from;
+  while (index < limit) {
     const char = text.charAt(index);
     if (inString) {
       if (char === '\\') {
@@ -264,7 +305,7 @@ function findJsonSpans(answer: string): JsonSpan[] {
       abandon(index);
       const run = backtickRun({ text, from: index });
       if (run >= 3) {
-        const fence = readFence({ text, start: index, ticks: run, answerLength: answer.length });
+        const fence = readFence({ text, start: index, ticks: run, limit, spanLimit });
         if (fence.span !== null) {
           spans.push(fence.span);
         }
@@ -296,21 +337,76 @@ function findJsonSpans(answer: string): JsonSpan[] {
     }
     index += 1;
   }
-  abandon(answer.length);
+  abandon(spanLimit);
   return spans.sort((first, second) => first.start - second.start);
+}
+
+function findJsonSpans(answer: string): JsonSpan[] {
+  const text = answer.slice(0, SCAN_LIMIT);
+  return scanJson({ text, from: 0, limit: text.length, spanLimit: answer.length, canRescan: true });
 }
 
 /** Sources the model sometimes writes as a bare subtitle part (often in italics) instead of the source field. */
 const SOURCE_WORDS = new Set(['email', 'mail', 'gmail', 'calendar', 'web', 'memory', 'space', 'spaces', 'notes']);
 
 /**
+ * Links and brackets removed in one left-to-right pass: "[text](url)" and "![text](url)" become the text, and so
+ * does "[text]". Looking up the next closing bracket is remembered, so a long line of brackets stays fast.
+ */
+function stripBrackets(text: string): string {
+  const parts: string[] = [];
+  // Text before `copied` is already in `parts`; the rest is copied in whole runs when a bracket is replaced.
+  let copied = 0;
+  let index = 0;
+  let nextClose = text.indexOf(']');
+  let nextParen = text.indexOf(')');
+  const replace = ({ from, inner, to }: { from: number; inner: string; to: number }) => {
+    parts.push(text.slice(copied, from), inner);
+    copied = to;
+    index = to;
+  };
+  while (index < text.length) {
+    const char = text.charAt(index);
+    const isImage = char === '!' && text.charAt(index + 1) === '[';
+    if (char !== '[' && !isImage) {
+      index += 1;
+      continue;
+    }
+    const open = isImage ? index + 1 : index;
+    if (nextClose !== -1 && nextClose < open) {
+      nextClose = text.indexOf(']', open);
+    }
+    if (nextClose === -1) {
+      index += 1;
+      continue;
+    }
+    const inner = text.slice(open + 1, nextClose);
+    const after = nextClose + 1;
+    if (text.charAt(after) === '(') {
+      if (nextParen !== -1 && nextParen < after) {
+        nextParen = text.indexOf(')', after);
+      }
+      if (nextParen !== -1) {
+        replace({ from: index, inner, to: nextParen + 1 });
+        continue;
+      }
+    }
+    if (!isImage && inner !== '') {
+      replace({ from: index, inner, to: after });
+      continue;
+    }
+    index += 1;
+  }
+  parts.push(text.slice(copied));
+  return parts.join('');
+}
+
+/**
  * Inline markdown removed from one line of brief text, so no `**`, `*`, `_`, backticks or link brackets show.
  * Rows have no room for emphasis, so stripping is simpler and steadier than rendering it.
  */
 export function plainBriefText(text: string): string {
-  return text
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]/g, '$1')
+  return stripBrackets(text)
     .replace(/`([^`]*)`/g, '$1')
     .replace(/(\*\*|__)(.+?)\1/g, '$2')
     .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?![\w*])/g, '$1$2')
@@ -350,6 +446,24 @@ function plainItem(item: BriefItem): BriefItem | null {
   return cleaned;
 }
 
+/** The text cut at a word to fit `max` characters, with "…" after it. Text that already fits is returned as it is. */
+function cutAtWord({ text, max }: { text: string; max: number }): string {
+  if (text.length <= max) {
+    return text;
+  }
+  // The cut must not split a two-unit character such as an emoji, which would leave half of it before the "…".
+  const room = text.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, '');
+  let space = room.length - 1;
+  while (space >= 0 && !/\s/.test(room.charAt(space))) {
+    space -= 1;
+  }
+  let end = space > 0 ? space : room.length;
+  while (end > 0 && /[\s,;:-]/.test(room.charAt(end - 1))) {
+    end -= 1;
+  }
+  return `${room.slice(0, end)}…`;
+}
+
 const SENTENCE_END = /[.!?]["')\]]?(?=\s|$)/g;
 
 /** A common abbreviation before a full stop, such as "Dr." or "e.g.", which does not end a sentence. */
@@ -377,11 +491,7 @@ function shortenDigest(digest: string): string {
   if (sentenceEnd >= max / 2) {
     return digest.slice(0, sentenceEnd);
   }
-  // The cut must not split a two-unit character such as an emoji, which would leave half of it before the "…".
-  const room = digest.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, '');
-  const lastSpace = room.search(/\s\S*$/);
-  const cut = lastSpace > 0 ? room.slice(0, lastSpace) : room;
-  return `${cut.replace(/[\s,;:-]+$/, '')}…`;
+  return cutAtWord({ text: digest, max });
 }
 
 /** The brief in one parsed JSON value, or null when its outer shape or digest is unusable. */
@@ -423,7 +533,8 @@ export function parseMorningBrief(answer: string): ReadBrief | null {
 
 /**
  * The words of an answer that holds a brief that could not be drawn, with every piece of JSON removed and markdown
- * stripped, so a person never reads raw JSON. Null when the answer holds no JSON, which the caller shows as it is.
+ * stripped, so a person never reads raw JSON. At most `BRIEF_LIMITS.digestCeiling` characters are kept, cut at a
+ * word. Null when the answer holds no JSON, which the caller shows as it is.
  */
 export function unreadableBriefText(answer: string): string | null {
   const spans = findJsonSpans(answer);
@@ -433,15 +544,21 @@ export function unreadableBriefText(answer: string): string | null {
   let words = '';
   let from = 0;
   for (const span of spans) {
-    words += `${answer.slice(from, span.start)}\n`;
-    from = span.end;
+    // A piece found inside a cut-off piece starts before `from`, and its words were already left out.
+    if (span.start > from) {
+      words += `${answer.slice(from, span.start)}\n`;
+    }
+    from = Math.max(from, span.end);
   }
   words += answer.slice(from);
-  return words
+  const limit = BRIEF_LIMITS.digestCeiling;
+  const lines = words
+    .slice(0, limit * 2)
+    .replace(/[\uD800-\uDBFF]$/, '')
     .split('\n')
     .map(plainBriefText)
-    .filter(line => line !== '')
-    .join('\n');
+    .filter(line => line !== '');
+  return cutAtWord({ text: lines.join('\n'), max: limit });
 }
 
 /**
