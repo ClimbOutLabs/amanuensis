@@ -32,6 +32,7 @@ import {
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
+import { turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -229,6 +230,10 @@ export function AssistantMessageContainer() {
     parts
       .slice(start, end)
       .flatMap(part => (part.type === 'tool-call' ? (stepNotices.get(part.toolCallId) ?? []) : []));
+  // With details off the step rows fold away, so a finished turn's lasting outcomes (a reminder set,
+  // a calendar change, an email sent, a draft saved) each get one plain line under the reply instead.
+  // With details on the step rows already carry them, and a running turn shows none until it settles.
+  const outcomeLines = !agentDetailsVisible && settled ? turnOutcomeLines(parts) : [];
 
   // The step rows below render only while agent details are on. Errors and approvals surface with an
   // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no
@@ -398,6 +403,16 @@ export function AssistantMessageContainer() {
           One step didn't finish. Turn on agent details to see it.
         </p>
       )}
+      {outcomeLines.map((line, index) => (
+        <p
+          key={index}
+          role="status"
+          data-testid="assistant-message-outcome"
+          className="mt-2 text-sm text-text-secondary"
+        >
+          {line}
+        </p>
+      ))}
       <TurnImages />
     </>
   );
