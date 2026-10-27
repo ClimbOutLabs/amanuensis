@@ -19,6 +19,11 @@
       "type": "string",
       "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
     },
+    "setup_image": {
+      "description": "Helper image the Windows state commands run against the aman_home volume, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
     "source_ref": {
       "description": "Commit of the checkout the local images were built from.",
       "type": "string"
