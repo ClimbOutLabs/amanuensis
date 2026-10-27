@@ -95,7 +95,7 @@ export function AgentHistoryFilterButton() {
       <div className="p-1" onMouseDown={e => e.stopPropagation()}>
         <SearchInput query={query} setQuery={setQuery} placeholder="Search agents" />
         {isSearching ? (
-          <p className="text-text-secondary px-1 pt-1 text-[11px]" role="status">
+          <p className="text-text-secondary px-1 pt-1 text-xs" role="status">
             Searching…
           </p>
         ) : null}
@@ -144,7 +144,7 @@ export function AgentHistoryFilterButton() {
             {hasMore ? (
               <div ref={sentinelRef} className="flex h-6 shrink-0 items-center justify-center" aria-hidden>
                 {loadingMore ? (
-                  <span className="text-text-secondary text-[11px]" role="status">
+                  <span className="text-text-secondary text-xs" role="status">
                     Loading more…
                   </span>
                 ) : null}

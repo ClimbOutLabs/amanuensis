@@ -194,7 +194,10 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     source: Extract<ChatImageSource, { kind: 'upload' | 'artifact' }>;
   }): Promise<ChatImageOutcome> {
     const { ref, source } = input;
-    const source_key = source.kind === 'upload' ? `upload:${String(source.index)}` : `artifact:${source.path}`;
+    // An upload is one turn's own attachment, so the turn is part of its key: the same position in
+    // a later turn is a different picture. An artifact path already names a file of this turn.
+    const source_key =
+      source.kind === 'upload' ? `upload:${ref.turn_id}:${String(source.index)}` : `artifact:${source.path}`;
     const hit = await cached({ ref, source_key });
     if (hit !== undefined) {
       return hit;

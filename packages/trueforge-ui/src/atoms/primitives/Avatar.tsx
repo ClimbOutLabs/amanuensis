@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { cn } from '../lib/cn.js';
 
 const sizeClasses = {
-  sm: 'h-5 w-5 text-[0.625rem] leading-none',
+  sm: 'h-5 w-5 text-xs leading-none',
   default: 'h-8 w-8 text-sm leading-none',
   lg: 'h-10 w-10 text-base leading-none',
 };
