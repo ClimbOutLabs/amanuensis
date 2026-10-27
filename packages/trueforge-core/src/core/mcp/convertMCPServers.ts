@@ -1,8 +1,10 @@
 import type { ChatCompletionTool } from 'openai/resources/chat';
+import { McpConnectionError, McpRedirectRefusedError, ToolPreDispatchError } from '../errors';
 import type { MCPServerInitInfo } from '../events/schema';
 import type { MCPAuthRequired } from '../mcp/IMCPServer';
+import { describeUnknownError } from '../util/errorLogFields';
 import { isRecord } from '../util/records';
-import { type IToolSet, isAuthRequired } from './IMCPServer';
+import { type IToolSet, type ListToolsResponse, isAuthRequired } from './IMCPServer';
 import { getUniqueSanitizedToolName } from './toolNames';
 
 export interface MappedMCPTool {
@@ -15,10 +17,18 @@ export interface ConvertToolsResult {
   toolMapping: Map<string, MappedMCPTool>;
 }
 
+/** A server whose tools are left out of a turn because the server could not be reached. */
+export interface MCPServerUnavailableInfo {
+  name: string;
+  /** The failure in the words it was reported with, for logs and later surfacing. */
+  message: string;
+}
+
 export interface ConvertMCPServersToToolsResult {
   convertedTools: ConvertToolsResult;
   initializationInfo: MCPServerInitInfo[];
   authRequirementInfo: MCPAuthRequired[];
+  unavailableInfo: MCPServerUnavailableInfo[];
 }
 
 /** The member types of a union-shaped schema (anyOf, oneOf, or a type list); undefined when not a union. */
@@ -78,6 +88,42 @@ export function plainBooleanSchema(schema: Record<string, unknown>): Record<stri
   return result;
 }
 
+/**
+ * Whether a listTools failure means the server itself could not be reached (a connection or
+ * transport failure, status 502 or above), as opposed to a problem with the request. Mirrors
+ * the unavailable-connector test AgentThread applies to tool metadata failures: a host policy
+ * pre-dispatch failure is not unavailability, and neither is a client error. A redirect the
+ * connection refused to follow is not unavailability either: the server was reached and
+ * answered, and the refusal is deliberate, so it stays loud. The refusal rides as the cause
+ * under wrappers that add their own context (the connect error names the server around it),
+ * so the whole chain is walked before answering: a refusal anywhere in it settles the
+ * question, even under an outer error that on its own would read as unavailability.
+ */
+function isServerUnavailableError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  let unavailable = false;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof McpRedirectRefusedError) {
+      return false;
+    }
+    if (
+      current instanceof McpConnectionError &&
+      current.statusCode >= 500 &&
+      !(current instanceof ToolPreDispatchError)
+    ) {
+      unavailable = true;
+    }
+    current = current.cause;
+  }
+  return unavailable;
+}
+
+type ListToolsOutcome =
+  | { serverName: string; response: ListToolsResponse }
+  | { serverName: string; unavailable: MCPServerUnavailableInfo };
+
 export async function convertMCPServersToTools(params: {
   tfyManagedServers: IToolSet[];
   userServers: IToolSet[];
@@ -87,6 +133,7 @@ export async function convertMCPServersToTools(params: {
   const toolMapping = new Map<string, MappedMCPTool>();
   const initializationInfo: MCPServerInitInfo[] = [];
   const authRequirementInfo: MCPAuthRequired[] = [];
+  const unavailableInfo: MCPServerUnavailableInfo[] = [];
   const registeredNames = new Set<string>();
 
   // Skip non-preloaded servers that have no preloaded tools, to avoid unnecessary listTools() calls and OAuth triggers.
@@ -102,13 +149,33 @@ export async function convertMCPServersToTools(params: {
   const allServers = [...sortedTfyServers, ...sortedUserServers];
   const managedServers = new Set(tfyManagedServers);
 
-  const listResults = await Promise.all(
-    allServers.map(async server => ({ serverName: server.name, response: await server.listTools() })),
+  const listResults: ListToolsOutcome[] = await Promise.all(
+    allServers.map(async (server): Promise<ListToolsOutcome> => {
+      try {
+        return { serverName: server.name, response: await server.listTools() };
+      } catch (error) {
+        // One unreachable server must not take down every other server's tools with it: its
+        // own tools are left out for this turn and the failure is recorded, the same shape
+        // as an auth-required server being skipped below. Any other failure still fails the
+        // conversion, so real problems stay loud.
+        if (!isServerUnavailableError(error)) {
+          throw error;
+        }
+        return {
+          serverName: server.name,
+          unavailable: { name: server.name, message: describeUnknownError(error) },
+        };
+      }
+    }),
   );
 
   for (let i = 0; i < allServers.length; i++) {
     const listResult = listResults[i];
     if (!listResult) {
+      continue;
+    }
+    if ('unavailable' in listResult) {
+      unavailableInfo.push(listResult.unavailable);
       continue;
     }
     const { serverName, response: listResponse } = listResult;
@@ -160,5 +227,5 @@ export async function convertMCPServersToTools(params: {
     }
   }
 
-  return { convertedTools: { tools, toolMapping }, initializationInfo, authRequirementInfo };
+  return { convertedTools: { tools, toolMapping }, initializationInfo, authRequirementInfo, unavailableInfo };
 }

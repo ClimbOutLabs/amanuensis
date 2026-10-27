@@ -1,7 +1,9 @@
 import type { Logger } from 'winston';
+import { McpConnectionError } from '../../../src/core/errors';
 import type { RemoteMcpHeaders } from '../../../src/core/mcp/RemoteMCP';
 import { RemoteMCP } from '../../../src/core/mcp/RemoteMCP';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { describeUnknownError } from '../../../src/core/util/errorLogFields';
 
 // RemoteMCP connects itself via connectRemoteMcp; mock it so the reconnect-on-header-change
 // behavior can be exercised without real networking. Mirrors remoteMcpServer.test.ts's harness.
@@ -28,7 +30,7 @@ interface FakeConnectionState {
 }
 
 function installFakeConnection(
-  opts: { sessionId?: string | null; failFirstCallToolWith?: unknown } = {},
+  opts: { sessionId?: string | null; failFirstCallToolWith?: unknown; failListToolsWith?: unknown } = {},
 ): FakeConnectionState {
   const state: FakeConnectionState = {
     connectCalls: 0,
@@ -45,7 +47,12 @@ function installFakeConnection(
     return Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: opts.sessionId ?? 'sess-1',
-      listTools: () => Promise.resolve({ tools: [] }),
+      listTools: () => {
+        if (opts.failListToolsWith !== undefined) {
+          throw opts.failListToolsWith;
+        }
+        return Promise.resolve({ tools: [] });
+      },
       callTool: callParams => {
         state.callToolCalls += 1;
         if (opts.failFirstCallToolWith !== undefined && state.callToolCalls === 1) {
@@ -203,5 +210,63 @@ describe('RemoteMCP session-expiry self-heal after a server restart', () => {
       ([msg]: [unknown]) => typeof msg === 'string' && msg.includes('Session expired'),
     );
     expect(sessionExpiryLogged).toBe(false);
+  });
+});
+
+/** The failure a dead server produces at the fetch layer: a bare "fetch failed" whose cause names the refusal. */
+function connectionRefusedFailure(): TypeError {
+  const cause = new Error('connect ECONNREFUSED 192.168.144.3:9557');
+  Object.assign(cause, { code: 'ECONNREFUSED', address: '192.168.144.3', port: 9557 });
+  return new TypeError('fetch failed', { cause });
+}
+
+async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(
+    () => {
+      throw new Error('expected the call to fail');
+    },
+    (error: unknown) => error,
+  );
+}
+
+describe('RemoteMCP transport failure wording', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('names the server and the cause when a tool call hits a dead server, instead of a bare fetch failed', async () => {
+    const transportFailure = connectionRefusedFailure();
+    const state = installFakeConnection({ sessionId: 'sess-1', failFirstCallToolWith: transportFailure });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    const thrown = await captureRejection(remote.callTool({ name: 'send_email', arguments: {} }));
+
+    if (!(thrown instanceof McpConnectionError)) throw new Error('expected an McpConnectionError');
+    expect(thrown.statusCode).toBe(502);
+    expect(thrown.cause).toBe(transportFailure);
+    // The turn-fatal surface shows describeUnknownError's text: the server and the reason, in plain words.
+    expect(describeUnknownError(thrown)).toBe(
+      'The rotating-mcp server could not be reached: connection refused at 192.168.144.3:9557.',
+    );
+    expect(describeUnknownError(thrown)).not.toBe('fetch failed');
+    // No reconnect or retry: exactly one connect and one failed call.
+    expect(state.connectCalls).toBe(1);
+    expect(state.callToolCalls).toBe(1);
+  });
+
+  it('names the server and the cause when listing tools hits a dead server', async () => {
+    const transportFailure = connectionRefusedFailure();
+    const state = installFakeConnection({ sessionId: 'sess-1', failListToolsWith: transportFailure });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    const thrown = await captureRejection(remote.listTools());
+
+    if (!(thrown instanceof McpConnectionError)) throw new Error('expected an McpConnectionError');
+    expect(thrown.statusCode).toBe(502);
+    expect(thrown.cause).toBe(transportFailure);
+    expect(describeUnknownError(thrown)).toBe(
+      'The rotating-mcp server could not be reached: connection refused at 192.168.144.3:9557.',
+    );
+    expect(state.connectCalls).toBe(1);
   });
 });

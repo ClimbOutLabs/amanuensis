@@ -274,6 +274,7 @@ export {
   ImplementationPlanAdmissionBlockedError,
   McpConnectionError,
   McpDcrConfigurationError,
+  McpRedirectRefusedError,
   StructuredEditPreconditionBlockedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
