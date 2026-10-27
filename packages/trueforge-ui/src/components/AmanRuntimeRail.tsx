@@ -9,6 +9,7 @@ import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
+import { useOptionalShellMode } from '../shell/ShellModeContext.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
   PersonalizationProvider,
@@ -172,6 +173,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
   const rules = ruleSentences({ settings, assistant: assistantName });
+  const shell = useOptionalShellMode();
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
@@ -319,6 +321,15 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </p>
             )}
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
+            {shell && (
+              <button
+                type="button"
+                className="text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
+                onClick={() => shell.setSettingsOpen(true, 'audit')}
+              >
+                Audits
+              </button>
+            )}
           </FoldedRow>
 
           <FoldedRow section="rules" title="Rules">
