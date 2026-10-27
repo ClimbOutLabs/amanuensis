@@ -134,6 +134,12 @@ export interface ResolveTurnSummarizeContextParams {
   memoryClientPresent: boolean;
   /** The small model for helper jobs; see `routeHelperModel`. */
   helperFqn?: string | undefined;
+  /**
+   * The person's name from their personalization profile, as loaded by the caller for this
+   * turn, so saved facts can be written in it. Optional: a caller without a profile resolves a
+   * context with no name, and the summarizer writes about "the person".
+   */
+  personName?: string | undefined;
 }
 
 /**
@@ -188,6 +194,10 @@ export async function resolveTurnSummarizeContext(
     });
     return undefined;
   }
+  // The name rides the context trimmed; a blank stored value means no name, and the
+  // summarizer falls back to writing about "the person" for this turn.
+  const trimmedPersonName = params.personName?.trim();
+  const personName = trimmedPersonName === undefined || trimmedPersonName === '' ? undefined : trimmedPersonName;
   try {
     const summarizationModelFqn = await resolveSummarizationModelFqn({
       tenantId,
@@ -201,15 +211,29 @@ export async function resolveTurnSummarizeContext(
         'Turn summarization is enabled but no summarization model resolved for this turn; nothing will be saved for it',
         { sessionId },
       );
-      return { tenantId, modelProviderStore, summarizationModelFqn: undefined, tokenFactoryBudget, modelUsage };
+      return {
+        tenantId,
+        modelProviderStore,
+        summarizationModelFqn: undefined,
+        tokenFactoryBudget,
+        modelUsage,
+        personName,
+      };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage };
+    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage, personName };
   } catch (error) {
     logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
       sessionId,
       ...extractErrorLogFields(error),
     });
-    return { tenantId, modelProviderStore, summarizationModelFqn: undefined, tokenFactoryBudget, modelUsage };
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn: undefined,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+    };
   }
 }

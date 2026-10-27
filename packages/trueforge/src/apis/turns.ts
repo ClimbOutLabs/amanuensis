@@ -1560,6 +1560,7 @@ async function beginAcceptedTurnExecution(
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
         helperFqn: turnHelperModelFqn(),
+        personName: deps.personalizationProfile?.user_name ?? undefined,
       });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -2428,6 +2429,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
       helperFqn: turnHelperModelFqn(),
+      personName: profile?.user_name ?? undefined,
     });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
