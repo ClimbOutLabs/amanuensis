@@ -13,7 +13,7 @@ export type {
   ChatFolderSnapshot,
   ChatFolderStore,
 } from '../server/ChatFolderContext.js';
-export type { AgentConfig } from '../server/ShellModeContext.js';
+export type { AgentConfig, SettingsOpenRequest } from '../server/ShellModeContext.js';
 export type { Space, SpaceStatus, SpaceStore } from '../server/SpaceContext.js';
 export type { TrueForgeBuiltInServerConfig, TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
 export type { LayoutProp } from '../theme/types.js';

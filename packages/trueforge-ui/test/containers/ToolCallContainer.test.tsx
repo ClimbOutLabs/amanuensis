@@ -345,6 +345,52 @@ describe('ToolCallContainer', () => {
     expect(responseSlot?.props.content).toContain(rejectionText);
   });
 
+  it('shows a plain note, not a failure, for a space write refused for its size', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 4,000. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    // Shape produced end-to-end: the space tool's JSON result (the refusal text plus its stable
+    // code) rides in a text content item, which the generic isError path wraps under `error` in
+    // the tool.response.v2 envelope's `result` field.
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: {
+        error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+      },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-1', toolName: 'create_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: 'Too long for one write. Splitting it into parts.', status: 'muted' }),
+    );
+    // The refusal text is still in the step's details, for the person who opens them.
+    const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
+    expect(responseSlot?.props.content).toContain(refusalText);
+  });
+
+  it('still shows a failure for a space call that failed for another reason', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const errorText = 'No space is named "Dog breeds". Call list_spaces to see the spaces you have.';
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: { error: [{ type: 'text', text: JSON.stringify({ error: errorText }) }] },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-2', toolName: 'edit_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: `Execution failed: ${errorText}`, status: 'error' }),
+    );
+  });
+
   it('shows the host remediation message next to a policy-blocked tool step', () => {
     const ToolCallCard = createToolCallCardProbe();
     const result = JSON.stringify({

@@ -61,6 +61,7 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
   parseToolOutputScreen,
   resolveSubAgentMeta,
   SANDBOX_TOOL_NAMES,
@@ -540,18 +541,27 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const disposition = toolCallDisposition(part);
   const outputScreen = parseToolOutputScreen(part.result);
   const outputWasWithheld = outputScreen?.action === 'withheld';
+  // A space write refused for its size is a normal step in building the space in parts, so
+  // its step shows a plain note in a neutral tone instead of the failure line. The refusal
+  // text itself stays in the result, for the model and for the step's details.
+  const tooLongNote = outputWasWithheld ? undefined : parseSpaceWriteTooLongNote(part.result);
   const status = outputWasWithheld
     ? outputScreen.tone
-    : disposition === undefined
-      ? toStatus(part.status?.type)
-      : disposition.tone;
-  const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
+    : tooLongNote !== undefined
+      ? 'muted'
+      : disposition === undefined
+        ? toStatus(part.status?.type)
+        : disposition.tone;
+  const failureReason =
+    outputWasWithheld || tooLongNote !== undefined ? undefined : getToolFailureReason(part.result, disposition);
   const notDoneReason = outputWasWithheld ? undefined : toolCallNotDoneReason(part);
   const outcomeText = outputWasWithheld
     ? outputScreen.label
-    : notDoneReason !== undefined
-      ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
-      : buildOutcomeText(disposition, failureReason);
+    : tooLongNote !== undefined
+      ? tooLongNote
+      : notDoneReason !== undefined
+        ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
+        : buildOutcomeText(disposition, failureReason);
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
