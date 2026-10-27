@@ -304,6 +304,26 @@ describe('AmanRuntimeRail', () => {
     expect(railReceiptRule).not.toMatch(/0\.875rem/);
   });
 
+  it('sizes the avatar-fallback initial, the persona name, the role, the status and the retry button on the scale', () => {
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The avatar-fallback initial and the persona name (serif) both read --text-lg.
+    expect(ruleOf('.aman-runtime-rail__avatar-fallback')).toMatch(/font-size: var\(--text-lg\);/);
+    const identityH2Rule = ruleOf('.aman-runtime-rail__identity h2');
+    expect(identityH2Rule).toMatch(/font-size: var\(--text-lg\);/);
+    expect(identityH2Rule).toMatch(/font-family: var\(--font-serif\);/);
+    // The role, the status line and the retry button all read --text-sm.
+    expect(ruleOf('.aui-panda__role')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__status')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__retry')).toMatch(/font-size: var\(--text-sm\);/);
+    // The section label (over its value) also reads --text-sm.
+    expect(ruleOf('.aman-runtime-rail__section-label')).toMatch(/font-size: var\(--text-sm\);/);
+  });
+
   it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>

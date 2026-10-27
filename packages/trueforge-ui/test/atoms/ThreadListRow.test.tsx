@@ -69,7 +69,9 @@ describe('ThreadListRow', () => {
       </SlotsProvider>,
     );
     expect(screen.getByText('Hello chat')).toBeInTheDocument();
-    expect(screen.getByText('from-sdk')).toBeInTheDocument();
+    const agentLine = screen.getByText('from-sdk').parentElement;
+    expect(agentLine).toHaveClass('text-xs');
+    expect(agentLine?.className).not.toMatch(/text-\[0\.75rem\]/);
     expect(screen.getByText('30m')).toBeInTheDocument();
   });
 

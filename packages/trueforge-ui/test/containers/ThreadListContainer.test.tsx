@@ -273,6 +273,29 @@ function renderThreadList({
 }
 
 describe('ThreadListContainer', () => {
+  it('sizes the search field and the Folders heading on the type scale, not a one-off literal', async () => {
+    renderThreadList({
+      adapter: { threads: [] },
+      variant: 'recent-history',
+      chatFolders: {
+        load: async () => ({ folders: [], assignments: [], folderSessions: [], unfiledSessions: [] }),
+        createFolder: async () => ({ id: 'f1', name: 'Research' }),
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      },
+    });
+
+    const heading = await screen.findByRole('heading', { name: 'Folders' });
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+    const searchField = screen.getByRole('searchbox', { name: 'Search chats' });
+    expect(searchField).toHaveClass('text-sm');
+    expect(searchField.className).not.toMatch(/text-\[0\.8125rem\]/);
+  });
+
   it('renders loading and empty list states from the runtime', () => {
     const { unmount } = renderThreadList({
       adapter: {

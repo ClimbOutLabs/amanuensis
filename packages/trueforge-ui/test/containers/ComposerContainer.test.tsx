@@ -165,6 +165,13 @@ describe('ComposerContainer', () => {
     window.sessionStorage.clear();
   });
 
+  it('sizes the typed text on the --text-base scale step, not a one-off literal', () => {
+    renderComposer();
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    expect(input).toHaveClass('text-base');
+    expect(input.className).not.toMatch(/text-\[0\.9375rem\]/);
+  });
+
   it('puts back the draft saved for this conversation, as after a reload or a sign-in round trip', async () => {
     const key = await draftKeyOf(renderComposer);
     window.sessionStorage.setItem(key, 'Madrid rental requirements: two bedrooms');
