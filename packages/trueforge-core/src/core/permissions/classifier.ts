@@ -26,7 +26,12 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { isMailReadToolName, isMailSendToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
+import {
+  isMailReadToolName,
+  isMailSendToolName,
+  MAIL_CONNECTOR_NAME,
+  MAIL_CONTENT_TOOL_NAME,
+} from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -59,6 +64,7 @@ import {
 import { recordClassificationAudit } from './audit';
 import {
   FIRST_PARTY_TOOL_REASON,
+  MAIL_MARK_AS_READ_REASON,
   MAIL_NEW_RECIPIENT_REASON,
   MAIL_READ_REASON,
   MAIL_SEND_REASON,
@@ -2266,7 +2272,10 @@ function demoRefusesConnector(input: {
 /**
  * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
  * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
- * connector that happens to be named Email.
+ * connector that happens to be named Email. The one exception is reading message bodies with mark-as-read set:
+ * that choice changes the mailbox, so it asks with its own card even though the tool is a read. The choice
+ * counts as set unless it is exactly off: not every path repairs the model's spelling of the value before
+ * classification, and a spelling the sidecar would honour as on must never slip through as a plain read.
  */
 async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -2274,6 +2283,33 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
       reason: 'offline_mode',
       reason_detail: 'Email needs network access, which is disabled while offline.',
       sensitive_read: false,
+    });
+  }
+  const markAsRead = action.canonical_params['mark_as_read'];
+  if (action.tool_name === MAIL_CONTENT_TOOL_NAME && markAsRead !== undefined && markAsRead !== false) {
+    return tier3Decision({
+      card: {
+        plain_what: 'Allow marking these emails as read?',
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: MAIL_MARK_AS_READ_REASON,
+      reason_detail: 'Reading with mark as read set changes these emails in the mailbox, so it asks first.',
+      sensitive_read: true,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
     });
   }
   return tier1Decision({

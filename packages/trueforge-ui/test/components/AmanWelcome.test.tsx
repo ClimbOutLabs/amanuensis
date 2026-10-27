@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
@@ -105,12 +105,12 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
-  it('sends only the morning brief prompt from the brief card', async () => {
+  it('sends only the morning brief card prompt from the brief card', async () => {
     server.grantedFeatures = ['gmail_read', 'calendar_read'];
     renderWelcome({ setup: firstRun });
 
     fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
-    expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
+    expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_CARD_PROMPT);
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
