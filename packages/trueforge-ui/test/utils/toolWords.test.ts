@@ -14,6 +14,12 @@ describe('toolWords', () => {
     expect(toolDoneWords('web_search')).toBe('Searched the web');
   });
 
+  it('reads a Google setup check as checking the connection', () => {
+    expect(toolDoingWords('google_setup_status')).toBe('Checking your Google connection');
+    expect(toolDoneWords('google_setup_status')).toBe('Checked your Google connection');
+    expect(toolDoneWords('google_setup_read')).toBe('Checked your Google connection');
+  });
+
   it('never shows a raw tool name for a tool it does not know', () => {
     expect(toolDoingWords('some_new_tool')).toBeUndefined();
     expect(toolDoneWords('some_new_tool')).toBe(TOOL_DONE_FALLBACK);

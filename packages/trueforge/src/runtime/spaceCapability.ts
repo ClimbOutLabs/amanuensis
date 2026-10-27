@@ -62,6 +62,7 @@ import {
 } from '../schemas/space';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
+import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
@@ -1683,7 +1684,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
-        ...(google === undefined ? [] : [google]),
+        ...google,
         ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
@@ -1716,26 +1717,34 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const connections = this.#space.googleConnections;
     const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
     if (connections === undefined && evalFixtures === undefined) {
-      return undefined;
+      return [];
     }
+    const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
     try {
-      return await googleCapability({
+      const google = await googleCapability({
         fetchImpl: undefined,
         connections,
         evalSources: evalFixtures,
-        owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        owner,
         tracing: input.tracing,
         timeZone: this.clientTimezone,
         sentinel: this.#sentinel(input),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
         logger: this.#space.logger,
       });
+      // The guided setup mounts beside the tools, but only against a real login store: in eval mode the
+      // fixture account stands in for a finished connection, so there is nothing to lead there.
+      const setup =
+        connections === undefined || evalFixtures !== undefined
+          ? undefined
+          : await googleSetupCapability({ connections, owner, tracing: input.tracing });
+      return [...(google === undefined ? [] : [google]), ...(setup === undefined ? [] : [setup])];
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
         extractErrorLogFields(error),
       );
-      return undefined;
+      return [];
     }
   }
 }
