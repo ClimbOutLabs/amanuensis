@@ -267,6 +267,13 @@ export interface SandboxOptions {
    */
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
   /**
+   * Resolves the skill network grant for this chat: the token and the approved sites, for the skills
+   * the person allowed network access to in Settings. Re-read on every command, so removing the
+   * approval in Settings takes effect on the next call. Absent outside the server runtime, and
+   * undefined when no mounted skill has approved sites.
+   */
+  loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  /**
    * Whether the person has allowed package downloads for the bound repository. Re-read whenever a
    * download command is stamped, so the first download in a repo shows its own approval card.
    * Absent outside the server runtime; the ordinary card is shown then.
@@ -1354,10 +1361,20 @@ type ReplaceTextDispatchOutcome =
   { kind: 'match_rejected'; rejection: string } | { kind: 'dispatched'; exec: ExecResult; payloadDigest: string };
 
 /** Network sentence of the exec description; the offline wording replaces the retrieval and admission claims. */
-function execNetworkSentences({ offline }: { offline: boolean }): string {
-  return offline
-    ? 'This shell has no internet access. Never use it to fetch web content.'
-    : 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+function execNetworkSentences({
+  offline,
+  skillNetworkHosts,
+}: {
+  offline: boolean;
+  skillNetworkHosts: readonly string[];
+}): string {
+  if (!offline) {
+    return 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+  }
+  if (skillNetworkHosts.length > 0) {
+    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site.`;
+  }
+  return 'This shell has no internet access. Never use it to fetch web content.';
 }
 
 /** Sent with the tools that make files: the UI downloads only files listed in this block. */
@@ -1367,9 +1384,12 @@ const SANDBOX_FILE_OUTPUT_RULE =
 export function createSandboxExecDescription({
   offline,
   fileDownload,
+  skillNetworkHosts,
 }: {
   offline: boolean;
   fileDownload: boolean;
+  /** Sites approved for the skills in this chat; the middle state between offline and full network. */
+  skillNetworkHosts?: readonly string[] | undefined;
 }): string {
   const fileOutput = fileDownload ? `\n${SANDBOX_FILE_OUTPUT_RULE}` : '';
   return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
@@ -1377,7 +1397,7 @@ Create files with write_file; edit with apply_patch or replace_text. Never bypas
 Large output: use output.head_lines, output.tail_lines or output.grep.
 Python and Node go to run_code; interpreter invocations are rejected.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
-${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
+${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
 `;
 }
 
@@ -1774,6 +1794,8 @@ function sandboxExecPreflightFailure(input: {
   webConnectorToolHint: string;
   hasNetwork: boolean;
   packageGatewayAvailable: boolean;
+  /** True when the person approved network access for a skill mounted in this chat. */
+  skillNetworkGranted: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1788,8 +1810,10 @@ function sandboxExecPreflightFailure(input: {
   if (interpreterGuardFailure !== undefined) {
     return interpreterGuardFailure;
   }
-  // An impossible action must not reach an approval card.
-  if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
+  // An impossible action must not reach an approval card. A skill network grant is the middle
+  // state: the command may try, and the gateway is the wall that refuses every site outside the
+  // grant, so the refusal here would only block the sites the person approved.
+  if (!input.hasNetwork && !input.skillNetworkGranted && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
   if (!input.packageGatewayAvailable && commandInstallsPypiOrNpmPackages(input.command)) {
@@ -2038,6 +2062,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
   private readonly loadPackageMirrorToken: (() => Promise<string | undefined>) | undefined;
+  private readonly loadSkillNetworkGrant:
+    (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
   private readonly loadPackageDownloadsAllowed: (() => Promise<boolean>) | undefined;
   private readonly allowPackageDownloads: (() => Promise<void>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -2079,6 +2105,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly runCodeService: RunCodeBackend | undefined;
   /** The person's download setting for the bound repository, read before each tool-list read and call. */
   private packageDownloadsAllowedForChat = false;
+  /** Sites approved for the skills in this chat, read before each tool-list read; empty means no grant. */
+  private skillNetworkHostsForChat: readonly string[] = [];
   /** host sink for harvested run_code file bytes; undefined when the host wires no persistence. */
   private readonly runCodeHarvestSink: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   /**
@@ -2141,6 +2169,7 @@ export class Sandbox extends LocalToolMCP {
     this.boundRepository = options.boundRepository;
     this.loadBoundRepository = options.loadBoundRepository;
     this.loadPackageMirrorToken = options.loadPackageMirrorToken;
+    this.loadSkillNetworkGrant = options.loadSkillNetworkGrant;
     this.loadPackageDownloadsAllowed = options.loadPackageDownloadsAllowed;
     this.allowPackageDownloads = options.allowPackageDownloads;
     this.onRepositorySources = options.onRepositorySources;
@@ -2241,6 +2270,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
         packageGatewayAvailable: this.packageGatewayAvailable(),
+        skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2877,6 +2907,7 @@ export class Sandbox extends LocalToolMCP {
 
   override async listTools() {
     await this.refreshPackageDownloadsAllowed();
+    await this.refreshSkillNetworkHosts();
     return super.listTools();
   }
 
@@ -2898,6 +2929,7 @@ export class Sandbox extends LocalToolMCP {
           description: createSandboxExecDescription({
             offline: !this.hasNetwork(),
             fileDownload: this.fileDownloadEnabled,
+            skillNetworkHosts: this.skillNetworkHostsForChat,
           }),
         };
       }
@@ -3827,8 +3859,11 @@ export class Sandbox extends LocalToolMCP {
     // Only the model's own commands can carry a package mirror grant: host-built commands (git,
     // verification, file reads) never download packages and never see the token.
     let packageMirrorToken: string | undefined;
+    // The skill network grant follows the same rule: only the model's own commands carry it.
+    let skillNetworkGrant: { token: string; hosts: readonly string[] } | undefined;
     if (!input.hostAuthored) {
       packageMirrorToken = await this.resolvePackageMirrorToken();
+      skillNetworkGrant = await this.resolveSkillNetworkGrant();
       if (packageMirrorToken !== undefined && commandDownloadsPackages(input.command)) {
         const refusal = await this.packageGitDependencyRefusal({
           sandboxId: input.sandboxId,
@@ -3852,6 +3887,9 @@ export class Sandbox extends LocalToolMCP {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.approvedGitRemotes === undefined ? {} : { approvedGitRemotes: input.approvedGitRemotes }),
       ...(packageMirrorToken === undefined ? {} : { packageMirrorToken }),
+      ...(skillNetworkGrant === undefined
+        ? {}
+        : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
@@ -3912,6 +3950,32 @@ export class Sandbox extends LocalToolMCP {
       return await load();
     } catch (error) {
       this.logger.warn('Could not resolve the package mirror grant; the command runs offline', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /** Reads the approved skill sites into the cache. A failed read keeps the list empty, never wider. */
+  private async refreshSkillNetworkHosts(): Promise<void> {
+    const grant = await this.resolveSkillNetworkGrant();
+    this.skillNetworkHostsForChat = grant?.hosts ?? [];
+  }
+
+  /**
+   * The skill network grant for this chat, or undefined when no mounted skill has approved sites.
+   * A resolver failure keeps the sandbox offline, never the reverse.
+   */
+  private async resolveSkillNetworkGrant(): Promise<{ token: string; hosts: readonly string[] } | undefined> {
+    const load = this.loadSkillNetworkGrant;
+    if (load === undefined) {
+      return undefined;
+    }
+    try {
+      const grant = await load();
+      return grant !== undefined && grant.hosts.length > 0 ? grant : undefined;
+    } catch (error) {
+      this.logger.warn('Could not resolve the skill network grant; the command runs offline', {
         error: error instanceof Error ? error.message : String(error),
       });
       return undefined;
@@ -5235,6 +5299,7 @@ export class Sandbox extends LocalToolMCP {
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
       packageGatewayAvailable: this.packageGatewayAvailable(),
+      skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {

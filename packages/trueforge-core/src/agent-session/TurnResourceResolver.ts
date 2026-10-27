@@ -214,6 +214,8 @@ export class TurnResourceResolver<
       modelFirstResponseTimeoutMs?: number | undefined;
       /** See ITurnResourceResolver.modelIdleTimeoutMs. */
       modelIdleTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelToolCallIdleTimeoutMs. */
+      modelToolCallIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
@@ -265,6 +267,15 @@ export class TurnResourceResolver<
     return this.#setUpConnectorNamesPromise;
   }
 
+  /**
+   * Names of every connector set up for this tenant, or undefined when that could not be
+   * read. The same single-flight read the deferred-tool wording uses, exposed so host
+   * resolvers can offer the set-up sources by default without a second read of the store.
+   */
+  get setUpConnectorNames(): Promise<readonly string[] | undefined> {
+    return this.#resolveSetUpConnectorNames();
+  }
+
   #configuredModelsPromise?: Promise<readonly ConfiguredModelSummary[]> | undefined;
 
   /** Single-flight, cached for the lifetime of this resolver instance. */
@@ -306,6 +317,10 @@ export class TurnResourceResolver<
 
   get modelIdleTimeoutMs(): number | undefined {
     return this.deps.modelIdleTimeoutMs;
+  }
+
+  get modelToolCallIdleTimeoutMs(): number | undefined {
+    return this.deps.modelToolCallIdleTimeoutMs;
   }
 
   get toolCallPolicy(): HostToolCallPolicy | undefined {

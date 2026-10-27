@@ -3,6 +3,7 @@ import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+import { REPLY_CALL_NOT_RUN_OWNER_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import { build } from './harness';
 
 const WRITE = ['gmail_read', 'calendar_read', 'calendar_write'] as const;
@@ -129,7 +130,7 @@ describe('a create the host refuses before it is shown', () => {
 });
 
 describe('a refusal the reply guard makes before dispatch', () => {
-  it('gives the person one plain line, says why, and writes one audit row for it', async () => {
+  it('gives the person one plain line and writes one audit row for it', async () => {
     const rows: AuditRecordInput[] = [];
     const built = await build({
       routes: [],
@@ -137,8 +138,7 @@ describe('a refusal the reply guard makes before dispatch', () => {
       timeZone: 'America/New_York',
       services: auditingServices(rows),
     });
-    const owner =
-      'One of the actions in this reply could not run: the title was missing. Ask again to try it once more.';
+    const owner = REPLY_CALL_NOT_RUN_OWNER_MESSAGE;
     const result = await runCalls({
       built,
       calls: [{ id: 'c1', name: 'create_event', arguments: NO_START }],
@@ -153,6 +153,8 @@ describe('a refusal the reply guard makes before dispatch', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'tool_not_prepared' });
-    expect(rows[0]?.description).toContain('the title was missing');
+    // The owner's activity log gets the plain line, never the text written for the model.
+    expect(rows[0]?.description).toContain(REPLY_CALL_NOT_RUN_OWNER_MESSAGE);
+    expect(rows[0]?.description).not.toContain('the title was missing');
   });
 });

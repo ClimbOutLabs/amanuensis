@@ -38,19 +38,14 @@ describe('Space tool classification', () => {
     expect(decision.reason_detail).toBe('Created the space Home renovation.');
   });
 
-  it('runs update_space without asking and names the space', async () => {
+  it('fails closed on update_space: the retired tool is an unknown space tool now', async () => {
     const decision = await classifyTier(
-      spaceAction('update_space', { space_id: 'sp1', name: 'Home renovation' }),
+      spaceAction('update_space', { space_name: 'Home renovation', name: 'Home renovation' }),
       makeCtx(),
     );
-    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Updated the space Home renovation.');
-  });
-
-  it('runs update_space without asking when the call carries no name', async () => {
-    const decision = await classifyTier(spaceAction('update_space', { space_id: 'sp1' }), makeCtx());
-    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
-    expect(decision.reason_detail).toBe('Updated a space.');
+    expect(decision).toMatchObject({ tier: 3, reason: 'unclassified', card: null });
+    expect(decision.reason).not.toBe('space_write');
+    expect(decision.reason_detail).toBe('Unknown space tool.');
   });
 
   it('runs edit_space without asking and names the space', async () => {
@@ -94,7 +89,7 @@ describe('Space tool classification', () => {
   });
 
   it('shows the nameless line when the name is only whitespace', async () => {
-    const decision = await classifyTier(spaceAction('update_space', { space_id: 'sp1', name: ' \n\t ' }), makeCtx());
+    const decision = await classifyTier(spaceAction('edit_space', { space_name: ' \n\t ' }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
     expect(decision.reason_detail).toBe('Updated a space.');
   });
@@ -126,10 +121,7 @@ describe('Space tool classification', () => {
   });
 
   it('shows a name with a control character as a visible escape, not a raw control', async () => {
-    const decision = await classifyTier(
-      spaceAction('update_space', { space_id: 'sp1', name: 'Home\u0007plans' }),
-      makeCtx(),
-    );
+    const decision = await classifyTier(spaceAction('edit_space', { space_name: 'Home\u0007plans' }), makeCtx());
     expect(decision.reason_detail).toBe('Updated the space Home\\u{0007}plans.');
   });
 
@@ -159,9 +151,6 @@ describe('Space tool classification', () => {
     ['list_blocks', { space_id: 'sp1' }, 'Looked at the sections of a space.'],
     ['create_space', { name: 'Dog breeds' }, 'Created the space Dog breeds.'],
     ['create_space', {}, 'Created a space.'],
-    ['update_space', { space_id: 'sp1', name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
-    ['update_space', { space_id: 'sp1' }, 'Updated a space.'],
-    ['update_space', { space_name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
     ['edit_space', { space_name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
     ['edit_space', { space_id: 'sp1' }, 'Updated a space.'],
     ['revert_space', { space_id: 'sp1', revision: 2 }, 'Restored an earlier version of a space.'],

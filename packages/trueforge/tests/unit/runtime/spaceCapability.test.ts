@@ -17,7 +17,6 @@ import {
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import {
   SpaceAggregateRevisionConflictError,
-  SpaceNotFoundError,
   SpaceRevisionConflictError,
   SpaceRevisionNotFoundError,
   type ISpaceStore,
@@ -62,7 +61,9 @@ function makeStore(overrides: Partial<ISpaceStore> = {}): SpaceToolStore {
     createSpace: jest.fn(),
     updateSpace: jest.fn(),
     revertSpace: jest.fn(),
-    listSpacesWithAggregate: jest.fn(),
+    listSpacesWithAggregate: jest
+      .fn()
+      .mockResolvedValue({ records: [], aggregate_revision: 0, has_more: false, next_offset: null }),
     getSpace: jest.fn(),
     getSpaceRevision: jest.fn(),
     ...overrides,
@@ -284,7 +285,7 @@ describe('space capability', () => {
     expect(createSpace).toHaveBeenLastCalledWith(expect.objectContaining({ format: 'markdown' }));
   });
 
-  it('update_space passes the space id and both expected revisions through', async () => {
+  it('edit_space passes the resolved space id and both expected revisions through', async () => {
     const updateSpace = jest.fn().mockResolvedValue({
       record: {
         tenant_id: 'default',
@@ -301,7 +302,16 @@ describe('space capability', () => {
       aggregate_revision: 2,
     });
     const capability = spaceCapability({
-      store: makeStore({ updateSpace, getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })) }),
+      store: makeStore({
+        updateSpace,
+        getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })),
+        listSpacesWithAggregate: jest.fn().mockResolvedValue({
+          records: [makeSpaceRecord({ revision: 1 })],
+          aggregate_revision: 1,
+          has_more: false,
+          next_offset: null,
+        }),
+      }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
@@ -312,13 +322,11 @@ describe('space capability', () => {
     }
 
     await toolSet.callTool({
-      name: UPDATE_SPACE_TOOL_NAME,
+      name: EDIT_SPACE_TOOL_NAME,
       arguments: {
-        space_id: 'space-1',
-        name: 'Spain houses (shortlist)',
-        purpose: 'Track candidate houses in Spain.',
-        status: 'active',
-        body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 240000 |',
+        space_name: 'Spain houses',
+        new_title: 'Spain houses (shortlist)',
+        edits: [{ type: 'search', search: '250000', replace: '240000' }],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -327,6 +335,7 @@ describe('space capability', () => {
     expect(updateSpace).toHaveBeenCalledWith(
       expect.objectContaining({
         space_id: 'space-1',
+        name: 'Spain houses (shortlist)',
         body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 240000 |',
         expected_revision: 1,
         expected_aggregate_revision: 1,
@@ -401,7 +410,7 @@ describe('space capability', () => {
     expect(createSpace).not.toHaveBeenCalled();
   });
 
-  it('update_space leaves a body given as a string unchanged', async () => {
+  it('edit_space passes the edited body to the store as one string', async () => {
     const updateSpace = jest.fn().mockResolvedValue({
       record: {
         tenant_id: 'default',
@@ -418,7 +427,16 @@ describe('space capability', () => {
       aggregate_revision: 2,
     });
     const capability = spaceCapability({
-      store: makeStore({ updateSpace, getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })) }),
+      store: makeStore({
+        updateSpace,
+        getSpace: jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 })),
+        listSpacesWithAggregate: jest.fn().mockResolvedValue({
+          records: [makeSpaceRecord({ revision: 1 })],
+          aggregate_revision: 1,
+          has_more: false,
+          next_offset: null,
+        }),
+      }),
       authority: { tenantId: 'default', userRef: 'user-a' },
       tracing: NOOP_TRACING,
       webSearch: createWebSearchTurnState(),
@@ -429,13 +447,10 @@ describe('space capability', () => {
     }
 
     await toolSet.callTool({
-      name: UPDATE_SPACE_TOOL_NAME,
+      name: EDIT_SPACE_TOOL_NAME,
       arguments: {
-        space_id: 'space-1',
-        name: 'Spain houses',
-        purpose: 'Track candidate houses in Spain.',
-        status: 'active',
-        body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 240000 |',
+        space_name: 'Spain houses',
+        edits: [{ type: 'search', search: '250000', replace: '240000' }],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -531,8 +546,8 @@ describe('space capability', () => {
     expect(JSON.parse(text)).toEqual({
       spaces: [
         {
-          id: 'space-1',
           name: 'Spain houses',
+          link: '/spaces/space-1',
           purpose: 'Track candidate houses in Spain.',
           status: 'active',
           format: 'markdown',
@@ -541,8 +556,8 @@ describe('space capability', () => {
           updated_at: '2026-09-13T00:00:00.000Z',
         },
         {
-          id: 'space-2',
           name: 'Spain houses (archive)',
+          link: '/spaces/space-2',
           purpose: 'Track candidate houses in Spain.',
           status: 'archived',
           format: 'markdown',
@@ -560,16 +575,16 @@ describe('space capability', () => {
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord());
     const listSpacesWithAggregate = jest
       .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 4, has_more: false, next_offset: null });
+      .mockResolvedValue({ records: [makeSpaceRecord()], aggregate_revision: 4, has_more: false, next_offset: null });
     const store = makeStore({ getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: 'space-1' });
+    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Spain houses' });
 
     expect(getSpace).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'user-a', space_id: 'space-1' });
     expect(JSON.parse(resultText(response))).toEqual({
       space: {
-        id: 'space-1',
         name: 'Spain houses',
+        link: '/spaces/space-1',
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
         body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |',
@@ -582,11 +597,10 @@ describe('space capability', () => {
     });
   });
 
-  it('get_space returns a terminal error naming list_spaces when the id is unknown', async () => {
-    const getSpace = jest.fn().mockResolvedValue(undefined);
-    const store = makeStore({ getSpace });
+  it('get_space returns a terminal error naming list_spaces when the name matches nothing', async () => {
+    const store = makeStore();
 
-    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: 'missing' });
+    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Missing' });
 
     if (!('result' in response)) {
       throw new Error('expected space tool result');
@@ -613,22 +627,22 @@ describe('space capability', () => {
     expect(createSpace).toHaveBeenCalledWith(expect.objectContaining({ expected_aggregate_revision: 2 }));
   });
 
-  it('update_space omits both revisions: the host reads the current space and aggregate revisions', async () => {
+  it('edit_space omits both revisions: the host reads the current space and aggregate revisions', async () => {
     const updateSpace = jest
       .fn()
       .mockResolvedValue({ record: makeSpaceRecord({ revision: 2 }), aggregate_revision: 3 });
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 1 }));
-    const listSpacesWithAggregate = jest
-      .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 2, has_more: false, next_offset: null });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 1 })],
+      aggregate_revision: 2,
+      has_more: false,
+      next_offset: null,
+    });
     const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
 
-    await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
-      name: 'Spain houses',
-      purpose: 'Track candidate houses in Spain.',
-      status: 'active',
-      body: 'Body text.',
+    await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Spain houses',
+      edits: [{ type: 'search', search: '250000', replace: '240000' }],
     });
 
     expect(getSpace).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'user-a', space_id: 'space-1' });
@@ -668,14 +682,17 @@ describe('space capability', () => {
       .fn()
       .mockRejectedValue(new SpaceRevisionConflictError({ id: 'space-1', expected_revision: 1, actual_revision: 4 }));
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 4 }));
-    const store = makeStore({ updateSpace, getSpace });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 4 })],
+      aggregate_revision: 1,
+      has_more: false,
+      next_offset: null,
+    });
+    const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
-      name: 'Spain houses',
-      purpose: 'Track candidate houses in Spain.',
-      status: 'active',
-      body: 'Spain houses to review.',
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Spain houses',
+      edits: [{ type: 'search', search: '250000', replace: '240000' }],
       expected_revision: 1,
       expected_aggregate_revision: 1,
     });
@@ -692,18 +709,12 @@ describe('space capability', () => {
     });
   });
 
-  it('update_space returns a terminal error naming list_spaces for an unknown space id', async () => {
-    const updateSpace = jest.fn().mockRejectedValue(new SpaceNotFoundError({ id: 'missing' }));
-    const store = makeStore({ updateSpace });
+  it('edit_space returns a terminal error naming list_spaces when the name matches nothing', async () => {
+    const store = makeStore();
 
-    const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: 'missing',
-      name: 'Spain houses',
-      purpose: 'Track candidate houses in Spain.',
-      status: 'active',
-      body: 'Spain houses to review.',
-      expected_revision: 1,
-      expected_aggregate_revision: 1,
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Missing',
+      edits: [{ type: 'search', search: 'a', replace: 'b' }],
     });
 
     if (!('result' in response)) {
@@ -718,10 +729,10 @@ describe('space capability', () => {
     const getSpaceRevision = jest.fn().mockResolvedValue(historical);
     const listSpacesWithAggregate = jest
       .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 21, has_more: false, next_offset: null });
+      .mockResolvedValue({ records: [makeSpaceRecord()], aggregate_revision: 21, has_more: false, next_offset: null });
     const store = makeStore({ getSpaceRevision, listSpacesWithAggregate });
 
-    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: 'space-1', revision: 18 });
+    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Spain houses', revision: 18 });
 
     expect(getSpaceRevision).toHaveBeenCalledWith({
       tenant_id: 'default',
@@ -736,9 +747,12 @@ describe('space capability', () => {
 
   it('get_space with a revision outside the retained window returns a terminal error', async () => {
     const getSpaceRevision = jest.fn().mockResolvedValue(undefined);
-    const store = makeStore({ getSpaceRevision });
+    const listSpacesWithAggregate = jest
+      .fn()
+      .mockResolvedValue({ records: [makeSpaceRecord()], aggregate_revision: 4, has_more: false, next_offset: null });
+    const store = makeStore({ getSpaceRevision, listSpacesWithAggregate });
 
-    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: 'space-1', revision: 1 });
+    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Spain houses', revision: 1 });
 
     if (!('result' in response)) {
       throw new Error('expected space tool result');
@@ -751,17 +765,17 @@ describe('space capability', () => {
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord());
     const listSpacesWithAggregate = jest
       .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 4, has_more: false, next_offset: null });
+      .mockResolvedValue({ records: [makeSpaceRecord()], aggregate_revision: 4, has_more: false, next_offset: null });
     const store = makeStore({ getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: 'space-1', include_body: false });
+    const response = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Spain houses', include_body: false });
 
     const parsed = JSON.parse(resultText(response));
     expect(parsed.space).not.toHaveProperty('body');
     expect(parsed).toEqual({
       space: {
-        id: 'space-1',
         name: 'Spain houses',
+        link: '/spaces/space-1',
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
         format: 'markdown',
@@ -778,11 +792,11 @@ describe('space capability', () => {
     const getSpaceRevision = jest.fn().mockResolvedValue(historical);
     const listSpacesWithAggregate = jest
       .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 21, has_more: false, next_offset: null });
+      .mockResolvedValue({ records: [makeSpaceRecord()], aggregate_revision: 21, has_more: false, next_offset: null });
     const store = makeStore({ getSpaceRevision, listSpacesWithAggregate });
 
     const response = await callTool(store, GET_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
+      space_name: 'Spain houses',
       revision: 18,
       include_body: false,
     });
@@ -804,12 +818,15 @@ describe('space capability', () => {
       aggregate_revision: 23,
     });
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord({ revision: 21, body: 'a' }));
-    const listSpacesWithAggregate = jest
-      .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 22, has_more: false, next_offset: null });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 21, body: 'a' })],
+      aggregate_revision: 22,
+      has_more: false,
+      next_offset: null,
+    });
     const store = makeStore({ revertSpace, getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, REVERT_SPACE_TOOL_NAME, { space_id: 'space-1', revision: 18 });
+    const response = await callTool(store, REVERT_SPACE_TOOL_NAME, { space_name: 'Spain houses', revision: 18 });
 
     expect(revertSpace).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -828,10 +845,16 @@ describe('space capability', () => {
     const revertSpace = jest
       .fn()
       .mockRejectedValue(new SpaceRevisionConflictError({ id: 'space-1', expected_revision: 20, actual_revision: 21 }));
-    const store = makeStore({ revertSpace });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 21 })],
+      aggregate_revision: 22,
+      has_more: false,
+      next_offset: null,
+    });
+    const store = makeStore({ revertSpace, listSpacesWithAggregate });
 
     const response = await callTool(store, REVERT_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
+      space_name: 'Spain houses',
       revision: 18,
       expected_revision: 20,
       expected_aggregate_revision: 22,
@@ -851,10 +874,16 @@ describe('space capability', () => {
 
   it('revert_space returns a terminal error for a revision outside the retained window', async () => {
     const revertSpace = jest.fn().mockRejectedValue(new SpaceRevisionNotFoundError({ id: 'space-1', revision: 1 }));
-    const store = makeStore({ revertSpace });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 21 })],
+      aggregate_revision: 22,
+      has_more: false,
+      next_offset: null,
+    });
+    const store = makeStore({ revertSpace, listSpacesWithAggregate });
 
     const response = await callTool(store, REVERT_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
+      space_name: 'Spain houses',
       revision: 1,
       expected_revision: 21,
       expected_aggregate_revision: 22,
@@ -867,20 +896,20 @@ describe('space capability', () => {
     expect(resultText(response)).toContain('Only recent revisions are retained');
   });
 
-  it('update_space refuses a dramatic shrink of the body without confirm_shrink', async () => {
+  it('edit_space refuses a dramatic shrink of the body without confirm_shrink', async () => {
     const updateSpace = jest.fn();
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord({ body: 'x'.repeat(1000) }));
-    const listSpacesWithAggregate = jest
-      .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 2, has_more: false, next_offset: null });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ body: 'x'.repeat(1000) })],
+      aggregate_revision: 2,
+      has_more: false,
+      next_offset: null,
+    });
     const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
-      name: 'Spain houses',
-      purpose: 'Track candidate houses in Spain.',
-      status: 'active',
-      body: 'a',
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Spain houses',
+      edits: [{ type: 'block', anchor: 'auto-body', new_content: 'a' }],
     });
 
     if (!('result' in response)) {
@@ -891,22 +920,22 @@ describe('space capability', () => {
     expect(updateSpace).not.toHaveBeenCalled();
   });
 
-  it('update_space with confirm_shrink allows replacing almost all of the body', async () => {
+  it('edit_space with confirm_shrink allows replacing almost all of the body', async () => {
     const updateSpace = jest
       .fn()
       .mockResolvedValue({ record: makeSpaceRecord({ revision: 2, body: 'a' }), aggregate_revision: 3 });
     const getSpace = jest.fn().mockResolvedValue(makeSpaceRecord({ body: 'x'.repeat(1000) }));
-    const listSpacesWithAggregate = jest
-      .fn()
-      .mockResolvedValue({ records: [], aggregate_revision: 2, has_more: false, next_offset: null });
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ body: 'x'.repeat(1000) })],
+      aggregate_revision: 2,
+      has_more: false,
+      next_offset: null,
+    });
     const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
 
-    const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: 'space-1',
-      name: 'Spain houses',
-      purpose: 'Track candidate houses in Spain.',
-      status: 'active',
-      body: 'a',
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Spain houses',
+      edits: [{ type: 'block', anchor: 'auto-body', new_content: 'a' }],
       confirm_shrink: true,
     });
 
@@ -946,31 +975,26 @@ describe('space tool model-facing schemas', () => {
 
   it.each([
     [LIST_SPACES_TOOL_NAME, []],
-    // space_id or space_name: one of the two is required, which the schema refine enforces.
-    [GET_SPACE_TOOL_NAME, []],
+    [GET_SPACE_TOOL_NAME, ['space_name']],
     [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [UPDATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [EDIT_SPACE_TOOL_NAME, ['edits']],
-    [REVERT_SPACE_TOOL_NAME, ['revision', 'space_id']],
-    [LIST_BLOCKS_TOOL_NAME, ['space_id']],
+    [EDIT_SPACE_TOOL_NAME, ['edits', 'space_name']],
+    [REVERT_SPACE_TOOL_NAME, ['revision', 'space_name']],
+    [LIST_BLOCKS_TOOL_NAME, ['space_name']],
   ])('%s keeps the required fields the model must send', async (name, required) => {
     const tools = await listedSpaceTools();
     expect([...(tools.get(name)?.required ?? [])].sort()).toEqual(required);
   });
 
-  it('update_space offers only the full body, and edit_space offers the one edits list', async () => {
+  it('update_space is not offered, and edit_space offers the one edits list addressed by name', async () => {
     const tools = await listedSpaceTools();
-    const updateProperties = tools.get(UPDATE_SPACE_TOOL_NAME)?.properties ?? [];
-    expect(updateProperties).toEqual(
-      expect.arrayContaining(['body', 'name', 'purpose', 'status', 'confirm_shrink', 'expected_revision']),
-    );
-    expect(updateProperties).not.toContain('edits');
-    expect(updateProperties).not.toContain('block_edits');
+    expect(tools.has(UPDATE_SPACE_TOOL_NAME)).toBe(false);
     const editProperties = tools.get(EDIT_SPACE_TOOL_NAME)?.properties ?? [];
     expect(editProperties).toEqual(
-      expect.arrayContaining(['edits', 'confirm_shrink', 'expected_revision', 'space_id', 'space_name']),
+      expect.arrayContaining(['edits', 'confirm_shrink', 'expected_revision', 'space_name', 'new_title']),
     );
     expect(editProperties).not.toContain('body');
     expect(editProperties).not.toContain('block_edits');
+    expect(editProperties).not.toContain('space_id');
+    expect(editProperties).not.toContain('name');
   });
 });

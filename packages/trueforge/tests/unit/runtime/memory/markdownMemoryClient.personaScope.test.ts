@@ -51,13 +51,36 @@ async function retain(client: MarkdownMemoryClient, content: string, operationId
   await retainMany(client, [content], operationId);
 }
 
-async function recall(client: MarkdownMemoryClient, query: string, maxTokens = 4000): Promise<string[]> {
+async function retainFromChat(client: MarkdownMemoryClient, content: string, sessionId: string): Promise<void> {
+  operationCounter += 1;
+  const outcome = await client.retain({
+    items: [
+      {
+        content,
+        timestamp: '2026-09-26T10:00:00.000Z',
+        document_id: `doc-${String(operationCounter)}`,
+        metadata: { session_id: sessionId },
+      },
+    ],
+    operationId: `op-${String(operationCounter)}`,
+    timeoutMs: TIMEOUT_MS,
+  });
+  expect(outcome).toEqual({ ok: true });
+}
+
+async function recall(
+  client: MarkdownMemoryClient,
+  query: string,
+  maxTokens = 4000,
+  currentSessionId?: string,
+): Promise<string[]> {
   const outcome = await client.recall({
     query,
     maxTokens,
     queryTimestamp: '2026-09-27T10:00:00.000Z',
     entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
+    currentSessionId,
   });
   if (!outcome.ok) {
     throw new Error(`recall failed: ${outcome.reason}`);
@@ -272,6 +295,24 @@ describe('MarkdownMemoryClient persona vault scope', () => {
     });
   });
 
+  describe('current chat', () => {
+    it('skips the current chat in both the persona vault and the shared vault, and keeps other chats', async () => {
+      const alpha = clientFor(ALPHA);
+      await retainFromChat(alpha, 'Alpha stores quince preserves in chat now', 'chat-now');
+      await retainFromChat(alpha, 'Alpha stores damson preserves in chat old', 'chat-old');
+      await retainFromChat(clientFor(undefined), 'The cellar stores preserves in chat now', 'chat-now');
+      await retainFromChat(clientFor(undefined), 'The cellar stores preserves in chat old', 'chat-old');
+
+      const during = await recall(alpha, 'stores preserves', 4000, 'chat-now');
+
+      expect(during).toHaveLength(2);
+      expect(mentions(during, 'chat now')).toBe(false);
+      expect(mentions(during, 'Alpha stores damson')).toBe(true);
+      expect(mentions(during, 'The cellar stores preserves in chat old')).toBe(true);
+      expect(await recall(alpha, 'stores preserves', 4000, 'chat-elsewhere')).toHaveLength(4);
+    });
+  });
+
   describe('recall composition', () => {
     it('gives the shared vault a place in a tight budget instead of filling it from the persona vault', async () => {
       const alpha = clientFor(ALPHA);
@@ -281,7 +322,7 @@ describe('MarkdownMemoryClient persona vault scope', () => {
       await retain(clientFor(undefined), 'The cellar stores preserves for winter too');
 
       // Room for two entries: one from each vault, not two from the persona vault.
-      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 40);
+      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 25);
 
       expect(recalled).toHaveLength(2);
       expect(mentions(recalled, 'cellar')).toBe(true);

@@ -113,7 +113,7 @@ export function AgentStepRow({
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className={cn(
-                  'min-w-0 truncate font-sans text-[0.75rem] font-medium leading-5 text-text-primary',
+                  'min-w-0 truncate font-sans text-xs font-medium leading-5 text-text-primary',
                   titleClassName,
                 )}
                 data-testid={dataTestPrefix ? `${dataTestPrefix}-title` : undefined}

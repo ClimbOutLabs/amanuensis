@@ -1,6 +1,6 @@
 /**
- * A space is a persistent, named, structured page the model creates and updates through the
- * `create_space` / `update_space` tools and the UI renders. Wire contracts for the
+ * A space is a persistent, named, structured page the model creates and changes through the
+ * `create_space` / `edit_space` tools and the UI renders. Wire contracts for the
  * `/api/v1/spaces` routes.
  */
 import { z } from '@hono/zod-openapi';
@@ -142,10 +142,20 @@ export const SpaceFormatSchema = z.enum(['markdown', 'html']).openapi('SpaceForm
 
 /**
  * Maximum space body length, in characters. Single source of truth: SpaceContentSchema's body
- * limit and the update_space delta-edit guard in runtime/spaceCapability.ts both use this, so
+ * limit and the edit_space body guard in runtime/spaceCapability.ts both use this, so
  * the cap can never drift between the schema and the tool layer.
  */
 export const SPACE_BODY_MAX_LENGTH = 65_536;
+
+/**
+ * Maximum new content one space write call may carry, in characters. A stored body may reach
+ * SPACE_BODY_MAX_LENGTH, but it is built up over several calls: models stall while writing
+ * very long tool arguments (the argument stream goes silent mid-call on more than one model),
+ * so one call stays small and the space tool layer refuses a write past this. The instructions
+ * the model gets say the same number, and the streamed-argument limit for the write tools is
+ * derived from it, so the three can never drift apart.
+ */
+export const SPACE_WRITE_MAX_LENGTH = 4_000;
 
 export const SpaceContentSchema = z
   .object({

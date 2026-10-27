@@ -195,7 +195,7 @@ function sandboxRawOutputStorageGuidance(content: string): string {
  * Ingestion budgets. Each one bounds what a tool result contributes to the history the model
  * resends on every later step. The full result is never changed upstream: grounding records fetched
  * page text in ToolSet before this pass runs. Space bodies are not budgeted: a shortened body could be
- * written back over the whole space by update_space.
+ * written back over the whole space by a later edit.
  */
 export const PAGE_READ_TOKEN_BUDGET = 2_500;
 export const SANDBOX_OUTPUT_EDGE_LINES = 40;

@@ -10,11 +10,15 @@ WAIT_SECONDS=${AMAN_TEST_WAIT_SECONDS:-90}
 NAME=aman-image-runtime-$$
 VOLUME=$NAME-data
 POLICY_VOLUME=$NAME-mail-policy
+MIRROR_VOLUME=$NAME-mirror
+SLOT_IMAGE_NAME=$NAME-slot
 
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker volume rm "$VOLUME" >/dev/null 2>&1 || true
   docker volume rm "$POLICY_VOLUME" >/dev/null 2>&1 || true
+  docker volume rm "$MIRROR_VOLUME" >/dev/null 2>&1 || true
+  docker image rm "$SLOT_IMAGE_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -132,3 +136,16 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
 else
   printf 'skip: the account agent permission case needs root, setpriv and python3\n'
 fi
+
+# A fresh package mirror volume takes the ownership of the slot image dir it mounts over. The slot
+# image carries that dir owned by the app user (10001), so the app can bind its mirror socket in a
+# fresh volume; the slot user (65532) only connects through the socket, so it needs to pass through
+# the dir, not write in it.
+docker build -f "$REPO/ops/sandbox-slot/Dockerfile" -t "$SLOT_IMAGE_NAME" "$REPO/ops/sandbox-slot" >/dev/null
+docker volume create "$MIRROR_VOLUME" >/dev/null
+mirror_uid=$(docker run --rm -v "$MIRROR_VOLUME:/run/aman/mirror" --entrypoint stat "$SLOT_IMAGE_NAME" -c %u /run/aman/mirror) ||
+  fail "the mirror dir is missing from the slot image"
+[ "$mirror_uid" = 10001 ] || fail "a fresh mirror volume is owned by uid $mirror_uid, expected 10001"
+docker run --rm --user 65532:65532 -v "$MIRROR_VOLUME:/run/aman/mirror" --entrypoint sh "$SLOT_IMAGE_NAME" -c 'test -x /run/aman/mirror' ||
+  fail "the slot user cannot pass through a fresh mirror volume"
+printf 'ok: a fresh mirror volume is owned by uid 10001 and the slot user can pass through it\n'

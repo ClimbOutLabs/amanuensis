@@ -503,14 +503,14 @@ function RecentChatsSection({
             placeholder="Search chats"
             value={search.query}
             onChange={event => search.onQueryChange(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-text-primary outline-none placeholder:text-text-muted"
+            className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
             autoFocus
           />
         </label>
       ) : null}
       {folderHeading && chatFolders !== null ? (
         <div className="flex shrink-0 items-center justify-between px-2.5 pt-1 pb-0.5">
-          <h3 className="m-0 text-[0.75rem] font-normal text-text-secondary">Folders</h3>
+          <h3 className="m-0 text-xs font-normal text-text-secondary">Folders</h3>
           <NewFolderButton />
         </div>
       ) : null}

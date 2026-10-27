@@ -266,7 +266,7 @@ function SearchField({
 
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <div className="text-text-secondary px-3 pt-2 pb-1 text-[0.75rem] font-normal">
+    <div className="text-text-secondary px-3 pt-2 pb-1 text-xs font-normal">
       {label} ({count})
     </div>
   );
@@ -280,14 +280,17 @@ export type DraftToolPickerProps = {
   onToggleConnector: (connector: ConnectorState) => void;
   onToggleSkill: (skill: AgentSkill) => void;
   onToggleSandbox: () => void;
+  /** A plain line shown above the connector list, for example when a switch could not be saved. */
+  notice?: string | undefined;
   /** Absent, the empty states do not offer a link to Settings. */
   onOpenSettings?: (section: SettingsSection) => void;
 };
 
 /**
  * The connector, skill and sandbox choices, shared by the chat's Add-ons picker and a schedule's Tools section.
- * It holds no selection itself: the owner decides where a toggle is saved. Mount it only while it is shown, so
- * the Selected group is snapped from the selection at that moment and rows do not jump while the person toggles.
+ * It holds no selection itself: the owner decides where a toggle is saved and which connectors count as selected,
+ * so the chat can pass the ones it ticks by default while a schedule passes only what it lists. Mount it only while
+ * it is shown, so the Selected group is snapped from the selection at that moment and rows do not jump.
  */
 export function DraftToolPicker({
   tab,
@@ -297,6 +300,7 @@ export function DraftToolPicker({
   onToggleConnector,
   onToggleSkill,
   onToggleSandbox,
+  notice,
   onOpenSettings,
 }: DraftToolPickerProps) {
   const { skills, connectors, connectorLogos, loading, ensureLoaded, refreshConnectors } = useDraftCatalog();
@@ -408,6 +412,11 @@ export function DraftToolPicker({
         onChange={setQuery}
         placeholder={tab === 'connectors' ? 'Search connectors...' : 'Search skills...'}
       />
+      {tab === 'connectors' && notice !== undefined ? (
+        <p role="alert" className="text-failure-bg mx-3 mb-2 text-xs">
+          {notice}
+        </p>
+      ) : null}
       {tab === 'skills' && skillsDisabled && skillsDisabledReason ? (
         <div
           role="status"

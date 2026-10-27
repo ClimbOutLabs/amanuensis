@@ -14,6 +14,16 @@ export const EDIT_SPACE_TOOL_NAME = 'edit_space';
 export const REVERT_SPACE_TOOL_NAME = 'revert_space';
 export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
 
+/**
+ * The stable code a space write result carries when the write was refused for carrying more
+ * new content than one write may hold. The refusal text itself is written for the model; this
+ * code is how the chat tells that refusal apart from a failure without reading the text.
+ */
+export const SPACE_WRITE_TOO_LONG_ERROR_CODE = 'space_write_too_long';
+
+/** The plain note a size-refused space write shows in the chat: the write is split into parts instead. */
+export const SPACE_WRITE_TOO_LONG_NOTE = 'Too long for one write. Splitting it into parts.';
+
 /** The plain line one space call shows, given the space's display name (null when the call names no space). */
 export type SpaceActivityLine = (space_name: string | null) => string;
 
@@ -27,10 +37,6 @@ const SPACE_WRITE_TOOLS: readonly SpaceToolContract[] = [
   {
     name: CREATE_SPACE_TOOL_NAME,
     activity_line: space_name => (space_name === null ? 'Created a space.' : `Created the space ${space_name}.`),
-  },
-  {
-    name: UPDATE_SPACE_TOOL_NAME,
-    activity_line: space_name => (space_name === null ? 'Updated a space.' : `Updated the space ${space_name}.`),
   },
   {
     name: EDIT_SPACE_TOOL_NAME,

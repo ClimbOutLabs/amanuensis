@@ -1127,6 +1127,7 @@ export class SessionHandle<
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+      modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
@@ -1226,6 +1227,7 @@ export class SessionHandle<
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+        modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });

@@ -9,7 +9,7 @@ describe('wire event schemas', () => {
     id: 'evt_0000000000000000000000001',
     created_at: '2026-09-01T10:00:00.000Z',
     injected_block:
-      '<aman-memory>\n[world, 2026-08-14] Example.\n(memory: 1 items, 0 entities; 9 tokens of 2048 budget)\n</aman-memory>',
+      '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items, 0 entities; 7 tokens of 2048 budget)\n</aman-memory>',
     stats: {
       items: 1,
       entities: 0,
@@ -42,7 +42,7 @@ describe('wire event schemas', () => {
     ...memoryEvent,
     id: 'evt_0000000000000000000000003',
     injected_block:
-      '<aman-memory>\n[world, 2026-08-14] Example.\n(memory: 1 items, 0 entities; 12 tokens of 2048 budget; 1 withheld by screen)\n</aman-memory>',
+      '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items, 0 entities; 10 tokens of 2048 budget; 1 withheld by screen)\n</aman-memory>',
     screen: {
       withheld: 1,
       records: [

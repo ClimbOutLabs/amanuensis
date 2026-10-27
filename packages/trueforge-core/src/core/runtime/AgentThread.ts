@@ -1,6 +1,7 @@
 import type { ChatCompletionContentPart, ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { createDocumentExtractionBudget, type DocumentFileProgress } from '../../documents/documentExtraction';
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import type { AgentCapability, CapabilityState, UntrustedTextScreen } from '../capabilities/AgentCapability';
 import type {
   AgentContextProcessorOutput,
@@ -16,7 +17,7 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
-import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
+import { NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
@@ -73,7 +74,11 @@ import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { streamDeadlineDetailsOf, type StreamDeadlineDetails } from '../llm/streamDeadline';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  streamDeadlineDetailsOf,
+  type StreamDeadlineDetails,
+} from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -129,6 +134,7 @@ import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
 import { isChangeRequestReason } from '../permissions/changeRequest';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -173,6 +179,7 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
   EMAIL_PASSWORD_PROMPT,
@@ -204,6 +211,7 @@ import {
   noProgressNudgeMessage,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
+  remapToolCallIdSet,
   SANDBOX_OFF_PROMPT,
   scanApprovalDecisions,
   toEnrichedToolCall,
@@ -225,6 +233,7 @@ import {
   guardModelReply,
   LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
+  REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
 import {
@@ -1060,6 +1069,8 @@ function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; 
         canonical_params: unwrapped,
         tool_type: tool_info.type,
         mcp_server_name: tool_info.mcp_server_name,
+        // The host's own verdict on the call, not the connector's claim: only its own sidecars read as mail or calendar.
+        mcp_first_party: isHostVouchedReadReason(tool_info.tier_reason),
         mcp_hints: {},
       },
     }),
@@ -1627,6 +1638,8 @@ export class AgentThread {
 
   private contextBusy = false;
   private preSendRanThisTurn = false;
+  // True only while execute() prepares a thread that goes straight to its tool step, with no new message.
+  private resumingIntoToolStep = false;
   // One AgentThread instance lives for one turn (a fresh instance is built per
   // turn by the harness), so this needs no snapshot/restore: it starts false
   // for every turn and latches true the first time the grounding nudge fires,
@@ -1661,6 +1674,7 @@ export class AgentThread {
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly modelIdleTimeoutMs: number;
+  private readonly modelToolCallIdleTimeoutMs: number;
   private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
@@ -1714,6 +1728,10 @@ export class AgentThread {
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.modelIdleTimeoutMs = input.modelIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
+    this.modelToolCallIdleTimeoutMs = Math.max(
+      input.modelToolCallIdleTimeoutMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+      this.modelIdleTimeoutMs,
+    );
     this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
@@ -1778,7 +1796,10 @@ export class AgentThread {
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
-      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      new OpenToolCallCloser({
+        deniedApprovalIdentities: () => this.toolCallMemo.deniedApprovalIdentities,
+        resuming: () => this.resumingIntoToolStep,
+      }),
       ...capabilityPreSend,
     ];
 
@@ -1916,6 +1937,9 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+    }
+    if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
+      capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
     }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
@@ -2213,13 +2237,9 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      if (
-        call === undefined ||
-        !isMailSend({
-          mcp_server_name: call.tool_info.mcp_server_name,
-          tool_name: call.tool_info.original_tool_name,
-        })
-      ) {
+      // Only a send the host itself judged to go through its own Email sidecar touches the Email list, however the
+      // card was later reworded.
+      if (call?.tool_info.mail_send !== true) {
         continue;
       }
       const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
@@ -3528,6 +3548,9 @@ export class AgentThread {
           // goes quiet ends the step with a plain message instead of holding the turn open.
           // Which bound the pending wait is on, so a silence can name the deadline that fired.
           let awaitedDeadline: 'first_chunk' | 'chunk' = 'first_chunk';
+          // A tool call is open from its first piece until the step finishes. A server may hold a
+          // call's arguments back and send them in a few large pieces, so this wait is longer.
+          let toolCallOpen = false;
           let attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
@@ -3539,7 +3562,14 @@ export class AgentThread {
             attemptResult !== MODEL_STREAM_SILENT &&
             !attemptResult.done
           ) {
-            const chunk = attemptResult.value;
+            const chunk = forcedAnswer !== null ? chunkWithoutToolCalls(attemptResult.value) : attemptResult.value;
+            const choice = chunk.choices[0];
+            if (choice?.delta.tool_calls?.length) {
+              toolCallOpen = true;
+            }
+            if (choice?.finish_reason) {
+              toolCallOpen = false;
+            }
             if (chunk.usage) {
               modelMessageUsage = this.computeAssistantMessageUsage({
                 requestBody,
@@ -3549,7 +3579,7 @@ export class AgentThread {
             }
             // On the forced answer no tool call is shown, since none of its calls will run.
             const event = await buildModelMessageDeltaEvent({
-              chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
+              chunk,
               threadId: this.threadId,
               toolMapping,
               usage: modelMessageUsage,
@@ -3571,7 +3601,7 @@ export class AgentThread {
               iterator: llmStream,
               signal,
               requestClose: requestLLMStreamClose,
-              timeoutMs: this.modelIdleTimeoutMs,
+              timeoutMs: toolCallOpen ? this.modelToolCallIdleTimeoutMs : this.modelIdleTimeoutMs,
             });
           }
           if (attemptResult === ASYNC_ITERATOR_ABORTED) {
@@ -3817,19 +3847,30 @@ export class AgentThread {
     // every call, but calls that will be held for the owner's approval do not count toward
     // the cap there, and which ones those are is only known once each call is classified.
     const unattended = this.sentinel?.services.unattended === true;
+    const providerToolCalls = result.value.output.tool_calls;
+    const uniqueToolCalls =
+      providerToolCalls === undefined
+        ? undefined
+        : withHostUniqueToolCallIds({ calls: providerToolCalls, context: this.context });
     const replyGuard = guardModelReply({
       message: {
         ...result.value.output,
-        ...(result.value.output.tool_calls === undefined
-          ? {}
-          : {
-              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
-            }),
+        ...(uniqueToolCalls === undefined ? {} : { tool_calls: uniqueToolCalls }),
       },
       // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
-      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
+      readOnlyTools: hostVouchedReadToolNames({ calls: providerToolCalls ?? [], toolMapping }),
+      // The stream recorded the size-cut calls by their provider ids; carry the set across
+      // the id remap above, or a remapped call loses its flag and the guard misses it.
+      sizeCutCalls:
+        providerToolCalls === undefined || uniqueToolCalls === undefined
+          ? new Set(result.value.size_cut_tool_calls ?? [])
+          : remapToolCallIdSet({
+              before: providerToolCalls,
+              after: uniqueToolCalls,
+              ids: new Set(result.value.size_cut_tool_calls ?? []),
+            }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
@@ -3891,7 +3932,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: `One of the actions in this reply could not run: ${problem} Ask again to try it once more.`,
+                owner_message: REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             },
           };
@@ -5283,11 +5324,16 @@ export class AgentThread {
       }
 
       if (!this.preSendRanThisTurn) {
-        for await (const event of this.executeContextProcessors('preSend', signal)) {
-          if (signal?.aborted) {
-            return;
+        this.resumingIntoToolStep = true;
+        try {
+          for await (const event of this.executeContextProcessors('preSend', signal)) {
+            if (signal?.aborted) {
+              return;
+            }
+            yield event;
           }
-          yield event;
+        } finally {
+          this.resumingIntoToolStep = false;
         }
         if (signal?.aborted) {
           return;

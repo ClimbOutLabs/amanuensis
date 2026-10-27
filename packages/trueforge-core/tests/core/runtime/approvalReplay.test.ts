@@ -1,19 +1,24 @@
+import type { ChatCompletionTool } from 'openai/resources/chat';
 import { EventType, newEventId, type AgentApprovalDecisionMessage } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type {
   ExtendedChatCompletionChunk,
   InternalEnrichedAssistantMessage,
   InternalEnrichedToolCall,
+  RawAssistantMessage,
   RawAssistantMessageWithUsage,
+  RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import {
   approvalDecisionBinding,
+  remapToolCallIdSet,
   scanApprovalDecisions,
   withHostUniqueToolCallIds,
 } from '../../../src/core/runtime/contextUtils';
+import { guardModelReply, TOOL_CALL_SIZE_CUT_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import type { SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -113,6 +118,71 @@ describe('withHostUniqueToolCallIds', () => {
     const call = toolCall({ id: 'gone', args: '{}' });
     const [only] = withHostUniqueToolCallIds({ calls: [{ id: 'gone' }], context: [allow(call)] });
     expect(only?.id).not.toBe('gone');
+  });
+});
+
+describe('remapToolCallIdSet', () => {
+  it('moves the ids that were remapped, keeps the rest, and drops ids no call carries', () => {
+    const before = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    const after = [{ id: 'a' }, { id: 'call_new1' }, { id: 'call_new2' }];
+    expect([...remapToolCallIdSet({ before, after, ids: new Set(['b', 'c', 'not-a-call']) })].sort()).toEqual([
+      'call_new1',
+      'call_new2',
+    ]);
+    expect([...remapToolCallIdSet({ before, after, ids: new Set(['a']) })]).toEqual(['a']);
+    expect(remapToolCallIdSet({ before, after, ids: new Set() }).size).toBe(0);
+  });
+});
+
+describe('a size-cut call whose id the host remaps', () => {
+  const TOOLS: ChatCompletionTool[] = [
+    {
+      type: 'function',
+      function: {
+        name: 'update_space',
+        parameters: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
+      },
+    },
+  ];
+
+  function guardWith(unique: RawToolCall[], sizeCutCalls: ReadonlySet<string>) {
+    const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: unique };
+    return guardModelReply({
+      message,
+      tools: TOOLS,
+      knownEventIds: new Set(),
+      readOnlyTools: new Set(),
+      sizeCutCalls,
+    });
+  }
+
+  it('still gets the size-cut message from the reply guard', () => {
+    // The provider reused an id an earlier turn already used, so the host remaps it.
+    const earlier = toolCall({ id: 'cut-1', args: '{}' });
+    const context: ContextMessage[] = [assistant(earlier), { role: 'tool', tool_call_id: 'cut-1', content: 'ok' }];
+    const providerCalls: RawToolCall[] = [
+      { id: 'cut-1', type: 'function', function: { name: 'update_space', arguments: '{"body":"partial' } },
+      { id: 'fresh', type: 'function', function: { name: 'update_space', arguments: '{"body":"whole"}' } },
+    ];
+    const unique = withHostUniqueToolCallIds({ calls: providerCalls, context });
+    const remappedId = unique[0]?.id;
+    expect(remappedId).toBeDefined();
+    expect(remappedId).not.toBe('cut-1');
+
+    // Carried across the remap the way AgentThread carries it, the flag lands on the call.
+    const carried = remapToolCallIdSet({ before: providerCalls, after: unique, ids: new Set(['cut-1']) });
+    const outcome = guardWith(unique, carried);
+    expect(remappedId === undefined ? undefined : outcome.invalidCalls.get(remappedId)).toBe(
+      TOOL_CALL_SIZE_CUT_MESSAGE,
+    );
+    expect(outcome.invalidCalls.has('fresh')).toBe(false);
+
+    // The bug this fixes: with the provider ids untranslated, the guard misses the flag and
+    // the call gets only the generic incomplete-arguments message.
+    const missed = guardWith(unique, new Set(['cut-1']));
+    expect(remappedId === undefined ? undefined : missed.invalidCalls.get(remappedId)).not.toBe(
+      TOOL_CALL_SIZE_CUT_MESSAGE,
+    );
   });
 });
 

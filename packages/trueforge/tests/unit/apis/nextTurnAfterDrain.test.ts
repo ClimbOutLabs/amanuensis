@@ -221,7 +221,6 @@ async function chatWithTwoTurns() {
         client: memoryClient,
         userText: input.text,
         attachedFiles: false,
-        sessionTitle: undefined,
         summarize: summarizeContext(),
       },
       artifacts: {
@@ -301,7 +300,7 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     const summaryGate = Promise.withResolvers<void>();
     mockSummarize.mockImplementation(async () => {
       await summaryGate.promise;
-      return { status: 'summarized', summary: 'The person asked about a cafe.' };
+      return { status: 'summarized', facts: ['The person asked about a cafe.'] };
     });
     const chat = await chatWithTwoTurns();
     const firstTurnSummarySaved = expect.objectContaining({
@@ -334,7 +333,7 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     const summaryGate = Promise.withResolvers<void>();
     mockSummarize.mockImplementation(async () => {
       await summaryGate.promise;
-      return { status: 'summarized', summary: 'The person asked for a chart.' };
+      return { status: 'summarized', facts: ['The person asked for a chart.'] };
     });
     const chat = await chatWithTwoTurns();
 
@@ -352,17 +351,18 @@ describe("the next turn of a chat does not wait on the previous turn's follow-up
     expect(await chat.savedChart('turn-2')).toBe('chart from turn 2');
   });
 
-  it('keeps the full-text fallback when the summary times out', async () => {
+  it('stores nothing, not the chat text, when the summary times out', async () => {
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'timed out', fallback: 'model_timeout' });
     const chat = await chatWithTwoTurns();
 
-    const first = await chat.runTurn({ turnId: 'turn-1', previousTurnId: 'none', text: 'Look up a cafe' });
+    const first = await chat.runTurn({
+      turnId: 'turn-1',
+      previousTurnId: 'none',
+      text: 'Please look up a cafe near my office',
+    });
     await first.drain;
 
-    expect(chat.retain).toHaveBeenCalledTimes(1);
-    const content = chat.retain.mock.calls[0]?.[0].items[0]?.content ?? '';
-    expect(content).toContain('Look up a cafe');
-    expect(content).toContain('Answer 1.');
+    expect(chat.retain).not.toHaveBeenCalled();
   });
 
   it('stops waiting on follow-up work that outlasts its time limit and logs it', async () => {

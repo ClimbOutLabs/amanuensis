@@ -43,6 +43,7 @@ import type {
   ReflectBudget,
   RetryOperationOutcome,
 } from './hindsightClient';
+import { localDay } from './localDay';
 import type { MemoryClient } from './memoryClient';
 import type {
   MemoryCuratedStats,
@@ -481,20 +482,37 @@ function sanitizeMemoryLine(text: string): string {
   return sanitizeMemoryText(text).replace(/\r\n|\r|\n/g, ' ');
 }
 
+/** A date-valued instant, such as a provider's midnight-UTC day, which names a day rather than a moment. */
+const DATE_VALUED_INSTANT = /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.0+)?Z$/;
+
+/**
+ * The item with an `occurred_start` that carries a real time shown as a day in the person's time
+ * zone. A plain date, or a midnight-UTC instant that stands for a date, is left as it is, so it
+ * never shifts a day west of UTC. Other items are unchanged.
+ */
+function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string | undefined }): RecallItem {
+  const start = item.occurred_start;
+  if (timeZone === undefined || !start?.includes('T') || DATE_VALUED_INSTANT.test(start)) {
+    return item;
+  }
+  const instant = new Date(start);
+  return Number.isNaN(instant.getTime()) ? item : { ...item, occurred_start: localDay({ instant, timeZone }).date };
+}
+
 /**
  * A recalled item's full line exactly as it reaches the model, with every provider-controlled byte
- * sanitized. `type` and the `occurred_start`-derived date are provider-supplied too, not just the
- * text, so all three are sanitized here; the surrounding brackets and comma are the only host bytes.
- * Shared by {@link formatMemoryBlock} and the recall screen so the classifier judges the same bytes
- * the model sees, prefix included, and no provider field can escape the wrapper or slip past the
- * screen unsanitized.
+ * sanitized. The date and the text are provider-supplied, so both are sanitized here; the surrounding
+ * brackets and comma are the only host bytes. The provider's own kind label is not shown: it names a
+ * storage detail, not anything the model can use. Shared by formatMemoryBlock and the recall screen
+ * so the classifier judges the same bytes the model sees, prefix included, and no provider field can
+ * escape the wrapper or slip past the screen unsanitized.
  */
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
   // Only the fixed phrase is emitted for the origin, never the provider's own value.
   const source = origin === undefined || origin === USER_STATED_ORIGIN ? '' : `, ${READ_CONTENT_LABEL}`;
-  return `[${sanitizeMemoryLine(item.type)}, ${date}${source}] ${sanitizeMemoryLine(item.text)}`;
+  return `[${date}${source}] ${sanitizeMemoryLine(item.text)}`;
 }
 
 /**
@@ -1251,7 +1269,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly logger: Logger;
   private readonly sessionId: string;
   private readonly previousTurnId: string | null;
-  private readonly sessionTitle: string | undefined;
   /** Undefined when the recall screen is disabled; then recall is lossless and unscreened. */
   private readonly screenClient: ScreenClient | undefined;
   /** When false, memory recall and retention are disabled by the user for this session. */
@@ -1264,6 +1281,10 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly internalSourceState: InternalSourceState | undefined;
   /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
   private readonly webSearch: WebSearchTurnState | undefined;
+  /** True only when summaries are off, so a turn is saved as its full exchange and a vanished one may be rebuilt from the chat. */
+  private readonly keepsFullExchange: boolean;
+  /** The person's time zone, so a recalled memory's day reads as they lived it. */
+  private readonly timeZone: string | undefined;
 
   // A thread is per-turn, so instance state (never persisted itself) is naturally per-turn.
   private ranForThisTurn = false;
@@ -1281,22 +1302,24 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     logger: Logger;
     sessionId: string;
     previousTurnId: string | null;
-    sessionTitle?: string | undefined;
     screenClient?: ScreenClient | undefined;
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
     webSearch?: WebSearchTurnState | undefined;
+    keepsFullExchange?: boolean | undefined;
+    timeZone?: string | undefined;
   }) {
     this.client = input.client;
     this.config = input.config;
     this.logger = input.logger;
     this.sessionId = input.sessionId;
     this.previousTurnId = input.previousTurnId;
-    this.sessionTitle = input.sessionTitle;
     this.screenClient = input.screenClient;
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
     this.webSearch = input.webSearch;
+    this.keepsFullExchange = input.keepsFullExchange ?? false;
+    this.timeZone = input.timeZone;
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1575,7 +1598,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         maxEntities: this.config.recallMaxEntities,
         suppressEntities: applyDamping,
       });
-      items = gated.items;
+      items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
       entities = gated.entities;
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never
@@ -1669,6 +1692,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         entityTokens,
         queryTimestamp: new Date().toISOString(),
         timeoutMs: this.config.recallTimeoutMs,
+        currentSessionId: this.sessionId,
       }),
     );
     return { outcome, recallMs: Date.now() - startedAt };
@@ -2065,6 +2089,16 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     previousTurnId: string,
     vanishedEntry: PendingRetainOp,
   ): Promise<void> {
+    if (!this.keepsFullExchange) {
+      try {
+        await this.client.noteSummaryOutcome?.({ outcome: 'failed', reason: 'summary_not_finished' });
+      } catch (error) {
+        this.logger.debug('Marking the unfinished summary failed', {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
     const exchange = extractPreviousExchange(context);
     if (exchange === undefined) {
       this.pending = capPending([...this.pending, { ...vanishedEntry, attempts: vanishedEntry.attempts + 1 }]);
@@ -2077,7 +2111,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       userText: exchange.userText,
       assistantText: exchange.assistantText,
       completedAt: new Date().toISOString(),
-      sessionTitle: this.sessionTitle,
       origin: exchange.origin,
       logger: this.logger,
     });
@@ -2120,7 +2153,6 @@ export function hindsightMemoryCapability(input: {
   logger: Logger;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle?: string | undefined;
   /** Test override for the recall screen client; production builds one from `config.screen`. */
   screenClient?: ScreenClient | undefined;
   /** When false, memory recall is disabled by the user for this session. Default: true. */
@@ -2132,6 +2164,14 @@ export function hindsightMemoryCapability(input: {
   internalSourceState?: InternalSourceState | undefined;
   /** The turn's search state, which keeps the injected block's details so a search that carries them asks. */
   webSearch?: WebSearchTurnState | undefined;
+  /**
+   * True only when summaries are off for the turn. Otherwise a vanished earlier turn is never
+   * rebuilt from the chat: saving its raw exchange would defeat the summary, and asking the
+   * summary model here would hold up the person's turn. The vault is marked instead.
+   */
+  keepsFullExchange?: boolean | undefined;
+  /** The person's IANA time zone; a recalled memory's instant is shown as a day in it. */
+  timeZone?: string | undefined;
 }): AgentCapability {
   const processor = new HindsightMemoryProcessor({ ...input, screenClient: resolveScreenClient(input) });
   return {

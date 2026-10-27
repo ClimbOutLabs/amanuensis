@@ -55,6 +55,12 @@ export type AmanRuntimeRailProps = {
    * It is the body of the Activity row.
    */
   auditFeed?: ReactNode;
+  /**
+   * The host's way to open Settings at the Audit section. The rail renders outside the shell
+   * tree, so it cannot open Settings itself: the Audits link shows only when the host hands
+   * this over, and clicking it calls it.
+   */
+  onOpenAudits?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -166,6 +172,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   status: statusOverride,
   pendingApprovalIds = [],
   auditFeed,
+  onOpenAudits,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
@@ -319,6 +326,15 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </p>
             )}
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
+            {onOpenAudits !== undefined && (
+              <button
+                type="button"
+                className="text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
+                onClick={onOpenAudits}
+              >
+                Audits
+              </button>
+            )}
           </FoldedRow>
 
           <FoldedRow section="rules" title="Rules">

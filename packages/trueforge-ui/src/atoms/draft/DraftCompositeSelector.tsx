@@ -3,8 +3,10 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
 import { Icon } from '../../icons/Icon.js';
+import { useChatConnectorChoice } from '../../server/ChatConnectorChoiceContext.js';
 import { useServerCapabilities } from '../../server/ServerContext.js';
 import { useOptionalShellMode, type SettingsSection } from '../../server/ShellModeContext.js';
 import type { AgentSkill, ConnectorState } from '../../server/types.js';
@@ -16,7 +18,9 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { readAgentCapabilities, withAgentCapabilities } from './agentCapabilities.js';
 import { readSandboxEnabled, withSandboxEnabled } from './agentSandbox.js';
+import { isDefaultOnConnector } from './defaultOnConnectors.js';
 import { DraftCapabilitiesPanel } from './DraftCapabilitiesPanel.js';
+import { useDraftCatalog } from './DraftCatalogProvider.js';
 import type { DraftComposerAction } from './DraftComposerActionsMenu.js';
 import { DraftToolPicker, draftMountsFromSpec, type DraftMount } from './DraftToolPicker.js';
 import { skillFamilyId } from './SkillVersionSelector.js';
@@ -29,6 +33,8 @@ const TABS: { id: AttachTab; label: string; icon: string }[] = [
 ];
 
 const SPEC_FLUSH_MS = 300;
+
+const CHOICE_NOT_SAVED_MESSAGE = 'Your change was not saved. Check your connection, then try the switch again.';
 
 export type DraftCompositeSelectorProps = {
   disabled?: boolean;
@@ -44,7 +50,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const DraftComposerActionsMenu = useSlot('DraftComposerActionsMenu');
   const capabilities = useServerCapabilities();
   const shell = useOptionalShellMode();
-  const { agentSpec } = useTrueFoundryAgentSpec();
+  const { agentSpec, draftSessionId } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<AttachTab>('connectors');
@@ -69,10 +75,25 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     height: PICKER_HEIGHT,
   });
 
+  const { connectors } = useDraftCatalog();
+  const { turnedOff, setTurnedOff } = useChatConnectorChoice(draftSessionId);
+  const [choiceNotSaved, setChoiceNotSaved] = useState(false);
+  // Email, Calendar and the search provider are on in every chat until the person turns one off.
+  const defaultOnMounts = useMemo(
+    () =>
+      connectors
+        .filter(connector => isDefaultOnConnector(connector) && !turnedOff.includes(connectorOffKey(connector.name)))
+        .map(connector => ({ id: connector.id, name: connector.name })),
+    [connectors, turnedOff],
+  );
   const specMcp = useMemo(() => draftMountsFromSpec(agentSpec?.mcpServers), [agentSpec?.mcpServers]);
   const specSkills = useMemo(() => draftMountsFromSpec(agentSpec?.skills), [agentSpec?.skills]);
 
-  const selectedMcp = open ? localMcp : specMcp;
+  const mountedMcp = open ? localMcp : specMcp;
+  const selectedMcp = useMemo(
+    () => [...mountedMcp, ...defaultOnMounts.filter(mount => !mountedMcp.some(item => item.id === mount.id))],
+    [mountedMcp, defaultOnMounts],
+  );
   const selectedSkills = open ? localSkills : specSkills;
   const hasValidModel = Boolean(agentSpec?.model?.name.trim());
   const clearFlushTimer = useCallback(() => {
@@ -139,6 +160,19 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   useEffect(() => () => clearFlushTimer(), [clearFlushTimer]);
 
   const toggleConnector = (connector: ConnectorState) => {
+    const selected = selectedMcp.some(mount => mount.id === connector.id);
+    const isDefaultOn = isDefaultOnConnector(connector);
+    if (isDefaultOn) {
+      // Default-on sources are never stored as mounts: only the off choice is kept for the chat.
+      const offKey = connectorOffKey(connector.name);
+      setChoiceNotSaved(false);
+      setTurnedOff(selected ? [...turnedOff, offKey] : turnedOff.filter(key => key !== offKey)).catch(() => {
+        // The hook already put the stored choice back; say so, so the switch is not read as a silent undo.
+        setChoiceNotSaved(true);
+      });
+      // A mount the chat already lists is dropped too, or it would keep the source on.
+      if (!selected || !localMcpRef.current.some(m => m.id === connector.id)) return;
+    }
     setLocalMcp(prev =>
       prev.some(m => m.id === connector.id)
         ? prev.filter(m => m.id !== connector.id)
@@ -192,6 +226,8 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     setLocalSkills(specSkills);
     dirtyRef.current = false;
     clearFlushTimer();
+    // A failed save from an earlier visit is stale once the list shows the stored choice again.
+    setChoiceNotSaved(false);
     setOpen(true);
   };
 
@@ -256,6 +292,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
           onToggleConnector={toggleConnector}
           onToggleSkill={toggleSkill}
           onToggleSandbox={toggleSandbox}
+          notice={choiceNotSaved ? CHOICE_NOT_SAVED_MESSAGE : undefined}
           onOpenSettings={openSettings}
         />
       )}

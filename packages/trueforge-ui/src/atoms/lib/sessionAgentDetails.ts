@@ -21,7 +21,7 @@ export function readSessionAgentDetails(
 }
 
 /** String-valued metadata off a loosely-typed UI session object. */
-function sessionMetadataRecord(session: object): Record<string, string> {
+export function sessionMetadataRecord(session: object): Record<string, string> {
   if (!('metadata' in session)) return {};
   const metadata = Reflect.get(session, 'metadata');
   if (typeof metadata !== 'object' || metadata === null) return {};
