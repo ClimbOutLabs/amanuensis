@@ -10,6 +10,7 @@ import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/appro
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
@@ -552,6 +553,26 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(info.approval_token_id).toEqual(expect.any(String));
   });
 
+  it('asks before marking when the choice arrives spelled as text through the call_tool wrapper', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const deferred = new DeferredTool([email], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const info = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: {
+        mcp_server: 'Email',
+        tool_name: 'get_emails_content',
+        input: { email_ids: ['e1'], mark_as_read: 'true' },
+      },
+    });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
+    expect(info.approval_token_id).toEqual(expect.any(String));
+  });
+
   it.each([
     ['a changed tag list', ['@write', '@destructive']],
     ['the all tag', ['@all']],
@@ -622,5 +643,59 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(send.is_approval_required).toBe(true);
     expect(allowsChatApproval(send)).toBe(false);
     expect(allowsToolGrant(send)).toBe(false);
+  });
+});
+
+describe("the operator's own Calendar sidecar, under a standing grant the person gave", () => {
+  const createEvent: ToolSchema = {
+    name: 'create_event',
+    description: 'Adds an event.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  };
+  const deleteEvent: ToolSchema = {
+    name: 'delete_event',
+    description: 'Deletes an event.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  };
+
+  function calendarServices(granted: string[]): SentinelServices {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    for (const tool_name of granted) {
+      void services.tool_grants.recordToolGrant({
+        tenant_id: 't1',
+        created_by: 'u1',
+        mcp_server_name: 'Calendar',
+        tool_name,
+        mcp_server_host: 'mcp.example.com',
+      });
+    }
+    return services;
+  }
+
+  it('runs a granted calendar write with no card under the default gate', async () => {
+    const calendar = makeToolSet({
+      tools: [createEvent],
+      services: calendarServices(['create_event']),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({
+      name: 'create_event',
+      arguments: { summary: 'Lunch', start: '2026-10-22T12:00', end: '2026-10-22T13:00' },
+    });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant', is_approval_required: false });
+  });
+
+  it('still asks for a destructive calendar call, granted or not', async () => {
+    const calendar = makeToolSet({
+      tools: [deleteEvent],
+      services: calendarServices(['delete_event']),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
   });
 });

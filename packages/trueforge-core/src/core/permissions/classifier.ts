@@ -2273,7 +2273,9 @@ function demoRefusesConnector(input: {
  * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
  * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
  * connector that happens to be named Email. The one exception is reading message bodies with mark-as-read set:
- * that choice changes the mailbox, so it asks with its own card even though the tool is a read.
+ * that choice changes the mailbox, so it asks with its own card even though the tool is a read. The choice
+ * counts as set unless it is exactly off: not every path repairs the model's spelling of the value before
+ * classification, and a spelling the sidecar would honour as on must never slip through as a plain read.
  */
 async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -2283,7 +2285,8 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
       sensitive_read: false,
     });
   }
-  if (action.tool_name === MAIL_CONTENT_TOOL_NAME && action.canonical_params['mark_as_read'] === true) {
+  const markAsRead = action.canonical_params['mark_as_read'];
+  if (action.tool_name === MAIL_CONTENT_TOOL_NAME && markAsRead !== undefined && markAsRead !== false) {
     return tier3Decision({
       card: {
         plain_what: 'Allow marking these emails as read?',

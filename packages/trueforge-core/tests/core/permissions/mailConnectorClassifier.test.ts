@@ -111,6 +111,23 @@ describe('Email connector classifier', () => {
       expect(decision.approval_token_id).not.toBeNull();
     });
 
+    it.each([
+      ['spelled as text', 'true'],
+      ['a number', 1],
+      ['the word yes', 'yes'],
+    ])(
+      'reading message bodies with mark as read set, %s, still asks with the card for that change',
+      async (_label, value) => {
+        const decision = await classifyTier(
+          hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: value }, CONTENT_HINTS),
+          makeCtx(),
+        );
+        expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null, sensitive_read: true });
+        expect(decision.card?.plain_what).toBe('Allow marking these emails as read?');
+        expect(decision.approval_token_id).not.toBeNull();
+      },
+    );
+
     it('reading message bodies with mark as read off or absent stays a silent read', async () => {
       for (const params of [{ email_ids: ['e1'] }, { email_ids: ['e1'], mark_as_read: false }]) {
         const decision = await classifyTier(hostMailCall('get_emails_content', params, CONTENT_HINTS), makeCtx());

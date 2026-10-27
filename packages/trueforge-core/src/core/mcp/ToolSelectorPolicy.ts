@@ -178,7 +178,7 @@ export class ToolSelectorPolicy {
    * carry the write tag only because an optional argument can change something, the mail server's
    * mark-as-read choice being the standing example, and the classifier has already judged this call
    * a read with that choice off. `@destructive` is never waived. The waiver applies to the default
-   * list alone: a list the user changed in any way, `@all`, or a literal tool name is the user's
+   * list alone: a list holding different tags, `@all`, or a literal tool name is the user's
    * explicit choice and still gates.
    */
   requiresApproval(
