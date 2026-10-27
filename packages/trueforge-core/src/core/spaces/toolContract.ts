@@ -29,10 +29,6 @@ const SPACE_WRITE_TOOLS: readonly SpaceToolContract[] = [
     activity_line: space_name => (space_name === null ? 'Created a space.' : `Created the space ${space_name}.`),
   },
   {
-    name: UPDATE_SPACE_TOOL_NAME,
-    activity_line: space_name => (space_name === null ? 'Updated a space.' : `Updated the space ${space_name}.`),
-  },
-  {
     name: EDIT_SPACE_TOOL_NAME,
     activity_line: space_name => (space_name === null ? 'Updated a space.' : `Updated the space ${space_name}.`),
   },

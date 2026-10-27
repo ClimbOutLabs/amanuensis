@@ -188,6 +188,33 @@ describe('guardModelReply', () => {
     expect(noCreate.invalidCalls.size).toBe(0);
   });
 
+  it('steers a truncated create_space to smaller parts with edit_space, never to resending the whole call', () => {
+    const outcome = guard([call('a', 'create_space', '{"name":"Dog breeds","body":"# Dog breeds\\n| Breed |')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('The create_space call was not sent because its arguments were not complete');
+    expect(message).toContain('nothing was written');
+    expect(message).toContain('Do not send the same call again');
+    expect(message).toContain('Send the content in smaller parts with edit_space');
+    expect(message).not.toContain('Send the whole call again');
+  });
+
+  it('steers a truncated edit_space to smaller parts too', () => {
+    const outcome = guard([
+      call('a', 'edit_space', '{"space_name":"Dog breeds","edits":[{"type":"search","search":"a","replace":"'),
+    ]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('The edit_space call was not sent because its arguments were not complete');
+    expect(message).toContain('Send the content in smaller parts with edit_space');
+    expect(message).not.toContain('Send the whole call again');
+  });
+
+  it('keeps the resend-whole message for a truncated call to any other tool', () => {
+    const outcome = guard([call('a', 'web_fetch', '{"urls":["https://example.com')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('nothing was done with it');
+    expect(message).toContain('Send the whole call again, with all of its arguments finished.');
+  });
+
   it('flags a size-cut call with the smaller-parts message, even though its arguments never finished', () => {
     const outcome = guard(
       [call('a', 'create_event', '{"title":"A very long title that was still being writ')],

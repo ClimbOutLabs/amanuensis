@@ -709,7 +709,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       'read_email',
       'list_events',
       'tavily_search',
-      'update_space',
+      'edit_space',
       'run_code',
       'write_file',
       'send_draft',
