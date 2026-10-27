@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
-import { McpConnectionError } from '../errors';
+import { McpConnectionError, McpRedirectRefusedError } from '../errors';
 import { withTimeout } from '../util/promiseUtils';
 import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
@@ -120,7 +120,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
           await response.body?.cancel().catch(() => {
             /* no-op */
           });
-          throw new McpConnectionError(redirectRefusedMessage(refused), 502);
+          throw new McpRedirectRefusedError(redirectRefusedMessage(refused));
         }
         await response.body?.cancel().catch(() => {
           /* no-op */
@@ -356,7 +356,7 @@ export async function connectRemoteMcp(params: {
       // A refused redirect is final: the URL does not serve MCP itself, so another transport on it would fare no better.
       const refused = redirectRefusal.refusal();
       if (refused !== undefined) {
-        throw new McpConnectionError(redirectRefusedMessage(refused), 502, { cause: error });
+        throw new McpRedirectRefusedError(redirectRefusedMessage(refused), { cause: error });
       }
       if (isAuthError(error)) {
         throw toConnectError(error);

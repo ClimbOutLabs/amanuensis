@@ -1,4 +1,4 @@
-import { McpConnectionError } from '../../../src/core/errors';
+import { McpConnectionError, McpRedirectRefusedError } from '../../../src/core/errors';
 import type { IToolSet, ListToolsResponse } from '../../../src/core/mcp/IMCPServer';
 import { convertMCPServersToTools } from '../../../src/core/mcp/convertMCPServers';
 import '../harnessMocks';
@@ -35,6 +35,32 @@ describe('convertMCPServersToTools with an unreachable server', () => {
     expect(unavailableInfo).toEqual([
       { name: 'Email', message: 'The Email server could not be reached: connection refused at 192.168.144.3:9557.' },
     ]);
+  });
+
+  it('still fails the conversion when the server answered with a redirect the connection refuses', async () => {
+    // The shape a refused redirect takes by the time it reaches conversion: the refusal
+    // itself, and the same refusal riding as the cause under the connect wrapper that names
+    // the server (a plain 502, which on its own would read as unavailability). The server
+    // was reached and answered, so neither shape may be left out as unavailable.
+    const refusal = new McpRedirectRefusedError(
+      'server answered HTTP 302 with a redirect to http://127.0.0.1:34101, and this connection does not follow redirects',
+    );
+    await expect(
+      convertMCPServersToTools({
+        tfyManagedServers: [],
+        userServers: [makeFailingServer({ name: 'memory', error: refusal })],
+      }),
+    ).rejects.toThrow('this connection does not follow redirects');
+
+    const wrapped = new McpConnectionError(`Failed to connect to remote MCP server 'memory': ${refusal.message}`, 502, {
+      cause: refusal,
+    });
+    await expect(
+      convertMCPServersToTools({
+        tfyManagedServers: [],
+        userServers: [makeFailingServer({ name: 'memory', error: wrapped })],
+      }),
+    ).rejects.toThrow("Failed to connect to remote MCP server 'memory'");
   });
 
   it('still fails the conversion for a failure that is not unavailability', async () => {

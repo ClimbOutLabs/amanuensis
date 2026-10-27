@@ -1,5 +1,5 @@
 import type { ChatCompletionTool } from 'openai/resources/chat';
-import { McpConnectionError, ToolPreDispatchError } from '../errors';
+import { McpConnectionError, McpRedirectRefusedError, ToolPreDispatchError } from '../errors';
 import type { MCPServerInitInfo } from '../events/schema';
 import type { MCPAuthRequired } from '../mcp/IMCPServer';
 import { describeUnknownError } from '../util/errorLogFields';
@@ -92,23 +92,32 @@ export function plainBooleanSchema(schema: Record<string, unknown>): Record<stri
  * Whether a listTools failure means the server itself could not be reached (a connection or
  * transport failure, status 502 or above), as opposed to a problem with the request. Mirrors
  * the unavailable-connector test AgentThread applies to tool metadata failures: a host policy
- * pre-dispatch failure is not unavailability, and neither is a client error.
+ * pre-dispatch failure is not unavailability, and neither is a client error. A redirect the
+ * connection refused to follow is not unavailability either: the server was reached and
+ * answered, and the refusal is deliberate, so it stays loud. The refusal rides as the cause
+ * under wrappers that add their own context (the connect error names the server around it),
+ * so the whole chain is walked before answering: a refusal anywhere in it settles the
+ * question, even under an outer error that on its own would read as unavailability.
  */
 function isServerUnavailableError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
+  let unavailable = false;
   while (current instanceof Error && !seen.has(current)) {
     seen.add(current);
+    if (current instanceof McpRedirectRefusedError) {
+      return false;
+    }
     if (
       current instanceof McpConnectionError &&
       current.statusCode >= 500 &&
       !(current instanceof ToolPreDispatchError)
     ) {
-      return true;
+      unavailable = true;
     }
     current = current.cause;
   }
-  return false;
+  return unavailable;
 }
 
 type ListToolsOutcome =
