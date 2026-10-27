@@ -10,8 +10,8 @@ import {
   CREATE_SPACE_TOOL_NAME,
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { SpaceNotFoundError, type SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
@@ -154,38 +154,67 @@ describe('space results lead with the name and link, not an id', () => {
     expect(text).not.toContain('(id:');
   });
 
-  it('update_space and revert_space name the space and the new revision, never an id', async () => {
+  it('edit_space and revert_space name the space and the new revision, never an id', async () => {
     const store = makeMemoryStore([makeRecord({ id: 'sp-1', name: 'Dog breeds' })]);
     const toolSet = makeToolSet(store);
-    const updated = await toolSet.callTool({
-      name: UPDATE_SPACE_TOOL_NAME,
+    const edited = await toolSet.callTool({
+      name: EDIT_SPACE_TOOL_NAME,
       arguments: {
-        space_id: 'sp-1',
-        name: 'Dog breeds',
-        purpose: 'Compare dog breeds.',
-        status: 'active',
-        body: '# Dog breeds\nUpdated',
+        space_name: 'Dog breeds',
+        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds\nUpdated' }],
       },
     });
-    expect(resultText(updated)).toContain('Updated space \\"Dog breeds\\" (revision 2).');
-    expect(resultText(updated)).not.toContain('"id"');
+    expect(resultText(edited)).toContain('Updated space \\"Dog breeds\\" (revision 2).');
+    expect(resultText(edited)).not.toContain('"id"');
     const reverted = await toolSet.callTool({
       name: REVERT_SPACE_TOOL_NAME,
-      arguments: { space_id: 'sp-1', revision: 1 },
+      arguments: { space_name: 'Dog breeds', revision: 1 },
     });
     expect(resultText(reverted)).toContain('Restored space \\"Dog breeds\\" (revision 3).');
     expect(resultText(reverted)).not.toContain('"id"');
+  });
+
+  it('create_space refuses a name an existing space already has, and writes nothing', async () => {
+    const store = makeMemoryStore([makeRecord({ id: 'sp-1', name: 'Dog breeds' })]);
+    const toolSet = makeToolSet(store);
+    const response = await toolSet.callTool({
+      name: CREATE_SPACE_TOOL_NAME,
+      arguments: { name: 'Dog breeds', purpose: 'Track cats instead.', status: 'active', body: '# Cats' },
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(JSON.parse(resultText(response))).toEqual({
+      error:
+        'A space named "Dog breeds" already exists. Pick a different name for the new space, or change the existing one with edit_space.',
+    });
+    const listed = await toolSet.callTool({ name: LIST_SPACES_TOOL_NAME, arguments: {} });
+    const spaces = (JSON.parse(resultText(listed)) as { spaces: { name: string }[] }).spaces;
+    expect(spaces.map(space => space.name)).toEqual(['Dog breeds']);
   });
 });
 
 describe('spaces found by exact name', () => {
   const dogBreeds = makeRecord({ id: 'sp-dogs', name: 'Dog breeds' });
 
-  it('get_space reads a space by its exact unique name when the id is missing', async () => {
+  it('get_space reads a space by its exact unique name, and the result carries the link, not an id', async () => {
     const toolSet = makeToolSet(makeMemoryStore([dogBreeds]));
     const response = await toolSet.callTool({ name: GET_SPACE_TOOL_NAME, arguments: { space_name: 'Dog breeds' } });
     expect(isErrorResponse(response)).toBe(false);
-    expect((JSON.parse(resultText(response)) as { space: { id: string } }).space.id).toBe('sp-dogs');
+    const { space } = JSON.parse(resultText(response)) as { space: Record<string, unknown> };
+    expect(space['name']).toBe('Dog breeds');
+    expect(space['link']).toBe('/spaces/sp-dogs');
+    expect('id' in space).toBe(false);
+  });
+
+  it('list_spaces gives names and links, never ids', async () => {
+    const toolSet = makeToolSet(makeMemoryStore([dogBreeds]));
+    const response = await toolSet.callTool({ name: LIST_SPACES_TOOL_NAME, arguments: {} });
+    expect(isErrorResponse(response)).toBe(false);
+    const { spaces } = JSON.parse(resultText(response)) as { spaces: Record<string, unknown>[] };
+    expect(spaces).toHaveLength(1);
+    expect(spaces[0]?.['name']).toBe('Dog breeds');
+    expect(spaces[0]?.['link']).toBe('/spaces/sp-dogs');
+    expect(spaces[0] !== undefined && 'id' in spaces[0]).toBe(false);
+    expect(spaces[0] !== undefined && 'body' in spaces[0]).toBe(false);
   });
 
   it('edit_space applies its change to the space found by name', async () => {
@@ -213,7 +242,7 @@ describe('spaces found by exact name', () => {
     });
   });
 
-  it('an ambiguous name returns the plain list of matching ids and does not pick one', async () => {
+  it('an ambiguous name refuses to pick one and says to rename one in the Spaces view', async () => {
     const store = makeMemoryStore([
       dogBreeds,
       makeRecord({ id: 'sp-other', name: 'Dog breeds', revision: 4, updated_at: '2026-10-20T00:00:00.000Z' }),
@@ -223,8 +252,9 @@ describe('spaces found by exact name', () => {
     expect(isErrorResponse(response)).toBe(true);
     const { error } = JSON.parse(resultText(response)) as { error: string };
     expect(error).toContain('More than one space is named "Dog breeds"');
-    expect(error).toContain('sp-dogs (revision 1');
-    expect(error).toContain('sp-other (revision 4, updated 2026-10-20T00:00:00.000Z)');
+    expect(error).toContain('rename one of them in the Spaces view');
+    expect(error).not.toContain('sp-dogs');
+    expect(error).not.toContain('sp-other');
   });
 
   it('a name lookup past one page fails closed instead of guessing', async () => {
@@ -232,30 +262,77 @@ describe('spaces found by exact name', () => {
     const response = await toolSet.callTool({ name: GET_SPACE_TOOL_NAME, arguments: { space_name: 'Dog breeds' } });
     expect(isErrorResponse(response)).toBe(true);
     expect(JSON.parse(resultText(response))).toEqual({
-      error: 'Too many spaces to find "Dog breeds" by name. Call list_spaces, then pass its space_id.',
+      error: 'Too many spaces to find "Dog breeds" by name for sure. Call list_spaces to see the spaces you have.',
     });
   });
 
-  it('get_space and update_space reject a call that gives both keys or neither', async () => {
+  it('a call carrying space_id is refused as an unknown field on every addressed tool', async () => {
     const toolSet = makeToolSet(makeMemoryStore([dogBreeds]));
-    const both = await toolSet.callTool({
-      name: GET_SPACE_TOOL_NAME,
-      arguments: { space_id: 'sp-dogs', space_name: 'Dog breeds' },
-    });
-    const neither = await toolSet.callTool({
-      name: UPDATE_SPACE_TOOL_NAME,
+    const calls: { name: string; arguments: Record<string, unknown> }[] = [
+      { name: GET_SPACE_TOOL_NAME, arguments: { space_id: 'sp-dogs', space_name: 'Dog breeds' } },
+      {
+        name: EDIT_SPACE_TOOL_NAME,
+        arguments: {
+          space_id: 'sp-dogs',
+          space_name: 'Dog breeds',
+          edits: [{ type: 'search', search: 'breeds', replace: 'breeds' }],
+        },
+      },
+      { name: REVERT_SPACE_TOOL_NAME, arguments: { space_id: 'sp-dogs', space_name: 'Dog breeds', revision: 1 } },
+    ];
+    for (const call of calls) {
+      const response = await toolSet.callTool(call);
+      expect(isErrorResponse(response)).toBe(true);
+      expect(JSON.stringify(JSON.parse(resultText(response)))).toContain('space_id');
+    }
+  });
+
+  it('a call with no space_name is refused, and the error names the missing field', async () => {
+    const toolSet = makeToolSet(makeMemoryStore([dogBreeds]));
+    const response = await toolSet.callTool({ name: GET_SPACE_TOOL_NAME, arguments: {} });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(JSON.stringify(JSON.parse(resultText(response)))).toContain('space_name');
+  });
+
+  it('edit_space renames through new_title, and refuses the old name field', async () => {
+    const store = makeMemoryStore([dogBreeds]);
+    const toolSet = makeToolSet(store);
+    const renamed = await toolSet.callTool({
+      name: EDIT_SPACE_TOOL_NAME,
       arguments: {
-        name: 'Dog breeds',
-        purpose: 'Compare dog breeds.',
-        status: 'active',
-        body: '# Dog breeds',
+        space_name: 'Dog breeds',
+        new_title: 'Dog breeds, ranked',
+        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds, ranked' }],
       },
     });
-    for (const response of [both, neither]) {
-      expect(isErrorResponse(response)).toBe(true);
-      expect(JSON.stringify(JSON.parse(resultText(response)))).toContain(
-        'Provide exactly one of space_id or space_name',
-      );
-    }
+    expect(isErrorResponse(renamed)).toBe(false);
+    expect(resultText(renamed)).toContain('Updated space \\"Dog breeds, ranked\\" (revision 2).');
+    const refused = await toolSet.callTool({
+      name: EDIT_SPACE_TOOL_NAME,
+      arguments: {
+        space_name: 'Dog breeds, ranked',
+        name: 'Dogs',
+        edits: [{ type: 'search', search: 'ranked', replace: 'ranked' }],
+      },
+    });
+    expect(isErrorResponse(refused)).toBe(true);
+    expect(JSON.stringify(JSON.parse(resultText(refused)))).toContain('name');
+  });
+
+  it('edit_space refuses a new_title another space already has', async () => {
+    const store = makeMemoryStore([dogBreeds, makeRecord({ id: 'sp-cats', name: 'Cat breeds' })]);
+    const toolSet = makeToolSet(store);
+    const response = await toolSet.callTool({
+      name: EDIT_SPACE_TOOL_NAME,
+      arguments: {
+        space_name: 'Cat breeds',
+        new_title: 'Dog breeds',
+        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Cat breeds' }],
+      },
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(JSON.parse(resultText(response))).toEqual({
+      error: 'A space named "Dog breeds" already exists. Pick a different new_title, or leave the name unchanged.',
+    });
   });
 });

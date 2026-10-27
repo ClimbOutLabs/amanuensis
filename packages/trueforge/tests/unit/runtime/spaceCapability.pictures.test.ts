@@ -11,7 +11,6 @@ import {
   CREATE_SPACE_TOOL_NAME,
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
@@ -390,18 +389,14 @@ describe('page reads, scripts, and empty bodies', () => {
     expect(error).toContain('Fix the listed fields and send the call again.');
   });
 
-  it('refuses an empty full-body update instead of wiping the space', async () => {
+  it('refuses an edit that empties the body instead of wiping the space', async () => {
     const store = makeStore();
     const call = setup(createWebSearchTurnState(), store);
     const createdResponse = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\nSome content here.') });
     expect(isErrorResponse(createdResponse)).toBe(false);
-    const response = await call(UPDATE_SPACE_TOOL_NAME, {
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      name: 'Dog breeds',
-      purpose: 'Dog breeds with pictures.',
-      status: 'active',
-      format: 'markdown',
-      body: '',
+      edits: [{ type: 'block', anchor: 'auto-body', new_content: '' }],
     });
     expect(await errorOf(response)).toContain('The space body is empty');
     const read = fieldObject(

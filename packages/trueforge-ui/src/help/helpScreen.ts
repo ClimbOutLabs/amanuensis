@@ -12,6 +12,7 @@ const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   themes: 'Themes',
   permissions: 'Permissions',
   audit: 'Audit',
+  about: 'About',
 };
 
 export interface HelpScreenState {
