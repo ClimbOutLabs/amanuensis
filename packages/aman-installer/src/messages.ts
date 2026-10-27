@@ -1,4 +1,5 @@
 import type { SystemKind } from './host/host.ts';
+import { LOCK_TIMING } from './state/lockTiming.ts';
 
 // Every sentence a person can read lives in this file, as a Problem with two
 // fields: what happened, and what to do (one sentence, one action). A test in
@@ -21,6 +22,7 @@ export const HELP_LINES: readonly string[] = [
   'Aman installer. It sets up Aman on this computer and checks that things work.',
   'Run aman --version to see which version this is.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
+  'Run aman status to see what is installed and whether it is running.',
 ];
 
 export const DOCKER_NOT_INSTALLED: Record<SystemKind, Problem> = {
@@ -136,6 +138,67 @@ export function memoryReadyLine(sizeText: string): string {
 
 export const ALL_READY_LINE = 'Docker is ready for Aman on this computer.';
 
+export const NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman on this computer, then run aman status again.',
+};
+
+export const STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run the installer again from the folder Aman was installed from, then run aman status again.',
+};
+
+// The wait is the lock's dead limit: an install stopped without cleaning up
+// leaves its lock until its beats have been missing that long.
+export const STATE_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman status again.`,
+};
+
+export const STATE_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then run aman status again.',
+};
+
+export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
+  windows: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Open Docker Desktop from the Start menu, then run aman status again.',
+  },
+  darwin: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Open Docker Desktop from Launchpad, then run aman status again.',
+  },
+  linux: {
+    happened: 'Docker is not answering, so whether each instance is running is unknown.',
+    fix: 'Start Docker Engine on this computer, then run aman status again.',
+  },
+};
+
+// The name and the address come from files in the state home, so a control
+// character in them must not reach the screen as a terminal command.
+function printable(text: string): string {
+  return text.replace(/\p{Cc}/gu, '');
+}
+
+export function statusInstalledLine(version: string): string {
+  return `Aman is installed, version ${printable(version)}.`;
+}
+
+export type InstanceState = 'running' | 'partly running' | 'stopped' | 'unknown';
+
+export function statusInstanceLine(name: string, state: InstanceState, address: string | null): string {
+  if (state === 'unknown') {
+    return `Instance ${printable(name)}: whether it is running is unknown.`;
+  }
+  if (address === null) {
+    return `Instance ${printable(name)} is ${state}.`;
+  }
+  return `Instance ${printable(name)} is ${state} at ${printable(address)}.`;
+}
+
+export const NO_INSTANCES_LINE = 'No instance has been made yet.';
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -146,6 +209,7 @@ export function allMessageLines(): string[] {
     lines.push(problemText(COMPOSE_MISSING[kind]));
     lines.push(problemText(LOW_MEMORY[kind]));
     lines.push(problemText(MEMORY_NOT_REPORTED[kind]));
+    lines.push(problemText(DOCKER_NOT_ANSWERING[kind]));
   }
   lines.push(problemText(ENGINE_VERSION_MISSING));
   lines.push(problemText(unknownCommandProblem('example')));
@@ -155,5 +219,15 @@ export function allMessageLines(): string[] {
   lines.push(composeReadyLine('0.0.0'));
   lines.push(memoryReadyLine('0 GB'));
   lines.push(ALL_READY_LINE);
+  lines.push(problemText(NOT_INSTALLED));
+  lines.push(problemText(STATE_UNREADABLE));
+  lines.push(problemText(STATE_BUSY));
+  lines.push(problemText(STATE_IMAGE_UNAVAILABLE));
+  lines.push(statusInstalledLine('aman-app:0'));
+  lines.push(statusInstanceLine('main', 'running', 'http://127.0.0.1:8791'));
+  lines.push(statusInstanceLine('main', 'partly running', 'http://127.0.0.1:8791'));
+  lines.push(statusInstanceLine('main', 'stopped', null));
+  lines.push(statusInstanceLine('main', 'unknown', null));
+  lines.push(NO_INSTANCES_LINE);
   return lines;
 }

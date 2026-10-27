@@ -155,11 +155,11 @@ function isPublicIpv6(address: string): boolean {
 /**
  * DNS lookup for upstream fetches: resolves the name, refuses the whole answer when any address in
  * it is not public, and pins the checked addresses for the connection, so what was checked is what
- * gets connected to.
+ * gets connected to. Shared with the skill network gateway, which makes the same promise.
  */
 type GuardedLookup = NonNullable<RequestOptions['lookup']>;
 
-const guardedLookup: GuardedLookup = (hostname, options, callback) => {
+export const guardedLookup: GuardedLookup = (hostname, options, callback) => {
   dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
     if (error !== null) {
       callback(error, '', 0);

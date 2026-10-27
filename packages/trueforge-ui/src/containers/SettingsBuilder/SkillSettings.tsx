@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { Button } from '@/atoms/primitives/Button.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
+import {
+  hasSkillNetworkApproval,
+  skillNetworkApprovalLines,
+  skillNetworkApprovedLine,
+  type SkillNetworkApprovalState,
+} from '../../server/skillNetworkApproval.js';
 import type { RegistrySkill, SkillBase, SkillCatalogEntry, SkillConfigBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { useToasterOptional } from '../ToasterContainer.js';
@@ -37,6 +43,12 @@ const SkillSettings = () => {
   // A git-imported skill is deleted outright, so removing it goes through a confirm dialog.
   // A registry (catalog) skill's Remove is a disable that just returns it to Available.
   const [pendingRemoval, setPendingRemoval] = useState<SkillBase | null>(null);
+  // Network approval state per enabled skill, keyed by skill id. A skill with no entry (the
+  // catalog carries no approval calls, or the read failed) simply shows no panel.
+  const [networkApprovals, setNetworkApprovals] = useState<Record<string, SkillNetworkApprovalState>>({});
+  // Skills whose approval prompt the person closed with "Don't allow" in this view. Nothing is
+  // stored for that choice: the skill just stays without network access.
+  const [dismissedNetworkPrompts, setDismissedNetworkPrompts] = useState<ReadonlySet<string>>(new Set());
 
   const refresh = useCallback(async () => {
     if (!skillCatalog) return;
@@ -46,6 +58,18 @@ const SkillSettings = () => {
       const [defined, available] = await Promise.all([skillCatalog.listSkills(), skillCatalog.getSkillCatalog()]);
       setSkills(defined);
       setCatalog(available);
+      if (hasSkillNetworkApproval(skillCatalog)) {
+        const approvals = await Promise.all(
+          defined.map(async skill => {
+            try {
+              return [skill.id, await skillCatalog.getSkillNetworkApproval({ id: skill.id })] as const;
+            } catch {
+              return undefined;
+            }
+          }),
+        );
+        setNetworkApprovals(Object.fromEntries(approvals.filter(entry => entry !== undefined)));
+      }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load skills'));
     } finally {
@@ -137,6 +161,111 @@ const SkillSettings = () => {
     }, 0);
   };
 
+  const handleAllowNetwork = (skill: SkillBase, state: SkillNetworkApprovalState) => {
+    if (!hasSkillNetworkApproval(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.approveSkillNetwork({ id: skill.id, hosts: [...state.declaredHosts] });
+    }).catch(() => {});
+  };
+
+  const handleRevokeNetwork = (skill: SkillBase) => {
+    if (!hasSkillNetworkApproval(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.revokeSkillNetwork({ id: skill.id });
+    }).catch(() => {});
+  };
+
+  const renderNetworkPanel = (skill: SkillBase): ReactNode => {
+    const state = networkApprovals[skill.id];
+    if (state === undefined || state.declaredHosts.length === 0) {
+      return null;
+    }
+    const hostsList = (
+      <ul className="mt-2 flex flex-col gap-0.5">
+        {state.declaredHosts.map(host => (
+          <li key={host} className="font-mono text-[0.8125rem] text-text-primary">
+            {host}
+          </li>
+        ))}
+      </ul>
+    );
+    if (state.approvedHosts !== null) {
+      return (
+        <div className="border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
+          <p className="text-sm text-text-secondary">{skillNetworkApprovedLine()}</p>
+          {hostsList}
+          <div className="mt-3">
+            <Button.Secondary
+              size="small"
+              type="button"
+              disabled={busy || managedExternally}
+              onClick={() => {
+                handleRevokeNetwork(skill);
+              }}
+            >
+              Remove network access
+            </Button.Secondary>
+          </div>
+        </div>
+      );
+    }
+    if (dismissedNetworkPrompts.has(skill.id)) {
+      return (
+        <div className="flex items-center gap-3 border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
+          <p className="min-w-0 flex-1 text-sm text-text-secondary">Network access is off for this skill.</p>
+          <Button.Secondary
+            size="small"
+            type="button"
+            disabled={busy || managedExternally}
+            onClick={() => {
+              setDismissedNetworkPrompts(current => {
+                const next = new Set(current);
+                next.delete(skill.id);
+                return next;
+              });
+            }}
+          >
+            Review the sites
+          </Button.Secondary>
+        </div>
+      );
+    }
+    const lines = skillNetworkApprovalLines({ skillName: skill.name, state });
+    return (
+      <div className="border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
+        <p className="text-sm text-text-primary">{lines[0]}</p>
+        {hostsList}
+        {lines.slice(1).map(line => (
+          <p key={line} className="mt-2 text-sm text-text-secondary">
+            {line}
+          </p>
+        ))}
+        <div className="mt-3 flex gap-2">
+          <Button.Primary
+            size="small"
+            type="button"
+            disabled={busy || managedExternally}
+            onClick={() => {
+              handleAllowNetwork(skill, state);
+            }}
+          >
+            Allow
+          </Button.Primary>
+          <Button.Secondary
+            size="small"
+            type="button"
+            disabled={busy || managedExternally}
+            onClick={() => {
+              setDismissedNetworkPrompts(current => new Set(current).add(skill.id));
+            }}
+          >
+            Don’t allow
+          </Button.Secondary>
+        </div>
+      </div>
+    );
+  };
+
   const renderRow = ({
     key,
     name,
@@ -209,26 +338,29 @@ const SkillSettings = () => {
                 Enabled · {selectedSkills.length}
               </h4>
               <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
-                {selectedSkills.map(skill =>
-                  renderRow({
-                    key: skill.id,
-                    name: skill.name,
-                    description: skill.description,
-                    action: skillCatalog.deleteSkill ? (
-                      <Button.Secondary
-                        size="small"
-                        type="button"
-                        disabled={busy || managedExternally}
-                        aria-label={`Remove ${skill.name}`}
-                        onClick={() => {
-                          handleRemoveClick(skill);
-                        }}
-                      >
-                        Remove
-                      </Button.Secondary>
-                    ) : null,
-                  }),
-                )}
+                {selectedSkills.map(skill => (
+                  <Fragment key={skill.id}>
+                    {renderRow({
+                      key: skill.id,
+                      name: skill.name,
+                      description: skill.description,
+                      action: skillCatalog.deleteSkill ? (
+                        <Button.Secondary
+                          size="small"
+                          type="button"
+                          disabled={busy || managedExternally}
+                          aria-label={`Remove ${skill.name}`}
+                          onClick={() => {
+                            handleRemoveClick(skill);
+                          }}
+                        >
+                          Remove
+                        </Button.Secondary>
+                      ) : null,
+                    })}
+                    {renderNetworkPanel(skill)}
+                  </Fragment>
+                ))}
               </div>
             </section>
           ) : null}

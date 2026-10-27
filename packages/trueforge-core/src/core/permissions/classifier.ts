@@ -740,13 +740,20 @@ export async function canonicalShellFormFor(
   return canonicalShellForm({ ...input, file_digests: digests });
 }
 
-export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBinding {
+export function shellBindingFromForm(input: {
+  form: CanonicalShellForm;
+  workspace_cwd: string | null;
+  path_resolution: PathResolution | undefined;
+}): ShellApprovalBinding {
+  const { form } = input;
   return {
     commands: [{ argv: [...form.argv], argv0_resolved: form.argv0_resolved }],
     redirections: [],
     cwd_resolved: form.cwd_resolved,
     env_overrides: form.env_overrides,
     file_hashes: form.file_hashes,
+    workspace_cwd: input.workspace_cwd,
+    path_resolution: input.path_resolution ?? null,
   };
 }
 
@@ -754,7 +761,11 @@ async function mintShellToken(input: { ctx: ClassifyContext; tool_name: string; 
   token_id: string;
   binding: ShellApprovalBinding;
 }> {
-  const binding = shellBindingFromForm(input.form);
+  const binding = shellBindingFromForm({
+    form: input.form,
+    workspace_cwd: input.ctx.workspace_cwd,
+    path_resolution: input.ctx.path_resolution,
+  });
   const token = await input.ctx.services.token_store.mint({
     ...approvalTokenOwner(input.ctx),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.form }),
