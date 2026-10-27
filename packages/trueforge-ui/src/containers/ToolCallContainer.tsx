@@ -429,15 +429,15 @@ function RequestResponseSlots({
   response: { data: string; isJson: boolean };
 }) {
   return {
+    // The Request pane resizes like the Response pane. At a fixed height it cut a long request off
+    // with no sign the rest existed; resizable shows it from the start, and the full text stays
+    // reachable by dragging the pane taller, scrolling, or expanding it.
     requestSlot: request.value ? (
-      <ToolCallContentBlockContainer
-        title="Request"
-        content={request.value}
-        isJson={request.isJson}
-        maxHeight="10.5rem"
-      />
+      <ToolCallContentBlockContainer title="Request" content={request.value} isJson={request.isJson} resizable />
     ) : response.data ? (
-      <ToolCallContentBlockContainer title="Request" content="{}" isJson maxHeight="10.5rem" />
+      // No request is on record for this call. Say so plainly rather than showing an empty object
+      // the call may never have carried.
+      <ToolCallContentBlockContainer title="Request" content="No request was recorded for this step." isJson={false} />
     ) : undefined,
     responseSlot: response.data ? (
       <ToolCallContentBlockContainer title="Response" content={response.data} isJson={response.isJson} resizable />

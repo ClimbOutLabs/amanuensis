@@ -151,6 +151,79 @@ describe('ToolCallContainer', () => {
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
   });
 
+  it('makes the Request pane resizable like the Response pane, so a long request stays reachable in full', () => {
+    const args = {
+      report_id: 'rep-2026-10-27',
+      sections: Array.from({ length: 30 }, (_, index) => `section-${index + 1}`),
+      include_history: true,
+    };
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(args),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    // The full request is on the block, from its first line to its last.
+    expect(blocks[0]).toHaveAttribute('data-content', JSON.stringify(args, null, 2));
+    // A resizable pane's body carries the drag affordance and clips by scrolling, like the Response
+    // pane; a fixed pane has neither, so its overflow reads as text that vanished.
+    const [requestBlock, responseBlock] = blocks;
+    if (requestBlock === undefined || responseBlock === undefined) {
+      throw new Error('expected the step to show a Request and a Response block');
+    }
+    const requestBody = requestBlock.children[1];
+    const responseBody = responseBlock.children[1];
+    expect(requestBody).toHaveStyle({ resize: 'vertical' });
+    expect(requestBody).toHaveClass('overflow-hidden');
+    expect(responseBody).toHaveStyle({ resize: 'vertical' });
+  });
+
+  it('makes a long plain-text request resizable too', () => {
+    const longText = Array.from({ length: 40 }, (_, index) => `line ${index + 1} of the request`).join('\n');
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(longText),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', longText);
+    const [requestBlock] = blocks;
+    if (requestBlock === undefined) {
+      throw new Error('expected the step to show a Request block');
+    }
+    expect(requestBlock.children[1]).toHaveStyle({ resize: 'vertical' });
+    expect(requestBlock.children[1]).toHaveClass('overflow-hidden');
+  });
+
+  it('says plainly when no request was recorded instead of showing an empty object', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: '',
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', 'No request was recorded for this step.');
+    expect(blocks[0]).not.toHaveAttribute('data-content', '{}');
+  });
+
   it('shows a Searched chip for a search the host ran without asking, from the host-set artifact only', () => {
     renderToolCallMessage([
       {
