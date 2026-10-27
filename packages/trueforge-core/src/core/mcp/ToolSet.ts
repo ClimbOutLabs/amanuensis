@@ -688,7 +688,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: isHostVouchedDecision(decision),
+              waiveWriteAndUnclassifiedForHostVouchedRead: isHostVouchedDecision(decision),
             })),
       },
       classification: decision,
