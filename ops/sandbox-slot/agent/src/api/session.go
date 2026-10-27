@@ -88,6 +88,8 @@ type execRequest struct {
 	DiskMB    int               `json:"disk_mb"`
 	// PackageMirrorToken grants this call the package mirrors; empty keeps the guest offline.
 	PackageMirrorToken string `json:"package_mirror_token"`
+	// SkillNetworkToken grants this call the approved skill sites; empty sets no proxy variables.
+	SkillNetworkToken string `json:"skill_network_token"`
 }
 
 type execResponse struct {
@@ -121,6 +123,9 @@ func (r *execRequest) validate() error {
 	}
 	if r.PackageMirrorToken != "" && !validMirrorToken(r.PackageMirrorToken) {
 		return errors.New("package_mirror_token must be 32 lowercase hex characters")
+	}
+	if r.SkillNetworkToken != "" && !validMirrorToken(r.SkillNetworkToken) {
+		return errors.New("skill_network_token must be 32 lowercase hex characters")
 	}
 	return nil
 }
@@ -179,6 +184,10 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	for name, value := range req.Env {
 		env = append(env, name+"="+value)
 	}
+	if req.SkillNetworkToken != "" {
+		// Last, so nothing the caller passed can point the guest's tools at a different proxy.
+		env = append(env, skillNetworkProxyEnv()...)
+	}
 	spec := guest.Spec{
 		// Unique per call, so a guest whose cleanup stalled can never block the next call of the session.
 		ID:     fmt.Sprintf("exec-%s-%d", req.SessionID[:12], time.Now().UnixNano()),
@@ -190,7 +199,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		GID:    guestGID,
 		Binds:  []guest.Bind{{Dest: tree.GuestRoot, Source: root}},
 		Tmpfs:  []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
-		SharedNetwork: req.PackageMirrorToken != "",
+		SharedNetwork: req.PackageMirrorToken != "" || req.SkillNetworkToken != "",
 	}
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
@@ -205,6 +214,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	oomBefore := s.OOMKills()
 	endGrant := s.beginMirrorGrant(req.PackageMirrorToken)
+	endSkillNetworkGrant := s.beginSkillNetworkGrant(req.SkillNetworkToken)
 	res := s.Runner.Run(r.Context(), spec, guest.Options{
 		Timeout:       time.Duration(req.TimeoutMS) * time.Millisecond,
 		StreamCap:     StreamCapBytes,
@@ -212,6 +222,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Guard:         watch.guard,
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	endSkillNetworkGrant()
 	endGrant()
 	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
 	notices = reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, notices)

@@ -88,6 +88,9 @@ type Server struct {
 	// MirrorSocketPath is where the package mirror gateway listens inside the control volume;
 	// empty means the standard path next to the agent's own socket.
 	MirrorSocketPath string
+	// SkillNetSocketPath is where the skill network gateway listens inside the control volume;
+	// empty means the standard path beside the mirror gateway's socket.
+	SkillNetSocketPath string
 
 	sem      chan struct{}
 	sessions sessionLocks
@@ -97,6 +100,9 @@ type Server struct {
 
 	mirrorMu    sync.Mutex
 	mirrorToken string
+
+	skillNetMu    sync.Mutex
+	skillNetToken string
 }
 
 func (s *Server) init() { s.once.Do(func() { s.sem = make(chan struct{}, 1) }) }

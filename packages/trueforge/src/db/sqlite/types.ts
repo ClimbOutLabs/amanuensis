@@ -462,6 +462,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JsonbColumn<string[]> | null;
   created_at: string;
   updated_at: string;
 }
