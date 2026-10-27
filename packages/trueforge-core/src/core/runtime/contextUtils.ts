@@ -551,6 +551,28 @@ export function withHostUniqueToolCallIds<T extends { id: string }>(input: {
   });
 }
 
+/**
+ * Carries a set of provider tool call ids across withHostUniqueToolCallIds. The remap returns
+ * the calls in order, so a fact recorded against the provider ids (for example, which calls
+ * the stream stopped early for size) is rebuilt against the ids the calls carry now. Without
+ * this, a remapped call's recorded fact is silently lost: the set still names an id no call
+ * in the reply has.
+ */
+export function remapToolCallIdSet<T extends { id: string }>(input: {
+  before: readonly T[];
+  after: readonly T[];
+  ids: ReadonlySet<string>;
+}): Set<string> {
+  const remapped = new Set<string>();
+  input.before.forEach((call, index) => {
+    const replacement = input.after[index];
+    if (replacement !== undefined && input.ids.has(call.id)) {
+      remapped.add(replacement.id);
+    }
+  });
+  return remapped;
+}
+
 /** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */
 export function findHeldToolCalls(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
   const held: InternalEnrichedToolCall[] = [];

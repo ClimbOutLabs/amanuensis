@@ -377,13 +377,15 @@ async function failedEdits(
 }
 
 describe('Phase 1: consecutive-failure circuit breaker', () => {
-  it('the miss error steers to full-body and never prescribes verbatim re-copy', async () => {
+  it('the miss error steers to re-reading and re-applying in parts, never to a full-body resend', async () => {
     const { callTool } = makeHarness();
     const spaceId = await createPlainBoard(callTool);
 
     const parsed = await failedEdits(callTool, spaceId);
     expect(parsed.error).toContain('Do not retry this search');
-    expect(parsed.error).toContain('full updated body');
+    expect(parsed.error).toContain('Re-read the space with get_space');
+    expect(parsed.error).toContain('make the change with edit_space in parts');
+    expect(parsed.error).not.toContain('full updated body');
     expect(parsed.error).not.toContain('copy the search text verbatim');
     expect(parsed.error).not.toContain('Re-read the body with get_space and copy');
   });
@@ -404,7 +406,9 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     expect(isErrorResponse(locked)).toBe(true);
     const parsed = resultJson(locked);
     expect(parsed.error).toContain('locked');
-    expect(parsed.error).toContain('full updated body');
+    expect(parsed.error).toContain("revert_space with the space's current");
+    expect(parsed.error).toContain('keeps the body exactly');
+    expect(parsed.error).not.toContain('Send the full updated body');
 
     // edit_space block edits are delta mode too: locked as well.
     const lockedBlocks = await callTool(EDIT_SPACE_TOOL_NAME, {
@@ -886,7 +890,7 @@ describe('fix-pass: reliability hardening', () => {
     expect(await readBody(callTool, spaceId)).toBe(body);
   });
 
-  it('list_blocks surfaces the preamble; it is not anchor-addressable but a full-body update edits it', async () => {
+  it('list_blocks surfaces the preamble; it is not anchor-addressable but a search edit changes it', async () => {
     const { callTool } = makeHarness();
     const preambleText = '<p>Intro paragraph before any marker.</p>\n';
     const body = `${preambleText}<!-- @block:main -->\n<p>Body</p>`;
@@ -910,27 +914,38 @@ describe('fix-pass: reliability hardening', () => {
     expect(isErrorResponse(failed)).toBe(true);
     expect(resultJson(failed).error).toContain('Unknown block anchor "preamble"');
 
-    // The recovery journey is complete anyway: a full-body update edits the preamble.
-    const full = await callTool(UPDATE_SPACE_TOOL_NAME, {
-      ...BOARD_META,
+    // The journey is complete anyway: a search edit copied from get_space changes the
+    // preamble in place, which works whatever the body's size.
+    const edited = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
-      body: `<p>New intro.</p>\n<!-- @block:main -->\n<p>Body</p>`,
+      edits: [{ type: 'search', search: '<p>Intro paragraph before any marker.</p>', replace: '<p>New intro.</p>' }],
     });
-    expect(isErrorResponse(full)).toBe(false);
+    expect(isErrorResponse(edited)).toBe(false);
     const finalBody = await readBody(callTool, spaceId);
     expect(finalBody).toContain('<p>New intro.</p>');
     expect(finalBody).not.toContain('Intro paragraph before any marker.');
   });
 
   it('an unclosed marker with a near-limit whitespace run parses in linear time (no ReDoS)', async () => {
-    const { callTool } = makeHarness();
+    const { store, callTool } = makeHarness();
     // The adversarial shape from the security review: an anchor name followed by ~65K
     // spaces with no closing `-->`. The old overlapping-quantifier pattern needed ~10-22s
     // per scan here (and edit_space re-parses up to 50 times); the disjoint pattern is linear.
+    // Seeded directly in the store: one write may no longer carry a near-limit body (a
+    // space this size is built in parts now); the subject is parsing the stored body.
     const body = `<!-- @block:real -->\n<p>ok</p>\n<!-- @block:prices${' '.repeat(65000)}`;
-    const created = await callTool(CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body });
-    expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await expectSpaceId(callTool, created);
+    await store.createSpace({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      id: 'redos-space',
+      name: BOARD_META.name,
+      purpose: BOARD_META.purpose,
+      status: BOARD_META.status,
+      format: BOARD_META.format,
+      body,
+      expected_aggregate_revision: 0,
+    });
+    const spaceId = 'redos-space';
 
     const start = Date.now();
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_id: spaceId });
@@ -959,10 +974,25 @@ describe('fix-pass: reliability hardening', () => {
   });
 
   it('a delta-computed body over the size limit feeds the breaker', async () => {
-    const { callTool } = makeHarness();
-    const spaceId = await createPlainBoard(callTool);
+    const { store, callTool } = makeHarness();
+    // Seeded directly in the store, just under the stored limit: one write may no longer
+    // carry a near-limit body. Each edit below stays under the per-write cap, but the body
+    // it computes crosses the stored limit, which is the failure that feeds the breaker.
+    const seededBody = `${'x'.repeat(64_000)}\nTAIL`;
+    await store.createSpace({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      id: 'near-limit-space',
+      name: BOARD_META.name,
+      purpose: BOARD_META.purpose,
+      status: BOARD_META.status,
+      format: 'markdown',
+      body: seededBody,
+      expected_aggregate_revision: 0,
+    });
+    const spaceId = 'near-limit-space';
 
-    const tooLong = { type: 'block', anchor: 'auto-body', new_content: 'y'.repeat(70000) };
+    const tooLong = { type: 'search', search: 'TAIL', replace: `TAIL${'y'.repeat(3_900)}` };
     for (let i = 0; i < 3; i += 1) {
       const failed = await callTool(EDIT_SPACE_TOOL_NAME, { space_id: spaceId, edits: [tooLong] });
       expect(isErrorResponse(failed)).toBe(true);
@@ -976,7 +1006,7 @@ describe('fix-pass: reliability hardening', () => {
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
     // The over-limit writes never persisted.
-    expect(await readBody(callTool, spaceId)).toBe(PLAIN_BOARD);
+    expect(await readBody(callTool, spaceId)).toBe(seededBody);
   });
 
   it('a revision conflict neither feeds nor resets the breaker', async () => {
@@ -1164,7 +1194,7 @@ describe('fix-pass: documentation masking edge cases', () => {
 });
 
 describe('fix-pass: large-body end-to-end journey', () => {
-  it('a near-limit HTML board survives block edits byte-identically, then the breaker locks and a full-body update recovers', async () => {
+  it('a near-limit HTML board survives block edits byte-identically, then the breaker locks and reverting to the current revision recovers it whole', async () => {
     const { createHash } = await import('node:crypto');
     const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
     const { store, callTool } = makeHarness();
@@ -1188,9 +1218,20 @@ describe('fix-pass: large-body end-to-end journey', () => {
     expect(body.length).toBeLessThan(65536);
     const sectionCount = sections.length;
 
-    const created = await callTool(CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body });
-    expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await expectSpaceId(callTool, created);
+    // Seeded directly in the store: one write may no longer carry a near-limit body (a
+    // space this size is built in parts now); the subject is living with a stored one.
+    await store.createSpace({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      id: 'trip-board',
+      name: BOARD_META.name,
+      purpose: BOARD_META.purpose,
+      status: BOARD_META.status,
+      format: BOARD_META.format,
+      body,
+      expected_aggregate_revision: 0,
+    });
+    const spaceId = 'trip-board';
 
     // Compaction recovery: list_blocks without the body; the fenced sample is not a block.
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_id: spaceId });
@@ -1247,13 +1288,27 @@ describe('fix-pass: large-body end-to-end journey', () => {
     expect(resultJson(locked).error).toContain('locked');
     expect(reads).toBe(0);
 
-    // Full-body recovery unlocks delta mode; a block edit works again.
-    const full = await callTool(UPDATE_SPACE_TOOL_NAME, { ...BOARD_META, space_id: spaceId, body: after });
-    expect(isErrorResponse(full)).toBe(false);
+    // Recovery is the path the lock error teaches: revert_space to the CURRENT revision.
+    // A full-body update cannot carry this body (one write is capped at 4,000 characters),
+    // and the old fixture's small replacement body with confirm_shrink threw the board
+    // away. Restoring the current revision clears the lock and keeps every byte.
+    const current = resultJson(await callTool(GET_SPACE_TOOL_NAME, { space_id: spaceId })).space;
+    expect(current?.revision).toBe(2);
+    const bodyBeforeRecovery = await readBody(callTool, spaceId);
+    const reverted = await callTool(REVERT_SPACE_TOOL_NAME, { space_id: spaceId, revision: 2 });
+    expect(isErrorResponse(reverted)).toBe(false);
+    expect(await readBody(callTool, spaceId)).toBe(bodyBeforeRecovery);
+    expect(sha256(await readBody(callTool, spaceId))).toBe(sha256(bodyBeforeRecovery));
+
+    // Unlocked: a block edit works again, on the whole board, nothing lost.
     const again = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_id: spaceId,
       edits: [{ type: 'block', anchor: 'sec-5', new_content: '<p>again</p>' }],
     });
     expect(isErrorResponse(again)).toBe(false);
+    const recovered = await readBody(callTool, spaceId);
+    expect(recovered.length).toBeGreaterThan(60000);
+    expect(recovered).toContain('<p>again</p>');
+    expect(recovered).toContain(`<!-- @block:sec-${String(sectionCount - 1)} -->`);
   });
 });

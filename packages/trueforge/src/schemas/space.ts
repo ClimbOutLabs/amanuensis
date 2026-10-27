@@ -147,6 +147,16 @@ export const SpaceFormatSchema = z.enum(['markdown', 'html']).openapi('SpaceForm
  */
 export const SPACE_BODY_MAX_LENGTH = 65_536;
 
+/**
+ * Maximum new content one space write call may carry, in characters. A stored body may reach
+ * SPACE_BODY_MAX_LENGTH, but it is built up over several calls: models stall while writing
+ * very long tool arguments (the argument stream goes silent mid-call on more than one model),
+ * so one call stays small and the space tool layer refuses a write past this. The instructions
+ * the model gets say the same number, and the streamed-argument limit for the write tools is
+ * derived from it, so the three can never drift apart.
+ */
+export const SPACE_WRITE_MAX_LENGTH = 4_000;
+
 export const SpaceContentSchema = z
   .object({
     name: z.string().trim().min(1).max(160),
