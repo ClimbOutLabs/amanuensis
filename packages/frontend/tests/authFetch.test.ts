@@ -72,16 +72,22 @@ describe('createAuthAwareFetch', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const originalWindow = globalThis.window;
     const assigns: string[] = [];
-    (globalThis as { window: Window }).window = {
-      location: {
-        pathname: '/chat/abc',
-        search: '',
-        hash: '',
-        assign: (href: string) => {
-          assigns.push(href);
+    // Minimal browser stub for the redirect path, installed as a plain
+    // property so the partial shape needs no type assertions.
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      writable: true,
+      value: {
+        location: {
+          pathname: '/chat/abc',
+          search: '',
+          hash: '',
+          assign: (href: string) => {
+            assigns.push(href);
+          },
         },
       },
-    } as Window;
+    });
 
     try {
       const wrapped = createAuthAwareFetch(async () => new Response('nope', { status: 401 }));
@@ -108,7 +114,11 @@ describe('createAuthAwareFetch', () => {
       if (originalWindow === undefined) {
         Reflect.deleteProperty(globalThis, 'window');
       } else {
-        (globalThis as { window: Window }).window = originalWindow;
+        Object.defineProperty(globalThis, 'window', {
+          configurable: true,
+          writable: true,
+          value: originalWindow,
+        });
       }
     }
   });
