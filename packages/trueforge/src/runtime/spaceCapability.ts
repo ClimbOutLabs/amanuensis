@@ -1132,7 +1132,7 @@ class SpaceTool extends LocalToolMCP {
     if (rest.length > 0) {
       throw new SpaceNameLookupError(
         `More than one space is named "${space_name}", and a name has to pick one space. ` +
-          `Do not guess: tell the person to rename one of them in the Spaces view, then try again.`,
+          `Do not guess: tell the person to delete one of them in the Spaces view, then try again.`,
       );
     }
     return only.id;
@@ -1356,6 +1356,23 @@ class SpaceTool extends LocalToolMCP {
 
   private async revert(input: z.infer<typeof REVERT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const space_id = await this.resolveSpaceId(input.space_name);
+    // A revert restores the name the space carried at that revision, so it takes a name
+    // just like create and rename do: refuse before anything is written when another
+    // space holds that name now, so a name can never come to mean two spaces. A missing
+    // revision reads as undefined here and keeps the store's not-found refusal below.
+    const historical = await this.options.store.getSpaceRevision({
+      tenant_id: this.options.authority.tenantId,
+      created_by: this.options.authority.userRef,
+      space_id,
+      revision: input.revision,
+    });
+    if (historical !== undefined) {
+      await this.refuseTakenSpaceName({
+        name: historical.name,
+        except_space_id: space_id,
+        next_step: 'Rename the space that has that name now with edit_space, then try again.',
+      });
+    }
     const [expected_aggregate_revision, expected_revision] = await Promise.all([
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       resolveSpaceRevision(this.options.store, this.options.authority, space_id, input.expected_revision),
