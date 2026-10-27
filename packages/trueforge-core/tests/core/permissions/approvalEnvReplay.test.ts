@@ -1,10 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  ShellApprovalBindingSchema,
-  type ShellApprovalBinding,
-} from '../../../src/core/permissions/approvalTokens';
+import { ShellApprovalBindingSchema, type ShellApprovalBinding } from '../../../src/core/permissions/approvalTokens';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
@@ -59,9 +56,7 @@ function action(canonical_params: Record<string, unknown>): SentinelAction {
 
 function requireShellApproval(decision: TierDecision): { token_id: string; binding: ShellApprovalBinding } {
   if (decision.tier !== 3 || decision.approval_token_id === null || decision.shell_binding === null) {
-    throw new Error(
-      `expected a Tier 3 shell approval, got tier ${String(decision.tier)} (${decision.reason})`,
-    );
+    throw new Error(`expected a Tier 3 shell approval, got tier ${String(decision.tier)} (${decision.reason})`);
   }
   return { token_id: decision.approval_token_id, binding: decision.shell_binding };
 }
