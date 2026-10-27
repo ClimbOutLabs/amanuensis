@@ -140,7 +140,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -498,6 +498,8 @@ function createTurnResolver(deps: {
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
+            toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
+            toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
           });
           return new UsageRecordingLLM({
             llm: client,
@@ -776,6 +778,7 @@ function createTurnResolver(deps: {
       searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
       modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
+      modelToolCallIdleTimeoutMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.

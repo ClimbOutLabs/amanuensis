@@ -26,11 +26,12 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
 import { useModelUsageVisible } from '../utils/modelUsageDisplayPreference.js';
 import {
-  hasPendingAskUserResponse,
-  hasPendingToolApproval,
-  parseToolResultDisposition,
-  toolCallDisposition,
-} from '../utils/toolCallParsing.js';
+  recoveredToolCallIds,
+  stepNoticesByCallId,
+  toolStepErrored,
+  toolStepUnfinished,
+} from '../utils/recoveredSteps.js';
+import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
 import { turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
@@ -100,25 +101,6 @@ function stepPhase(
     return 'executing-tools';
   }
   return 'waiting-for-model';
-}
-
-/**
- * A tool-call part counts as errored when its result disposition carries an
- * error tone. The incomplete-status branch is a fallback for runtimes that
- * preserve part-level statuses (the external-store runtime normalizes them).
- */
-function isToolPartErrored(part: PartState): boolean {
-  if (part.type !== 'tool-call') return false;
-  if (part.status?.type === 'incomplete') return true;
-  return parseToolResultDisposition(part.result)?.tone === 'error';
-}
-
-/** A step that ran into trouble: it failed, was blocked or denied, did not run, or its outcome is unknown. */
-function isToolPartUnfinished(part: PartState): boolean {
-  if (part.type !== 'tool-call') return false;
-  if (isToolPartErrored(part)) return true;
-  const disposition = toolCallDisposition(part);
-  return disposition !== undefined && disposition.disposition !== 'executed_ok';
 }
 
 type NestedPart = { readonly type: string; readonly messages?: readonly { readonly content: readonly NestedPart[] }[] };
@@ -213,7 +195,12 @@ export function AssistantMessageContainer() {
   // the answer, unless a step after that line failed, and then one plain line says it did not finish.
   const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
   const lastInterim = interimTextIndices.at(-1);
-  const failedAfterLastInterim = lastInterim !== undefined && parts.slice(lastInterim + 1).some(isToolPartErrored);
+  // A step the reply did again, successfully, is not a failure the person needs to hear about.
+  const recovered = recoveredToolCallIds(parts);
+  const isUnrecovered = (part: PartState) => part.type === 'tool-call' && !recovered.has(part.toolCallId);
+  const failedAfterLastInterim =
+    lastInterim !== undefined &&
+    parts.slice(lastInterim + 1).some(part => toolStepErrored(part) && isUnrecovered(part));
   const keptAsAnswer = settled && !hasFinal && !failedAfterLastInterim ? lastInterim : undefined;
   const hiddenTextIndices = agentDetailsVisible
     ? new Set<number>()
@@ -224,7 +211,7 @@ export function AssistantMessageContainer() {
     !hasFinal &&
     keptAsAnswer === undefined &&
     error === undefined &&
-    parts.some(isToolPartErrored);
+    parts.some(part => toolStepErrored(part) && isUnrecovered(part));
   const foldedToolCallIds = new Set(
     runs.flatMap(run =>
       parts.slice(run.start, run.end).flatMap(part => (part.type === 'tool-call' ? [part.toolCallId] : [])),
@@ -232,9 +219,17 @@ export function AssistantMessageContainer() {
   );
   const isHiddenStep = (part: PartState) =>
     !agentDetailsVisible && part.type === 'tool-call' && foldedToolCallIds.has(part.toolCallId) && !needsPerson(part);
-  // An answer can read as if everything worked, so a hidden step that did not finish always gets one line.
+  // An answer can read as if everything worked, so a hidden step that ended unfinished always gets one line.
   const showStepNotFinished =
-    settled && !showNotFinished && parts.some(part => isHiddenStep(part) && isToolPartUnfinished(part));
+    settled &&
+    !showNotFinished &&
+    parts.some(part => isHiddenStep(part) && toolStepUnfinished(part) && isUnrecovered(part));
+  // The host's plain line for an undone step shows once the reply has settled, where the step happened.
+  const stepNotices = settled ? stepNoticesByCallId({ parts, recovered }) : new Map<string, readonly string[]>();
+  const noticesInRange = ({ start, end }: { start: number; end: number }) =>
+    parts
+      .slice(start, end)
+      .flatMap(part => (part.type === 'tool-call' ? (stepNotices.get(part.toolCallId) ?? []) : []));
   // With details off the step rows fold away, so a finished turn's lasting outcomes (a reminder set,
   // a calendar change, an email sent, a draft saved) each get one plain line under the reply instead.
   // With details on the step rows already carry them, and a running turn shows none until it settles.
@@ -267,7 +262,7 @@ export function AssistantMessageContainer() {
     // Only the last run reflects the running turn; earlier runs have already finished.
     const phase = stepPhase(runParts, isMessageRunning && !isLast ? undefined : messageStatus);
     const attention =
-      runParts.some(isToolPartErrored) ||
+      runParts.some(part => toolStepErrored(part) && isUnrecovered(part)) ||
       (isHost && (recallOutcomeBad || memoryFailed)) ||
       phase === 'waiting-for-approval';
     const showMemory = isHost && hasMemory;
@@ -340,7 +335,6 @@ export function AssistantMessageContainer() {
         runs.length === 0 &&
         renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
       <RunCodeSetupNoticesContainer parts={parts} />
-      <ToolRefusalNoticesContainer parts={parts} />
       {ingestionStatusLine !== undefined && (
         <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
           {ingestionStatusLine}
@@ -364,7 +358,14 @@ export function AssistantMessageContainer() {
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
-              return <AssistantLeafPartContainer part={part} stepHidden={isHiddenStep(part)} />;
+              return (
+                <>
+                  <AssistantLeafPartContainer part={part} stepHidden={isHiddenStep(part)} />
+                  {foldedToolCallIds.has(part.toolCallId) ? null : (
+                    <ToolRefusalNoticesContainer notices={stepNotices.get(part.toolCallId) ?? []} />
+                  )}
+                </>
+              );
             case 'image':
             case 'data':
               return <AssistantLeafPartContainer part={part} />;
@@ -377,7 +378,12 @@ export function AssistantMessageContainer() {
               const run = runs[runIndex];
               if (!run) return null;
               // Details off: no step header; only the calls that need the person show from the run.
-              return agentDetailsVisible ? renderInternals({ run, runIndex, children }) : children;
+              return (
+                <>
+                  {agentDetailsVisible ? renderInternals({ run, runIndex, children }) : children}
+                  <ToolRefusalNoticesContainer notices={noticesInRange(run)} />
+                </>
+              );
             }
           }
         }}

@@ -765,6 +765,137 @@ describe('AssistantMessageContainer with agent details off', () => {
   });
 });
 
+describe('AssistantMessageContainer when a step was refused and then done again', () => {
+  const PLAIN_LINE = 'I could not finish one of the steps in this reply. Ask me to try again.';
+  const OLD_STORED_LINE =
+    'One of the actions in this reply could not run: The update_space call was not sent because its arguments were not complete, so nothing was done with it. Send the whole call again, with all of its arguments finished. Ask again to try it once more.';
+  const LEAD =
+    'I will update the space with the full checklist now.\n\nIt has twelve steps and a timeline, so this takes one careful write.';
+  const FINAL_DONE = 'Done. The space now has the twelve steps and the timeline.';
+  const FINAL_FAILED = 'The space was not changed.';
+
+  function envelope(outcome: Record<string, unknown>) {
+    return { schema_version: 'tool.response.v2', outcome, result: {} };
+  }
+
+  const refused = (message: string) =>
+    envelope({
+      disposition: 'never_ran',
+      remediation: { reason_code: 'tool_pre_dispatch_failed', message, suggested_action: 'contact_user' },
+    });
+  const done = envelope({ disposition: 'executed_ok' });
+
+  function spaceCall(id: string, extra: { cutOff?: boolean; result?: unknown }) {
+    const argsText =
+      extra.cutOff === true
+        ? '{"name":"Harbour Market Plan","body":"- [ ] Book the stall'
+        : JSON.stringify({ name: 'Harbour Market Plan', body: '- [x] Book the stall' });
+    return {
+      type: 'tool-call' as const,
+      toolCallId: id,
+      toolName: 'update_space',
+      args: {},
+      argsText,
+      ...(extra.result === undefined ? {} : { result: extra.result }),
+    };
+  }
+
+  const failTwiceThenSucceed = (line: string) => [
+    { type: 'text' as const, text: LEAD },
+    spaceCall('try-1', { cutOff: true, result: refused(line) }),
+    spaceCall('try-2', { cutOff: true, result: refused(line) }),
+    spaceCall('try-3', { result: done }),
+    { type: 'text' as const, text: FINAL_DONE },
+  ];
+
+  const failTwice = (line: string) => [
+    { type: 'text' as const, text: LEAD },
+    spaceCall('try-1', { cutOff: true, result: refused(line) }),
+    spaceCall('try-2', { cutOff: true, result: refused(line) }),
+    { type: 'text' as const, text: FINAL_FAILED },
+  ];
+
+  it('shows the person nothing about a failure the reply recovered from, with agent details off', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwiceThenSucceed(PLAIN_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL_DONE)).toBeVisible();
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('says nothing about it, even for a reply stored before the plain line existed', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwiceThenSucceed(OLD_STORED_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    for (const element of screen.queryAllByText(/could not run|arguments/)) expect(element).not.toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('keeps the recovered failure under agent details, and still says nothing in plain words', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: failTwiceThenSucceed(PLAIN_LINE) }]);
+
+    expect(screen.getByText(FINAL_DONE)).toBeVisible();
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+    // The failed tries are still listed with the other steps.
+    expect(screen.getByTestId('assistant-message-agent-internals')).toHaveTextContent(/3 steps · 3 tools/);
+  });
+
+  it('shows one plain line where the step happened, and the footer, when the step never finished', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwice(PLAIN_LINE) }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    const notice = screen.getByTestId('tool-refusal-notice');
+    expect(screen.getAllByTestId('tool-refusal-notice')).toHaveLength(1);
+    expect(notice).toHaveTextContent(PLAIN_LINE);
+    expect(notice).not.toHaveTextContent(/update_space|arguments/);
+    const lead = screen.getByText(/I will update the space/);
+    const final = screen.getByText(FINAL_FAILED);
+    // After the words that led into the step, before the words that followed it: never the first line.
+    expect(lead.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toHaveTextContent(
+      "One step didn't finish. Turn on agent details to see it.",
+    );
+  });
+
+  it('still shows a reply stored with the older line, in place', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwice(OLD_STORED_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.getByTestId('tool-refusal-notice')).toHaveTextContent(OLD_STORED_LINE);
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toBeVisible();
+  });
+
+  it('shows the plain line once with agent details on, next to the listed steps', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: failTwice(PLAIN_LINE) }]);
+
+    expect(screen.getAllByTestId('tool-refusal-notice')).toHaveLength(1);
+    expect(screen.getByTestId('tool-refusal-notice')).toHaveTextContent(PLAIN_LINE);
+    expect(screen.getByText(FINAL_FAILED)).toBeVisible();
+  });
+
+  it('waits for the reply to settle before saying a step is undone', async () => {
+    renderAssistantMessage(
+      [{ role: 'assistant', content: failTwice(PLAIN_LINE).slice(0, 3), status: { type: 'running' } }],
+      { agentDetails: 'collapsed', isRunning: true },
+    );
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+});
+
 describe('AssistantMessageContainer images without a chat image scope', () => {
   const DATA_PNG = 'data:image/png;base64,iVBORw0KGgo=';
 

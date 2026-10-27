@@ -577,14 +577,21 @@ describe('edit_space delta edits: Madrid board journey', () => {
 
   it('a delta edit that would exceed the body size limit fails as a clean terminal error', async () => {
     const store = new InMemorySpaceStore();
-    const created = await callTool(store, CREATE_SPACE_TOOL_NAME, {
+    // Seeded directly in the store: one write may no longer carry 60,000 characters (a
+    // space this size is built in parts now), and this test's subject is the delta whose
+    // computed body crosses the stored limit, not the write that first made the space.
+    const seeded = await store.createSpace({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      id: 'big-space',
       name: 'Big',
       purpose: 'Size-limit probe.',
       status: 'active',
       format: 'markdown',
       body: 'a'.repeat(60_000),
+      expected_aggregate_revision: 0,
     });
-    const spaceId = await expectSpaceId(store, created);
+    const spaceId = seeded.record.id;
 
     // One edit doubles every character, pushing the computed body (120,000
     // chars) past the 65,536 cap the body path enforces at the boundary.

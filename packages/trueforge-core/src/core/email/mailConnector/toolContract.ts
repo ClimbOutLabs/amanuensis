@@ -41,6 +41,9 @@ export const MAIL_ACCOUNT_ARGUMENT = 'account_name';
 /** Lists and searches messages; the host keeps it to a recent window when the call sets no date. */
 export const MAIL_LIST_TOOL_NAME = 'list_emails_metadata';
 
+/** Reads message bodies; its optional mark-as-read choice is the one read argument that changes the mailbox. */
+export const MAIL_CONTENT_TOOL_NAME = 'get_emails_content';
+
 /** Names a model tends to guess when it looks for the Email connector under another name. */
 export function isMailConnectorGuess(name: string): boolean {
   const lowered = name.toLowerCase();
