@@ -281,6 +281,29 @@ describe('AmanRuntimeRail', () => {
     expect(ruleOf('.aman-runtime-rail__picture')).not.toMatch(/gradient/);
   });
 
+  it('sizes the section value, fold rows, waiting line and the Activity receipt on the --text-sm step', () => {
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The value sits a weight heavier than its label, at the same size, not a size jump.
+    const sectionValueRule = ruleOf('.aman-runtime-rail__section-value');
+    expect(sectionValueRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(sectionValueRule).toMatch(/font-weight: 500;/);
+    const summaryRule = ruleOf('.aman-runtime-rail__details-summary');
+    expect(summaryRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(summaryRule).toMatch(/font-weight: 500;/);
+    expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
+    // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
+    const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');
+    expect(railReceiptRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(railReceiptRule).not.toMatch(/0\.875rem/);
+  });
+
   it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
     const { container } = render(
       <RuntimeHarness messages={[]}>
