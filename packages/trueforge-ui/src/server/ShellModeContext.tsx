@@ -81,7 +81,8 @@ export type SettingsSection =
   | 'personalization'
   | 'themes'
   | 'permissions'
-  | 'audit';
+  | 'audit'
+  | 'about';
 
 export type HistoryAgentFilter = {
   agentId?: string;
