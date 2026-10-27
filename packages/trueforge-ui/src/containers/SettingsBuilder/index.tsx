@@ -43,6 +43,7 @@ const SentinelSettings = lazy(() =>
 const AuditLogSettings = lazy(() =>
   import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
 );
+const AboutSettings = lazy(() => import('./AboutSettings.js'));
 
 type SettingsNavItem = {
   id: SettingsSection;
@@ -57,7 +58,8 @@ type SettingsNavItem = {
     | 'robot'
     | 'palette'
     | 'lock'
-    | 'clock-rotate-left';
+    | 'clock-rotate-left'
+    | 'info';
 };
 
 const SETTINGS_PANEL_ID = 'settings-panel';
@@ -152,6 +154,7 @@ const TruefoundrySettingsBuilder = () => {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
       baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
+    baseSections.push({ id: 'about', label: 'About', icon: 'info' });
     return baseSections;
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
 
@@ -293,6 +296,7 @@ const TruefoundrySettingsBuilder = () => {
               {activeSection === 'personalization' ? <PersonalizationSettings /> : null}
               {activeSection === 'permissions' ? <SentinelSettings /> : null}
               {activeSection === 'audit' ? <AuditLogSettings /> : null}
+              {activeSection === 'about' ? <AboutSettings /> : null}
             </Suspense>
           </div>
         </section>
