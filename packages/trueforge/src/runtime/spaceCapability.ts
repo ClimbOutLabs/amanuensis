@@ -63,6 +63,7 @@ import {
 } from '../schemas/space';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
+import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
@@ -201,21 +202,21 @@ export class SpaceBlockFingerprintMismatchError extends SpaceBlockAnchorError {
       this.message =
         head +
         `That fingerprint matches block "${this.relocatedAnchor}" in the current revision: the content ` +
-          `you meant is there now. Send the edit again naming anchor "${this.relocatedAnchor}" with the ` +
-          `same fingerprint, or re-read the space with list_blocks first.`;
+        `you meant is there now. Send the edit again naming anchor "${this.relocatedAnchor}" with the ` +
+        `same fingerprint, or re-read the space with list_blocks first.`;
     } else if (input.matchAnchors.length > 1) {
       this.message =
         head +
         `That fingerprint matches ${String(input.matchAnchors.length)} blocks in the current revision ` +
-          `(${input.matchAnchors.map(a => `"${a}"`).join(', ')}): identical copies share a fingerprint, so ` +
-          `it cannot say which block moved. Re-read the space with list_blocks or get_space and take the ` +
-          `anchor and fingerprint from the fresh read.`;
+        `(${input.matchAnchors.map(a => `"${a}"`).join(', ')}): identical copies share a fingerprint, so ` +
+        `it cannot say which block moved. Re-read the space with list_blocks or get_space and take the ` +
+        `anchor and fingerprint from the fresh read.`;
     } else {
       this.message =
         head +
         `No block in the current revision has that fingerprint: the content it names is gone or was ` +
-          `changed since the read. Re-read the space with list_blocks or get_space and take the anchor ` +
-          `and fingerprint from the fresh read.`;
+        `changed since the read. Re-read the space with list_blocks or get_space and take the anchor ` +
+        `and fingerprint from the fresh read.`;
     }
   }
 }
@@ -1097,11 +1098,10 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
  * before anything is persisted, and the resulting length is
  * checked arithmetically before the new body is built, mirroring the other edit paths.
  */
-function applyEditEntries(input: {
-  space_id: string;
+function applyEditEntries(input: { space_id: string; body: string; edits: readonly SpaceEditEntry[] }): {
   body: string;
-  edits: readonly SpaceEditEntry[];
-}): { body: string; block_results: { anchor: string; new_length: number; deleted: boolean }[] } {
+  block_results: { anchor: string; new_length: number; deleted: boolean }[];
+} {
   const { space_id, body, edits } = input;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
@@ -1146,7 +1146,8 @@ function applyEditEntries(input: {
       const matchAnchors = segments
         .filter(
           segment =>
-            segment !== target && blockFingerprint(body.slice(segment.coreStart, segment.coreEnd)) === entry.fingerprint,
+            segment !== target &&
+            blockFingerprint(body.slice(segment.coreStart, segment.coreEnd)) === entry.fingerprint,
         )
         .map(segment => segment.anchor);
       throw new SpaceBlockFingerprintMismatchError({
@@ -1334,7 +1335,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: GET_SPACE_TOOL_NAME,
       description:
-        'Read one space by its exact space_name. Returns metadata, the aggregate_revision, the block outline (each block\'s anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.',
+        "Read one space by its exact space_name. Returns metadata, the aggregate_revision, the block outline (each block's anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.",
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,
@@ -1354,7 +1355,7 @@ class SpaceTool extends LocalToolMCP {
         'Change part of one space by its exact space_name, without resending the body. ' +
         'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed: every entry addresses a block of that one revision, and a call naming an older revision is refused with the current one. ' +
         'edits is a list of up to 50 entries: a block entry {type: "block", anchor, fingerprint, new_content} replaces the content of the block the anchor names, and empty new_content deletes it; an insert entry {type: "insert", after, fingerprint, new_content} adds new content right after the named block. One block can be named by only one entry per call. ' +
-        'fingerprint is the block\'s fingerprint as that read showed it: a short code hashed from the block\'s exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block\'s anchor. ' +
+        "fingerprint is the block's fingerprint as that read showed it: a short code hashed from the block's exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block's anchor. " +
         'Anchors come from list_blocks: the name of a <!-- @block:name --> section, or b1, b2, and so on for the blocks a body without markers is split into. ' +
         'An unknown or duplicate anchor fails the whole edit and nothing is saved: do not retry the same entry. Re-read the space and correct the entry from the fresh read. ' +
         'The new content across one call may total at most about 4,000 characters; split a bigger change into several calls. ' +
@@ -1610,7 +1611,7 @@ class SpaceTool extends LocalToolMCP {
     if (rest.length > 0) {
       throw new SpaceNameLookupError(
         `More than one space is named "${space_name}", and a name has to pick one space. ` +
-          `Do not guess: tell the person to rename one of them in the Spaces view, then try again.`,
+          `Do not guess: tell the person to delete one of them in the Spaces view, then try again.`,
       );
     }
     return only.id;
@@ -1700,6 +1701,23 @@ class SpaceTool extends LocalToolMCP {
 
   private async revert(input: z.infer<typeof REVERT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const space_id = await this.resolveSpaceId(input.space_name);
+    // A revert restores the name the space carried at that revision, so it takes a name
+    // just like create and rename do: refuse before anything is written when another
+    // space holds that name now, so a name can never come to mean two spaces. A missing
+    // revision reads as undefined here and keeps the store's not-found refusal below.
+    const historical = await this.options.store.getSpaceRevision({
+      tenant_id: this.options.authority.tenantId,
+      created_by: this.options.authority.userRef,
+      space_id,
+      revision: input.revision,
+    });
+    if (historical !== undefined) {
+      await this.refuseTakenSpaceName({
+        name: historical.name,
+        except_space_id: space_id,
+        next_step: 'Rename the space that has that name now with edit_space, then try again.',
+      });
+    }
     const [expected_aggregate_revision, expected_revision] = await Promise.all([
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       resolveSpaceRevision(this.options.store, this.options.authority, space_id, input.expected_revision),
@@ -2028,7 +2046,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
-        ...(google === undefined ? [] : [google]),
+        ...google,
         ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
@@ -2061,26 +2079,34 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const connections = this.#space.googleConnections;
     const evalFixtures = configuration.AMAN_EVAL_MODE ? evalSources() : undefined;
     if (connections === undefined && evalFixtures === undefined) {
-      return undefined;
+      return [];
     }
+    const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
     try {
-      return await googleCapability({
+      const google = await googleCapability({
         fetchImpl: undefined,
         connections,
         evalSources: evalFixtures,
-        owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        owner,
         tracing: input.tracing,
         timeZone: this.clientTimezone,
         sentinel: this.#sentinel(input),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
         logger: this.#space.logger,
       });
+      // The guided setup mounts beside the tools, but only against a real login store: in eval mode the
+      // fixture account stands in for a finished connection, so there is nothing to lead there.
+      const setup =
+        connections === undefined || evalFixtures !== undefined
+          ? undefined
+          : await googleSetupCapability({ connections, owner, tracing: input.tracing });
+      return [...(google === undefined ? [] : [google]), ...(setup === undefined ? [] : [setup])];
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
         extractErrorLogFields(error),
       );
-      return undefined;
+      return [];
     }
   }
 }

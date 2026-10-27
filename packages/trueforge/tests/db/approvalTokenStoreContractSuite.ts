@@ -37,6 +37,8 @@ const shellBinding: ShellApprovalBinding = {
   cwd_resolved: '/work',
   env_overrides: { LANG: 'C' },
   file_hashes: { '/usr/bin/git': 'abc' },
+  workspace_cwd: '/work',
+  path_resolution: 'host',
 };
 
 export function runApprovalTokenStoreContractSuite(harness: () => ApprovalTokenStoreHarness): void {

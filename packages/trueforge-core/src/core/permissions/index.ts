@@ -27,7 +27,7 @@ export {
   withoutRelaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
-export { verifyPreDispatch } from './dispatch';
+export { SANDBOX_FILE_WRITE_TOOLS, verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
 export { extractCardFields, genericExtractor } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';

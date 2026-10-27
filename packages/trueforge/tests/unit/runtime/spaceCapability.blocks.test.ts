@@ -417,7 +417,14 @@ describe('structural blocks for a body with no markers', () => {
     const extended = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Big table',
       expected_revision: 1,
-      edits: [{ type: 'insert', after: last.anchor, fingerprint: last.fingerprint, new_content: `| Row 61 | ${'y'.repeat(95)} |` }],
+      edits: [
+        {
+          type: 'insert',
+          after: last.anchor,
+          fingerprint: last.fingerprint,
+          new_content: `| Row 61 | ${'y'.repeat(95)} |`,
+        },
+      ],
     });
     expect(isErrorResponse(extended)).toBe(false);
     const finalBody = await readBody(callTool, 'Big table');
@@ -479,9 +486,12 @@ describe('the dog-table flow: build a 40-row table in parts by block edits', () 
 
   it('creates with the heading and first rows, then extends by inserts past the cap in total', async () => {
     const { callTool } = makeHarness();
-    const header = ['# Dog breeds', '', '| Breed | Size | Energy | Good with kids | Note |', '| --- | --- | --- | --- | --- |'].join(
-      '\n',
-    );
+    const header = [
+      '# Dog breeds',
+      '',
+      '| Breed | Size | Energy | Good with kids | Note |',
+      '| --- | --- | --- | --- | --- |',
+    ].join('\n');
     await createSpace(callTool, { name: 'Dog breeds', body: `${header}\n${rowsFor(1, 8)}` });
 
     // The first part reads the blocks once. Each later part chains from what the
@@ -547,7 +557,8 @@ describe('the dog-table flow: build a 40-row table in parts by block edits', () 
           type: 'insert',
           after: middle.anchor,
           fingerprint: middle.fingerprint,
-          new_content: '| Border Terrier | Medium | High | Yes | A steady, people-focused dog that fits family life well. |',
+          new_content:
+            '| Border Terrier | Medium | High | Yes | A steady, people-focused dog that fits family life well. |',
         },
       ],
     });
@@ -585,7 +596,14 @@ describe('block edits carry the revision they were read at', () => {
     const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Stale',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'First paragraph, updated.' }],
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: outline[0]?.fingerprint ?? '',
+          new_content: 'First paragraph, updated.',
+        },
+      ],
     });
     expect(isErrorResponse(moved)).toBe(false);
     const bodyAfterMove = await readBody(callTool, 'Stale');
@@ -594,7 +612,14 @@ describe('block edits carry the revision they were read at', () => {
     const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Stale',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Second paragraph, updated.' }],
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: outline[1]?.fingerprint ?? '',
+          new_content: 'Second paragraph, updated.',
+        },
+      ],
     });
     expect(isErrorResponse(stale)).toBe(true);
     const parsed = resultJson(stale);
@@ -721,7 +746,9 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, updated.' }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, updated.' },
+      ],
     });
     expect(isErrorResponse(moved)).toBe(false);
 
@@ -729,7 +756,9 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, updated.' }],
+      edits: [
+        { type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, updated.' },
+      ],
     });
     expect(isErrorResponse(stale)).toBe(true);
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -743,7 +772,9 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 2,
-      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, updated.' }],
+      edits: [
+        { type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, updated.' },
+      ],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -861,7 +892,14 @@ describe('marked bodies keep their named anchors', () => {
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Marked insert',
       expected_revision: 1,
-      edits: [{ type: 'insert', after: 'pricing', fingerprint: listed.blocks?.[0]?.fingerprint ?? '', new_content: '<p>Extra</p>' }],
+      edits: [
+        {
+          type: 'insert',
+          after: 'pricing',
+          fingerprint: listed.blocks?.[0]?.fingerprint ?? '',
+          new_content: '<p>Extra</p>',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     expect(await readBody(callTool, 'Marked insert')).toBe(

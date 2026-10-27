@@ -19,6 +19,7 @@ pins_validate() {
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
   mail=$(json_get "$PINS_FILE" mail_email_image)
   valid_digest_ref "$mail" || die "mail_email_image in $PINS_FILE must be pinned by sha256 digest"
+  valid_digest_ref "$(json_get "$PINS_FILE" setup_image)" || die "setup_image in $PINS_FILE must be pinned by sha256 digest"
   valid_digest_ref "$(json_get "$PINS_FILE" caddy_image)" || die "caddy_image in $PINS_FILE must be pinned by sha256 digest"
   node_pins_validate
 }

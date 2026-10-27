@@ -437,8 +437,18 @@ describe('edit_space delta edits: Madrid board journey', () => {
       space_name: 'Notes',
       expected_revision: 1,
       edits: [
-        { type: 'block', anchor: 'b1', fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b1' }), new_content: 'First paragraph, updated.' },
-        { type: 'block', anchor: 'b2', fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b2' }), new_content: 'Second paragraph, updated.' },
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b1' }),
+          new_content: 'First paragraph, updated.',
+        },
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b2' }),
+          new_content: 'Second paragraph, updated.',
+        },
       ],
     });
     expect(isErrorResponse(updated)).toBe(false);
@@ -555,7 +565,12 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     await createBoard(store);
 
-    const edits = Array.from({ length: 51 }, () => ({ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'b' }));
+    const edits = Array.from({ length: 51 }, () => ({
+      type: 'block',
+      anchor: 'b1',
+      fingerprint: '00000000',
+      new_content: 'b',
+    }));
     const rejected = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       expected_revision: 1,

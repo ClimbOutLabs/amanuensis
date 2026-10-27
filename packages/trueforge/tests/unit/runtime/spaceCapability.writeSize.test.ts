@@ -317,7 +317,14 @@ describe('the space write size cap', () => {
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Breeds',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: table.anchor, fingerprint: table.fingerprint, new_content: 'y'.repeat(SPACE_WRITE_MAX_LENGTH + 1) }],
+      edits: [
+        {
+          type: 'block',
+          anchor: table.anchor,
+          fingerprint: table.fingerprint,
+          new_content: 'y'.repeat(SPACE_WRITE_MAX_LENGTH + 1),
+        },
+      ],
     });
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
@@ -604,7 +611,12 @@ describe('recovering a space past the write cap, end to end', () => {
       space_name: 'Dog breeds',
       expected_revision: revision,
       edits: [
-        { type: 'insert', after: last.anchor, fingerprint: last.fingerprint, new_content: '| Breed 41 | Group 5 | Added after the miss |' },
+        {
+          type: 'insert',
+          after: last.anchor,
+          fingerprint: last.fingerprint,
+          new_content: '| Breed 41 | Group 5 | Added after the miss |',
+        },
       ],
     });
     expect(isErrorResponse(appended)).toBe(false);
@@ -624,7 +636,9 @@ describe('recovering a space past the write cap, end to end', () => {
     const locked = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
       expected_revision: revision,
-      edits: [{ type: 'insert', after: lastAfterLock.anchor, fingerprint: lastAfterLock.fingerprint, new_content: 'x' }],
+      edits: [
+        { type: 'insert', after: lastAfterLock.anchor, fingerprint: lastAfterLock.fingerprint, new_content: 'x' },
+      ],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error ?? '').toContain("call revert_space with the space's current revision");
@@ -643,7 +657,12 @@ describe('recovering a space past the write cap, end to end', () => {
       space_name: 'Dog breeds',
       expected_revision: currentRevision + 1,
       edits: [
-        { type: 'insert', after: lastAfterRevert.anchor, fingerprint: lastAfterRevert.fingerprint, new_content: '| Breed 42 | Group 5 | Added after the recovery |' },
+        {
+          type: 'insert',
+          after: lastAfterRevert.anchor,
+          fingerprint: lastAfterRevert.fingerprint,
+          new_content: '| Breed 42 | Group 5 | Added after the recovery |',
+        },
       ],
     });
     expect(isErrorResponse(editsAgain)).toBe(false);
@@ -713,6 +732,8 @@ describe('recovering a space past the write cap, end to end', () => {
     // A marked block's replacement is its whole content, as before this change: the
     // line break after the old content was part of that content, so the next marker
     // follows the new content directly.
-    expect(resultJson(read).space?.body).toBe('<!-- @block:dup -->\n<p>first updated</p><!-- @block:other -->\n<p>other</p>');
+    expect(resultJson(read).space?.body).toBe(
+      '<!-- @block:dup -->\n<p>first updated</p><!-- @block:other -->\n<p>other</p>',
+    );
   });
 });

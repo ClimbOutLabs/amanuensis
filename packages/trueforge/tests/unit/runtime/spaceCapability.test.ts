@@ -330,7 +330,9 @@ describe('space capability', () => {
       arguments: {
         space_name: 'Spain houses',
         new_title: 'Spain houses (shortlist)',
-        edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED }],
+        edits: [
+          { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+        ],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -454,7 +456,9 @@ describe('space capability', () => {
       name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Spain houses',
-        edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED }],
+        edits: [
+          { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+        ],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -654,7 +658,9 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+      ],
     });
 
     if (!('result' in response)) {
@@ -707,7 +713,9 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+      ],
       expected_revision: 1,
       expected_aggregate_revision: 1,
     });

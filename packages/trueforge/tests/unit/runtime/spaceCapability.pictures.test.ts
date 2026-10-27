@@ -435,8 +435,18 @@ describe('page reads, scripts, and empty bodies', () => {
       space_name: 'Dog breeds',
       expected_revision: 1,
       edits: [
-        { type: 'block', anchor: 'b1', fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b1' }), new_content: '' },
-        { type: 'block', anchor: 'b2', fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b2' }), new_content: '' },
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b1' }),
+          new_content: '',
+        },
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b2' }),
+          new_content: '',
+        },
       ],
     });
     expect(await errorOf(response)).toContain('The space body is empty');
