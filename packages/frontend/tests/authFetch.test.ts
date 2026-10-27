@@ -68,6 +68,51 @@ describe('createAuthAwareFetch', () => {
     }
   });
 
+  it('returns the 401 response when the sign-in redirect does not take the page away', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const originalWindow = globalThis.window;
+    const assigns: string[] = [];
+    (globalThis as { window: Window }).window = {
+      location: {
+        pathname: '/chat/abc',
+        search: '',
+        hash: '',
+        assign: (href: string) => {
+          assigns.push(href);
+        },
+      },
+    } as Window;
+
+    try {
+      const wrapped = createAuthAwareFetch(async () => new Response('nope', { status: 401 }));
+      let settled: Response | undefined;
+      void wrapped('/api/v1/models').then(response => {
+        settled = response;
+      });
+      // Let the fetch and the wrapper's own promise hops run to completion.
+      const flush = async () => {
+        for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      };
+      await flush();
+      // Still held back at first, so a working redirect never flashes an error.
+      assert.equal(settled, undefined);
+      assert.equal(assigns.length, 1);
+
+      // The page is still here long after the redirect should have taken it
+      // away: the caller gets the real response instead of hanging forever.
+      t.mock.timers.tick(60_000);
+      await flush();
+      assert.equal(settled?.status, 401);
+    } finally {
+      t.mock.timers.reset();
+      if (originalWindow === undefined) {
+        Reflect.deleteProperty(globalThis, 'window');
+      } else {
+        (globalThis as { window: Window }).window = originalWindow;
+      }
+    }
+  });
+
   it('exports browser auth entry paths', () => {
     assert.equal(AUTH_LOGIN_HREF, '/api/v1/auth/login');
     assert.equal(AUTH_LOGOUT_HREF, '/api/v1/auth/logout');
