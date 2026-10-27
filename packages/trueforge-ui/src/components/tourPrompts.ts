@@ -1,4 +1,4 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the home only offers examples that will work here. */
@@ -54,7 +54,7 @@ export const CARDS = {
   brief: {
     title: 'Your morning brief',
     detail: assistant => `${assistant} gathers your mail, calendar and to-dos into one note each morning`,
-    prompt: MORNING_BRIEF_PROMPT,
+    prompt: MORNING_BRIEF_CARD_PROMPT,
     icon: 'book-open',
     needs: ['calendar', 'email'],
     sharedRules: false,
