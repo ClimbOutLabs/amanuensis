@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import SkillSettings from '@/containers/SettingsBuilder/SkillSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import type { SkillNetworkApprovalState } from '@/server/skillNetworkApproval.js';
 import type { CreateSkillRequest, DefinedSkill, SkillCatalogEntry } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
@@ -27,9 +28,14 @@ const catalogEntry: SkillCatalogEntry = {
 };
 
 /** In-memory host: catalog is fixed, defined skills live in a mutable list. */
-function createFakeHost(initial: DefinedSkill[] = []) {
+function createFakeHost(
+  initial: DefinedSkill[] = [],
+  options: { networkApprovals?: Record<string, SkillNetworkApprovalState> } = {},
+) {
   let defined = [...initial];
   const created: CreateSkillRequest[] = [];
+  const approvals = new Map(Object.entries(options.networkApprovals ?? {}));
+  const approvalCalls: { method: string; id: string; hosts?: string[] }[] = [];
 
   const skillCatalog = {
     getSkillCatalog: async () => [catalogEntry],
@@ -55,6 +61,29 @@ function createFakeHost(initial: DefinedSkill[] = []) {
     deleteSkill: async ({ id }: { id: string }) => {
       defined = defined.filter(skill => skill.id !== id);
     },
+    ...(options.networkApprovals === undefined
+      ? {}
+      : {
+          getSkillNetworkApproval: async ({ id }: { id: string }) =>
+            approvals.get(id) ?? { declaredHosts: [], approvedHosts: null, sendCapable: false },
+          approveSkillNetwork: async ({ id, hosts }: { id: string; hosts: string[] }) => {
+            approvalCalls.push({ method: 'approve', id, hosts });
+            const next: SkillNetworkApprovalState = {
+              declaredHosts: hosts,
+              approvedHosts: hosts,
+              sendCapable: approvals.get(id)?.sendCapable ?? false,
+            };
+            approvals.set(id, next);
+            return next;
+          },
+          revokeSkillNetwork: async ({ id }: { id: string }) => {
+            approvalCalls.push({ method: 'revoke', id });
+            const current = approvals.get(id);
+            if (current !== undefined) {
+              approvals.set(id, { ...current, approvedHosts: null });
+            }
+          },
+        }),
   };
 
   const server = createMockAgentUIServer({
@@ -63,6 +92,7 @@ function createFakeHost(initial: DefinedSkill[] = []) {
 
   return {
     created,
+    approvalCalls,
     getDefined: () => defined,
     wrapper: ({ children }: { children: ReactNode }) => <ServerProvider server={server}>{children}</ServerProvider>,
   };
@@ -296,5 +326,103 @@ describe('SkillSettings', () => {
     expect(screen.getByRole('button', { name: 'Enable Code Review' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Import from GitHub/ })).toBeDisabled();
     expect(createSkill).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SkillSettings network approval', () => {
+  const tenX: DefinedSkill = { id: 'ten-x', name: 'ten-x', description: 'Works with GitHub from the sandbox.' };
+  const tenXApproval: SkillNetworkApprovalState = {
+    declaredHosts: ['github.com', 'api.github.com'],
+    approvedHosts: null,
+    sendCapable: false,
+  };
+
+  it('shows the declared sites with the approval wording, and Allow stores the approval', async () => {
+    const host = createFakeHost([tenX], { networkApprovals: { 'ten-x': tenXApproval } });
+    const { wrapper: Wrapper } = host;
+
+    render(
+      <Wrapper>
+        <SkillSettings />
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText('The ten-x skill needs to reach these sites to work:')).toBeTruthy();
+    expect(screen.getByText('github.com')).toBeTruthy();
+    expect(screen.getByText('api.github.com')).toBeTruthy();
+    expect(
+      screen.getByText(
+        /While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others/,
+      ),
+    ).toBeTruthy();
+    // GitHub cannot send mail, so no sending line appears for it.
+    expect(screen.queryByText(/will be able to send email as you/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Remove network access' })).toBeTruthy();
+    });
+    expect(host.approvalCalls).toEqual([{ method: 'approve', id: 'ten-x', hosts: ['github.com', 'api.github.com'] }]);
+    expect(screen.getByText(/Network access is on for this skill/)).toBeTruthy();
+  });
+
+  it('Remove network access takes the approval back and the prompt returns', async () => {
+    const host = createFakeHost([tenX], {
+      networkApprovals: { 'ten-x': { ...tenXApproval, approvedHosts: ['github.com', 'api.github.com'] } },
+    });
+    const { wrapper: Wrapper } = host;
+
+    render(
+      <Wrapper>
+        <SkillSettings />
+      </Wrapper>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove network access' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow' })).toBeTruthy();
+    });
+    expect(host.approvalCalls).toEqual([{ method: 'revoke', id: 'ten-x' }]);
+  });
+
+  it('names the sending when a declared site can send email', async () => {
+    const google: DefinedSkill = { id: 'google', name: 'google', description: 'Reads mail and calendar.' };
+    const host = createFakeHost([google], {
+      networkApprovals: {
+        google: { declaredHosts: ['gmail.googleapis.com'], approvedHosts: null, sendCapable: true },
+      },
+    });
+    const { wrapper: Wrapper } = host;
+
+    render(
+      <Wrapper>
+        <SkillSettings />
+      </Wrapper>,
+    );
+
+    expect(
+      await screen.findByText(
+        'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('a skill that declares no sites shows no panel', async () => {
+    const host = createFakeHost([tenX], {
+      networkApprovals: { 'ten-x': { declaredHosts: [], approvedHosts: null, sendCapable: false } },
+    });
+    const { wrapper: Wrapper } = host;
+
+    render(
+      <Wrapper>
+        <SkillSettings />
+      </Wrapper>,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Remove ten-x' })).toBeTruthy();
+    expect(screen.queryByText(/needs to reach these sites/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
   });
 });
