@@ -10,7 +10,7 @@ import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
 
 /** The right panel with its folds full, for the font, link and picture checks. Every entry is invented. */
-const ACTIONS = ['read_email', 'list_events', 'tavily_search', 'update_space', 'run_code', 'write_file', 'send_draft'];
+const ACTIONS = ['read_email', 'list_events', 'tavily_search', 'edit_space', 'run_code', 'write_file', 'send_draft'];
 
 const entries: SentinelAuditEntry[] = ACTIONS.map((action, index) => ({
   id: `entry-${String(index)}`,

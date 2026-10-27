@@ -35,6 +35,27 @@ export async function getCapabilities(client: TrueForge): Promise<TrueForgeApi.C
 }
 
 /**
+ * The build identity off a capabilities payload, or null when the host did not report one
+ * or reported something unusable. The UI's capabilities type is narrower than the wire
+ * shape, so this reads defensively rather than assuming the field is present.
+ */
+export function readBuildIdentity(capabilities: unknown): BuildIdentity | null {
+  if (typeof capabilities !== 'object' || capabilities === null) {
+    return null;
+  }
+  const build: unknown = Reflect.get(capabilities, 'build');
+  if (typeof build !== 'object' || build === null) {
+    return null;
+  }
+  const version: unknown = Reflect.get(build, 'version');
+  if (typeof version !== 'string' || version.trim() === '') {
+    return null;
+  }
+  const ref: unknown = Reflect.get(build, 'ref');
+  return typeof ref === 'string' && ref.trim() !== '' ? { version, ref } : { version };
+}
+
+/**
  * The memory backend the server resolved (`MEMORY_BACKEND`), read defensively from the
  * `memory_defaults` capability. Undefined when the capability is missing, malformed, or
  * names an unknown backend — the caller then reports memory as unknown rather than guessing.

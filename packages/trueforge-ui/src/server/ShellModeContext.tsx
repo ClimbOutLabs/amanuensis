@@ -81,7 +81,8 @@ export type SettingsSection =
   | 'personalization'
   | 'themes'
   | 'permissions'
-  | 'audit';
+  | 'audit'
+  | 'about';
 
 /**
  * A host request to open Settings at one section, made after the shell has mounted (for

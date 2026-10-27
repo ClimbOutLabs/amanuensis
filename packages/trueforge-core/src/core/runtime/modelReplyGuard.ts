@@ -21,6 +21,7 @@ import {
   type ToolParameterSchema,
 } from '../mcp/toolArgumentCheck';
 import { stableStringify } from '../permissions/approvalTokens';
+import { CREATE_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME } from '../spaces/toolContract';
 import type { ContextMessage } from './AgentThread.types';
 
 /** Most tool calls one reply may make; beyond this the turn stops (see TOO_MANY_TOOL_CALLS_MESSAGE). */
@@ -42,6 +43,18 @@ export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran l
 export const TOOL_CALL_SIZE_CUT_MESSAGE =
   'That call was stopped while it was still being written, because its arguments ran past the size limit for one call, so nothing was written. ' +
   'Send the content in smaller parts instead: the first part now, then the rest in follow-up calls.';
+
+/**
+ * Shown to the model when a space write call's arguments never finished. A space write is
+ * never resent whole: the recovery is smaller parts through edit_space, the same advice the
+ * size-cut message gives, so the two layers never contradict each other.
+ */
+export function spaceWriteIncompleteMessage(toolName: string): string {
+  return (
+    `The ${toolName} call was not sent because its arguments were not complete, so nothing was written. ` +
+    'Do not send the same call again. Send the content in smaller parts with edit_space: the first part now, then the rest in follow-up calls.'
+  );
+}
 
 /**
  * Shown to the person for a call the guard stopped, if it is still undone at the end of the turn.
@@ -126,8 +139,10 @@ export function guardModelReply(input: {
     if (args === undefined) {
       invalidCalls.set(
         call.id,
-        `The ${call.function.name} call was not sent because its arguments were not complete, so nothing was done with it. ` +
-          'Send the whole call again, with all of its arguments finished.',
+        call.function.name === CREATE_SPACE_TOOL_NAME || call.function.name === EDIT_SPACE_TOOL_NAME
+          ? spaceWriteIncompleteMessage(call.function.name)
+          : `The ${call.function.name} call was not sent because its arguments were not complete, so nothing was done with it. ` +
+              'Send the whole call again, with all of its arguments finished.',
       );
       cleaned.push(call);
       continue;
