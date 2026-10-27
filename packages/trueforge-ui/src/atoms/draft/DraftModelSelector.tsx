@@ -169,7 +169,7 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
           variant: 'ghost',
           size: 'small',
           className: cn(
-            'aui-composer-model-button text-text-secondary hover:text-text-primary h-8 max-w-48 min-w-0 gap-1 rounded-full px-2 text-[0.8125rem] font-normal',
+            'aui-composer-model-button text-text-secondary hover:text-text-primary h-8 max-w-48 min-w-0 gap-1 rounded-full px-2 text-sm font-normal',
           ),
         })}
         onClick={() => setOpen(v => !v)}

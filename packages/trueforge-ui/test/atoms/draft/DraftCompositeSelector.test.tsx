@@ -209,6 +209,15 @@ describe('DraftCompositeSelector', () => {
     expect(screen.getByText(/^Available \(\d+\)$/)).not.toHaveClass('uppercase');
   });
 
+  it('sizes the section headings on the --text-xs scale step, not a one-off literal', async () => {
+    renderSelector();
+    openAddOns();
+
+    const heading = await screen.findByText(/^Selected \(\d+\)$/);
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+  });
+
   it('opens the add-ons picker downward from a composer near the top, inside the screen', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });

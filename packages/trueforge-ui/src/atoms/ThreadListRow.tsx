@@ -82,7 +82,7 @@ export function ThreadListRow({
             ) : null}
           </span>
           {agentName != null ? (
-            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.75rem] text-text-secondary">
+            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-text-secondary">
               <Icon name="bot" className="shrink-0" />
               <span className="truncate">{agentName}</span>
             </span>
