@@ -36,6 +36,7 @@ import {
   REVERT_SPACE_TOOL_NAME,
   SPACE_SERVER_ID,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
+import { createHash } from 'node:crypto';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -69,47 +70,10 @@ import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
- * Server-assigned anchor for the implicit whole-body block of a space that declares no
- * `<!-- @block:… -->` markers. The id is a constant, so it is stable by construction: the same
- * across turns, compactions, and revisions, with nothing to persist. An `edit_space` block edit
- * against it replaces (or, with empty new_content, deletes) the entire body, subject to the usual
- * shrink guard.
- */
-export const AUTO_BLOCK_ANCHOR = 'auto-body';
-
-/**
- * Thrown when a delta edit's search text is not found in the current body. The error message is
- * self-contained: it states that nothing was persisted, shows the search text, and steers away
- * from delta retries — a miss means the model's mental copy of the body diverged, and recomputed
- * search text does not converge. The recovery is to re-read the space and re-apply the change
- * in parts from the fresh read, which works at any body size.
- */
-export class SpaceEditNotFoundError extends Error {
-  readonly search: string;
-  readonly index: number;
-
-  constructor(input: { search: string; index: number }) {
-    const preview = input.search.length > 500 ? `${input.search.slice(0, 500)}…` : input.search;
-    super(
-      `Edit #${String(input.index + 1)} search text not found in the space's current body. ` +
-        `Nothing was persisted: the space is unchanged. ` +
-        `Search text (exact, case- and whitespace-sensitive): "${preview}". ` +
-        `Do not retry this search and do not recompute search text from memory: delta retries ` +
-        `after a miss do not converge. Re-read the space with get_space first (list_blocks names ` +
-        `its sections), then make the change with edit_space in parts: a block edit naming one of ` +
-        `its anchors, or a corrected search copied from the fresh read.`,
-    );
-    this.name = 'SpaceEditNotFoundError';
-    this.search = input.search;
-    this.index = input.index;
-  }
-}
-
-/**
- * Base class for block-anchor addressing failures on the edit_space path. Like
- * SpaceEditNotFoundError, these are terminal tool errors: nothing is persisted, and the message
- * lists the valid anchors so the model can address a real block (or re-read the space and use
- * search edits) instead of guessing.
+ * Base class for block-anchor addressing failures on the edit_space path. These are
+ * terminal tool errors: nothing is persisted, and the message lists the valid anchors so
+ * the model can address a real block (or re-read the space and start from its blocks)
+ * instead of guessing.
  */
 export class SpaceBlockAnchorError extends Error {
   readonly space_id: string;
@@ -118,17 +82,19 @@ export class SpaceBlockAnchorError extends Error {
   readonly validAnchors: string[];
 
   constructor(input: { space_id: string; anchor: string; index: number; validAnchors: string[] }) {
-    // The anchor is model-controlled: truncate it in the message the way search text is
-    // truncated in SpaceEditNotFoundError, so a pathological anchor can't bloat the error
-    // (and the context) unboundedly. The full value stays on the `anchor` field.
+    // The anchor is model-controlled: truncate it in the message, so a pathological
+    // anchor can't bloat the error (and the context) unboundedly. The full value stays
+    // on the `anchor` field.
     const anchorPreview = input.anchor.length > 120 ? `${input.anchor.slice(0, 120)}…` : input.anchor;
     super(
       `${input.anchor === '' ? 'Empty' : `Unknown`} block anchor "${anchorPreview}" ` +
         `in edit_space entry #${String(input.index + 1)} for space "${input.space_id}". ` +
         `Nothing was persisted: the space is unchanged. ` +
         `Valid anchors: ${input.validAnchors.map(a => `"${a}"`).join(', ')}. ` +
-        `Retry edit_space with one of the valid anchors. If the change is not inside one block, ` +
-        `re-read the space with get_space and make it with a search edit copied from the fresh read.`,
+        `Retry edit_space with one of the valid anchors. If none of them holds the change, ` +
+        `call list_blocks to see every block with a preview of its first line, or re-read ` +
+        `the space with get_space, then make the change with edit_space in parts against ` +
+        `the revision you just read.`,
     );
     this.name = 'SpaceBlockAnchorError';
     this.space_id = input.space_id;
@@ -148,9 +114,9 @@ export class SpaceBlockAnchorNotFoundError extends SpaceBlockAnchorError {
 
 /**
  * The anchor named two or more blocks: addressing it would silently pick one, so the update
- * fails closed instead. The model renames all but one of the duplicates with search edits
- * whose search text includes the text right after the marker, so each rename touches only
- * the one copy it means to.
+ * fails closed instead. No edit can rename one copy on its own, because the anchor names
+ * them all; the honest recovery is reverting to a revision from before the duplication,
+ * and the message says so instead of teaching a fix that cannot work.
  */
 export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
   readonly occurrences: number;
@@ -163,16 +129,93 @@ export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
     // model back to the anchor that just failed.
     const unique = input.validAnchors.filter(a => a !== input.anchor);
     const uniqueList =
-      unique.length > 0 ? unique.map(a => `"${a}"`).join(', ') : '(none — every anchor in this space is duplicated)';
+      unique.length > 0 ? unique.map(a => `"${a}"`).join(', ') : '(none: every anchor in this space is duplicated)';
     this.message =
       `Block anchor "${input.anchor}" appears ${String(input.occurrences)} times in the body of ` +
       `space "${input.space_id}" (edit_space entry #${String(input.index + 1)}): edit_space needs ` +
       `a unique anchor, so nothing was persisted: the space is unchanged. ` +
-      `Rename all but one of the duplicates, then retry edit_space. To rename one copy, re-read ` +
-      `the space with get_space, then send a search edit whose search text is the marker plus the ` +
-      `text right after it (so it matches only that one copy) and whose replacement is the marker ` +
-      `with a new name plus that same text. ` +
+      `No edit can rename one copy on its own, because the anchor names them all. If an earlier ` +
+      `revision of the space has this anchor only once, revert_space to that revision brings the ` +
+      `unique anchor back; the copies added since are lost with that revert. Otherwise, edit the ` +
+      `blocks that do have unique anchors and leave the duplicated sections as they are. ` +
       `Currently unique anchors: ${uniqueList}.`;
+  }
+}
+
+/**
+ * Two entries in one edit_space call named the same block. All entries in one call apply
+ * to the blocks of the one revision the call names, so a block can be changed by only one
+ * entry per call; the model combines the change into a single entry instead.
+ */
+export class SpaceBlockAnchorRepeatedError extends SpaceBlockAnchorError {
+  readonly firstIndex: number;
+
+  constructor(input: { space_id: string; anchor: string; index: number; firstIndex: number; validAnchors: string[] }) {
+    super(input);
+    this.name = 'SpaceBlockAnchorRepeatedError';
+    this.firstIndex = input.firstIndex;
+    this.message =
+      `Block anchor "${input.anchor}" is named by two entries in this one edit_space call ` +
+      `(entries #${String(input.firstIndex + 1)} and #${String(input.index + 1)}). Entries in one call ` +
+      `all apply to the blocks of the revision the call names, so one block can be changed by ` +
+      `only one entry per call. Nothing was persisted: the space is unchanged. ` +
+      `Combine the change into a single entry for that block and retry.`;
+  }
+}
+
+/**
+ * The anchor resolved, but the block there does not carry the fingerprint the entry
+ * named: the model's copy of that block diverged (the usual cause is a read from before
+ * the block changed or moved). The refusal says where the named content is now when
+ * exactly one other block in the current revision carries that fingerprint, which is
+ * the recovery the mechanism exists for; when none or several do, it says so plainly
+ * and points at a fresh read. The block's current fingerprint is deliberately not
+ * handed back: copying it from the refusal would turn the check into a no-op, so the
+ * model re-reads and takes the fingerprint from the fresh read like any other.
+ */
+export class SpaceBlockFingerprintMismatchError extends SpaceBlockAnchorError {
+  readonly fingerprint: string;
+  readonly relocatedAnchor: string | null;
+  readonly matchAnchors: string[];
+
+  constructor(input: {
+    space_id: string;
+    anchor: string;
+    index: number;
+    validAnchors: string[];
+    fingerprint: string;
+    matchAnchors: string[];
+  }) {
+    super(input);
+    this.name = 'SpaceBlockFingerprintMismatchError';
+    this.fingerprint = input.fingerprint;
+    this.matchAnchors = input.matchAnchors;
+    const [onlyMatch] = input.matchAnchors;
+    this.relocatedAnchor = onlyMatch !== undefined && input.matchAnchors.length === 1 ? onlyMatch : null;
+    const head =
+      `Block anchor "${input.anchor}" in edit_space entry #${String(input.index + 1)} for space ` +
+      `"${input.space_id}" does not hold the content fingerprint "${input.fingerprint}" names. ` +
+      `Nothing was persisted: the space is unchanged. `;
+    if (this.relocatedAnchor !== null) {
+      this.message =
+        head +
+        `That fingerprint matches block "${this.relocatedAnchor}" in the current revision: the content ` +
+          `you meant is there now. Send the edit again naming anchor "${this.relocatedAnchor}" with the ` +
+          `same fingerprint, or re-read the space with list_blocks first.`;
+    } else if (input.matchAnchors.length > 1) {
+      this.message =
+        head +
+        `That fingerprint matches ${String(input.matchAnchors.length)} blocks in the current revision ` +
+          `(${input.matchAnchors.map(a => `"${a}"`).join(', ')}): identical copies share a fingerprint, so ` +
+          `it cannot say which block moved. Re-read the space with list_blocks or get_space and take the ` +
+          `anchor and fingerprint from the fresh read.`;
+    } else {
+      this.message =
+        head +
+        `No block in the current revision has that fingerprint: the content it names is gone or was ` +
+          `changed since the read. Re-read the space with list_blocks or get_space and take the anchor ` +
+          `and fingerprint from the fresh read.`;
+    }
   }
 }
 
@@ -203,7 +246,7 @@ export class SpaceDeltaLockedError extends Error {
 /**
  * Thrown when an edit_space call computes a body longer than the schema's
  * character limit. A tool-layer policy, not a store error: it never reaches the database.
- * Exported alongside SpaceEditNotFoundError: both are terminal tool errors surfaced by write().
+ * A terminal tool error surfaced by write().
  */
 export class SpaceBodyTooLongError extends Error {
   readonly space_id: string;
@@ -278,28 +321,23 @@ export class SpaceWriteTooLongError extends Error {
  * and a format (at most 8 each), plus one short field of headroom: 6 * (4,000 + 2,000 +
  * 160 + 160 + 8 + 8) + 2,000 of framing = 40,016.
  *
- * edit_space carries up to 50 entries. An entry's search text is copied from the stored
- * body, so one search can be as long as a whole body (SPACE_BODY_MAX_LENGTH) and 50 of
- * them dominate the call: 50 * 65,536. Anchors are at most 200 each (50 * 200, counted
- * too even though an entry carries a search or an anchor, never both). The new content
- * (every entry's replace and new_content together) is capped at SPACE_WRITE_MAX_LENGTH.
- * The metadata fields match create: 2,000 + 160 + 160 + 8 + 8. Total:
- * 6 * (50 * 65,536 + 50 * 200 + 4,000 + 2,000 + 160 + 160 + 8 + 8) + 3,000 of framing
- * = 19,761,816.
+ * edit_space carries up to 50 entries. An entry names one anchor (at most 200) and
+ * one block fingerprint (8), and carries new content; the new content across the
+ * whole call is capped at SPACE_WRITE_MAX_LENGTH by the write cap, so the entries
+ * together carry at most 50 anchors and fingerprints (50 * 208) plus 4,000 of new
+ * content. The metadata fields match create
+ * (2,000 + 160 + 160 + 8 + 8), and expected_revision is a short number. Total:
+ * 6 * (50 * 208 + 4,000 + 2,000 + 160 + 160 + 8 + 8) + 3,000 of framing = 103,416.
  *
- * The edit_space limit is therefore large: a search that copies a stored page is
- * legitimate, however long it streams. What stops a runaway edit_space call in practice
- * is the tool-call idle allowance (a call that goes silent mid-write is stopped on
- * time, not on size); this limit is only the backstop for a call that keeps streaming
- * past every valid shape.
+ * What stops a runaway edit_space call in practice is the tool-call idle allowance
+ * (a call that goes silent mid-write is stopped on time, not on size); this limit is
+ * only the backstop for a call that keeps streaming past every valid shape.
  */
 const STREAMED_JSON_ESCAPE_FACTOR = 6;
 const CREATE_STREAMED_ARGUMENT_LIMIT =
   STREAMED_JSON_ESCAPE_FACTOR * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000;
 const EDIT_STREAMED_ARGUMENT_LIMIT =
-  STREAMED_JSON_ESCAPE_FACTOR *
-    (50 * SPACE_BODY_MAX_LENGTH + 50 * 200 + SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) +
-  3_000;
+  STREAMED_JSON_ESCAPE_FACTOR * (50 * 208 + SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 3_000;
 export const SPACE_WRITE_TOOL_ARGUMENT_LIMITS: ReadonlyMap<string, number> = new Map([
   [CREATE_SPACE_TOOL_NAME, CREATE_STREAMED_ARGUMENT_LIMIT],
   [EDIT_SPACE_TOOL_NAME, EDIT_STREAMED_ARGUMENT_LIMIT],
@@ -323,7 +361,7 @@ const SPACE_INSTRUCTION_SECTION = 'spaces';
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Build a large space in steps, not in one call: one write carries at most about 4,000 characters of new content, and a write past that is refused with nothing saved. For a space with sections, first create a short skeleton: a title and one section per part, each opened by a marker such as <!-- @block:pricing -->. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with edit_space search edits that extend the last row, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
+Build a large space in steps, not in one call: one write carries at most about 4,000 characters of new content, and a write past that is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with edit_space: call list_blocks, then insert the new rows after the last block, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
 
 Pass body as one string with real line breaks: each table row on its own line, and a blank line as an empty line. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
@@ -333,7 +371,7 @@ Pictures: use only picture links that a search or page result in this chat retur
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
-There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it: each entry in edits is a search/replace pair (type 'search') or an anchor-addressed block replacement (type 'block'). edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. Use block edits for one section, search edits for a small change to a space with no markers: each search is an exact, case-sensitive substring copied verbatim from the latest get_space. A search that does not match fails the whole edit, so do not retry it: re-read the space and correct the search from the fresh read, or address the change to one of its blocks. An unknown or duplicate anchor also fails the edit, and the error lists the valid anchors. A space with no markers has one block, "auto-body", covering the whole body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_revision and expected_aggregate_revision are optional: leave them out; if one is stale, the error names the current value, so retry once with it.
+There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, all entries in the call apply to the blocks of that one revision, and a call naming an older revision is refused with the current revision named, so re-read and send the change again. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -397,36 +435,58 @@ const CREATE_SPACE_INPUT_SCHEMA = SpaceContentSchema.extend({
   body: SPACE_BODY_INPUT_SCHEMA,
   expected_aggregate_revision: z.number().int().nonnegative().optional(),
 }).strict();
-/** One search/replace entry of an edit_space call: `search` must match exactly, every occurrence is replaced. */
-const SPACE_SEARCH_EDIT_SCHEMA = z
-  .object({
-    type: z.literal('search'),
-    search: z.string().min(1),
-    replace: z.string(),
-  })
-  .strict();
 /**
- * One anchor-addressed entry of an edit_space call: `anchor` names a `<!-- @block:name -->`
- * marker in the current body (or "auto-body" for a space with no markers) and `new_content`
- * replaces that block's content wholesale. Empty `new_content` deletes the block.
+ * The fingerprint an edit entry names: the eight hex characters a read (list_blocks,
+ * get_space, or a successful edit's result) showed for the block as read. The shape is
+ * enforced here so a miscopied fingerprint is a guided validation error; a well-formed
+ * fingerprint that names different content is the mismatch refusal in applyEditEntries.
+ */
+const SPACE_FINGERPRINT_FIELD = z
+  .string()
+  .regex(/^[0-9a-f]{8}$/, 'must be the 8-character fingerprint a read returned for the block');
+/**
+ * One anchor-addressed entry of an edit_space call: `anchor` names one block of the body
+ * at the revision the call names (a `<!-- @block:name -->` marker's name, or the ordinal
+ * anchor list_blocks gives a block of a body without markers), `fingerprint` is that
+ * block's fingerprint as read, and `new_content` replaces that block's content
+ * wholesale. Empty `new_content` deletes the block.
  */
 const SPACE_BLOCK_EDIT_SCHEMA = z
   .object({
     type: z.literal('block'),
-    // Anchors are short kebab-case names by convention; the max bounds how much
+    // Anchors are short names by convention; the max bounds how much
     // model-controlled text can flow into error messages.
     anchor: z.string().min(1).max(200),
+    fingerprint: SPACE_FINGERPRINT_FIELD,
     new_content: z.string(),
   })
   .strict();
-/** The one edit list shape: every entry names its own kind, so search and block edits never mix ambiguously. */
-const SPACE_DELTA_EDIT_SCHEMA = z.discriminatedUnion('type', [SPACE_SEARCH_EDIT_SCHEMA, SPACE_BLOCK_EDIT_SCHEMA]);
+/**
+ * One insert entry of an edit_space call: `new_content` is added as new block content
+ * right after the block `after` names, at the revision the call names, and `fingerprint`
+ * is that block's fingerprint as read, checked the same way a block entry's is. This is
+ * how a table or a list grows: the new rows go after the last block without resending
+ * the rows that are already there.
+ */
+const SPACE_INSERT_EDIT_SCHEMA = z
+  .object({
+    type: z.literal('insert'),
+    after: z.string().min(1).max(200),
+    fingerprint: SPACE_FINGERPRINT_FIELD,
+    new_content: z.string().min(1),
+  })
+  .strict();
+/** The one edit list shape: every entry names its own kind, so block and insert entries never mix ambiguously. */
+const SPACE_EDIT_ENTRY_SCHEMA = z.discriminatedUnion('type', [SPACE_BLOCK_EDIT_SCHEMA, SPACE_INSERT_EDIT_SCHEMA]);
+type SpaceEditEntry = z.infer<typeof SPACE_EDIT_ENTRY_SCHEMA>;
 /**
  * On the edit path, new_title/purpose/status/format are optional: omit them to leave the
  * metadata unchanged, provide them to change specific fields. The edits list itself is
  * required: an edit call with nothing to change is a wasted step, not a metadata-only update.
  * The rename field is new_title, never name: name is create_space's title field, and keeping
  * the two apart means a call can never confuse which space it means with what to call it.
+ * expected_revision is required: every entry addresses a block of one stated revision, so
+ * a call that does not say which revision its anchors belong to cannot be applied safely.
  */
 const EDIT_SPACE_INPUT_SCHEMA = z
   .object({
@@ -435,8 +495,8 @@ const EDIT_SPACE_INPUT_SCHEMA = z
     purpose: z.string().trim().min(1).max(2_000).optional(),
     status: SpaceStatusSchema.optional(),
     format: SpaceFormatSchema.optional(),
-    edits: z.array(SPACE_DELTA_EDIT_SCHEMA).min(1).max(50),
-    expected_revision: z.number().int().positive().optional(),
+    edits: z.array(SPACE_EDIT_ENTRY_SCHEMA).min(1).max(50),
+    expected_revision: z.number().int().positive(),
     expected_aggregate_revision: z.number().int().nonnegative().optional(),
     confirm_shrink: z.boolean().optional(),
   })
@@ -525,14 +585,19 @@ interface WriteOutcome {
   mutation: SpaceMutationResult;
   /** Leads the result text so the model reads the name and revision before anything else. */
   action: 'Created' | 'Updated' | 'Restored';
-  /** Per search-edit replacement counts, in message order among search edits; set only by the edit path. */
-  edit_replacements?: number[];
   /**
-   * Per-block outcomes, in message order among block edits; set only by the edit path.
-   * `new_length` is the block's content length after the edit (0 when deleted) — the
-   * verification signal that replaces replacement counts for anchor-addressed edits.
+   * Per-entry outcomes, in message order; set only by the edit path. `anchor` is the
+   * block the entry named (for an insert entry, the block the new content went after),
+   * `new_length` is that entry's content length after the edit (0 when the entry deleted
+   * its block), and `deleted` marks a block entry that removed its block.
    */
   block_results?: { anchor: string; new_length: number; deleted: boolean }[];
+  /**
+   * The fresh block outline of the new body, at the new revision; set only by the edit
+   * path. The model's next edit chains from these anchors and fingerprints instead of
+   * a re-read.
+   */
+  blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
 }
 
 /**
@@ -566,8 +631,8 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
       updated_at: result.record.updated_at,
     },
     aggregate_revision: result.aggregate_revision,
-    ...(outcome.edit_replacements === undefined ? {} : { edit_replacements: outcome.edit_replacements }),
     ...(outcome.block_results === undefined ? {} : { block_results: outcome.block_results }),
+    ...(outcome.blocks === undefined ? {} : { blocks: outcome.blocks }),
   });
 }
 
@@ -625,9 +690,10 @@ async function resolveSpaceRevision(
 }
 
 /**
- * Consecutive-failure circuit breaker for delta updates. A missed search/replace (or a bad
- * block anchor) means the model's mental copy of the body diverged; recomputed deltas do not
- * converge, and each retry burns a full model step — the failure loop that motivated this.
+ * Consecutive-failure circuit breaker for delta updates. A failed block edit (a bad
+ * block anchor, a stale revision, or a computed body over the size limit) means the
+ * model's mental copy of the body diverged; recomputed deltas do not
+ * converge, and each retry burns a full model step: the failure loop that motivated this.
  * After DELTA_BREAKER_TRIP_AFTER_FAILURES consecutive failed delta updates on one
  * (tenant, user, session, space), delta mode locks: further edit_space calls are refused with
  * SpaceDeltaLockedError until a successful revert_space. Any success
@@ -670,14 +736,14 @@ export interface ListBlocksResult {
   space_name: string;
   revision: number;
   /**
-   * Text before the first marker. Not addressable by anchor — there is no marker to hang an
-   * edit on — so it is surfaced here (preview + length) for the post-compaction recovery
-   * journey and edited with a search edit copied from get_space when needed.
-   * Null when the body starts with a marker or has no markers at all (the implicit
-   * whole-body block then covers everything).
+   * Text before the first marker of a marked body. Not addressable by anchor: there is
+   * no marker to hang an edit on, so it is surfaced here (preview + length) for the
+   * post-compaction recovery journey, and the model is told to keep it short and stable.
+   * Null when the body starts with a marker, and null for a body with no markers at
+   * all: such a body is split into structural blocks that cover it whole.
    */
   preamble: { preview: string; char_count: number } | null;
-  blocks: { anchor: string; preview: string; occurrences: number }[];
+  blocks: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
 }
 
 /**
@@ -810,7 +876,7 @@ function parseSpaceBlocks(body: string): { preamble: string; blocks: ParsedSpace
 }
 
 /** Unique anchor names in first-seen order, for the "valid anchors" lists in loud failures. */
-function uniqueBlockAnchors(blocks: ParsedSpaceBlock[]): string[] {
+function uniqueBlockAnchors(blocks: readonly { anchor: string }[]): string[] {
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const block of blocks) {
@@ -820,6 +886,420 @@ function uniqueBlockAnchors(blocks: ParsedSpaceBlock[]): string[] {
     }
   }
   return unique;
+}
+
+/**
+ * One addressable block of a space body at one revision: a slice of the body an
+ * edit_space entry can name. A marked block keeps its marker's name as the anchor; a
+ * block of a body without markers gets an ordinal anchor (b1, b2, and so on) in order.
+ * Ordinals are defined against one revision's segmentation: the same body always
+ * segments the same way, and a changed body is a new revision whose anchors the model
+ * reads fresh, so an ordinal is never resolved against a body the model has not seen.
+ */
+interface SpaceSegment {
+  anchor: string;
+  /** Index where this block's slice of the body starts (the marker's `<` for a marked block). */
+  start: number;
+  /** Index where the replaceable content starts (just past the marker for a marked block). */
+  coreStart: number;
+  /** Index where the replaceable content ends; a trailing separator sits between here and `end`. */
+  coreEnd: number;
+  /** Index where this block's slice ends: the next block's start, or the end of the body. */
+  end: number;
+  /** True for a block a `<!-- @block:name -->` marker opens; false for a structural block. */
+  marked: boolean;
+}
+
+/** The most characters one block of a table holds: the header plus one group of rows. */
+const TABLE_GROUP_MAX_LENGTH = 2_000;
+
+/**
+ * The fingerprint of one block: eight hex characters hashed from the block's exact
+ * current content. The one canonical helper: every place a block is shown (list_blocks,
+ * get_space, the outline a successful edit returns) carries the fingerprint this
+ * computes, and an edit entry must name it back. Identical blocks share a fingerprint
+ * by construction: the fingerprint verifies what content is at an anchor, and the
+ * anchor alone says which block is meant, so the fingerprint is a check, never an
+ * address. Eight characters is short enough to copy exactly and long enough that the
+ * blocks of one body practically never collide by accident.
+ */
+export function blockFingerprint(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 8);
+}
+
+/**
+ * Segments a body with no markers into structural blocks: each heading on its own,
+ * each paragraph and list group (a run of non-blank lines), and for
+ * a table the header plus row groups of at most TABLE_GROUP_MAX_LENGTH characters, so
+ * replacing one group stays well under the per-write new-content cap. Classification
+ * reads the documentation-masked lines, so a heading or table row inside a fenced code
+ * block or a <pre> or <code> element is text, not structure. The blocks tile the body:
+ * each block's slice runs to the next block's start, and the whitespace at a slice's
+ * end is its separator, which a replacement preserves.
+ */
+function structuralSegments(body: string): SpaceSegment[] {
+  if (body.length === 0) {
+    return [{ anchor: 'b1', start: 0, coreStart: 0, coreEnd: 0, end: 0, marked: false }];
+  }
+  const maskedLines = maskDocumentationRegions(body).split('\n');
+  const lines = body.split('\n');
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineStarts.push(offset);
+    offset += line.length + 1;
+  }
+  const isBlank = (index: number): boolean => (lines[index] ?? '').trim() === '';
+  const isHeading = (index: number): boolean => /^#{1,6}(\s|$)/.test(maskedLines[index] ?? '');
+  const isTableRow = (index: number): boolean => (maskedLines[index] ?? '').trim().startsWith('|');
+  const isSeparatorRow = (index: number): boolean => {
+    const trimmed = (maskedLines[index] ?? '').trim();
+    return trimmed.startsWith('|') && trimmed.includes('-') && /^\|[\s:|-]*$/.test(trimmed);
+  };
+
+  // Runs: stretches of non-blank lines. A heading is a run of its own, one line:
+  // changing a heading never means resending the section under it, and the content
+  // under a heading starts a fresh run of its own.
+  const runs: { first: number; last: number }[] = [];
+  let runStart = -1;
+  const closeRun = (endLine: number): void => {
+    if (runStart >= 0) {
+      runs.push({ first: runStart, last: endLine });
+      runStart = -1;
+    }
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isBlank(index)) {
+      closeRun(index);
+    } else if (isHeading(index)) {
+      closeRun(index);
+      runs.push({ first: index, last: index + 1 });
+    } else if (runStart < 0) {
+      runStart = index;
+    }
+  }
+  closeRun(lines.length);
+
+  // Pieces: each run splits at its table regions, and each table region splits into
+  // groups under the length budget, the header and its separator row pinned together
+  // in the first group.
+  const pieces: { first: number; last: number }[] = [];
+  for (const run of runs) {
+    let index = run.first;
+    while (index < run.last) {
+      if (!isTableRow(index)) {
+        let end = index;
+        while (end < run.last && !isTableRow(end)) {
+          end += 1;
+        }
+        pieces.push({ first: index, last: end });
+        index = end;
+        continue;
+      }
+      let regionEnd = index;
+      while (regionEnd < run.last && isTableRow(regionEnd)) {
+        regionEnd += 1;
+      }
+      const pinned = regionEnd - index >= 2 && isSeparatorRow(index + 1) ? 2 : 0;
+      let groupStart = index;
+      while (groupStart < regionEnd) {
+        let groupEnd = groupStart;
+        let groupLength = 0;
+        while (groupEnd < regionEnd) {
+          const lineLength = (lines[groupEnd] ?? '').length;
+          const nextLength = groupEnd === groupStart ? lineLength : groupLength + 1 + lineLength;
+          const pinnedLine = groupStart === index && groupEnd - groupStart < pinned;
+          if (groupEnd > groupStart && !pinnedLine && nextLength > TABLE_GROUP_MAX_LENGTH) {
+            break;
+          }
+          groupLength = nextLength;
+          groupEnd += 1;
+        }
+        pieces.push({ first: groupStart, last: groupEnd });
+        groupStart = groupEnd;
+      }
+      index = regionEnd;
+    }
+  }
+
+  if (pieces.length === 0) {
+    // A body of blank lines only: one block covering it whole.
+    return [{ anchor: 'b1', start: 0, coreStart: 0, coreEnd: body.length, end: body.length, marked: false }];
+  }
+  return pieces.map((piece, index) => {
+    const start = index === 0 ? 0 : (lineStarts[piece.first] ?? body.length);
+    const next = pieces[index + 1];
+    const end = next === undefined ? body.length : (lineStarts[next.first] ?? body.length);
+    const slice = body.slice(start, end);
+    // The separator is the slice's trailing whitespace, kept only when it contains a
+    // line break and leaves a non-empty core: a replacement preserves it, so the gap
+    // between this block and the next survives an edit.
+    const suffix = /\s+$/.exec(slice)?.[0] ?? '';
+    const separatorLength = suffix.includes('\n') && suffix.length < slice.length ? suffix.length : 0;
+    return {
+      anchor: `b${String(index + 1)}`,
+      start,
+      coreStart: start,
+      coreEnd: end - separatorLength,
+      end,
+      marked: false,
+    };
+  });
+}
+
+/**
+ * The blocks of one body at one revision. A body with markers keeps today's behaviour
+ * exactly: the marked blocks are the blocks, with their names as anchors, and the text
+ * before the first marker is a preamble no anchor names. A body with no markers is
+ * segmented by its structure instead, and the blocks cover it whole.
+ */
+function segmentSpaceBody(body: string): { preamble: string; segments: SpaceSegment[] } {
+  const { preamble, blocks } = parseSpaceBlocks(body);
+  if (blocks.length > 0) {
+    return {
+      preamble,
+      segments: blocks.map(block => ({
+        anchor: block.anchor,
+        start: block.markerStart,
+        coreStart: block.contentStart,
+        coreEnd: block.contentEnd,
+        end: block.contentEnd,
+        marked: true,
+      })),
+    };
+  }
+  return { preamble: '', segments: structuralSegments(body) };
+}
+
+/** The line break a marked block's stored content starts with, when it starts with one: layout, not content. */
+function markedLeadSeparator(body: string, segment: SpaceSegment): string {
+  if (body.startsWith('\r\n', segment.coreStart)) {
+    return '\r\n';
+  }
+  return body.charAt(segment.coreStart) === '\n' ? '\n' : '';
+}
+
+/** The separator between one block's content and the next block: whitespace the block's slice ends with. */
+function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
+  if (!segment.marked) {
+    return body.slice(segment.coreEnd, segment.end);
+  }
+  const suffix = /\s+$/.exec(body.slice(segment.start, segment.end))?.[0] ?? '';
+  return suffix.includes('\n') ? suffix : '';
+}
+
+/**
+ * Applies one edit_space call's entries, all against the segmentation of the body the
+ * call names (the current body at the revision it checked): entries never see each
+ * other's results, and one block can be named by only one entry. Unknown or duplicated
+ * anchors, and a fingerprint that does not match the block at its anchor, fail closed
+ * before anything is persisted, and the resulting length is
+ * checked arithmetically before the new body is built, mirroring the other edit paths.
+ */
+function applyEditEntries(input: {
+  space_id: string;
+  body: string;
+  edits: readonly SpaceEditEntry[];
+}): { body: string; block_results: { anchor: string; new_length: number; deleted: boolean }[] } {
+  const { space_id, body, edits } = input;
+  const { preamble, segments } = segmentSpaceBody(body);
+  const validAnchors = uniqueBlockAnchors(segments);
+  const byAnchor = new Map<string, SpaceSegment[]>();
+  for (const segment of segments) {
+    const matches = byAnchor.get(segment.anchor) ?? [];
+    matches.push(segment);
+    byAnchor.set(segment.anchor, matches);
+  }
+  const replacements = new Map<SpaceSegment, string>();
+  const deletions = new Set<SpaceSegment>();
+  const inserts = new Map<SpaceSegment, string>();
+  const namedAt = new Map<string, number>();
+  const block_results: { anchor: string; new_length: number; deleted: boolean }[] = [];
+  for (const [index, entry] of edits.entries()) {
+    const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
+    const firstNamedAt = namedAt.get(anchor);
+    if (firstNamedAt !== undefined) {
+      throw new SpaceBlockAnchorRepeatedError({ space_id, anchor, index, firstIndex: firstNamedAt, validAnchors });
+    }
+    namedAt.set(anchor, index);
+    const matches = byAnchor.get(anchor) ?? [];
+    const target = matches[0];
+    if (target === undefined) {
+      throw new SpaceBlockAnchorNotFoundError({ space_id, anchor, index, validAnchors });
+    }
+    if (matches.length > 1) {
+      throw new SpaceBlockAnchorDuplicateError({
+        space_id,
+        anchor,
+        index,
+        occurrences: matches.length,
+        validAnchors,
+      });
+    }
+    // The anchor and the call's revision say where the edit applies; the fingerprint
+    // verifies what is there. A block whose content is not the content the model read
+    // refuses, and the refusal looks for that content's fingerprint in the other
+    // blocks of this same revision, so a block that moved gets its new anchor named.
+    const targetFingerprint = blockFingerprint(body.slice(target.coreStart, target.coreEnd));
+    if (entry.fingerprint !== targetFingerprint) {
+      const matchAnchors = segments
+        .filter(
+          segment =>
+            segment !== target && blockFingerprint(body.slice(segment.coreStart, segment.coreEnd)) === entry.fingerprint,
+        )
+        .map(segment => segment.anchor);
+      throw new SpaceBlockFingerprintMismatchError({
+        space_id,
+        anchor,
+        index,
+        validAnchors,
+        fingerprint: entry.fingerprint,
+        matchAnchors,
+      });
+    }
+    if (entry.type === 'block') {
+      if (entry.new_content === '') {
+        deletions.add(target);
+        block_results.push({ anchor, new_length: 0, deleted: true });
+      } else {
+        replacements.set(target, entry.new_content);
+        const leadLength = target.marked ? markedLeadSeparator(body, target).length : 0;
+        block_results.push({ anchor, new_length: leadLength + entry.new_content.length, deleted: false });
+      }
+    } else {
+      inserts.set(target, entry.new_content);
+      block_results.push({ anchor, new_length: entry.new_content.length, deleted: false });
+    }
+  }
+
+  // The text an insert entry adds after its block, placed between the block's content
+  // and its trailing separator, so what follows the block keeps its distance. When the
+  // block's last line and the new content's first line are both table rows, the new
+  // content continues the table, so a single line break joins them and the table stays
+  // one table. Otherwise the block's own separator is the joiner; a block that ends the
+  // body with no separator after it gives the new content one of its own in front: a
+  // blank line after a structural block, one line break after a marked block.
+  const lastLineOf = (text: string): string => {
+    const lines = text.split('\n');
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if ((lines[index] ?? '').trim() !== '') {
+        return lines[index] ?? '';
+      }
+    }
+    return '';
+  };
+  const firstLineOf = (text: string): string => {
+    for (const line of text.split('\n')) {
+      if (line.trim() !== '') {
+        return line;
+      }
+    }
+    return '';
+  };
+  const insertText = (segment: SpaceSegment, content: string): string => {
+    const core = body.slice(segment.coreStart, segment.coreEnd);
+    const continuesTable = lastLineOf(core).trim().startsWith('|') && firstLineOf(content).trim().startsWith('|');
+    if (continuesTable) {
+      return `\n${content}`;
+    }
+    const separator = segmentTrailingSeparator(body, segment);
+    if (separator !== '') {
+      return separator + content;
+    }
+    return segment.marked ? `\n${content}` : `\n\n${content}`;
+  };
+  let new_length = body.length;
+  for (const [segment, content] of replacements) {
+    const leadLength = segment.marked ? markedLeadSeparator(body, segment).length : 0;
+    new_length += leadLength + content.length - (segment.coreEnd - segment.coreStart);
+  }
+  for (const segment of deletions) {
+    new_length -= segment.end - segment.start;
+  }
+  for (const [segment, content] of inserts) {
+    new_length += insertText(segment, content).length;
+  }
+  if (new_length > SPACE_BODY_MAX_LENGTH) {
+    throw new SpaceBodyTooLongError({ space_id, new_length });
+  }
+
+  const parts: string[] = [preamble];
+  for (const segment of segments) {
+    if (deletions.has(segment)) {
+      continue;
+    }
+    const replacement = replacements.get(segment);
+    const inserted = inserts.get(segment);
+    // A replaced marked block emits its marker, the preserved line break after it, and
+    // the new content: the old content, its trailing line break included, is gone, as
+    // it was when one block edit applied on its own. Any other block emits its content
+    // first and its trailing separator last, with an insert entry's text in between.
+    let coreEmission: string;
+    let tailEmission: string;
+    if (replacement !== undefined && segment.marked) {
+      coreEmission = body.slice(segment.start, segment.coreStart) + markedLeadSeparator(body, segment) + replacement;
+      tailEmission = '';
+    } else if (replacement !== undefined) {
+      coreEmission = replacement;
+      tailEmission = body.slice(segment.coreEnd, segment.end);
+    } else if (segment.marked) {
+      const separator = segmentTrailingSeparator(body, segment);
+      coreEmission = body.slice(segment.start, segment.end - separator.length);
+      tailEmission = separator;
+    } else {
+      coreEmission = body.slice(segment.coreStart, segment.coreEnd);
+      tailEmission = body.slice(segment.coreEnd, segment.end);
+    }
+    parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
+  }
+  return { body: parts.join(''), block_results };
+}
+
+/**
+ * The block outline of one body at one revision: every block's anchor, fingerprint,
+ * and a preview of its first line, in order, plus the preamble of a marked body. list_blocks returns
+ * it on its own; a successful edit_space returns it too (see WriteOutcome), so the
+ * model can chain its next edit from what the edit handed back instead of paying a
+ * full re-read between edits.
+ */
+function blockOutline(body: string): {
+  preamble: { preview: string; char_count: number } | null;
+  blocks: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+} {
+  const { preamble, segments } = segmentSpaceBody(body);
+  const marked = segments[0]?.marked === true;
+  if (!marked) {
+    return {
+      preamble: null,
+      blocks: segments.map(segment => {
+        const content = body.slice(segment.coreStart, segment.coreEnd);
+        return {
+          anchor: segment.anchor,
+          fingerprint: blockFingerprint(content),
+          preview: blockPreview(content),
+          occurrences: 1,
+        };
+      }),
+    };
+  }
+  const byAnchor = new Map<string, { fingerprint: string; preview: string; occurrences: number }>();
+  for (const segment of segments) {
+    const content = body.slice(segment.coreStart, segment.coreEnd);
+    const existing = byAnchor.get(segment.anchor);
+    if (existing === undefined) {
+      byAnchor.set(segment.anchor, {
+        fingerprint: blockFingerprint(content),
+        preview: blockPreview(content),
+        occurrences: 1,
+      });
+    } else {
+      existing.occurrences += 1;
+    }
+  }
+  return {
+    preamble: preamble.length > 0 ? { preview: blockPreview(preamble), char_count: preamble.length } : null,
+    blocks: [...byAnchor.entries()].map(([anchor, info]) => ({ anchor, ...info })),
+  };
 }
 
 /** 80-character compaction-recovery preview: whitespace-collapsed, ellipsis-truncated. */
@@ -853,7 +1333,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: GET_SPACE_TOOL_NAME,
       description:
-        'Read one space by its exact space_name. Returns metadata, the aggregate_revision, and the body unless include_body is false. Call before edit_space to get the current body and revision.',
+        'Read one space by its exact space_name. Returns metadata, the aggregate_revision, the block outline (each block\'s anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.',
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,
@@ -871,9 +1351,13 @@ class SpaceTool extends LocalToolMCP {
       name: EDIT_SPACE_TOOL_NAME,
       description:
         'Change part of one space by its exact space_name, without resending the body. ' +
-        'edits is a list of up to 50 entries, applied in order: a search entry {type: "search", search, replace} replaces every occurrence of an exact, case-sensitive substring copied verbatim from a recent get_space; a block entry {type: "block", anchor, new_content} replaces one <!-- @block:name --> section, and empty new_content deletes it. ' +
-        'A search that matches nothing, or an unknown or duplicate anchor, fails the whole edit: do not retry the same entry. Re-read the space with get_space (list_blocks names its sections) and correct the entry from the fresh read. ' +
+        'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed: every entry addresses a block of that one revision, and a call naming an older revision is refused with the current one. ' +
+        'edits is a list of up to 50 entries: a block entry {type: "block", anchor, fingerprint, new_content} replaces the content of the block the anchor names, and empty new_content deletes it; an insert entry {type: "insert", after, fingerprint, new_content} adds new content right after the named block. One block can be named by only one entry per call. ' +
+        'fingerprint is the block\'s fingerprint as that read showed it: a short code hashed from the block\'s exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block\'s anchor. ' +
+        'Anchors come from list_blocks: the name of a <!-- @block:name --> section, or b1, b2, and so on for the blocks a body without markers is split into. ' +
+        'An unknown or duplicate anchor fails the whole edit and nothing is saved: do not retry the same entry. Re-read the space and correct the entry from the fresh read. ' +
         'The new content across one call may total at most about 4,000 characters; split a bigger change into several calls. ' +
+        'A successful edit returns the new revision and the fresh block outline, so the next edit can chain from them without a re-read. ' +
         'new_title renames the space; purpose, status, and format are optional too. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: EDIT_SPACE_INPUT_SCHEMA,
@@ -891,7 +1375,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: LIST_BLOCKS_TOOL_NAME,
       description:
-        "List one space's block anchors with an 80-character preview of each, without the body. Address the space by its exact space_name. Use it after a context compaction or before edit_space. The preamble (text before the first marker) is reported separately; it has no anchor, so change it with a search edit copied from get_space.",
+        "List one space's blocks with an 80-character preview of each, without the body. Address the space by its exact space_name. Every block has an anchor edit_space can name: the name of its <!-- @block:name --> marker, or b1, b2, and so on for the blocks a body without markers is split into (its headings, paragraphs, list groups, and table row groups). Every block also carries a fingerprint: a short code hashed from its exact current content, which an edit entry names back so the host can check the block still holds what you read. The result names the revision the anchors and fingerprints belong to: send it as expected_revision when you edit. Use it after a context compaction or before edit_space. In a marked space, the text before the first marker is the preamble: it is reported separately and has no anchor, so keep it short and stable.",
       schema: LIST_BLOCKS_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,
@@ -979,19 +1463,15 @@ class SpaceTool extends LocalToolMCP {
   }
 
   /**
-   * Every change to an existing space lives here: one edits list, entries applied in
-   * message order. A missing search, a bad anchor, or a delta-computed body over
-   * the size limit fails before anything is persisted, and feeds the consecutive-failure
-   * breaker below.
+   * Every change to an existing space lives here: one edits list, every entry applied
+   * against the blocks of the one revision the call names. A bad anchor, a stale
+   * revision, or a delta-computed body over the size limit fails before anything is
+   * persisted, and feeds the consecutive-failure breaker below.
    */
   private async edit(request: z.infer<typeof EDIT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const input = { ...request, space_id: await this.resolveSpaceId(request.space_name) };
-    // The write cap counts only new content (a search entry's replace text, a block entry's
-    // new_content); the search text itself is copied from the body the model already read.
-    const new_content_length = input.edits.reduce(
-      (total, edit) => total + (edit.type === 'search' ? edit.replace.length : edit.new_content.length),
-      0,
-    );
+    // The write cap counts only new content: every entry's new_content, and nothing else.
+    const new_content_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
     if (new_content_length > SPACE_WRITE_MAX_LENGTH) {
       throw new SpaceWriteTooLongError({
         tool: EDIT_SPACE_TOOL_NAME,
@@ -1007,6 +1487,18 @@ class SpaceTool extends LocalToolMCP {
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       this.requireCurrentSpace(input.space_id),
     ]);
+    // The entries address blocks of the revision the call names, so a space that has
+    // moved since the model's read refuses here, before any anchor is resolved against
+    // a body the model has not seen. The refusal names the current revision, and it
+    // counts as a failed delta like any other: the model's copy diverged.
+    if (input.expected_revision !== current.revision) {
+      this.recordDeltaFailure(input.space_id);
+      throw new SpaceRevisionConflictError({
+        id: input.space_id,
+        expected_revision: input.expected_revision,
+        actual_revision: current.revision,
+      });
+    }
     // A rename takes a name of its own: refuse a new_title another space already has,
     // so the rename cannot recreate the two-spaces-one-name ambiguity create refuses.
     if (input.new_title !== undefined && input.new_title !== current.name) {
@@ -1016,27 +1508,14 @@ class SpaceTool extends LocalToolMCP {
         next_step: 'Pick a different new_title, or leave the name unchanged.',
       });
     }
-    let body = current.body;
-    const edit_replacements: number[] = [];
-    const block_results: { anchor: string; new_length: number; deleted: boolean }[] = [];
+    let body: string;
+    let block_results: { anchor: string; new_length: number; deleted: boolean }[];
     try {
-      for (const [index, edit] of input.edits.entries()) {
-        if (edit.type === 'search') {
-          const applied = this.applySearchEdit(input.space_id, body, edit, index);
-          body = applied.body;
-          edit_replacements.push(applied.replacements);
-        } else {
-          const applied = this.applyBlockEdit(input.space_id, body, edit, index);
-          body = applied.body;
-          block_results.push(applied.result);
-        }
-      }
+      const applied = applyEditEntries({ space_id: input.space_id, body: current.body, edits: input.edits });
+      body = applied.body;
+      block_results = applied.block_results;
     } catch (error) {
-      if (
-        error instanceof SpaceEditNotFoundError ||
-        error instanceof SpaceBlockAnchorError ||
-        error instanceof SpaceBodyTooLongError
-      ) {
+      if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
         this.recordDeltaFailure(input.space_id);
       }
       throw error;
@@ -1061,16 +1540,16 @@ class SpaceTool extends LocalToolMCP {
       status: input.status ?? current.status,
       body,
       format: input.format ?? current.format,
-      expected_revision: input.expected_revision ?? current.revision,
+      expected_revision: input.expected_revision,
       expected_aggregate_revision,
     });
     const outcome: WriteOutcome = { mutation, action: 'Updated' };
-    if (edit_replacements.length > 0) {
-      outcome.edit_replacements = edit_replacements;
-    }
     if (block_results.length > 0) {
       outcome.block_results = block_results;
     }
+    // The fresh outline of the new body, at the new revision: the next edit chains
+    // from these anchors instead of paying a re-read first.
+    outcome.blocks = blockOutline(mutation.record.body).blocks;
     // Reset only after the durable write succeeds. Resetting earlier (e.g. right after the
     // local delta application) would clear the counter even when shrink validation or the
     // store write then fails — unlocking a loop that never actually converged. A delta
@@ -1137,156 +1616,22 @@ class SpaceTool extends LocalToolMCP {
   }
 
   /**
-   * Applies one search/replace edit: every occurrence of an exact substring is replaced.
-   * A missing search fails before anything is persisted.
-   */
-  private applySearchEdit(
-    space_id: string,
-    currentBody: string,
-    edit: { search: string; replace: string },
-    index: number,
-  ): { body: string; replacements: number } {
-    const parts: string[] = currentBody.split(edit.search);
-    if (parts.length < 2) {
-      throw new SpaceEditNotFoundError({ search: edit.search, index });
-    }
-    // Check the resulting length arithmetically BEFORE joining: a huge
-    // replace string could otherwise OOM the process building the joined
-    // string before the length check ever runs. Exact under the
-    // <= SPACE_BODY_MAX_LENGTH invariant every writer enforces.
-    const new_length = currentBody.length + (parts.length - 1) * (edit.replace.length - edit.search.length);
-    if (new_length > SPACE_BODY_MAX_LENGTH) {
-      throw new SpaceBodyTooLongError({ space_id, new_length });
-    }
-    return { body: parts.join(edit.replace), replacements: parts.length - 1 };
-  }
-
-  /**
-   * Applies one anchor-addressed edit, parsing block structure fresh so the edit sees
-   * earlier results (including anchors introduced by new_content). Unknown or duplicated
-   * anchors fail closed before anything is persisted; the error lists the valid anchors.
-   */
-  private applyBlockEdit(
-    space_id: string,
-    currentBody: string,
-    edit: { anchor: string; new_content: string },
-    index: number,
-  ): { body: string; result: { anchor: string; new_length: number; deleted: boolean } } {
-    const anchor = edit.anchor.trim();
-    const { blocks } = parseSpaceBlocks(currentBody);
-    let newBody: string;
-    let resultLength: number;
-    let deleted: boolean;
-    if (blocks.length === 0) {
-      // Anchorless space: only the implicit whole-body block is addressable.
-      if (anchor !== AUTO_BLOCK_ANCHOR) {
-        throw new SpaceBlockAnchorNotFoundError({
-          space_id,
-          anchor,
-          index,
-          validAnchors: [AUTO_BLOCK_ANCHOR],
-        });
-      }
-      if (edit.new_content.length > SPACE_BODY_MAX_LENGTH) {
-        throw new SpaceBodyTooLongError({ space_id, new_length: edit.new_content.length });
-      }
-      newBody = edit.new_content;
-      resultLength = edit.new_content.length;
-      deleted = false;
-    } else {
-      const matches = blocks.filter(block => block.anchor === anchor);
-      const target = matches[0];
-      if (target === undefined) {
-        throw new SpaceBlockAnchorNotFoundError({
-          space_id,
-          anchor,
-          index,
-          validAnchors: uniqueBlockAnchors(blocks),
-        });
-      }
-      if (matches.length > 1) {
-        throw new SpaceBlockAnchorDuplicateError({
-          space_id,
-          anchor,
-          index,
-          occurrences: matches.length,
-          validAnchors: uniqueBlockAnchors(blocks),
-        });
-      }
-      if (edit.new_content === '') {
-        // Delete the block: marker and content both go.
-        const new_length = currentBody.length - (target.contentEnd - target.markerStart);
-        if (new_length > SPACE_BODY_MAX_LENGTH) {
-          throw new SpaceBodyTooLongError({ space_id, new_length });
-        }
-        newBody = currentBody.slice(0, target.markerStart) + currentBody.slice(target.contentEnd);
-        resultLength = 0;
-        deleted = true;
-      } else {
-        // Arithmetic length check before materializing, mirroring the edits path.
-        const new_length = currentBody.length - (target.contentEnd - target.contentStart) + edit.new_content.length;
-        if (new_length > SPACE_BODY_MAX_LENGTH) {
-          throw new SpaceBodyTooLongError({ space_id, new_length });
-        }
-        // Keep the marker on its own line: a line break immediately after the marker is
-        // layout, not content, so preserve it instead of gluing new_content to `-->`.
-        let separator = '';
-        if (currentBody.startsWith('\r\n', target.contentStart)) {
-          separator = '\r\n';
-        } else if (currentBody.charAt(target.contentStart) === '\n') {
-          separator = '\n';
-        }
-        newBody =
-          currentBody.slice(0, target.contentStart) +
-          separator +
-          edit.new_content +
-          currentBody.slice(target.contentEnd);
-        // The preserved separator is part of the stored block content.
-        resultLength = separator.length + edit.new_content.length;
-        deleted = false;
-      }
-    }
-    return { body: newBody, result: { anchor, new_length: resultLength, deleted } };
-  }
-
-  /**
-   * Cheap compaction-recovery read: the space's block anchors with an 80-character preview of
-   * each block's content and the anchor's occurrence count — everything edit_space needs,
-   * without resending the body. A space with no markers reports the single implicit
-   * AUTO_BLOCK_ANCHOR block. Text before the first marker (the preamble) is not
-   * addressable by anchor, so it is surfaced separately with its preview and length.
+   * Cheap compaction-recovery read: the space's blocks at its current revision, each
+   * with its anchor and an 80-character preview of its first line, without resending
+   * the body. A marked body lists its marker names (with an occurrence count, so a
+   * duplicated name is visible before an edit trips over it) and surfaces its preamble
+   * separately; a body with no markers lists the structural blocks its headings,
+   * paragraphs, list groups, and table row groups make, with ordinal anchors.
    */
   private async listBlocks(input: z.infer<typeof LIST_BLOCKS_INPUT_SCHEMA>): Promise<ListBlocksResult> {
     const space_id = await this.resolveSpaceId(input.space_name);
     const current = await this.requireCurrentSpace(space_id);
-    const { preamble, blocks } = parseSpaceBlocks(current.body);
-    const preambleInfo =
-      blocks.length > 0 && preamble.length > 0
-        ? { preview: blockPreview(preamble), char_count: preamble.length }
-        : null;
-    if (blocks.length === 0) {
-      return {
-        space_name: input.space_name,
-        revision: current.revision,
-        preamble: preambleInfo,
-        blocks: [{ anchor: AUTO_BLOCK_ANCHOR, preview: blockPreview(current.body), occurrences: 1 }],
-      };
-    }
-    const byAnchor = new Map<string, { preview: string; occurrences: number }>();
-    for (const block of blocks) {
-      const content = current.body.slice(block.contentStart, block.contentEnd);
-      const existing = byAnchor.get(block.anchor);
-      if (existing === undefined) {
-        byAnchor.set(block.anchor, { preview: blockPreview(content), occurrences: 1 });
-      } else {
-        existing.occurrences += 1;
-      }
-    }
+    const outline = blockOutline(current.body);
     return {
       space_name: input.space_name,
       revision: current.revision,
-      preamble: preambleInfo,
-      blocks: [...byAnchor.entries()].map(([anchor, info]) => ({ anchor, ...info })),
+      preamble: outline.preamble,
+      blocks: outline.blocks,
     };
   }
 
@@ -1305,7 +1650,7 @@ class SpaceTool extends LocalToolMCP {
   }
 
   /**
-   * Records one failed delta update (missed search, bad anchor, or delta-computed body over
+   * Records one failed delta update (bad anchor, stale revision, or delta-computed body over
    * the size limit). At the trip threshold the space's delta mode locks. Every failure is
    * logged: the next burn loop must be visible at failure #2, not discovered at #8.
    */
@@ -1475,6 +1820,9 @@ class SpaceTool extends LocalToolMCP {
         created_at: parsed.created_at,
         updated_at: parsed.updated_at,
       },
+      // The block outline rides along even when the body is omitted: the anchors and
+      // fingerprints are what an edit names, and they are cheap without the body.
+      blocks: blockOutline(result.space.body).blocks,
       aggregate_revision: result.aggregate_revision,
     };
   }
@@ -1482,8 +1830,8 @@ class SpaceTool extends LocalToolMCP {
   /**
    * Only a known, expected write failure (a stale entity or aggregate revision, an unknown space
    * id, a revision outside the retained window, a refused dramatic shrink, a delta-computed body
-   * over the size limit, an edit_space search text that is not found, a bad block anchor, or a
-   * locked delta mode, all with a stable sanitized message) becomes a terminal tool error here.
+   * over the size limit, a bad block anchor, or a locked delta mode, all with a stable sanitized
+   * message) becomes a terminal tool error here.
    * Every error text carries the sentence that says what to do next: a refused call is never
    * a dead end. Any other exception is an unexpected infrastructure or programming failure and
    * is rethrown uncaught so its exception and stack reach the tracing wrapper instead of being
@@ -1520,9 +1868,6 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceWriteTooLongError) {
-        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
-      }
-      if (error instanceof SpaceEditNotFoundError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBlockAnchorError) {
