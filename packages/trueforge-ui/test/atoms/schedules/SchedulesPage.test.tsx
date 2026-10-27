@@ -239,6 +239,38 @@ describe('SchedulesPage', () => {
     expect(await screen.findByText('weekly-digest')).toBeInTheDocument();
   });
 
+  it('keeps Next when a page has no schedules but more pages follow', async () => {
+    const listSchedules = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [], nextPageToken: 'page-2' })
+      .mockResolvedValueOnce({ data: [{ ...sampleSchedules[0], id: 's2', name: 'morning-brief' }] });
+    renderPage([], {}, listSchedules);
+
+    expect(await screen.findByRole('heading', { name: 'No Schedules Found' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    await waitFor(() => {
+      expect(listSchedules).toHaveBeenLastCalledWith(expect.objectContaining({ pageToken: 'page-2' }));
+    });
+    expect(await screen.findByText('morning-brief')).toBeInTheDocument();
+  });
+
+  it('says to go back when the last page has no schedules', async () => {
+    const listSchedules = vi
+      .fn()
+      .mockResolvedValueOnce({ data: sampleSchedules, nextPageToken: 'page-2' })
+      .mockResolvedValueOnce({ data: [] });
+    renderPage(sampleSchedules, {}, listSchedules);
+
+    expect(await screen.findByText('daily-digest')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByText('None on this page. Go back to see your schedules.')).toBeInTheDocument();
+    expect(screen.queryByText('None on this page. Try the next page.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeEnabled();
+  });
+
   it('ignores run history returned for a stale schedules page', async () => {
     let resolveFirstRuns: (runs: ScheduleRun[]) => void = () => undefined;
     const listSchedules = vi
