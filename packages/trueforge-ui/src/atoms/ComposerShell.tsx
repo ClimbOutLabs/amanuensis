@@ -42,7 +42,7 @@ function useRunningElapsed(): string | undefined {
 function RunningStatus() {
   const elapsed = useRunningElapsed();
   return (
-    <span role="status" className="text-text-secondary flex items-center gap-2 text-[0.8125rem]">
+    <span role="status" className="text-text-secondary flex items-center gap-2 text-sm">
       <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
       {elapsed === undefined ? WORKING_ON_IT_LABEL : `${WORKING_ON_IT_LABEL}, ${elapsed}`}
     </span>
@@ -87,12 +87,12 @@ export function ComposerShell({
           <ComposerLeftSection disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
           {isRunning ? <RunningStatus /> : null}
           {connectorStatusLabel && (
-            <span className="text-text-secondary max-w-[12rem] truncate text-[0.8125rem]">{connectorStatusLabel}</span>
+            <span className="text-text-secondary max-w-[12rem] truncate text-sm">{connectorStatusLabel}</span>
           )}
         </div>
         <div className="aui-composer-actions ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
           {modelLabel && !isRunning && (
-            <span className="text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-[0.8125rem]">
+            <span className="text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
               {modelIcon}
               <span className="truncate">{modelLabel}</span>
             </span>

@@ -268,7 +268,7 @@ function ActivePersonaChip({
         disabled={triggerDisabled}
         className={cn(
           auiButtonClass({ variant: 'ghost', size: 'small' }),
-          'h-8 min-w-0 max-w-40 gap-1 rounded-full px-2 text-[0.8125rem] font-normal text-text-secondary hover:text-text-primary',
+          'h-8 min-w-0 max-w-40 gap-1 rounded-full px-2 text-sm font-normal text-text-secondary hover:text-text-primary',
         )}
         onClick={() => setMenuOpen(open => !open)}
       >
@@ -285,7 +285,7 @@ function ActivePersonaChip({
           style={menuStyle}
           className="z-50 rounded-md border border-border bg-card-bg py-1 shadow-lg"
         >
-          <p className="m-0 px-3 pt-1 pb-1.5 text-[0.75rem] text-text-secondary">{MENU_HEADING}</p>
+          <p className="m-0 px-3 pt-1 pb-1.5 text-xs text-text-secondary">{MENU_HEADING}</p>
           <button
             type="button"
             role="menuitem"
