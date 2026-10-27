@@ -1294,6 +1294,14 @@ export interface SharedServerConfiguration {
    */
   MODEL_STREAM_IDLE_TIMEOUT_MS: number;
   /**
+   * Bound in milliseconds on silence between a model's chunks while one of its
+   * tool calls is open. Some servers hold a call's arguments back and send them
+   * in a few large pieces, so a long call needs more room than ordinary
+   * answering. Never shorter than `MODEL_STREAM_IDLE_TIMEOUT_MS`.
+   * Env: `MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS`. Default 180000 (3 minutes).
+   */
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: number;
+  /**
    * Bound in milliseconds on one web search or page read, after which the
    * model gets a plain tool error and the reply goes on.
    * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
@@ -2186,6 +2194,12 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
     defaultValue: 60_000,
+  }),
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS in trueforge-core's streamDeadline.ts.
+    defaultValue: 180_000,
   }),
   SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
     envKey: 'SEARCH_CALL_TIMEOUT_MS',

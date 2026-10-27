@@ -14,6 +14,25 @@ import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
+type MockShellMode = { setSettingsOpen: (open: boolean, section?: string) => void } | null;
+
+const shellModeState = vi.hoisted((): { current: MockShellMode } => ({ current: null }));
+
+const serverState = vi.hoisted((): { hasCatalog: boolean; settingsEnabled: boolean } => ({
+  hasCatalog: true,
+  settingsEnabled: true,
+}));
+
+vi.mock('@/server/ShellModeContext.js', () => ({
+  useOptionalShellMode: () => shellModeState.current,
+}));
+
+vi.mock('@/server/ServerContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ServerContext.js')>()),
+  useOptionalCatalogServer: () => (serverState.hasCatalog ? {} : null),
+  useServerCapabilities: () => ({ settings: { enabled: serverState.settingsEnabled } }),
+}));
+
 const fetchMock = vi.fn();
 
 /** The panda's accessible name carries the assistant's default display name. */
@@ -651,6 +670,9 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    shellModeState.current = null;
+    serverState.hasCatalog = true;
+    serverState.settingsEnabled = true;
     fetchMock.mockImplementation(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -891,5 +913,45 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </RuntimeHarness>,
     );
     expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+  });
+
+  it('shows an Audits link in the Activity fold when shell context is available and settings chrome is enabled', () => {
+    const setSettingsOpen = vi.fn();
+    shellModeState.current = { setSettingsOpen };
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    const auditsLink = screen.getByRole('button', { name: 'Audits' });
+    expect(auditsLink).toBeInTheDocument();
+
+    fireEvent.click(auditsLink);
+
+    expect(setSettingsOpen).toHaveBeenCalledWith(true, 'audit');
+  });
+
+  it('does not show an Audits link when shell context is not available', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
+  });
+
+  it('does not show an Audits link when settings chrome is disabled, even with shell context', () => {
+    const setSettingsOpen = vi.fn();
+    shellModeState.current = { setSettingsOpen };
+    serverState.settingsEnabled = false;
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
   });
 });

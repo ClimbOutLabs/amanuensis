@@ -345,7 +345,8 @@ describe('space contract: one string body, one edit shape, guided errors, name a
   });
 
   it('edit_space failures name the next step: miss, bad anchor, duplicate anchor, lockout, over-long body', async () => {
-    const call = makeCall(makeStore());
+    const store = makeStore();
+    const call = makeCall(store);
     await createSpace(call, {
       name: 'Edit failures',
       body: '# Edit failures\n<!-- @block:main -->\nSome text here.',
@@ -355,15 +356,15 @@ describe('space contract: one string body, one edit shape, guided errors, name a
       space_name: 'Edit failures',
       edits: [{ type: 'search', search: 'absent words', replace: 'x' }],
     });
-    expect(await errorOf(missed)).toContain('then pass the full body via update_space');
+    expect(await errorOf(missed)).toContain('Re-read the space with get_space');
+    expect(await errorOf(missed)).toContain('make the change with edit_space in parts');
 
     const badAnchor = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Edit failures',
       edits: [{ type: 'block', anchor: 'nope', new_content: 'x' }],
     });
-    expect(await errorOf(badAnchor)).toContain(
-      'Retry edit_space with one of the valid anchors, or send the full updated body via update_space',
-    );
+    expect(await errorOf(badAnchor)).toContain('Retry edit_space with one of the valid anchors');
+    expect(await errorOf(badAnchor)).toContain('make it with a search edit copied from the fresh read');
 
     await createSpace(call, {
       name: 'Duplicate anchors',
@@ -390,7 +391,20 @@ describe('space contract: one string body, one edit shape, guided errors, name a
     });
     expect(await errorOf(locked)).toContain('Do not call edit_space again for this space.');
 
-    await createSpace(call, { name: 'Too long board', body: `TOKEN\n${'x'.repeat(64_990)}` });
+    // Seeded directly in the store: one write may no longer carry a near-limit body (a
+    // space this size is built in parts now); the subject is the edit whose computed
+    // body crosses the stored limit.
+    await store.createSpace({
+      tenant_id: AUTHORITY.tenantId,
+      created_by: AUTHORITY.userRef,
+      id: 'too-long-board',
+      name: 'Too long board',
+      purpose: 'Too long board purpose.',
+      status: 'active',
+      format: 'markdown',
+      body: `TOKEN\n${'x'.repeat(64_990)}`,
+      expected_aggregate_revision: 0,
+    });
     const tooLong = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Too long board',
       edits: [{ type: 'search', search: 'TOKEN', replace: 'y'.repeat(2000) }],

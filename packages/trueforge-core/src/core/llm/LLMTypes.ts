@@ -422,6 +422,13 @@ export interface RawAssistantMessageWithUsage {
   repetition_stopped?: true;
   /** Which guard cut the answer short and on which channel, present when repetition_stopped is set. */
   repetition_stop?: RepetitionStop;
+  /**
+   * Ids of tool calls the stream stopped early because their arguments ran past the host's
+   * per-call size limit. Their arguments are partial and must never run: the reply guard
+   * refuses them with a plain message that tells the model to send the content in smaller
+   * parts. Absent when no call was cut.
+   */
+  size_cut_tool_calls?: string[];
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

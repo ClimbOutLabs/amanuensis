@@ -9,6 +9,7 @@ import {
   collectKnownEventIds,
   guardModelReply,
   MAX_TOOL_CALLS_PER_REPLY,
+  TOOL_CALL_SIZE_CUT_MESSAGE,
 } from '../../../src/core/runtime/modelReplyGuard';
 
 const TOOLS: ChatCompletionTool[] = [
@@ -69,9 +70,10 @@ function guard(
   calls: RawToolCall[],
   knownEventIds: ReadonlySet<string> = new Set(),
   readOnlyTools: ReadonlySet<string> = new Set(),
+  sizeCutCalls: ReadonlySet<string> = new Set(),
 ) {
   const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: calls };
-  return guardModelReply({ message, tools: TOOLS, knownEventIds, readOnlyTools });
+  return guardModelReply({ message, tools: TOOLS, knownEventIds, readOnlyTools, sizeCutCalls });
 }
 
 describe('guardModelReply', () => {
@@ -184,6 +186,34 @@ describe('guardModelReply', () => {
 
     const noCreate = guard([call('b', 'get_event', { event_id: 'evt-new' })]);
     expect(noCreate.invalidCalls.size).toBe(0);
+  });
+
+  it('flags a size-cut call with the smaller-parts message, even though its arguments never finished', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"A very long title that was still being writ')],
+      new Set(),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.invalidCalls.get('a')).toBe(TOOL_CALL_SIZE_CUT_MESSAGE);
+    // The call stays in the reply so it resolves as never ran, with that reason.
+    expect(outcome.message.tool_calls).toHaveLength(1);
+  });
+
+  it('flags a size-cut call even when its arguments happen to parse', () => {
+    const outcome = guard([call('a', 'create_event', { title: 'Dentist' })], new Set(), new Set(), new Set(['a']));
+    expect(outcome.invalidCalls.get('a')).toBe(TOOL_CALL_SIZE_CUT_MESSAGE);
+  });
+
+  it('leaves the other calls in the same reply alone when one call was size-cut', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"half-written'), call('b', 'get_event', { event_id: 'evt-1' })],
+      new Set(['evt-1']),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.invalidCalls.size).toBe(1);
+    expect(outcome.invalidCalls.has('b')).toBe(false);
   });
 });
 
