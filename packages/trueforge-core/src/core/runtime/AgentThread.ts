@@ -560,7 +560,11 @@ function errorTextFromToolContent(content: string): string | undefined {
  * One log line per completed tool call, so a turn's tool story can be found in the app log by
  * tool name, by the word error, or by the session and turn ids the logger already carries.
  * Successes log at info, the level the app keeps; anything else logs at warn with its error
- * text. Names, the outcome, and error text only: never argument or result bodies.
+ * text. Names, the outcome, and error text only: never argument or result bodies. The one
+ * exception is a call to a tool that is not in the mapping: that case already drew the
+ * canonical unknown-tool warning where the call was first seen, so its outcome line logs at
+ * info, keeping the call's ids, outcome and error text while the case carries exactly one
+ * warning in total.
  */
 export function logToolCallOutcome(logger: Logger, input: { toolName: string; result: ToolCallResult }): void {
   const { result } = input;
@@ -575,10 +579,15 @@ export function logToolCallOutcome(logger: Logger, input: { toolName: string; re
     return;
   }
   const error = toolCallOutcomeErrorText(result);
-  logger.warn(`Tool call ${input.toolName}: ${result.disposition}`, {
+  const failureFields = {
     ...fields,
     ...(error === undefined ? {} : { error }),
-  });
+  };
+  if (result.remediation?.reason_code === 'unknown_tool') {
+    logger.info(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
+    return;
+  }
+  logger.warn(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
 }
 
 /** The single runtime boundary that turns an executed host result into its public v2 event. */
