@@ -1,6 +1,7 @@
 /**
  * Bound session handle: starts turns via {@link SessionHandle.createTurn}.
  */
+import type { Logger } from 'winston';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
 import type { ActionRequiredEvent, ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
@@ -502,6 +503,9 @@ export class SessionHandle<
         session_id: this.session.session_id,
       };
       const turnId = input.turn_id;
+      // One logger for the whole turn, stamped with the session and turn ids, so every line the
+      // turn's threads and orchestrator write can be found in the app log by either id.
+      const turnLogger = input.resolver.logger.child({ sessionId: this.session.session_id, turnId });
       const planGrantTurnOwner = { ...planGrantOwner, turn_id: turnId };
       let turnCommitted = false;
       const chatApprovalGrants = new Set(
@@ -554,6 +558,7 @@ export class SessionHandle<
       const agentThreads = this.buildThreads({
         previous,
         resolver: input.resolver,
+        logger: turnLogger,
         spec,
         sandbox,
         tracing,
@@ -568,6 +573,7 @@ export class SessionHandle<
 
       const createDynamicSubAgentThread = this.makeCreateDynamicSubAgentThread({
         resolver: input.resolver,
+        logger: turnLogger,
         previous,
         spec,
         sandbox,
@@ -581,7 +587,7 @@ export class SessionHandle<
         agentThreads,
         createDynamicSubAgentThread,
         tracing,
-        logger: input.resolver.logger,
+        logger: turnLogger,
       });
 
       // SEND BEFORE COMMIT — validate + append; throw ⇒ nothing persisted.
@@ -1026,6 +1032,7 @@ export class SessionHandle<
   private buildThreads(input: {
     previous: TurnRecord<TTurnCustom> | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1050,6 +1057,7 @@ export class SessionHandle<
           threadId,
           previousThreadSnapshot: snapshots?.[threadId],
           resolver: input.resolver,
+          logger: input.logger,
           spec: input.spec,
           sandbox: input.sandbox,
           tracing: input.tracing,
@@ -1070,6 +1078,7 @@ export class SessionHandle<
     threadId: string;
     previousThreadSnapshot?: AgentThreadSnapshot | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1092,7 +1101,7 @@ export class SessionHandle<
       sandbox,
       sandboxAvailable: Boolean(sandbox),
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
@@ -1121,7 +1130,7 @@ export class SessionHandle<
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
       isRequestContinuation: input.isRequestContinuation,
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
@@ -1136,6 +1145,7 @@ export class SessionHandle<
 
   private makeCreateDynamicSubAgentThread(input: {
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     previous: TurnRecord<TTurnCustom> | undefined;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
@@ -1199,7 +1209,7 @@ export class SessionHandle<
         sandbox,
         sandboxAvailable: Boolean(sandbox),
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
         boundRepository: input.resolver.boundRepository,
@@ -1221,7 +1231,7 @@ export class SessionHandle<
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
         isRequestContinuation: false,
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,

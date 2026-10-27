@@ -2,6 +2,7 @@
  * A chat driven through SessionHandle and the session store, whose model makes one web search through a designated
  * search connector. Each turn gets its own resolver, and so its own search state, as the server builds them.
  */
+import type { Logger } from 'winston';
 import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
@@ -81,6 +82,8 @@ export async function setupSearchChat(
     sandbox?: Sandbox;
     /** The name the person gave the assistant, as the host sets it on the main thread. */
     assistant_name?: string;
+    /** Logger handed to each turn's resolver, so a test can read the lines the turn wrote. */
+    logger?: Logger;
   } = {},
 ) {
   // Each test is its own chat: the record of unsaved turns lives for the whole process.
@@ -130,7 +133,9 @@ export async function setupSearchChat(
   // Each turn gets its own resolver, and so its own search state, as the server builds them.
   const resolverForTurn = (): ITurnResourceResolver => {
     const base = makeTestResolver(
-      options.sandbox === undefined ? { modelClient } : { modelClient, sandbox: options.sandbox },
+      options.sandbox === undefined
+        ? { modelClient, logger: options.logger }
+        : { modelClient, sandbox: options.sandbox, logger: options.logger },
     );
     return {
       get logger() {
