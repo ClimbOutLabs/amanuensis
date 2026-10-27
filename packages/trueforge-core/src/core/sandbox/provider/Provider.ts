@@ -60,6 +60,17 @@ export interface SandboxExecParams {
    * call stays offline.
    */
   packageMirrorToken?: string | undefined;
+  /**
+   * Skill network grant token for this call, issued for the sites the person approved for the skills
+   * in this chat. Slot providers pass it to the agent, which hands the guest proxy variables for the
+   * duration of the call; the gateway stays the wall that checks every site against the grant.
+   */
+  skillNetworkToken?: string | undefined;
+  /**
+   * The approved sites behind {@link skillNetworkToken}, for providers that enforce a per-command
+   * allowlist on the host (the local supervisor path) instead of a gateway.
+   */
+  skillNetworkHosts?: readonly string[] | undefined;
 }
 
 export interface WorkspaceExecutionLock {

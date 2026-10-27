@@ -584,6 +584,7 @@ describe('validateAgentSpec', () => {
             repository_name: 'team-a',
             version: 1,
           },
+          network_approval: null,
           created_at: now,
           updated_at: now,
         },
@@ -595,6 +596,9 @@ describe('validateAgentSpec', () => {
         throw new Error('unused');
       },
       deleteSkill: async () => {
+        throw new Error('unused');
+      },
+      setSkillNetworkApproval: async () => {
         throw new Error('unused');
       },
       listSkillVersions: async () => [],

@@ -1,0 +1,197 @@
+{
+  "release": {
+    "schema": "1",
+    "sourceRef": "abc123def4567890",
+    "appImage": "aman-app:abc123def456",
+    "sttImage": "aman-stt:abc123def456",
+    "calendarImage": "aman-calendar-caldav:abc123def456",
+    "dexImage": "ghcr.io/example/dex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "mailEmailImage": "ghcr.io/example/mail@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "releaseUnreadable": false,
+  "previousRelease": {
+    "schema": "1",
+    "sourceRef": "0123456789abcdef",
+    "appImage": "aman-app:0123456789ab",
+    "sttImage": "aman-stt:0123456789ab",
+    "calendarImage": "aman-calendar-caldav:0123456789ab",
+    "dexImage": "ghcr.io/example/dex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "mailEmailImage": "ghcr.io/example/mail@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "instances": [
+    {
+      "name": "guest",
+      "entries": [
+        {
+          "key": "name",
+          "value": "guest"
+        },
+        {
+          "key": "app_port",
+          "value": "8792"
+        },
+        {
+          "key": "login_port",
+          "value": "5557"
+        },
+        {
+          "key": "public_url",
+          "value": "http://127.0.0.1:8792"
+        },
+        {
+          "key": "login_url",
+          "value": "http://127.0.0.1:5557"
+        },
+        {
+          "key": "owner_email",
+          "value": "guest@example.com"
+        },
+        {
+          "key": "owner_name",
+          "value": "Guest Person"
+        },
+        {
+          "key": "cookie_suffix",
+          "value": ""
+        },
+        {
+          "key": "client_id",
+          "value": "client-guest"
+        },
+        {
+          "key": "healthy",
+          "value": "0"
+        },
+        {
+          "key": "origins",
+          "value": "http://127.0.0.1:8792"
+        },
+        {
+          "key": "extra_hosts",
+          "value": ""
+        },
+        {
+          "key": "sandbox",
+          "value": "slots"
+        },
+        {
+          "key": "tls",
+          "value": "off"
+        },
+        {
+          "key": "tls_port",
+          "value": ""
+        },
+        {
+          "key": "token_factory",
+          "value": "0"
+        },
+        {
+          "key": "tf_model",
+          "value": ""
+        },
+        {
+          "key": "tf_cap",
+          "value": ""
+        },
+        {
+          "key": "demo",
+          "value": "0"
+        },
+        {
+          "key": "created",
+          "value": "2026-10-21T03:04:05Z"
+        }
+      ]
+    },
+    {
+      "name": "main",
+      "entries": [
+        {
+          "key": "name",
+          "value": "main"
+        },
+        {
+          "key": "app_port",
+          "value": "8791"
+        },
+        {
+          "key": "login_port",
+          "value": "5556"
+        },
+        {
+          "key": "public_url",
+          "value": "http://127.0.0.1:8791"
+        },
+        {
+          "key": "login_url",
+          "value": "http://127.0.0.1:5556"
+        },
+        {
+          "key": "owner_email",
+          "value": "owner@example.com"
+        },
+        {
+          "key": "owner_name",
+          "value": "Test Person"
+        },
+        {
+          "key": "cookie_suffix",
+          "value": ""
+        },
+        {
+          "key": "client_id",
+          "value": "client-main"
+        },
+        {
+          "key": "healthy",
+          "value": "1"
+        },
+        {
+          "key": "origins",
+          "value": "http://127.0.0.1:8791"
+        },
+        {
+          "key": "extra_hosts",
+          "value": ""
+        },
+        {
+          "key": "sandbox",
+          "value": "slots"
+        },
+        {
+          "key": "tls",
+          "value": "off"
+        },
+        {
+          "key": "tls_port",
+          "value": ""
+        },
+        {
+          "key": "token_factory",
+          "value": "0"
+        },
+        {
+          "key": "tf_model",
+          "value": ""
+        },
+        {
+          "key": "tf_cap",
+          "value": ""
+        },
+        {
+          "key": "demo",
+          "value": "0"
+        },
+        {
+          "key": "created",
+          "value": "2026-10-20T03:04:05Z"
+        }
+      ]
+    }
+  ],
+  "backups": ["20261020T030405Z", "20261021T030405Z-keep"],
+  "backupsMode": "daily",
+  "sourceCheckout": "/opt/aman-checkout",
+  "installedAppImage": "aman-app:abc123def456"
+}

@@ -424,6 +424,84 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'failed', reason: 'upstream 500', fallback: 'model_failed' });
   });
 
+  it('retries once after a timeout, through a fresh client, and saves what the retry returns', async () => {
+    const timedOut = fakeSummarizerThrowing(new Error('The request timed out after 30000 ms'));
+    const timedOutCall = jest.spyOn(timedOut, 'createNonStream');
+    const working = fakeSummarizer('{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}');
+    const workingCall = jest.spyOn(working, 'createNonStream');
+    const clients: ILLM[] = [timedOut, working];
+    let resolutions = 0;
+    const resolveLlm = async (): Promise<ILLM> => {
+      resolutions += 1;
+      const client = clients.shift();
+      if (client === undefined) {
+        throw new Error('the summarizer was resolved more times than the test set up');
+      }
+      return client;
+    };
+    const result = await summarizeTurnContent({ ...base, resolveLlm });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
+    });
+    // The timed-out client is not called again; the retry resolves a fresh one and asks
+    // for the same output as the first attempt.
+    expect(resolutions).toBe(2);
+    expect(timedOutCall).toHaveBeenCalledTimes(1);
+    expect(workingCall).toHaveBeenCalledTimes(1);
+    expect(workingCall.mock.calls[0]?.[0]?.max_tokens).toBe(800);
+  });
+
+  it('fails with model_timeout after exactly one retry when the retry times out too', async () => {
+    let calls = 0;
+    const alwaysTimingOut: ILLM = {
+      create(): ReturnType<ILLM['create']> {
+        throw new Error('streaming is not used by memory summarization');
+      },
+      createNonStream: async () => {
+        calls += 1;
+        throw new Error('The request timed out after 30000 ms');
+      },
+    };
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => alwaysTimingOut });
+    expect(result).toEqual({
+      status: 'failed',
+      reason: 'The request timed out after 30000 ms',
+      fallback: 'model_timeout',
+    });
+    expect(calls).toBe(2);
+  });
+
+  it('does not retry a failure that is not a timeout', async () => {
+    const failing = fakeSummarizerThrowing(new Error('upstream 500'));
+    const failingCall = jest.spyOn(failing, 'createNonStream');
+    const failedResult = await summarizeTurnContent({ ...base, resolveLlm: async () => failing });
+    expect(failedResult).toEqual({ status: 'failed', reason: 'upstream 500', fallback: 'model_failed' });
+    expect(failingCall).toHaveBeenCalledTimes(1);
+
+    const empty = fakeSummarizer('   ');
+    const emptyCall = jest.spyOn(empty, 'createNonStream');
+    const emptyResult = await summarizeTurnContent({ ...base, resolveLlm: async () => empty });
+    expect(emptyResult).toEqual({ status: 'failed', reason: 'summary-empty', fallback: 'summary_empty' });
+    expect(emptyCall).toHaveBeenCalledTimes(1);
+
+    const unreadable = fakeSummarizer('The person talked about a robot and a dog.');
+    const unreadableCall = jest.spyOn(unreadable, 'createNonStream');
+    const unreadableResult = await summarizeTurnContent({ ...base, resolveLlm: async () => unreadable });
+    expect(unreadableResult).toEqual({
+      status: 'failed',
+      reason: 'summary-unreadable',
+      fallback: 'summary_unreadable',
+    });
+    expect(unreadableCall).toHaveBeenCalledTimes(1);
+
+    const overlong = fakeSummarizer('x'.repeat(5000));
+    const overlongCall = jest.spyOn(overlong, 'createNonStream');
+    const overlongResult = await summarizeTurnContent({ ...base, resolveLlm: async () => overlong });
+    expect(overlongResult).toEqual({ status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' });
+    expect(overlongCall).toHaveBeenCalledTimes(1);
+  });
+
   it('returns failed for an overlong summary instead of truncating', async () => {
     const result = await summarizeTurnContent({
       ...base,
@@ -666,6 +744,24 @@ describe('summarizeTurnContent', () => {
     jest.spyOn(finished, 'createNonStream');
     await summarizeTurnContent({ ...base, resolveLlm: async () => finished });
     expect(finished.createNonStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the cut-off retry on the same client, without resolving a new one', async () => {
+    const { llm, caps } = fakeReasoningSummarizer({
+      thinkingTokens: 2000,
+      answer: '{"facts": ["The person has a dog named Rex."]}',
+    });
+    let resolutions = 0;
+    const result = await summarizeTurnContent({
+      ...base,
+      resolveLlm: async () => {
+        resolutions += 1;
+        return llm;
+      },
+    });
+    expect(result).toEqual({ status: 'summarized', facts: ['The person has a dog named Rex.'] });
+    expect(caps).toEqual([800, 4000]);
+    expect(resolutions).toBe(1);
   });
 
   it('flattens multi-part content responses', async () => {

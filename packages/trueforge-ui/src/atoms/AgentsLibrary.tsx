@@ -334,8 +334,10 @@ async function listAllSchedulesForAgents({
 }): Promise<Schedule[]> {
   if (agentIds.length === 0) return [];
   const rows: Schedule[] = [];
+  // A token seen before means the server is going round in a circle, so reading stops there.
+  const seenTokens = new Set<string>();
   let pageToken: string | undefined;
-  do {
+  for (;;) {
     const page = await listSchedules({
       agentIds,
       limit: 25,
@@ -343,8 +345,9 @@ async function listAllSchedulesForAgents({
     });
     rows.push(...page.data);
     pageToken = page.nextPageToken;
-  } while (pageToken != null && pageToken !== '');
-  return rows;
+    if (pageToken == null || pageToken === '' || seenTokens.has(pageToken)) return rows;
+    seenTokens.add(pageToken);
+  }
 }
 
 export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {

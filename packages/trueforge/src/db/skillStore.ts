@@ -15,6 +15,12 @@ export interface SkillRecord {
    */
   name: string;
   manifest: SkillManifest;
+  /**
+   * The exact site list the person approved for this skill's network access, or null when they
+   * have not approved (or approval was removed). Stored beside the manifest, never inside it:
+   * editing the skill must not silently grant or widen access.
+   */
+  network_approval: readonly string[] | null;
   /** ISO-8601 UTC instant. */
   created_at: string;
   /** ISO-8601 UTC instant. */
@@ -40,6 +46,13 @@ export interface CreateSkillInput {
 
 /** Same shape as create for now; kept as a distinct name for the upsert path. */
 export type UpsertSkillInput = CreateSkillInput;
+
+export interface SetSkillNetworkApprovalInput {
+  tenant_id: string;
+  name: string;
+  /** The approved site list, or null to remove the approval. */
+  hosts: readonly string[] | null;
+}
 
 /** AgentSpec `skills` refs for validate and resolve. */
 export interface AgentSkillsInput {
@@ -68,6 +81,14 @@ export interface ISkillStore<TTransaction = never> {
   upsertSkill(input: UpsertSkillInput, transaction?: TTransaction): Promise<SkillRecord>;
   /** Deletes a skill. Returns true if a row was deleted, false if none matched. */
   deleteSkill(input: GetSkillInput, transaction?: TTransaction): Promise<boolean>;
+  /**
+   * Stores or clears the person's network approval for one skill. Returns the updated record,
+   * or undefined when no skill with that name exists.
+   */
+  setSkillNetworkApproval(
+    input: SetSkillNetworkApprovalInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined>;
   listSkillVersions(input: { name: string }): Promise<SkillVersion[]>;
   /** Admit AgentSpec skill refs (git store or TrueFoundry SFY resolve with caller token). */
   validateAgentSkills(input: AgentSkillsInput, transaction?: TTransaction): Promise<void>;

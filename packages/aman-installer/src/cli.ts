@@ -1,12 +1,15 @@
+import { runStatus } from './commands/status.ts';
 import { checkDocker } from './doctor/dockerDoctor.ts';
 import type { Host } from './host/host.ts';
 import { HELP_LINES, UNKNOWN_DOCTOR_CHECK, problemText, unknownCommandProblem, versionLine } from './messages.ts';
 import type { ProcessRunner } from './runner/processRunner.ts';
+import type { StateStore } from './state/state.ts';
 import { INSTALLER_VERSION } from './version.ts';
 
 export interface CliDeps {
   host: Host;
   runner: ProcessRunner;
+  store: StateStore;
   print: (line: string) => void;
 }
 
@@ -28,6 +31,9 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
     }
     deps.print(problemText(UNKNOWN_DOCTOR_CHECK));
     return 1;
+  }
+  if (first === 'status') {
+    return runStatus(deps);
   }
   deps.print(problemText(unknownCommandProblem(first)));
   return 1;
