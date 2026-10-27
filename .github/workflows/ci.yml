@@ -264,14 +264,14 @@ jobs:
 
       - name: Setup Go
         if: matrix.package == 'sandbox-slot-agent'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ops/sandbox-slot/agent/go.mod
 
       # The chat image re-encode script runs in the sandbox guest on this Pillow pin; its tests run it on the host.
       - name: Setup Python
         if: matrix.package == 'trueforge'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
