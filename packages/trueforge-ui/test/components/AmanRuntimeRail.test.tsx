@@ -892,4 +892,30 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     );
     expect(screen.queryByText('local-model')).not.toBeInTheDocument();
   });
+
+  it('shows an Audits link in the Activity fold when shell context is available', () => {
+    const setSettingsOpen = vi.fn();
+    render(
+      <RuntimeHarness messages={[]} shellMode={{ setSettingsOpen }}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    const auditsLink = screen.getByRole('button', { name: 'Audits' });
+    expect(auditsLink).toBeInTheDocument();
+
+    fireEvent.click(auditsLink);
+
+    expect(setSettingsOpen).toHaveBeenCalledWith(true, 'audit');
+  });
+
+  it('does not show an Audits link when shell context is not available', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
+  });
 });
