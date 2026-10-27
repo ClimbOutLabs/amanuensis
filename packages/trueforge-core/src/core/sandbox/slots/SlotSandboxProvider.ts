@@ -178,6 +178,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: this.treeDiskMb,
       ...(params.packageMirrorToken === undefined ? {} : { package_mirror_token: params.packageMirrorToken }),
+      ...(params.skillNetworkToken === undefined ? {} : { skill_network_token: params.skillNetworkToken }),
     };
     const deadline = Date.now() + timeoutMs + QUEUE_GRACE_MS;
     for (;;) {

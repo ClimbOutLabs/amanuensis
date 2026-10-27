@@ -23,6 +23,7 @@ import {
   LIST_BLOCKS_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
+  SPACE_WRITE_TOO_LONG_ERROR_CODE,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import {
@@ -192,6 +193,7 @@ interface SpaceWireResult {
   spaces?: { id: string }[];
   blocks?: { anchor: string; fingerprint: string }[];
   error?: string;
+  error_code?: string;
 }
 
 function resultText(response: CallToolResponse): string {
@@ -275,6 +277,13 @@ describe('the space write size cap', () => {
     expect(error).toContain('one write may carry at most 4,000');
     expect(error).toContain('Nothing was persisted');
     expect(error).toContain('add the rest with edit_space');
+    // The refusal text is pinned word for word: it is what the model reads and it must not
+    // drift. The stable code beside it is what the chat keys its plain note on.
+    expect(error).toBe(
+      'Refusing create_space: this write carries 4,001 characters of new content, and one write may carry at most 4,000. ' +
+        'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.',
+    );
+    expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
 
     const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
     expect(resultJson(listed).spaces).toHaveLength(0);
@@ -315,6 +324,7 @@ describe('the space write size cap', () => {
     expect(error).toContain('Refusing edit_space');
     expect(error).toContain('one write may carry at most 4,000');
     expect(error).toContain('follow-up edit_space call');
+    expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
 
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
@@ -587,6 +597,8 @@ describe('recovering a space past the write cap, end to end', () => {
     const missError = resultJson(missed).error ?? '';
     expect(missError).toContain('call list_blocks');
     expect(missError).toContain('make the change with edit_space in parts');
+    // Only the size refusal carries the code; other refusals stay plain failures in the chat.
+    expect(resultJson(missed).error_code).toBeUndefined();
     const last = await lastBlockOf(call, 'Dog breeds');
     const appended = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',

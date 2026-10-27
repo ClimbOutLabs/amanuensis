@@ -9,6 +9,7 @@ import {
   SkillGitPathSchema,
   SkillGitRefSchema,
   SkillGitUrlSchema,
+  SkillNetworkHostsSchema,
   SkillRequiresSchema,
   SkillTypeSchema,
 } from './skill';
@@ -29,6 +30,7 @@ export const CatalogSkillSchema = z
     ref: SkillGitRefSchema,
     description: SkillDescriptionSchema,
     requires: SkillRequiresSchema.optional(),
+    network_hosts: SkillNetworkHostsSchema.optional(),
   })
   .strict()
   .openapi('CatalogSkill');
