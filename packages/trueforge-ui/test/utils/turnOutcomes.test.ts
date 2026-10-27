@@ -174,6 +174,40 @@ describe('turnOutcomeLines', () => {
     expect(turnOutcomeLines([gmail])).toEqual(['Draft saved for ana@example.org']);
   });
 
+  it('names an updated Gmail draft by who it is for', () => {
+    const part = toolPart({
+      toolName: 'update_draft',
+      args: { draft_id: 'd-2', to: ['ana@example.org'], subject: 'Hello', body: 'Hi, with the new date.' },
+      result: envelope(
+        mcpText({
+          account: 'owner@example.com',
+          draft_id: 'd-2',
+          message_id: 'msg-9',
+          thread_id: 'th-1',
+          status: 'updated',
+        }),
+      ),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Draft updated for ana@example.org']);
+  });
+
+  it('names an updated Gmail draft on its own when the call names no recipient', () => {
+    const part = toolPart({
+      toolName: 'update_draft',
+      args: { draft_id: 'd-2' },
+      result: envelope(
+        mcpText({
+          account: 'owner@example.com',
+          draft_id: 'd-2',
+          message_id: 'msg-9',
+          thread_id: 'th-1',
+          status: 'updated',
+        }),
+      ),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Draft updated']);
+  });
+
   it('names a Gmail send on its own, because the send call carries no recipient', () => {
     const part = toolPart({
       toolName: 'send_draft',

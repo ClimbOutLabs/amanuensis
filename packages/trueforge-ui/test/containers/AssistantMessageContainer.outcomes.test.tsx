@@ -141,7 +141,7 @@ describe('AssistantMessageContainer outcome lines', () => {
     expect(screen.queryByTestId('assistant-message-outcome')).not.toBeInTheDocument();
   });
 
-  it('shows no outcome line while details are stored off for the chat either', async () => {
+  it('shows the outcome line when details are stored collapsed for the chat, and no internals', async () => {
     render(
       <AgentDetailsHarness agentDetails="collapsed" messages={[reminderTurn('rem-1')]}>
         <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
