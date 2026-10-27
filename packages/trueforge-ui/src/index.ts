@@ -511,7 +511,12 @@ export {
   useOptionalShellMode,
   useShellMode,
 } from './server/ShellModeContext.js';
-export type { AgentConfig, SelectLibraryAgentRequest, SettingsOpenRequest, ShellMode } from './server/ShellModeContext.js';
+export type {
+  AgentConfig,
+  SelectLibraryAgentRequest,
+  SettingsOpenRequest,
+  ShellMode,
+} from './server/ShellModeContext.js';
 export type {
   AgentBuilderCapabilitiesResponse,
   AgentBuilderServer,
