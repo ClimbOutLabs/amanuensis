@@ -32,6 +32,7 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
+import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -2320,6 +2321,22 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
 }
 
 /**
+ * The Google setup read is the host's own, named by server like the Gmail tools. It reads only whether a
+ * login is saved and what it may do: no secret, no mail and no calendar content, so it runs without asking
+ * and is not a sensitive read. Anything else on this server fails closed.
+ */
+function classifyGoogleSetupTool(action: SentinelAction): TierDecision {
+  if (action.tool_name !== GOOGLE_SETUP_STATUS_TOOL_NAME) {
+    return failClosedDecision({ reason_detail: 'Unknown Google setup tool.' });
+  }
+  return tier1Decision({
+    reason: 'google_setup_read',
+    reason_detail: 'Read the state of your Google connection.',
+    sensitive_read: false,
+  });
+}
+
+/**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
  */
@@ -3227,6 +3244,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
+    return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
   }
   if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);
