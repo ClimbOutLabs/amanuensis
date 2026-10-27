@@ -107,7 +107,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     ({
       modelCatalog: createModelProviderCatalog(client, clientOptions),
       connectorCatalog: createConnectorCatalog(client, clientOptions),
-      skillCatalog: createSkillCatalog(client),
+      skillCatalog: createSkillCatalog(client, clientOptions),
       sandboxCatalog: createSandboxProviderCatalog(client),
     } satisfies CatalogServer);
 

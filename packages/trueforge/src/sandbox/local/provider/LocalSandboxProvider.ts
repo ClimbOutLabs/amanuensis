@@ -696,6 +696,7 @@ export class LocalSandboxProvider implements SandboxProvider {
         ...(env === undefined ? {} : { env }),
         signal: lockedParams.signal,
         timeoutMs: timeoutSeconds * 1000,
+        extraAllowedDomains: lockedParams.skillNetworkHosts,
       });
       throwIfSignalAborted(lockedParams.signal);
       return localSandboxExecResult(session);
