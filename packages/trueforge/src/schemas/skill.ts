@@ -72,6 +72,70 @@ export const SkillWhenToUseSchema = z
   .array(z.string().trim().min(1))
   .describe('Trigger phrases describing when the agent should use the skill.');
 
+/**
+ * One site a skill declares it needs to reach: an exact host name, lowercase, with no scheme, port
+ * or path, and never a wildcard or an IP address. The gateway matches this name exactly, so
+ * anything looser would approve more than the person was shown.
+ */
+const SKILL_NETWORK_HOST_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+export const SkillNetworkHostSchema = z
+  .string()
+  .trim()
+  .max(253)
+  .regex(
+    SKILL_NETWORK_HOST_REGEX,
+    'Must be an exact site name like gmail.googleapis.com, with no https://, port, path or *',
+  )
+  .refine(v => !v.split('.').every(label => /^\d+$/.test(label)), 'Must be a site name, not an IP address')
+  .describe('One exact site name the skill needs to reach.');
+
+/**
+ * The sites a skill declares it needs. Optional and backward compatible like `when_to_use`: a
+ * skill that declares nothing gets no network, and nothing about it changes. Naming a site here
+ * grants nothing by itself; the person approves the list in Settings first.
+ */
+export const SkillNetworkHostsSchema = z
+  .array(SkillNetworkHostSchema)
+  .max(20)
+  .transform(hosts => [...new Set(hosts)])
+  .describe('Exact site names the skill needs to reach. The person approves this list in Settings.');
+
+/**
+ * Built-in list of sites where a skill can send mail or change a calendar. When a declared list
+ * names one of these, the approval in Settings says so in plain words, because approving the site
+ * approves the sending too: the gateway cannot see inside the encrypted connection to tell a read
+ * from a send.
+ */
+export const SKILL_NETWORK_SEND_CAPABLE_HOSTS: readonly string[] = [
+  'gmail.googleapis.com',
+  'www.googleapis.com',
+  'graph.microsoft.com',
+  'outlook.office365.com',
+];
+
+/** True when any of the given sites can send mail or change a calendar. */
+export function skillNetworkHostsCanSend(hosts: readonly string[]): boolean {
+  return hosts.some(host => SKILL_NETWORK_SEND_CAPABLE_HOSTS.includes(host));
+}
+
+/**
+ * The sites a skill may reach right now, from what it declares and what the person approved.
+ * Hosts removed from the declaration drop out on their own. A host added to the declaration is
+ * not covered by an earlier approval, so nothing is granted until the person approves the new
+ * full list: the approval counts only when it covers every declared site.
+ */
+export function effectiveSkillNetworkHosts(input: {
+  declared: readonly string[] | undefined;
+  approved: readonly string[] | null;
+}): readonly string[] | null {
+  const declared = input.declared ?? [];
+  if (input.approved === null || declared.length === 0) {
+    return null;
+  }
+  const approved = new Set(input.approved);
+  return declared.every(host => approved.has(host)) ? declared : null;
+}
+
 /** Configured skill document persisted as `skill.manifest`. */
 const GitSkillSchema = z
   .object({
@@ -83,6 +147,7 @@ const GitSkillSchema = z
     description: SkillDescriptionSchema,
     requires: SkillRequiresSchema.optional(),
     when_to_use: SkillWhenToUseSchema.optional(),
+    network_hosts: SkillNetworkHostsSchema.optional(),
   })
   .strict()
   .openapi('GitSkill');
@@ -187,8 +252,42 @@ export const ListSkillVersionsResponseSchema = z
   .object({ data: z.array(SkillVersionSchema) })
   .openapi('ListSkillVersionsResponse');
 
+/**
+ * Network approval state of one skill, as Settings shows it. `approved_hosts` is the list in
+ * force right now: null when the person has not approved, or when the skill's declared list grew
+ * past what they approved and they need to approve the new full list.
+ */
+export const SkillNetworkApprovalSchema = z
+  .object({
+    declared_hosts: SkillNetworkHostsSchema,
+    approved_hosts: z.array(SkillNetworkHostSchema).nullable(),
+    send_capable: z.boolean().describe('True when a declared site can send mail or change a calendar.'),
+  })
+  .strict()
+  .openapi('SkillNetworkApproval');
+
+export const GetSkillNetworkApprovalResponseSchema = z
+  .object({ data: SkillNetworkApprovalSchema })
+  .openapi('GetSkillNetworkApprovalResponse');
+
+/** The approval the person is giving. It must name the skill's declared sites exactly, no more, no fewer. */
+export const UpdateSkillNetworkApprovalRequestSchema = z
+  .object({
+    hosts: SkillNetworkHostsSchema,
+  })
+  .strict()
+  .openapi('UpdateSkillNetworkApprovalRequest');
+
+export const UpdateSkillNetworkApprovalResponseSchema = z
+  .object({ data: SkillNetworkApprovalSchema })
+  .openapi('UpdateSkillNetworkApprovalResponse');
+
+export const DeleteSkillNetworkApprovalResponseSchema = z.object({}).openapi('DeleteSkillNetworkApprovalResponse');
+
 export type ConfiguredSkill = z.infer<typeof ConfiguredSkillSchema>;
 export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>;
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>;
 export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 export type SkillVersion = z.infer<typeof SkillVersionSchema>;
+export type SkillNetworkApproval = z.infer<typeof SkillNetworkApprovalSchema>;
+export type UpdateSkillNetworkApprovalRequest = z.infer<typeof UpdateSkillNetworkApprovalRequestSchema>;

@@ -725,6 +725,7 @@ export function buildTurnSandbox(input: {
   boundRepository?: BoundRepository | undefined;
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
   loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
   allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
@@ -763,6 +764,7 @@ export function buildTurnSandbox(input: {
     boundRepository: input.boundRepository,
     loadBoundRepository: input.loadBoundRepository,
     loadPackageMirrorToken: input.loadPackageMirrorToken,
+    loadSkillNetworkGrant: input.loadSkillNetworkGrant,
     loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
     allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,
