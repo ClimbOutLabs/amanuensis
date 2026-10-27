@@ -29,7 +29,7 @@ describe('CompactionStatusLine', () => {
 
     const line = screen.getByText("This chat uses 10% of the model's memory (13K of 128K tokens).");
     expect(line).toHaveAttribute('data-slot', 'aui_compaction-status');
-    expect(line).toHaveClass('text-text-muted', 'text-[0.75rem]', 'font-normal');
+    expect(line).toHaveClass('text-text-muted', 'text-xs', 'font-normal');
     expect(line).toHaveAttribute('title', expect.stringContaining("model's memory"));
   });
 

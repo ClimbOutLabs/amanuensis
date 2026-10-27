@@ -29,14 +29,15 @@ export function ApprovalNavBanner({ total, assistantName, title, onFocusCurrent,
       role="status"
       aria-live="polite"
       className={cn(
-        'aui-approval-nav-banner border-gold-line bg-gold-soft text-text-primary flex w-full items-center gap-2 rounded-t-[1.25rem] border-t border-r border-l px-4 py-2 text-[0.8125rem]',
+        'aui-approval-nav-banner border-gold-line bg-gold-soft text-text-primary flex w-full items-center gap-2 rounded-t-[1.25rem] border-t border-r border-l px-4 py-2 text-sm',
         className,
       )}
     >
       <span className="bg-gold size-1.5 shrink-0 rounded-full" aria-hidden />
       <p className="min-w-0 flex-1">
         {label}
-        {total === 1 && title !== undefined ? <span className="font-serif text-[0.9375rem]"> {title}</span> : null}
+        {/* The card's own title stands out by weight, at the banner's own size, not a serif accent or a size jump. */}
+        {total === 1 && title !== undefined ? <span className="font-semibold"> {title}</span> : null}
       </p>
       <button
         type="button"

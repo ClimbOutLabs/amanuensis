@@ -48,7 +48,7 @@ export function CompactionStatusLine({ className }: { className?: string }) {
     <p
       data-slot="aui_compaction-status"
       title={MEMORY_HINT}
-      className={cn('px-1 pt-1 text-[0.75rem] leading-snug font-normal text-text-muted', className)}
+      className={cn('px-1 pt-1 text-xs leading-snug font-normal text-text-muted', className)}
     >
       {lines.join(' ')}
     </p>
