@@ -2,7 +2,12 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
+import {
+  extractErrorLogFields,
+  rawSandboxId,
+  repositoryRootsMatch,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -40,7 +45,7 @@ import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/sch
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
-import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
+import { createInternalSessionsRouter, createSessionsRouter, sandboxIdOfLastTurn } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacePicturesRouter } from './apis/spacePictures';
@@ -1053,6 +1058,39 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
             sessionId: session_id,
           });
           return provider?.getWorkspaceDir();
+        },
+        resolveCheckoutExists: async ({ c, session_id, workspace_cwd }) => {
+          const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id });
+          if (session === undefined) {
+            return false;
+          }
+          const sandboxId = await sandboxIdOfLastTurn({
+            deps: { sessionStore: deps.sessionStore, logger: deps.logger },
+            record: session,
+          });
+          if (sandboxId === undefined) {
+            return false;
+          }
+          const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+          const provider = await resolver({
+            tenant_id: TENANT_ID,
+            store: deps.resolveSandboxProviderStore(c),
+            logger: deps.logger,
+            sessionId: session_id,
+          });
+          if (provider === undefined) {
+            return false;
+          }
+          const result = await provider.exec({
+            sandboxId: rawSandboxId(sandboxId),
+            command: 'git rev-parse --show-toplevel',
+            cwd: workspace_cwd,
+          });
+          return (
+            result.success &&
+            result.response.exitCode === 0 &&
+            repositoryRootsMatch({ expected: workspace_cwd, actual: result.response.result.trim() })
+          );
         },
       }),
       authMiddleware,
