@@ -11,6 +11,7 @@ import {
   lightReasoningRequestFields,
   parseSummaryReply,
   summarizeTurnContent,
+  usablePersonName,
 } from '../../../../src/runtime/memory/memorySummarize';
 import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
@@ -89,6 +90,53 @@ describe('buildSummarizationMessages', () => {
     expect(system).toContain('Most turns hold nothing worth keeping');
   });
 
+  it("gives the model the person's name and asks for facts written in it, when a name is supplied", () => {
+    const system = buildSummarizationMessages({
+      userText: 'hi',
+      assistantText: 'hello',
+      turnDate: TURN_DATE,
+      personName: 'Priya',
+    })[0]?.content;
+    expect(system).toContain("The person's name is Priya.");
+    expect(system).toContain('with Priya as its subject');
+    expect(system).toContain('never use "the person" as the subject of a fact');
+    expect(system).not.toContain('in the third person, about "the person"');
+  });
+
+  it('writes the worked examples in the name style when a name is supplied', () => {
+    const system = buildSummarizationMessages({
+      userText: 'hi',
+      assistantText: 'hello',
+      turnDate: TURN_DATE,
+      personName: 'Priya',
+    })[0]?.content;
+    expect(system).toContain('"Priya\'s friend <name> has their book."');
+    expect(system).toContain('"Priya needs the car back on 2026-03-05."');
+    expect(system).toContain('"Priya\'s neighbour <name> waters their plants every Tuesday while they are away."');
+    expect(system).toContain('"Priya\'s dentist is Dr <name>."');
+  });
+
+  it('falls back to writing about "the person" when no name is supplied', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('Write each fact as one complete sentence in the third person, about "the person".');
+    expect(system).toContain('"The person\'s friend <name> has their book."');
+    expect(system).not.toContain("The person's name is");
+  });
+
+  it('falls back when the supplied value is blank, spread over several lines, or far longer than a name', () => {
+    for (const personName of ['   ', 'Two\nLines', 'N'.repeat(201)]) {
+      const system = buildSummarizationMessages({
+        userText: 'hi',
+        assistantText: 'hello',
+        turnDate: TURN_DATE,
+        personName,
+      })[0]?.content;
+      expect(system).toContain('in the third person, about "the person"');
+      expect(system).not.toContain("The person's name is");
+    }
+  });
+
   it('names what to keep and what never to keep', () => {
     const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
       ?.content;
@@ -146,6 +194,20 @@ describe('buildSummarizationMessages', () => {
     const user = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[1]
       ?.content;
     expect(user).toContain('Date of the chat: 2026-10-26 (Monday)');
+  });
+});
+
+describe('usablePersonName', () => {
+  it('returns the name, trimmed', () => {
+    expect(usablePersonName('Priya')).toBe('Priya');
+    expect(usablePersonName('  Priya Shah  ')).toBe('Priya Shah');
+  });
+
+  it('returns undefined for no name, a blank one, one over several lines, or one far longer than a name', () => {
+    expect(usablePersonName(undefined)).toBeUndefined();
+    expect(usablePersonName('   ')).toBeUndefined();
+    expect(usablePersonName('Two\nLines')).toBeUndefined();
+    expect(usablePersonName('N'.repeat(201))).toBeUndefined();
   });
 });
 
@@ -426,6 +488,66 @@ describe('summarizeTurnContent', () => {
     expect(sent).toContain('I walked to the harbour in the morning');
     expect(sent).toContain('Remember: my dentist is Dr Patel.');
     expect(sent).toContain('Part of this long turn was left out.');
+  });
+
+  it("sends a long paste with the person's name and returns exactly its two durable facts, written in the name, and nothing from the diary filler between them", async () => {
+    const llm = fakeSummarizer(
+      '{"facts": ["Priya\'s neighbour Ana waters her plants every Tuesday while she is away.", "Priya\'s dentist is Dr Patel."]}',
+    );
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const diaryDay = [
+      'I walked to the harbour in the morning and watched the fishing boats come in.',
+      'The market stalls were setting up, and I passed a stall selling oranges and lemons.',
+      'I sat on a bench by the water for a while and watched gulls circling over the pier.',
+      'On the way back I took the lane past the old lighthouse and stopped to look at the view.',
+      'I had a coffee at a small cafe and watched people passing in the street outside.',
+    ].join(' ');
+    const paste = [
+      'My neighbour Ana waters my plants every Tuesday while I am away.',
+      `${diaryDay} `.repeat(26),
+      'Remember: my dentist is Dr Patel.',
+    ].join('\n');
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: paste,
+      personName: 'Priya',
+      resolveLlm: async () => llm,
+    });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: [
+        "Priya's neighbour Ana waters her plants every Tuesday while she is away.",
+        "Priya's dentist is Dr Patel.",
+      ],
+    });
+    const returned = result.status === 'summarized' ? result.facts.join(' ') : '';
+    expect(returned).not.toContain('harbour');
+    expect(returned).not.toContain('fishing boats');
+    expect(returned).not.toContain('market stalls');
+    expect(returned).not.toContain('gulls');
+    expect(returned).not.toContain('lighthouse');
+    const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain("The person's name is Priya.");
+    expect(sent).toContain('with Priya as its subject');
+    expect(sent).toContain('A fact at the start of a long message counts as much as one at the end');
+    expect(sent).toContain('A request to remember never crowds out the rest');
+    expect(sent).toContain('passing events, descriptions, and things the person only saw or did once');
+    expect(sent).toContain('My neighbour Ana waters my plants every Tuesday while I am away.');
+    expect(sent).toContain('Remember: my dentist is Dr Patel.');
+    expect(sent).toContain('Part of this long turn was left out.');
+  });
+
+  it('still returns facts in the fallback style when the call carries no name', async () => {
+    const llm = fakeSummarizer('{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}');
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => llm });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
+    });
+    const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain('Write each fact as one complete sentence in the third person');
+    expect(sent).not.toContain("The person's name is");
   });
 
   it('cuts a long emoji paste on whole characters and still sees a request at its start', async () => {

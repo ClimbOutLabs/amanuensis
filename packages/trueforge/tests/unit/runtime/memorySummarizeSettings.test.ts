@@ -369,4 +369,41 @@ describe('resolveTurnSummarizeContext', () => {
     expect(context?.summarizationModelFqn).toBe('openai/gpt-4o');
     expect(jest.mocked(agentStore.getAgent)).toHaveBeenCalledTimes(1);
   });
+
+  it("carries the person's name on the context when the caller supplies one", async () => {
+    const { logger } = capturingLogger();
+
+    const context = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: 'Priya Shah',
+    });
+
+    expect(context?.personName).toBe('Priya Shah');
+  });
+
+  it('trims a supplied name, and carries no name for a blank one', async () => {
+    const { logger } = capturingLogger();
+
+    const trimmed = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: '  Priya Shah  ',
+    });
+    expect(trimmed?.personName).toBe('Priya Shah');
+
+    const blank = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: '   ',
+    });
+    expect(blank?.summarizationModelFqn).toBe('openai/gpt-4o');
+    expect(blank?.personName).toBeUndefined();
+  });
+
+  it('carries no name when the caller supplies none', async () => {
+    const { logger } = capturingLogger();
+
+    const context = await resolveTurnSummarizeContext({ ...baseParams({ logger }) });
+
+    expect(context?.summarizationModelFqn).toBe('openai/gpt-4o');
+    expect(context?.personName).toBeUndefined();
+  });
 });
