@@ -89,6 +89,12 @@ export interface SummarizeTurnContext {
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
   modelUsage: TurnModelUsage;
+  /**
+   * The person's name from their personalization profile, so saved facts are written in their
+   * name. Undefined when the profile holds no name; the summarizer then writes its facts about
+   * "the person" instead.
+   */
+  personName?: string | undefined;
 }
 
 /**
@@ -174,6 +180,7 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
       tenantId: summarize.tenantId,
       modelProviderStore: summarize.modelProviderStore,
       summarizationModelFqn: summarize.summarizationModelFqn,
+      personName: summarize.personName,
       tokenFactoryBudget: summarize.tokenFactoryBudget,
       modelUsage: summarize.modelUsage,
       logger: params.logger,
