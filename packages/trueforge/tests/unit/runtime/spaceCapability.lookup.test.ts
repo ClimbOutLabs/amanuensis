@@ -242,7 +242,7 @@ describe('spaces found by exact name', () => {
     });
   });
 
-  it('an ambiguous name refuses to pick one and says to rename one in the Spaces view', async () => {
+  it('an ambiguous name refuses to pick one and says to delete one in the Spaces view', async () => {
     const store = makeMemoryStore([
       dogBreeds,
       makeRecord({ id: 'sp-other', name: 'Dog breeds', revision: 4, updated_at: '2026-10-20T00:00:00.000Z' }),
@@ -252,7 +252,7 @@ describe('spaces found by exact name', () => {
     expect(isErrorResponse(response)).toBe(true);
     const { error } = JSON.parse(resultText(response)) as { error: string };
     expect(error).toContain('More than one space is named "Dog breeds"');
-    expect(error).toContain('rename one of them in the Spaces view');
+    expect(error).toContain('delete one of them in the Spaces view');
     expect(error).not.toContain('sp-dogs');
     expect(error).not.toContain('sp-other');
   });
