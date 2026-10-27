@@ -120,6 +120,28 @@ describe('googleSetupCapability', () => {
     expect(await mount()).toBeUndefined();
   });
 
+  it('mounts the walkthrough with the read for a user who never connected', async () => {
+    const capability = await mount();
+    expect(capability?.systemToolSets).toHaveLength(1);
+    expect(capability?.instructionBuilders).toHaveLength(1);
+  });
+
+  it('mounts the read without the walkthrough once the login is connected with something still off', async () => {
+    // The Cloud steps are done by then; what is still off is turned on from the Settings page, which
+    // the read's next step names, so the walkthrough must not ride on every turn of a connected login.
+    await store.save(record({ granted_scopes: [READ] }));
+    const capability = await mount();
+    expect(capability?.systemToolSets).toHaveLength(1);
+    expect(capability?.instructionBuilders ?? []).toHaveLength(0);
+  });
+
+  it('mounts the walkthrough with the read when the sign-in has expired', async () => {
+    await store.save(record({ status: 'needs_reconnect' }));
+    const capability = await mount();
+    expect(capability?.systemToolSets).toHaveLength(1);
+    expect(capability?.instructionBuilders).toHaveLength(1);
+  });
+
   it('never mounts one user the setup state of another', async () => {
     await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
     const other = await mount({ tenant_id: 't1', created_by: 'bob' });

@@ -123,8 +123,13 @@ interface GoogleSetupCapabilityOptions {
 }
 
 /**
- * The guided setup for one turn, or nothing when the login is connected with everything allowed: then
- * there is nothing to lead. Reading the login here is the same read the Google tools make.
+ * The guided setup for one turn. The walkthrough mounts only where its steps can still be acted on:
+ * with no login, or an expired one, the Cloud steps are still ahead of the person, so the guidance
+ * rides with the read. Once the login is connected, those steps are done and cannot be done again
+ * from chat; what is still off is turned on from the Settings page, which the read's next step names,
+ * so the read mounts alone and the walkthrough does not ride on every turn of a connected instance.
+ * A login connected with everything allowed mounts nothing: there is nothing left to lead.
+ * Reading the login here is the same read the Google tools make.
  */
 export async function googleSetupCapability(
   options: GoogleSetupCapabilityOptions,
@@ -135,6 +140,7 @@ export async function googleSetupCapability(
     if (GOOGLE_FEATURES.every(feature => granted.includes(feature))) {
       return undefined;
     }
+    return { systemToolSets: [new GoogleSetupToolSet(options)] };
   }
   return {
     systemToolSets: [new GoogleSetupToolSet(options)],
