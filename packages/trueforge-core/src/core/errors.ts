@@ -99,6 +99,19 @@ export class ToolPreDispatchError extends McpConnectionError {
 }
 
 /**
+ * The server answered with a redirect this connection refuses to follow. A deliberate
+ * refusal, not a transport failure: the server was reached and answered, so this must
+ * never be read as the server being unavailable. Carries 502 to match how the refusal
+ * has always been reported.
+ */
+export class McpRedirectRefusedError extends McpConnectionError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, 502, options);
+    this.name = 'McpRedirectRefusedError';
+  }
+}
+
+/**
  * An MCP server's `auth.type: dcr` is unsatisfiable by configuration, not by a transient fault
  */
 export class McpDcrConfigurationError extends McpConnectionError {

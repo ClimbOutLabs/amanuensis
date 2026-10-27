@@ -274,6 +274,7 @@ export {
   ImplementationPlanAdmissionBlockedError,
   McpConnectionError,
   McpDcrConfigurationError,
+  McpRedirectRefusedError,
   StructuredEditPreconditionBlockedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
@@ -400,7 +401,10 @@ export {
   DEFAULT_SESSION_DISK_MB,
   SLOT_MIRROR_GUEST_PORT,
   SLOT_MIRROR_SOCKET_NAME,
+  SLOT_SKILL_NETWORK_GUEST_PORT,
+  SLOT_SKILL_NETWORK_SOCKET_NAME,
   slotMirrorSocketPathsIn,
+  slotSkillNetworkSocketPathsIn,
   slotSocketPathsIn,
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';

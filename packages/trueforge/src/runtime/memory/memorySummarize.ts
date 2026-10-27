@@ -22,7 +22,11 @@ import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import { localDay } from './localDay';
 
-/** Bounds the whole summary, retry included, so a slow model cannot hold up the drain. */
+/**
+ * Bounds the model calls made through one summarization client, so a slow model cannot hold
+ * up the drain. A timed-out attempt is retried once through a fresh client with the same
+ * bound, so the worst case is two of these in a row and no more.
+ */
 const SUMMARIZE_TIMEOUT_MS = 60_000;
 
 /** Cap on the raw model reply; an overlong reply is dropped whole, never truncated. */
@@ -463,24 +467,23 @@ export async function summarizeTurnContent(params: {
       logger.debug('Memory summarization model did not resolve', { reason });
       return { status: 'failed', reason, fallback: 'model_unresolved' };
     }
-    try {
-      const messages = buildSummarizationMessages({
-        userText,
-        assistantText,
-        turnDate: params.turnDate,
-        timeZone: params.timeZone,
-        textLeftOut,
-        personName: params.personName,
-      });
+    // One attempt over one client: the summary call, its cut-off retry, and the reading of
+    // the reply. Returns the attempt's result, or throws the call's error for the caller to
+    // classify. Both attempts run this same shape, so a retried attempt behaves exactly
+    // like a first one.
+    const runAttempt = async (
+      attemptLlm: ILLM,
+      messages: { role: 'system' | 'user'; content: string }[],
+    ): Promise<SummarizeTurnResult> => {
       // Cap the generation so the model cannot burn tokens for the full call budget on output
       // the length validation would discard anyway.
-      let result = await llm.createNonStream({ messages, max_tokens: SUMMARIZE_MAX_OUTPUT_TOKENS });
+      let result = await attemptLlm.createNonStream({ messages, max_tokens: SUMMARIZE_MAX_OUTPUT_TOKENS });
       let reply = flattenLlmContent(result.output.content ?? null).trim();
       // A reply cut off by the cap with no answer in it (a model that spent the cap thinking)
       // gets one retry with more room, never a guess.
       if (result.finish_reason === 'length' && (reply === '' || parseSummaryReply(reply).kind === 'unreadable')) {
         logger.debug('Memory summarization was cut off by its token cap; retrying with more room');
-        result = await llm.createNonStream({ messages, max_tokens: SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS });
+        result = await attemptLlm.createNonStream({ messages, max_tokens: SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS });
         reply = flattenLlmContent(result.output.content ?? null).trim();
       }
       if (result.finish_reason === 'length' && reply === '') {
@@ -500,6 +503,38 @@ export async function summarizeTurnContent(params: {
         return { status: 'nothing_to_keep' };
       }
       return { status: 'summarized', facts: parsed.facts };
+    };
+    try {
+      const messages = buildSummarizationMessages({
+        userText,
+        assistantText,
+        turnDate: params.turnDate,
+        timeZone: params.timeZone,
+        textLeftOut,
+        personName: params.personName,
+      });
+      try {
+        return await runAttempt(llm, messages);
+      } catch (error) {
+        if (!isTimeoutError(error)) {
+          throw error;
+        }
+        // A timeout gets one retry, as a cut-off reply does: the model may only have been
+        // crowded out by other turns that have since finished. The timed-out client cannot
+        // serve the retry, because its time budget is spent and its abort signal has
+        // fired, so the retry resolves a fresh client. It asks for the same output as the
+        // first attempt: a longer reply would take more time, not arrive any likelier.
+        logger.debug('Memory summarization timed out; retrying once');
+        let retryLlm: ILLM;
+        try {
+          retryLlm = await resolveLlm(summarizationModelFqn);
+        } catch (resolveError) {
+          const resolveReason = resolveError instanceof Error ? resolveError.message : String(resolveError);
+          logger.debug('Memory summarization model did not resolve for the retry', { reason: resolveReason });
+          throw error;
+        }
+        return await runAttempt(retryLlm, messages);
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.debug('Memory summarization failed', { reason });

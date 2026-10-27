@@ -155,6 +155,8 @@ import {
 } from '../runtime/turnStartBound';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
+import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
@@ -697,6 +699,23 @@ function createTurnResolver(deps: {
                     repository_id: repository.id,
                   });
                 },
+          loadSkillNetworkGrant: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return undefined;
+            }
+            return resolveSkillNetworkGrant({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
+              created_by: userRef,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
           loadPackageDownloadsAllowed:
             boundRepository === undefined
               ? undefined

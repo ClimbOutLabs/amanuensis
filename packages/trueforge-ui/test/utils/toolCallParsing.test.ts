@@ -13,6 +13,7 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
   parseToolNotDoneReason,
   parseToolRefusalNotice,
   parseToolResultDisposition,
@@ -266,6 +267,30 @@ describe('toolCallParsing', () => {
     expect(buildOutcomeText(disposition, undefined)).toBe('Execution failed');
     expect(buildOutcomeText(disposition, 'the tool timed out')).toBe('Execution failed: the tool timed out');
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
+  });
+
+  it('reads the plain note for a space write refused for its size, from its code alone', () => {
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 4,000. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    const envelope = (result: unknown) =>
+      JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result });
+
+    const refused = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(refused)).toBe('Too long for one write. Splitting it into parts.');
+
+    // The same words without the code are just a failure: the wording never drives the note.
+    const uncoded = envelope({ error: [{ type: 'text', text: JSON.stringify({ error: refusalText }) }] });
+    expect(parseSpaceWriteTooLongNote(uncoded)).toBeUndefined();
+
+    const otherCode = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: 'boom', error_code: 'something_else' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(otherCode)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote(undefined)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote('boom')).toBeUndefined();
   });
 
   it('builds default approval options when none declared', () => {

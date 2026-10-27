@@ -176,10 +176,34 @@ describe('Google connection API', () => {
     expect(JSON.parse(text).data.setup.mode).toBe('paste');
   });
 
-  it('uses a pasted address when the public address is a Tailscale name', async () => {
+  it('asks for a Web client when the public address is a Tailscale name', async () => {
     configuration.PUBLIC_BASE_URL = 'https://box.tailnet-name.ts.net';
     const { text } = await call({ method: 'GET', path: '/status', origin: 'https://box.tailnet-name.ts.net' });
-    expect(JSON.parse(text).data.setup.mode).toBe('paste');
+    expect(JSON.parse(text).data.setup).toEqual({
+      mode: 'web',
+      client_type: 'web',
+      redirect_uri: 'https://box.tailnet-name.ts.net/api/v1/user/settings/google/oauth/callback',
+    });
+  });
+
+  it('uses the recorded Tailscale address when the public address is the loopback default', async () => {
+    const originalOrigins = configuration.ALLOWED_ORIGINS;
+    configuration.PUBLIC_BASE_URL = 'http://127.0.0.1:8791';
+    configuration.ALLOWED_ORIGINS = ['http://127.0.0.1:8791', 'https://box.tailnet-name.ts.net:8443'];
+    try {
+      const { text } = await call({
+        method: 'GET',
+        path: '/status',
+        origin: 'https://box.tailnet-name.ts.net:8443',
+      });
+      expect(JSON.parse(text).data.setup).toEqual({
+        mode: 'web',
+        client_type: 'web',
+        redirect_uri: 'https://box.tailnet-name.ts.net:8443/api/v1/user/settings/google/oauth/callback',
+      });
+    } finally {
+      configuration.ALLOWED_ORIGINS = originalOrigins;
+    }
   });
 
   describe('on a demo instance', () => {

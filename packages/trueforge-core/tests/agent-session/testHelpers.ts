@@ -1,4 +1,5 @@
 import { ulid } from 'ulid';
+import type { Logger } from 'winston';
 import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
 import { MAIN_THREAD_ID, type TurnRecord } from '../../src/agent-session/models/TurnRecord';
 import { AgentSpecSchema, type AgentSpec } from '../../src/agent-session/schemas/agentSpec';
@@ -99,6 +100,8 @@ export function makeTestResolver<TTurnCustom extends object = Record<string, nev
   agent?: ((agentId: string) => Promise<AgentSpec>) | undefined;
   finalizeAssistantOutput?: ITurnResourceResolver<TTurnCustom>['finalizeAssistantOutput'];
   sanitizeAssistantTextForContext?: ITurnResourceResolver<TTurnCustom>['sanitizeAssistantTextForContext'];
+  /** Logger for the turn's resolver; defaults to a silent one. Pass a capturing logger to assert on log lines. */
+  logger?: Logger | undefined;
 }): ITurnResourceResolver<TTurnCustom> {
   const llm =
     options?.modelClient ??
@@ -113,7 +116,7 @@ export function makeTestResolver<TTurnCustom extends object = Record<string, nev
     },
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
-    logger: makeSilentLogger(),
+    logger: options?.logger ?? makeSilentLogger(),
     ...(options?.agent !== undefined ? { agent: options.agent } : {}),
     ...(options?.sandbox
       ? {
