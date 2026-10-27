@@ -150,6 +150,58 @@ export function isSessionExpiredError(error: unknown): boolean {
   );
 }
 
+/** Node network failure codes that mean the request never reached the server. */
+const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+function networkErrorCode(error: Error): string | undefined {
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code) ? code : undefined;
+}
+
+/**
+ * A plain-words reason when a failure is the transport itself (the request never reached the
+ * server), or undefined for anything else: an answer the server gave, an auth refusal, a bug.
+ * The fetch layer reports these as a bare "fetch failed" and hides the real reason one level
+ * down, on the error's cause, which for a refused connection carries the code and the address;
+ * the chain is walked for the first link that names a network failure.
+ */
+export function transportFailureDetail(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  let sawFetchFailure = false;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof TypeError && current.message === 'fetch failed') {
+      sawFetchFailure = true;
+    }
+    const code = networkErrorCode(current);
+    if (code !== undefined) {
+      if (code === 'ECONNREFUSED') {
+        const address: unknown = Reflect.get(current, 'address');
+        const port: unknown = Reflect.get(current, 'port');
+        if (typeof address === 'string' && typeof port === 'number') {
+          return `connection refused at ${address}:${String(port)}`;
+        }
+      }
+      return current.message.length > 0 ? current.message : code;
+    }
+    current = current.cause;
+  }
+  // A bare fetch failure with no coded cause is still the transport failing, just with
+  // nothing more specific to say about why.
+  return sawFetchFailure ? 'the connection failed' : undefined;
+}
+
 /**
  * Matches a JSON-RPC -32000 "not initialized" server error. Streamable-HTTP MCP servers that keep
  * sessions in memory answer a request carrying a stale session id with HTTP 400 and a JSON-RPC body
