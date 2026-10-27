@@ -122,6 +122,17 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
+  test('exec carries the skill network token to the agent only when one was granted', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    const token = 'b'.repeat(32);
+    await provider.exec({ sandboxId, command: 'curl https://github.com', skillNetworkToken: token });
+    await provider.exec({ sandboxId, command: 'ls' });
+    const [granted, plain] = started[0]?.requests.map(request => request.body) ?? [];
+    expect(granted).toMatchObject({ skill_network_token: token });
+    expect(plain).not.toHaveProperty('skill_network_token');
+  });
+
   test('a non-zero exit is still a successful call', async () => {
     const { provider } = await providerFor([
       () => ({ status: 200, body: execResponse({ exit_code: 3, output: 'bad' }) }),

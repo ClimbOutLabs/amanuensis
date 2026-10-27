@@ -31,7 +31,13 @@ import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderCo
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
 import { ServerProvider } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
-import { DEFAULT_AGENT_CONFIG, ShellModeProvider, useShellMode, type AgentConfig } from '../server/ShellModeContext.js';
+import {
+  DEFAULT_AGENT_CONFIG,
+  ShellModeProvider,
+  useShellMode,
+  type AgentConfig,
+  type SettingsOpenRequest,
+} from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
 import type { TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
 import type { AgentUIServer } from '../server/types.js';
@@ -77,12 +83,26 @@ export type TrueForgeUIProps = {
   /** Reports the ids of approvals waiting on the person in the active chat, for the host's waiting status. */
   onPendingApprovalsChange?: (approvalIds: readonly string[]) => void;
   /**
+   * Reports whether Settings chrome is enabled (a settings catalog is present and the
+   * server has not disabled Settings), as the shell's own gate decides it, on mount and
+   * whenever it changes. Hosts with UI outside the shell tree, such as a right rail with
+   * an Audits link, show or hide that UI from this value so it never disagrees with the
+   * Settings button.
+   */
+  onSettingsChromeEnabledChange?: (enabled: boolean) => void;
+  /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
    */
   agentConfig?: AgentConfig;
   /** Open settings on first paint only (host boot with no models configured). */
   initialSettingsOpen?: boolean;
+  /**
+   * Ask the shell to open Settings at a section after mount, from UI that lives outside the
+   * shell tree. Raise the request's nonce on every ask; a request the shell mounts with is
+   * remembered, not answered.
+   */
+  settingsOpenRequest?: SettingsOpenRequest;
   /**
    * Host UI for pending client-side tools, keyed by tool name.
    * When a pending tool matches, the composer mounts that component instead of Ask User.
@@ -312,6 +332,8 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     className,
     agentConfig = DEFAULT_AGENT_CONFIG,
     initialSettingsOpen = false,
+    settingsOpenRequest,
+    onSettingsChromeEnabledChange,
     server: serverConfig,
     onError,
     customActionRenderers,
@@ -358,7 +380,12 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
   const layoutTree = <LayoutChildren layout={layout} className={className} />;
 
   const shellTree = (
-    <ShellModeProvider agentConfig={agentConfig} initialSettingsOpen={initialSettingsOpen}>
+    <ShellModeProvider
+      agentConfig={agentConfig}
+      initialSettingsOpen={initialSettingsOpen}
+      settingsOpenRequest={settingsOpenRequest}
+      onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
+    >
       <LibrarySessionShareBoot />
       {resolvedRoutes != null ? (
         <Suspense fallback={null}>
