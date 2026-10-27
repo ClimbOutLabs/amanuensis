@@ -9,8 +9,6 @@ import {
 } from '@assistant-ui/react';
 import type { ReactNode } from 'react';
 
-import { ShellModeProvider, type ShellModeApi } from '@/server/ShellModeContext.js';
-
 /** Test-only harness driving a real assistant-ui runtime from plain message fixtures. */
 export function RuntimeHarness({
   messages,
@@ -21,7 +19,6 @@ export function RuntimeHarness({
   onRespondToToolApproval,
   onEdit,
   onNew = async () => {},
-  shellMode,
   children,
 }: {
   messages: ThreadMessageLike[];
@@ -37,7 +34,6 @@ export function RuntimeHarness({
   onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void;
   onEdit?: (message: AppendMessage) => Promise<void>;
   onNew?: (message: AppendMessage) => Promise<void>;
-  shellMode?: ShellModeApi;
   children: ReactNode;
 }) {
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
@@ -59,11 +55,5 @@ export function RuntimeHarness({
           },
   });
 
-  const content = <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
-
-  if (shellMode) {
-    return <ShellModeProvider api={shellMode}>{content}</ShellModeProvider>;
-  }
-
-  return content;
+  return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
 }

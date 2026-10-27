@@ -14,6 +14,14 @@ import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
+type MockShellMode = { setSettingsOpen: (open: boolean, section?: string) => void } | null;
+
+const shellModeState = vi.hoisted((): { current: MockShellMode } => ({ current: null }));
+
+vi.mock('@/server/ShellModeContext.js', () => ({
+  useOptionalShellMode: () => shellModeState.current,
+}));
+
 const fetchMock = vi.fn();
 
 /** The panda's accessible name carries the assistant's default display name. */
@@ -651,6 +659,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    shellModeState.current = null;
     fetchMock.mockImplementation(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -895,8 +904,9 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
   it('shows an Audits link in the Activity fold when shell context is available', () => {
     const setSettingsOpen = vi.fn();
+    shellModeState.current = { setSettingsOpen };
     render(
-      <RuntimeHarness messages={[]} shellMode={{ setSettingsOpen }}>
+      <RuntimeHarness messages={[]}>
         <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
       </RuntimeHarness>,
     );
