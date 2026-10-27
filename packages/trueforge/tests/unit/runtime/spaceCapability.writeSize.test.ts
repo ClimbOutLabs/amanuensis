@@ -223,16 +223,7 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
   return await toolSet.callTool({ name, arguments: args });
 }
 
-/** The id of the one space in the store, from list_spaces: write results carry name and link, never an id. */
-async function createdSpaceId(store: SpaceToolStore): Promise<string> {
-  const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
-  const first = resultJson(listed).spaces?.[0];
-  if (first === undefined) {
-    throw new Error('expected a listed space');
-  }
-  return first.id;
-}
-
+/** Tests address spaces by their exact names: tool results carry name and link, never an id. */
 const PURPOSE = 'Track the dog breeds table.';
 
 function rowRange(from: number, to: number): string {
@@ -286,7 +277,7 @@ describe('the space write size cap', () => {
     expect(resultJson(response).space?.body).toHaveLength(SPACE_WRITE_MAX_LENGTH);
   });
 
-  it('refuses an update whose body is past the cap and leaves the space unchanged', async () => {
+  it('refuses one edit entry whose new content is past the cap and leaves the space unchanged', async () => {
     const store = new InMemorySpaceStore();
     const created = await callTool(store, CREATE_SPACE_TOOL_NAME, {
       name: 'Breeds',
@@ -296,22 +287,17 @@ describe('the space write size cap', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await createdSpaceId(store);
-    const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
-      space_id: spaceId,
-      name: 'Breeds',
-      purpose: PURPOSE,
-      status: 'active',
-      body: 'y'.repeat(SPACE_WRITE_MAX_LENGTH + 1),
-      format: 'markdown',
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      edits: [{ type: 'block', anchor: 'auto-body', new_content: 'y'.repeat(SPACE_WRITE_MAX_LENGTH + 1) }],
     });
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
-    expect(error).toContain('Refusing update_space');
+    expect(error).toContain('Refusing edit_space');
     expect(error).toContain('one write may carry at most 4,000');
     expect(error).toContain('follow-up edit_space call');
 
-    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
   });
 
@@ -325,10 +311,9 @@ describe('the space write size cap', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await createdSpaceId(store);
     const half = 'z'.repeat(2_500);
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Breeds',
       edits: [
         { type: 'search', search: 'Breed 01', replace: half },
         { type: 'search', search: 'Breed 02', replace: half },
@@ -339,7 +324,7 @@ describe('the space write size cap', () => {
     expect(error).toContain('Refusing edit_space');
     expect(error).toContain('one write may carry at most 4,000');
 
-    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
   });
 
@@ -355,15 +340,14 @@ describe('the space write size cap', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await createdSpaceId(store);
     // Search text is 3,000 characters and the replacement is 3,900: counted together they
     // would pass the cap, but only the replacement is new content, so the edit goes through.
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Long text',
       edits: [{ type: 'search', search: chunk, replace: 'c'.repeat(3_900) }],
     });
     expect(isErrorResponse(response)).toBe(false);
-    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Long text' });
     expect(resultJson(read).space?.body).toBe(`${'c'.repeat(3_900)}\n${'b'.repeat(900)}`);
   });
 
@@ -377,7 +361,6 @@ describe('the space write size cap', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const spaceId = await createdSpaceId(store);
     for (const [from, to] of [
       [11, 20],
       [21, 30],
@@ -385,12 +368,12 @@ describe('the space write size cap', () => {
     ] as const) {
       const lastRow = rowRange(from - 1, from - 1);
       const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
-        space_id: spaceId,
+        space_name: 'Dog breeds',
         edits: [{ type: 'search', search: lastRow, replace: `${lastRow}\n${rowRange(from, to)}` }],
       });
       expect(isErrorResponse(response)).toBe(false);
     }
-    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
     const body = resultJson(read).space?.body ?? '';
     expect(body.length).toBeGreaterThan(SPACE_WRITE_MAX_LENGTH);
     const breedRows = body.split('\n').filter(line => /^\| Breed \d/.test(line));
@@ -423,10 +406,10 @@ describe('the space write size cap', () => {
     // calls the tool layer accepts.
     const framing = SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 500;
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(CREATE_SPACE_TOOL_NAME) ?? 0).toBeGreaterThan(framing);
-    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(UPDATE_SPACE_TOOL_NAME) ?? 0).toBeGreaterThan(framing);
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(EDIT_SPACE_TOOL_NAME) ?? 0).toBeGreaterThan(
       SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(CREATE_SPACE_TOOL_NAME) ?? 0,
     );
+    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.has(UPDATE_SPACE_TOOL_NAME)).toBe(false);
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.has(GET_SPACE_TOOL_NAME)).toBe(false);
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.has(LIST_SPACES_TOOL_NAME)).toBe(false);
   });
@@ -434,12 +417,9 @@ describe('the space write size cap', () => {
   it('derives the streamed limits from the worst valid call, escaping included', () => {
     // The arithmetic written beside the constants in spaceCapability.ts: every string
     // field at six times its source length (a character can stream as a six-character
-    // escape), plus one flat framing allowance. Create and update carry one body at the
-    // write cap, a 2,000 purpose, a 160 name, a 160 lookup, and the two short enums.
+    // escape), plus one flat framing allowance. Create carries one body at the write
+    // cap, a 2,000 purpose, a 160 name, a 160 lookup, and the two short enums.
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(CREATE_SPACE_TOOL_NAME)).toBe(
-      6 * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000,
-    );
-    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(UPDATE_SPACE_TOOL_NAME)).toBe(
       6 * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000,
     );
     // Edit carries up to 50 entries; a search is copied from the stored body, so 50
@@ -485,7 +465,7 @@ function toolCallParts(toolName: string, argsJson: string, chunkSize = 9_973): S
 }
 
 describe('the streamed-argument limits against real streams', () => {
-  it('does not cut an escape-heavy create or update that the tool layer accepts', async () => {
+  it('does not cut an escape-heavy create that the tool layer accepts', async () => {
     // Every character of the body, purpose, and name is a control character, so each one
     // streams as a six-character escape: the harshest valid call there is. Its streamed
     // length passes the old flat limit of three times the write cap many times over.
@@ -500,18 +480,6 @@ describe('the streamed-argument limits against real streams', () => {
     const created = await drainParts(toolCallParts(CREATE_SPACE_TOOL_NAME, createArgs));
     expect(created.size_cut_tool_calls).toBeUndefined();
     expect(created.output.tool_calls?.[0]?.function.arguments).toBe(createArgs);
-
-    const updateArgs = JSON.stringify({
-      space_id: 'space-1',
-      name: 'N'.repeat(160),
-      purpose: '\u0001'.repeat(2_000),
-      status: 'active',
-      body: '\u0001'.repeat(SPACE_WRITE_MAX_LENGTH),
-      format: 'markdown',
-    });
-    const updated = await drainParts(toolCallParts(UPDATE_SPACE_TOOL_NAME, updateArgs));
-    expect(updated.size_cut_tool_calls).toBeUndefined();
-    expect(updated.output.tool_calls?.[0]?.function.arguments).toBe(updateArgs);
   });
 
   it('does not cut a valid edit whose search text is long, even a whole stored body', async () => {
@@ -537,10 +505,6 @@ describe('the streamed-argument limits against real streams', () => {
     const overCreate = `{"body":"${'x'.repeat(createLimit)}"}`;
     const cutCreate = await drainParts(toolCallParts(CREATE_SPACE_TOOL_NAME, overCreate));
     expect(cutCreate.size_cut_tool_calls).toEqual(['call-1']);
-
-    const overUpdate = `{"body":"${'x'.repeat(createLimit)}"}`;
-    const cutUpdate = await drainParts(toolCallParts(UPDATE_SPACE_TOOL_NAME, overUpdate));
-    expect(cutUpdate.size_cut_tool_calls).toEqual(['call-1']);
 
     // One single delta past the edit limit: the cut lands on the accumulated length.
     const editLimit = SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(EDIT_SPACE_TOOL_NAME) ?? 0;
@@ -588,12 +552,6 @@ describe('recovering a space past the write cap, end to end', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const listed = await call(LIST_SPACES_TOOL_NAME, {});
-    const spaceId = resultJson(listed).spaces?.[0]?.id;
-    expect(spaceId).toBeDefined();
-    if (spaceId === undefined) {
-      throw new Error('expected a listed space');
-    }
     for (const [from, to] of [
       [11, 20],
       [21, 30],
@@ -601,18 +559,18 @@ describe('recovering a space past the write cap, end to end', () => {
     ] as const) {
       const lastRow = rowRange(from - 1, from - 1);
       const extended = await call(EDIT_SPACE_TOOL_NAME, {
-        space_id: spaceId,
+        space_name: 'Dog breeds',
         edits: [{ type: 'search', search: lastRow, replace: `${lastRow}\n${rowRange(from, to)}` }],
       });
       expect(isErrorResponse(extended)).toBe(false);
     }
-    const built = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const built = await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
     const builtBody = resultJson(built).space?.body ?? '';
     expect(builtBody.length).toBeGreaterThan(SPACE_WRITE_MAX_LENGTH);
 
     // A missed search: the error teaches the parts recovery, and following it works.
     const missed = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Dog breeds',
       edits: [{ type: 'search', search: 'Breed 99', replace: 'x' }],
     });
     expect(isErrorResponse(missed)).toBe(true);
@@ -621,7 +579,7 @@ describe('recovering a space past the write cap, end to end', () => {
     expect(missError).toContain('make the change with edit_space in parts');
     const lastRow = rowRange(40, 40);
     const appended = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Dog breeds',
       edits: [
         { type: 'search', search: lastRow, replace: `${lastRow}\n| Breed 41 | Group 5 | Added after the miss |` },
       ],
@@ -632,33 +590,33 @@ describe('recovering a space past the write cap, end to end', () => {
     // revision: the body survives byte for byte, and edits work again.
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const failed = await call(EDIT_SPACE_TOOL_NAME, {
-        space_id: spaceId,
+        space_name: 'Dog breeds',
         edits: [{ type: 'search', search: 'no such text', replace: 'x' }],
       });
       expect(isErrorResponse(failed)).toBe(true);
     }
     const locked = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Dog breeds',
       edits: [{ type: 'search', search: 'Breed 41', replace: 'Breed 41' }],
     });
     expect(isErrorResponse(locked)).toBe(true);
-    expect(resultJson(locked).error ?? '').toContain("revert_space with the space's current");
+    expect(resultJson(locked).error ?? '').toContain("call revert_space with the space's current revision");
 
-    const beforeRevert = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const beforeRevert = await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
     const bodyBeforeRevert = resultJson(beforeRevert).space?.body ?? '';
     const currentRevision = resultJson(beforeRevert).space?.revision ?? 0;
     expect(currentRevision).toBeGreaterThan(1);
-    const reverted = await call(REVERT_SPACE_TOOL_NAME, { space_id: spaceId, revision: currentRevision });
+    const reverted = await call(REVERT_SPACE_TOOL_NAME, { space_name: 'Dog breeds', revision: currentRevision });
     expect(isErrorResponse(reverted)).toBe(false);
-    const afterRevert = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const afterRevert = await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
     expect(resultJson(afterRevert).space?.body).toBe(bodyBeforeRevert);
 
     const editsAgain = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Dog breeds',
       edits: [{ type: 'search', search: 'Breed 41', replace: 'Breed 41 (recovered)' }],
     });
     expect(isErrorResponse(editsAgain)).toBe(false);
-    const finalRead = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const finalRead = await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
     const finalBody = resultJson(finalRead).space?.body ?? '';
     expect(finalBody).toContain('Breed 41 (recovered)');
     expect(finalBody.split('\n').filter(line => /^\| Breed \d/.test(line))).toHaveLength(41);
@@ -677,14 +635,9 @@ describe('recovering a space past the write cap, end to end', () => {
       format: 'markdown',
     });
     expect(isErrorResponse(created)).toBe(false);
-    const listed = await call(LIST_SPACES_TOOL_NAME, {});
-    const spaceId = resultJson(listed).spaces?.[0]?.id;
-    if (spaceId === undefined) {
-      throw new Error('expected a listed space');
-    }
 
     const blocked = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Duplicates',
       edits: [{ type: 'block', anchor: 'dup', new_content: '<p>winner</p>' }],
     });
     expect(isErrorResponse(blocked)).toBe(true);
@@ -694,7 +647,7 @@ describe('recovering a space past the write cap, end to end', () => {
 
     // The taught rename: the marker plus the text right after it matches only one copy.
     const renamed = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Duplicates',
       edits: [
         {
           type: 'search',
@@ -706,16 +659,16 @@ describe('recovering a space past the write cap, end to end', () => {
     expect(isErrorResponse(renamed)).toBe(false);
 
     const firstEdit = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Duplicates',
       edits: [{ type: 'block', anchor: 'dup', new_content: '<p>first updated</p>' }],
     });
     expect(isErrorResponse(firstEdit)).toBe(false);
     const secondEdit = await call(EDIT_SPACE_TOOL_NAME, {
-      space_id: spaceId,
+      space_name: 'Duplicates',
       edits: [{ type: 'block', anchor: 'dup-two', new_content: '<p>second updated</p>' }],
     });
     expect(isErrorResponse(secondEdit)).toBe(false);
-    const read = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const read = await call(GET_SPACE_TOOL_NAME, { space_name: 'Duplicates' });
     expect(resultJson(read).space?.body).toContain('<p>first updated</p>');
     expect(resultJson(read).space?.body).toContain('<p>second updated</p>');
   });

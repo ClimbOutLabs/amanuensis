@@ -70,7 +70,7 @@ describe('SentinelAuditFeed', () => {
       makeEntry({ id: 'entry-1', action_type: 'list_events', outcome: 'ran', created_at: '2026-09-29T10:03:00.000Z' }),
       makeEntry({
         id: 'entry-2',
-        action_type: 'update_space',
+        action_type: 'edit_space',
         outcome: 'approved',
         created_at: '2026-09-29T10:02:00.000Z',
       }),

@@ -23,7 +23,7 @@ const FAILED = envelope({ disposition: 'executed_nonzero' });
 
 function call({
   id,
-  tool = 'update_space',
+  tool = 'edit_space',
   args,
   argsText: givenArgsText,
   cutOff = false,
