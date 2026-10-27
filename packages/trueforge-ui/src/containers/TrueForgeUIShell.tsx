@@ -83,6 +83,14 @@ export type TrueForgeUIProps = {
   /** Reports the ids of approvals waiting on the person in the active chat, for the host's waiting status. */
   onPendingApprovalsChange?: (approvalIds: readonly string[]) => void;
   /**
+   * Reports whether Settings chrome is enabled (a settings catalog is present and the
+   * server has not disabled Settings), as the shell's own gate decides it, on mount and
+   * whenever it changes. Hosts with UI outside the shell tree, such as a right rail with
+   * an Audits link, show or hide that UI from this value so it never disagrees with the
+   * Settings button.
+   */
+  onSettingsChromeEnabledChange?: (enabled: boolean) => void;
+  /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
    */
@@ -325,6 +333,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     agentConfig = DEFAULT_AGENT_CONFIG,
     initialSettingsOpen = false,
     settingsOpenRequest,
+    onSettingsChromeEnabledChange,
     server: serverConfig,
     onError,
     customActionRenderers,
@@ -375,6 +384,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       agentConfig={agentConfig}
       initialSettingsOpen={initialSettingsOpen}
       settingsOpenRequest={settingsOpenRequest}
+      onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
     >
       <LibrarySessionShareBoot />
       {resolvedRoutes != null ? (

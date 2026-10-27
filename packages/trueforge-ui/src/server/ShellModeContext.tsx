@@ -260,6 +260,7 @@ export function ShellModeProvider({
   agentConfig = DEFAULT_AGENT_CONFIG,
   initialSettingsOpen = false,
   settingsOpenRequest,
+  onSettingsChromeEnabledChange,
   children,
 }: {
   agentConfig?: AgentConfig;
@@ -267,6 +268,12 @@ export function ShellModeProvider({
   initialSettingsOpen?: boolean;
   /** Host requests to open Settings after mount; answered only when the nonce changes. */
   settingsOpenRequest?: SettingsOpenRequest;
+  /**
+   * Reports whether Settings chrome is enabled, as this provider's own gate decides it,
+   * on mount and whenever it changes. Hosts with UI outside this tree (the right rail)
+   * show or hide their way into Settings from this same value, so the two never disagree.
+   */
+  onSettingsChromeEnabledChange?: (enabled: boolean) => void;
   children: ReactNode;
 }) {
   const capabilities = useServerCapabilities();
@@ -401,6 +408,11 @@ export function ShellModeProvider({
     lastSettingsRequestNonce.current = settingsOpenRequest.nonce;
     setSettingsOpen(true, settingsOpenRequest.section);
   }, [settingsOpenRequest, setSettingsOpen]);
+  // The gate is reported even when it does not change, so a host that mounts after this
+  // provider still hears the current value from its own mount.
+  useEffect(() => {
+    onSettingsChromeEnabledChange?.(settingsEnabled);
+  }, [onSettingsChromeEnabledChange, settingsEnabled]);
   const setAgentConfigOpen = useCallback(
     (open: boolean) => {
       if (open) {
