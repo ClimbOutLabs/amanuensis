@@ -256,8 +256,7 @@ describe('uploads across turns', () => {
         outboundSecrets: () => Promise.resolve([]),
       },
       fetchDeps: {
-        fetchImpl: async () =>
-          new UndiciResponse(PNG, { status: 200, headers: { 'content-type': 'image/png' } }),
+        fetchImpl: async () => new UndiciResponse(PNG, { status: 200, headers: { 'content-type': 'image/png' } }),
         resolveAddresses: () => Promise.resolve([EXAMPLE_COM_ADDRESS]),
       },
     });
