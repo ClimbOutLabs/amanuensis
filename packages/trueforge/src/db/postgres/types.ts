@@ -614,6 +614,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JSONColumnType<SkillManifest, SkillManifest, SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JSONColumnType<string[], string[], string[]> | null;
   created_at: Date;
   updated_at: Date;
 }

@@ -232,7 +232,7 @@ function verifyTier2Containment(input: {
 }
 
 /** File-write tools whose sandbox writes can run without a card, so they are re-checked at dispatch. */
-const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
+export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
 
 /**
  * Returns an error message when the call must not execute, or undefined when
@@ -304,15 +304,19 @@ export async function verifyPreDispatch(input: {
     return 'Approval token is invalid or was already used; request approval again.';
   }
 
-  // Rebuild the canonical params identically to classify time, with fresh hashes.
+  // Rebuild the canonical params from the environment stamped on the binding at
+  // approval time, with fresh hashes. Replaying the approved environment keeps an
+  // approval valid when the sandbox state flips between the card and dispatch.
+  // A missing path resolution stamp means none was in force at approval time; it
+  // replays as none, never as whatever the live turn now reports.
   if (call.shell_binding !== null) {
     const form = await canonicalShellFormFor({
       command: stringParam(call.canonical_params, 'command') ?? '',
       cwd: stringParam(call.canonical_params, 'cwd'),
       env: envOverrides(call.canonical_params),
       allowlist: services.shell_allowlist,
-      workspace_cwd: ctx.workspace_cwd,
-      path_resolution: ctx.path_resolution,
+      workspace_cwd: call.shell_binding.workspace_cwd ?? ctx.workspace_cwd,
+      path_resolution: call.shell_binding.path_resolution ?? undefined,
       file_digest: ctx.file_digest,
     });
     const verification = verifyApprovalToken({

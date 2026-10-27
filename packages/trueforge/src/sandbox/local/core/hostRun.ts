@@ -565,6 +565,12 @@ export async function runSupervisorSession(params: {
   onChildSpawn?: (pid: number) => void;
   /** Hard wall-clock limit for the sandboxed command; caller must choose deliberately. */
   timeoutMs: number;
+  /**
+   * Sites the person approved for the skills in this chat, added to this one command's allowed
+   * domains only. An approval is one person's decision for one chat: it never joins the shared
+   * egress list the next lines build on.
+   */
+  extraAllowedDomains?: readonly string[] | undefined;
 }): Promise<SessionResult> {
   const {
     sandboxRootPath,
@@ -587,7 +593,7 @@ export async function runSupervisorSession(params: {
     {
       filesystem: filesystemPolicy({ sandboxRootPath, platform }),
       network: {
-        allowedDomains: allowedNetworkDomains(),
+        allowedDomains: [...new Set([...allowedNetworkDomains(), ...(params.extraAllowedDomains ?? [])])],
         deniedDomains: [],
       },
     },
