@@ -8,7 +8,7 @@ import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
-import { useOptionalShellMode } from '../shell/ShellModeContext.js';
+import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
