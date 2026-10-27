@@ -15,16 +15,19 @@ import type {
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
 import { createWebSearchTurnState, InstructionBuilder } from '@truefoundry/trueforge-core/core';
+import { mapStreamToChunks } from '@truefoundry/trueforge-core/core/llm/VercelAILLM';
 import {
   CREATE_SPACE_TOOL_NAME,
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceRevisionConflictError,
+  SpaceRevisionNotFoundError,
   type CreateSpaceInput,
   type GetSpaceRevisionInput,
   type ListSpacesInput,
@@ -39,7 +42,7 @@ import {
   spaceCapability,
   type SpaceToolStore,
 } from '../../../src/runtime/spaceCapability';
-import { SPACE_WRITE_MAX_LENGTH } from '../../../src/schemas/space';
+import { SPACE_BODY_MAX_LENGTH, SPACE_WRITE_MAX_LENGTH } from '../../../src/schemas/space';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -68,7 +71,17 @@ const NOOP_TRACING: AgentTracing = {
 /** A small stateful store: just enough of the production fencing for the tool layer to run. */
 class InMemorySpaceStore implements SpaceToolStore {
   private spaces = new Map<string, SpaceRecord>();
+  private history = new Map<string, SpaceRecord[]>();
   private aggregateRevision = 0;
+
+  private pushHistory(record: SpaceRecord): void {
+    const entries = this.history.get(record.id) ?? [];
+    entries.push({ ...record });
+    while (entries.length > 20) {
+      entries.shift();
+    }
+    this.history.set(record.id, entries);
+  }
 
   async createSpace(input: CreateSpaceInput): Promise<SpaceMutationResult> {
     if (input.expected_aggregate_revision !== this.aggregateRevision) {
@@ -92,6 +105,7 @@ class InMemorySpaceStore implements SpaceToolStore {
       updated_at: new Date().toISOString(),
     };
     this.spaces.set(input.id, record);
+    this.pushHistory(record);
     return { record, aggregate_revision: this.aggregateRevision };
   }
 
@@ -122,19 +136,46 @@ class InMemorySpaceStore implements SpaceToolStore {
       updated_at: new Date().toISOString(),
     };
     this.spaces.set(input.space_id, updated);
+    this.pushHistory(updated);
     return { record: updated, aggregate_revision: this.aggregateRevision };
   }
 
-  async revertSpace(_input: RevertSpaceInput): Promise<SpaceMutationResult> {
-    throw new Error('not used in this test');
+  async revertSpace(input: RevertSpaceInput): Promise<SpaceMutationResult> {
+    const current = this.spaces.get(input.space_id);
+    if (current === undefined || current.revision !== input.expected_revision) {
+      throw new SpaceRevisionConflictError({
+        id: input.space_id,
+        expected_revision: input.expected_revision,
+        actual_revision: current?.revision ?? 0,
+      });
+    }
+    if (input.expected_aggregate_revision !== this.aggregateRevision) {
+      throw new SpaceAggregateRevisionConflictError({
+        expected_revision: input.expected_aggregate_revision,
+        actual_revision: this.aggregateRevision,
+      });
+    }
+    const target = this.history.get(input.space_id)?.find(record => record.revision === input.revision);
+    if (target === undefined) {
+      throw new SpaceRevisionNotFoundError({ id: input.space_id, revision: input.revision });
+    }
+    this.aggregateRevision += 1;
+    const reverted: SpaceRecord = {
+      ...target,
+      revision: current.revision + 1,
+      updated_at: new Date().toISOString(),
+    };
+    this.spaces.set(input.space_id, reverted);
+    this.pushHistory(reverted);
+    return { record: reverted, aggregate_revision: this.aggregateRevision };
   }
 
   async getSpace(input: SpaceIdentityInput): Promise<SpaceRecord | undefined> {
     return this.spaces.get(input.space_id);
   }
 
-  async getSpaceRevision(_input: GetSpaceRevisionInput): Promise<SpaceRecord | undefined> {
-    return undefined;
+  async getSpaceRevision(input: GetSpaceRevisionInput): Promise<SpaceRecord | undefined> {
+    return this.history.get(input.space_id)?.find(record => record.revision === input.revision);
   }
 
   async listSpacesWithAggregate(input: ListSpacesInput) {
@@ -146,7 +187,7 @@ class InMemorySpaceStore implements SpaceToolStore {
 }
 
 interface SpaceWireResult {
-  space?: { id: string; body: string };
+  space?: { id: string; body: string; revision?: number };
   spaces?: { id: string }[];
   error?: string;
 }
@@ -254,6 +295,7 @@ describe('the space write size cap', () => {
       body: tablePart(1, 5),
       format: 'markdown',
     });
+    expect(isErrorResponse(created)).toBe(false);
     const spaceId = await createdSpaceId(store);
     const response = await callTool(store, UPDATE_SPACE_TOOL_NAME, {
       space_id: spaceId,
@@ -282,6 +324,7 @@ describe('the space write size cap', () => {
       body: tablePart(1, 5),
       format: 'markdown',
     });
+    expect(isErrorResponse(created)).toBe(false);
     const spaceId = await createdSpaceId(store);
     const half = 'z'.repeat(2_500);
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
@@ -311,6 +354,7 @@ describe('the space write size cap', () => {
       body: `${chunk}\n${'b'.repeat(900)}`,
       format: 'markdown',
     });
+    expect(isErrorResponse(created)).toBe(false);
     const spaceId = await createdSpaceId(store);
     // Search text is 3,000 characters and the replacement is 3,900: counted together they
     // would pass the cap, but only the replacement is new content, so the edit goes through.
@@ -385,5 +429,294 @@ describe('the space write size cap', () => {
     );
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.has(GET_SPACE_TOOL_NAME)).toBe(false);
     expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.has(LIST_SPACES_TOOL_NAME)).toBe(false);
+  });
+
+  it('derives the streamed limits from the worst valid call, escaping included', () => {
+    // The arithmetic written beside the constants in spaceCapability.ts: every string
+    // field at six times its source length (a character can stream as a six-character
+    // escape), plus one flat framing allowance. Create and update carry one body at the
+    // write cap, a 2,000 purpose, a 160 name, a 160 lookup, and the two short enums.
+    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(CREATE_SPACE_TOOL_NAME)).toBe(
+      6 * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000,
+    );
+    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(UPDATE_SPACE_TOOL_NAME)).toBe(
+      6 * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000,
+    );
+    // Edit carries up to 50 entries; a search is copied from the stored body, so 50
+    // searches at the body's own limit dominate, with 50 anchors at 200 counted as well.
+    expect(SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(EDIT_SPACE_TOOL_NAME)).toBe(
+      6 * (50 * SPACE_BODY_MAX_LENGTH + 50 * 200 + SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 3_000,
+    );
+  });
+});
+
+/** One part of a streamed tool call, as the model server sends it. */
+type SpaceStreamPart =
+  Parameters<typeof mapStreamToChunks>[0]['stream'] extends AsyncIterable<infer Part> ? Part : never;
+
+async function* streamParts(parts: readonly SpaceStreamPart[]): AsyncGenerator<SpaceStreamPart> {
+  for (const part of parts) {
+    yield part;
+  }
+}
+
+/** Runs streamed parts through the real stream mapper with the real limits and returns its result. */
+async function drainParts(parts: readonly SpaceStreamPart[]) {
+  const gen = mapStreamToChunks({
+    stream: streamParts(parts),
+    chunkMeta: { id: 'stream-pin', created: 0, model: 'test-model' },
+    toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
+  });
+  let result = await gen.next();
+  while (!result.done) {
+    result = await gen.next();
+  }
+  return result.value;
+}
+
+/** The parts of one tool call whose JSON arguments arrive in chunks, the way a model streams them. */
+function toolCallParts(toolName: string, argsJson: string, chunkSize = 9_973): SpaceStreamPart[] {
+  const parts: SpaceStreamPart[] = [{ type: 'tool-input-start', id: 'call-1', toolName }];
+  for (let offset = 0; offset < argsJson.length; offset += chunkSize) {
+    parts.push({ type: 'tool-input-delta', id: 'call-1', delta: argsJson.slice(offset, offset + chunkSize) });
+  }
+  parts.push({ type: 'tool-input-end', id: 'call-1' });
+  return parts;
+}
+
+describe('the streamed-argument limits against real streams', () => {
+  it('does not cut an escape-heavy create or update that the tool layer accepts', async () => {
+    // Every character of the body, purpose, and name is a control character, so each one
+    // streams as a six-character escape: the harshest valid call there is. Its streamed
+    // length passes the old flat limit of three times the write cap many times over.
+    const createArgs = JSON.stringify({
+      name: 'N'.repeat(160),
+      purpose: '\u0001'.repeat(2_000),
+      status: 'active',
+      body: '\u0001'.repeat(SPACE_WRITE_MAX_LENGTH),
+      format: 'markdown',
+    });
+    expect(createArgs.length).toBeGreaterThan(SPACE_WRITE_MAX_LENGTH * 3);
+    const created = await drainParts(toolCallParts(CREATE_SPACE_TOOL_NAME, createArgs));
+    expect(created.size_cut_tool_calls).toBeUndefined();
+    expect(created.output.tool_calls?.[0]?.function.arguments).toBe(createArgs);
+
+    const updateArgs = JSON.stringify({
+      space_id: 'space-1',
+      name: 'N'.repeat(160),
+      purpose: '\u0001'.repeat(2_000),
+      status: 'active',
+      body: '\u0001'.repeat(SPACE_WRITE_MAX_LENGTH),
+      format: 'markdown',
+    });
+    const updated = await drainParts(toolCallParts(UPDATE_SPACE_TOOL_NAME, updateArgs));
+    expect(updated.size_cut_tool_calls).toBeUndefined();
+    expect(updated.output.tool_calls?.[0]?.function.arguments).toBe(updateArgs);
+  });
+
+  it('does not cut a valid edit whose search text is long, even a whole stored body', async () => {
+    const search30k = JSON.stringify({
+      space_name: 'Dog breeds',
+      edits: [{ type: 'search', search: 's'.repeat(30_000), replace: 'done' }],
+    });
+    expect(search30k.length).toBeGreaterThan(24_000);
+    const edited = await drainParts(toolCallParts(EDIT_SPACE_TOOL_NAME, search30k));
+    expect(edited.size_cut_tool_calls).toBeUndefined();
+    expect(edited.output.tool_calls?.[0]?.function.arguments).toBe(search30k);
+
+    const wholeBody = JSON.stringify({
+      space_name: 'Dog breeds',
+      edits: [{ type: 'search', search: 's'.repeat(SPACE_BODY_MAX_LENGTH), replace: 'done' }],
+    });
+    const whole = await drainParts(toolCallParts(EDIT_SPACE_TOOL_NAME, wholeBody));
+    expect(whole.size_cut_tool_calls).toBeUndefined();
+  });
+
+  it('cuts a call that streams past its derived limit, for each write tool', async () => {
+    const createLimit = SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(CREATE_SPACE_TOOL_NAME) ?? 0;
+    const overCreate = `{"body":"${'x'.repeat(createLimit)}"}`;
+    const cutCreate = await drainParts(toolCallParts(CREATE_SPACE_TOOL_NAME, overCreate));
+    expect(cutCreate.size_cut_tool_calls).toEqual(['call-1']);
+
+    const overUpdate = `{"body":"${'x'.repeat(createLimit)}"}`;
+    const cutUpdate = await drainParts(toolCallParts(UPDATE_SPACE_TOOL_NAME, overUpdate));
+    expect(cutUpdate.size_cut_tool_calls).toEqual(['call-1']);
+
+    // One single delta past the edit limit: the cut lands on the accumulated length.
+    const editLimit = SPACE_WRITE_TOOL_ARGUMENT_LIMITS.get(EDIT_SPACE_TOOL_NAME) ?? 0;
+    const overEdit = `{"edits":[{"type":"search","search":"${'x'.repeat(editLimit)}","replace":""}]}`;
+    const cutEdit = await drainParts(toolCallParts(EDIT_SPACE_TOOL_NAME, overEdit, overEdit.length));
+    expect(cutEdit.size_cut_tool_calls).toEqual(['call-1']);
+  });
+});
+
+/**
+ * One capability reused across calls, with a session id: the delta breaker is keyed per
+ * session and survives turn boundaries, so the recovery journey needs the same shape
+ * production has.
+ */
+function makeSessionCallTool(store: SpaceToolStore, sessionId: string) {
+  const capability = spaceCapability({
+    store,
+    authority: { tenantId: 'default', userRef: 'user-a' },
+    tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
+    sessionId,
+  });
+  const toolSet = capability.systemToolSets?.[0];
+  if (toolSet === undefined) {
+    throw new Error('expected space tool set');
+  }
+  return (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
+}
+
+let recoverySessionCounter = 0;
+
+describe('recovering a space past the write cap, end to end', () => {
+  it('a missed edit, a lockout, and a rename all recover in parts without losing content', async () => {
+    const store = new InMemorySpaceStore();
+    recoverySessionCounter += 1;
+    const call = makeSessionCallTool(store, `write-size-recovery-${String(recoverySessionCounter)}`);
+
+    // Build the 40-row table in parts, the flow the cap prescribes: the finished body is
+    // well past one write's 4,000 characters.
+    const created = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Dog breeds',
+      purpose: PURPOSE,
+      status: 'active',
+      body: tablePart(1, 10),
+      format: 'markdown',
+    });
+    expect(isErrorResponse(created)).toBe(false);
+    const listed = await call(LIST_SPACES_TOOL_NAME, {});
+    const spaceId = resultJson(listed).spaces?.[0]?.id;
+    expect(spaceId).toBeDefined();
+    if (spaceId === undefined) {
+      throw new Error('expected a listed space');
+    }
+    for (const [from, to] of [
+      [11, 20],
+      [21, 30],
+      [31, 40],
+    ] as const) {
+      const lastRow = rowRange(from - 1, from - 1);
+      const extended = await call(EDIT_SPACE_TOOL_NAME, {
+        space_id: spaceId,
+        edits: [{ type: 'search', search: lastRow, replace: `${lastRow}\n${rowRange(from, to)}` }],
+      });
+      expect(isErrorResponse(extended)).toBe(false);
+    }
+    const built = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const builtBody = resultJson(built).space?.body ?? '';
+    expect(builtBody.length).toBeGreaterThan(SPACE_WRITE_MAX_LENGTH);
+
+    // A missed search: the error teaches the parts recovery, and following it works.
+    const missed = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'search', search: 'Breed 99', replace: 'x' }],
+    });
+    expect(isErrorResponse(missed)).toBe(true);
+    const missError = resultJson(missed).error ?? '';
+    expect(missError).toContain('Re-read the space with get_space');
+    expect(missError).toContain('make the change with edit_space in parts');
+    const lastRow = rowRange(40, 40);
+    const appended = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [
+        { type: 'search', search: lastRow, replace: `${lastRow}\n| Breed 41 | Group 5 | Added after the miss |` },
+      ],
+    });
+    expect(isErrorResponse(appended)).toBe(false);
+
+    // Three more misses lock delta mode. The taught unlock is revert_space to the current
+    // revision: the body survives byte for byte, and edits work again.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const failed = await call(EDIT_SPACE_TOOL_NAME, {
+        space_id: spaceId,
+        edits: [{ type: 'search', search: 'no such text', replace: 'x' }],
+      });
+      expect(isErrorResponse(failed)).toBe(true);
+    }
+    const locked = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'search', search: 'Breed 41', replace: 'Breed 41' }],
+    });
+    expect(isErrorResponse(locked)).toBe(true);
+    expect(resultJson(locked).error ?? '').toContain("revert_space with the space's current");
+
+    const beforeRevert = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const bodyBeforeRevert = resultJson(beforeRevert).space?.body ?? '';
+    const currentRevision = resultJson(beforeRevert).space?.revision ?? 0;
+    expect(currentRevision).toBeGreaterThan(1);
+    const reverted = await call(REVERT_SPACE_TOOL_NAME, { space_id: spaceId, revision: currentRevision });
+    expect(isErrorResponse(reverted)).toBe(false);
+    const afterRevert = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    expect(resultJson(afterRevert).space?.body).toBe(bodyBeforeRevert);
+
+    const editsAgain = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'search', search: 'Breed 41', replace: 'Breed 41 (recovered)' }],
+    });
+    expect(isErrorResponse(editsAgain)).toBe(false);
+    const finalRead = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    const finalBody = resultJson(finalRead).space?.body ?? '';
+    expect(finalBody).toContain('Breed 41 (recovered)');
+    expect(finalBody.split('\n').filter(line => /^\| Breed \d/.test(line))).toHaveLength(41);
+  });
+
+  it('a duplicated anchor is renamed with a search edit, as its error teaches', async () => {
+    const store = new InMemorySpaceStore();
+    recoverySessionCounter += 1;
+    const call = makeSessionCallTool(store, `write-size-recovery-${String(recoverySessionCounter)}`);
+    const body = '<!-- @block:dup -->\n<p>first</p>\n<!-- @block:dup -->\n<p>second</p>';
+    const created = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Duplicates',
+      purpose: PURPOSE,
+      status: 'active',
+      body,
+      format: 'markdown',
+    });
+    expect(isErrorResponse(created)).toBe(false);
+    const listed = await call(LIST_SPACES_TOOL_NAME, {});
+    const spaceId = resultJson(listed).spaces?.[0]?.id;
+    if (spaceId === undefined) {
+      throw new Error('expected a listed space');
+    }
+
+    const blocked = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'block', anchor: 'dup', new_content: '<p>winner</p>' }],
+    });
+    expect(isErrorResponse(blocked)).toBe(true);
+    const dupError = resultJson(blocked).error ?? '';
+    expect(dupError).toContain('Rename all but one of the duplicates');
+    expect(dupError).toContain('matches only that one copy');
+
+    // The taught rename: the marker plus the text right after it matches only one copy.
+    const renamed = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [
+        {
+          type: 'search',
+          search: '<!-- @block:dup -->\n<p>second</p>',
+          replace: '<!-- @block:dup-two -->\n<p>second</p>',
+        },
+      ],
+    });
+    expect(isErrorResponse(renamed)).toBe(false);
+
+    const firstEdit = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'block', anchor: 'dup', new_content: '<p>first updated</p>' }],
+    });
+    expect(isErrorResponse(firstEdit)).toBe(false);
+    const secondEdit = await call(EDIT_SPACE_TOOL_NAME, {
+      space_id: spaceId,
+      edits: [{ type: 'block', anchor: 'dup-two', new_content: '<p>second updated</p>' }],
+    });
+    expect(isErrorResponse(secondEdit)).toBe(false);
+    const read = await call(GET_SPACE_TOOL_NAME, { space_id: spaceId });
+    expect(resultJson(read).space?.body).toContain('<p>first updated</p>');
+    expect(resultJson(read).space?.body).toContain('<p>second updated</p>');
   });
 });

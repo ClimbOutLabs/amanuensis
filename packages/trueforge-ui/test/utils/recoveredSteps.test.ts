@@ -25,16 +25,18 @@ function call({
   id,
   tool = 'update_space',
   args,
+  argsText: givenArgsText,
   cutOff = false,
   result,
 }: {
   id: string;
   tool?: string;
   args?: Record<string, unknown>;
+  argsText?: string;
   cutOff?: boolean;
   result?: string;
 }): StepPart {
-  const argsText = cutOff ? '{"name":"Garden plan","body":"- [ ] Plant' : JSON.stringify(args ?? {});
+  const argsText = givenArgsText ?? (cutOff ? '{"name":"Garden plan","body":"- [ ] Plant' : JSON.stringify(args ?? {}));
   return { type: 'tool-call', toolCallId: id, toolName: tool, argsText, ...(result === undefined ? {} : { result }) };
 }
 
@@ -60,6 +62,22 @@ describe('recoveredToolCallIds', () => {
     const parts = [
       call({ id: 'a', args: { space_name: 'Garden Plan' }, result: FAILED }),
       call({ id: 'b', args: { space_name: 'Harbour Market' }, result: DONE }),
+    ];
+    expect(recoveredToolCallIds(parts).size).toBe(0);
+  });
+
+  it('keeps a cut-off call when the same tool later finished a call about a different thing', () => {
+    const parts = [
+      call({ id: 'a', argsText: '{"space_name":"Harbour Market","body":"- [ ] Book the', result: REFUSED }),
+      call({ id: 'b', args: { space_name: 'Garden plan' }, result: DONE }),
+    ];
+    expect(recoveredToolCallIds(parts).size).toBe(0);
+  });
+
+  it('keeps a call cut off before it finished naming its target, even when the tool later finished', () => {
+    const parts = [
+      call({ id: 'a', argsText: '{"space_na', result: REFUSED }),
+      call({ id: 'b', args: { space_name: 'Garden plan' }, result: DONE }),
     ];
     expect(recoveredToolCallIds(parts).size).toBe(0);
   });

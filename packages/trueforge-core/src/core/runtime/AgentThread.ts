@@ -211,6 +211,7 @@ import {
   noProgressNudgeMessage,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
+  remapToolCallIdSet,
   SANDBOX_OFF_PROMPT,
   scanApprovalDecisions,
   toEnrichedToolCall,
@@ -3846,20 +3847,30 @@ export class AgentThread {
     // every call, but calls that will be held for the owner's approval do not count toward
     // the cap there, and which ones those are is only known once each call is classified.
     const unattended = this.sentinel?.services.unattended === true;
+    const providerToolCalls = result.value.output.tool_calls;
+    const uniqueToolCalls =
+      providerToolCalls === undefined
+        ? undefined
+        : withHostUniqueToolCallIds({ calls: providerToolCalls, context: this.context });
     const replyGuard = guardModelReply({
       message: {
         ...result.value.output,
-        ...(result.value.output.tool_calls === undefined
-          ? {}
-          : {
-              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
-            }),
+        ...(uniqueToolCalls === undefined ? {} : { tool_calls: uniqueToolCalls }),
       },
       // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
-      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
-      sizeCutCalls: new Set(result.value.size_cut_tool_calls ?? []),
+      readOnlyTools: hostVouchedReadToolNames({ calls: providerToolCalls ?? [], toolMapping }),
+      // The stream recorded the size-cut calls by their provider ids; carry the set across
+      // the id remap above, or a remapped call loses its flag and the guard misses it.
+      sizeCutCalls:
+        providerToolCalls === undefined || uniqueToolCalls === undefined
+          ? new Set(result.value.size_cut_tool_calls ?? [])
+          : remapToolCallIdSet({
+              before: providerToolCalls,
+              after: uniqueToolCalls,
+              ids: new Set(result.value.size_cut_tool_calls ?? []),
+            }),
     });
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);

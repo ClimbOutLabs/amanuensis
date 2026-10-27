@@ -1364,9 +1364,9 @@ describe('enforceStreamDeadlines', () => {
 
   describe('while a tool call is open', () => {
     const toolCalls = { chunkMs: 180, pieceOf: toolCallPieceOf };
-    const opened = { type: 'tool-input-start', id: 'c1', toolName: 'update_space' } as TextStreamPart<ToolSet>;
-    const argumentsArrived = { type: 'tool-input-delta', id: 'c1', delta: '{"a":1}' } as TextStreamPart<ToolSet>;
-    const completed = { type: 'tool-input-end', id: 'c1' } as TextStreamPart<ToolSet>;
+    const opened: TextStreamPart<ToolSet> = { type: 'tool-input-start', id: 'c1', toolName: 'update_space' };
+    const argumentsArrived: TextStreamPart<ToolSet> = { type: 'tool-input-delta', id: 'c1', delta: '{"a":1}' };
+    const completed: TextStreamPart<ToolSet> = { type: 'tool-input-end', id: 'c1' };
 
     function guarded({ gapMs, first }: { gapMs: number; first: TextStreamPart<ToolSet> }): {
       deadlineController: AbortController;
@@ -1410,7 +1410,7 @@ describe('enforceStreamDeadlines', () => {
     });
 
     it('keeps the ordinary bound when the silence comes before any tool piece', async () => {
-      const text = { type: 'text-delta', id: 't1', text: 'a' } as TextStreamPart<ToolSet>;
+      const text: TextStreamPart<ToolSet> = { type: 'text-delta', id: 't1', text: 'a' };
       const { deadlineController, outcome } = guarded({ gapMs: 150, first: text });
       await jest.advanceTimersByTimeAsync(70);
       await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
@@ -1418,10 +1418,10 @@ describe('enforceStreamDeadlines', () => {
     });
 
     it('goes back to the ordinary bound once the call has completed', async () => {
-      async function* stream() {
+      async function* stream(): AsyncGenerator<TextStreamPart<ToolSet>> {
         yield opened;
         yield completed;
-        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'update_space', input: {} } as TextStreamPart<ToolSet>;
+        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'update_space', input: {} };
         await new Promise(() => undefined);
       }
       const deadlineController = new AbortController();

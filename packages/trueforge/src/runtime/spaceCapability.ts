@@ -82,7 +82,8 @@ export const AUTO_BLOCK_ANCHOR = 'auto-body';
  * Thrown when a delta edit's search text is not found in the current body. The error message is
  * self-contained: it states that nothing was persisted, shows the search text, and steers away
  * from delta retries — a miss means the model's mental copy of the body diverged, and recomputed
- * search text does not converge. The only recovery is a full-body update.
+ * search text does not converge. The recovery is to re-read the space and re-apply the change
+ * in parts from the fresh read, which works at any body size.
  */
 export class SpaceEditNotFoundError extends Error {
   readonly search: string;
@@ -92,11 +93,12 @@ export class SpaceEditNotFoundError extends Error {
     const preview = input.search.length > 500 ? `${input.search.slice(0, 500)}…` : input.search;
     super(
       `Edit #${String(input.index + 1)} search text not found in the space's current body. ` +
-        `Nothing was persisted — the space is unchanged. ` +
+        `Nothing was persisted: the space is unchanged. ` +
         `Search text (exact, case- and whitespace-sensitive): "${preview}". ` +
-        `Do not retry this search and do not recompute search text from another read: delta retries ` +
-        `after a miss do not converge. Send the full updated body via update_space instead — ` +
-        `call get_space first if you no longer have the current body, then pass the full body via update_space.`,
+        `Do not retry this search and do not recompute search text from memory: delta retries ` +
+        `after a miss do not converge. Re-read the space with get_space first (list_blocks names ` +
+        `its sections), then make the change with edit_space in parts: a block edit naming one of ` +
+        `its anchors, or a corrected search copied from the fresh read.`,
     );
     this.name = 'SpaceEditNotFoundError';
     this.search = input.search;
@@ -107,8 +109,8 @@ export class SpaceEditNotFoundError extends Error {
 /**
  * Base class for block-anchor addressing failures on the edit_space path. Like
  * SpaceEditNotFoundError, these are terminal tool errors: nothing is persisted, and the message
- * lists the valid anchors so the model can address a real block (or fall back to a full-body
- * update) instead of guessing.
+ * lists the valid anchors so the model can address a real block (or re-read the space and use
+ * search edits) instead of guessing.
  */
 export class SpaceBlockAnchorError extends Error {
   readonly space_id: string;
@@ -124,10 +126,10 @@ export class SpaceBlockAnchorError extends Error {
     super(
       `${input.anchor === '' ? 'Empty' : `Unknown`} block anchor "${anchorPreview}" ` +
         `in edit_space entry #${String(input.index + 1)} for space "${input.space_id}". ` +
-        `Nothing was persisted — the space is unchanged. ` +
+        `Nothing was persisted: the space is unchanged. ` +
         `Valid anchors: ${input.validAnchors.map(a => `"${a}"`).join(', ')}. ` +
-        `Retry edit_space with one of the valid anchors, or send the full updated body via ` +
-        `update_space.`,
+        `Retry edit_space with one of the valid anchors. If the change is not inside one block, ` +
+        `re-read the space with get_space and make it with a search edit copied from the fresh read.`,
     );
     this.name = 'SpaceBlockAnchorError';
     this.space_id = input.space_id;
@@ -147,7 +149,9 @@ export class SpaceBlockAnchorNotFoundError extends SpaceBlockAnchorError {
 
 /**
  * The anchor named two or more blocks: addressing it would silently pick one, so the update
- * fails closed instead. The model renames the duplicates with a full-body update.
+ * fails closed instead. The model renames all but one of the duplicates with search edits
+ * whose search text includes the text right after the marker, so each rename touches only
+ * the one copy it means to.
  */
 export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
   readonly occurrences: number;
@@ -164,16 +168,21 @@ export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
     this.message =
       `Block anchor "${input.anchor}" appears ${String(input.occurrences)} times in the body of ` +
       `space "${input.space_id}" (edit_space entry #${String(input.index + 1)}): edit_space needs ` +
-      `a unique anchor, so nothing was persisted — the space is unchanged. ` +
-      `Rename the duplicate anchors with a full-body update_space, then retry edit_space. ` +
+      `a unique anchor, so nothing was persisted: the space is unchanged. ` +
+      `Rename all but one of the duplicates, then retry edit_space. To rename one copy, re-read ` +
+      `the space with get_space, then send a search edit whose search text is the marker plus the ` +
+      `text right after it (so it matches only that one copy) and whose replacement is the marker ` +
+      `with a new name plus that same text. ` +
       `Currently unique anchors: ${uniqueList}.`;
   }
 }
 
 /**
  * Thrown when edit_space is called on a space whose delta mode the server locked after
- * consecutive failed delta updates. Terminal: the model must send a full-body update or
- * revert_space, either of which unlocks delta mode on success.
+ * consecutive failed delta updates. Terminal for edit_space until something unlocks it: a
+ * successful update_space or revert_space does. Restoring the space's current revision
+ * with revert_space unlocks it without changing the body at all, which is the recovery
+ * that works for a body too long to send in one update_space write.
  */
 export class SpaceDeltaLockedError extends Error {
   readonly space_id: string;
@@ -181,10 +190,14 @@ export class SpaceDeltaLockedError extends Error {
   constructor(input: { space_id: string }) {
     super(
       `Delta updates for space "${input.space_id}" are locked after consecutive failed delta ` +
-        `updates in this session. Nothing was persisted — the space is unchanged. ` +
+        `updates in this session. Nothing was persisted: the space is unchanged. ` +
         `Do not call edit_space again for this space. ` +
-        `Send the full updated body via update_space, or restore a known-good ` +
-        `revision with revert_space; a successful full-body update or revert unlocks delta updates.`,
+        `To unlock it without losing any content, call revert_space with the space's current ` +
+        `revision (get_space shows it): restoring the current revision keeps the body exactly ` +
+        `as it is and clears the lock. Then re-read the space and make the change with ` +
+        `edit_space in parts. A successful update_space also unlocks it, but one write carries ` +
+        `at most ${SPACE_WRITE_MAX_LENGTH.toLocaleString('en-US')} characters, so that only works when the whole ` +
+        `new body fits in one write.`,
     );
     this.name = 'SpaceDeltaLockedError';
     this.space_id = input.space_id;
@@ -239,16 +252,47 @@ export class SpaceWriteTooLongError extends Error {
 }
 
 /**
- * Streamed-argument limits for the space write tools, derived from SPACE_WRITE_MAX_LENGTH.
- * A valid call's arguments hold the new content plus the name, purpose, and JSON framing,
- * so a multiple of the write cap passes every valid call and stops only a call that is
- * already over the write cap or has run away. edit_space gets more room because one call
- * may carry up to 50 entries whose search text is copied from the body.
+ * Streamed-argument limits for the space write tools. The stream counts the call's JSON
+ * arguments as they arrive, so a limit must clear the largest call the tool layer would
+ * accept, measured in streamed characters, or the stream cut refuses a call that is
+ * valid. The derivation, field by field from the input schemas:
+ *
+ * A character inside a JSON string can stream as a six-character escape (a control
+ * character written as a unicode escape), so every string field counts at six times its
+ * source length. Key names, punctuation, numbers, and true-or-false values never escape; they
+ * get one flat allowance per call.
+ *
+ * create_space and update_space carry one body (at most SPACE_WRITE_MAX_LENGTH of new
+ * content by the write cap), a purpose (at most 2,000), a name (at most 160), one lookup
+ * key (a space id, or a space_name of at most 160), a status and a format (at most 8
+ * each): 6 * (4,000 + 2,000 + 160 + 160 + 8 + 8) + 2,000 of framing = 40,016.
+ *
+ * edit_space carries up to 50 entries. An entry's search text is copied from the stored
+ * body, so one search can be as long as a whole body (SPACE_BODY_MAX_LENGTH) and 50 of
+ * them dominate the call: 50 * 65,536. Anchors are at most 200 each (50 * 200, counted
+ * too even though an entry carries a search or an anchor, never both). The new content
+ * (every entry's replace and new_content together) is capped at SPACE_WRITE_MAX_LENGTH.
+ * The metadata fields match create: 2,000 + 160 + 160 + 8 + 8. Total:
+ * 6 * (50 * 65,536 + 50 * 200 + 4,000 + 2,000 + 160 + 160 + 8 + 8) + 3,000 of framing
+ * = 19,761,816.
+ *
+ * The edit_space limit is therefore large: a search that copies a stored page is
+ * legitimate, however long it streams. What stops a runaway edit_space call in practice
+ * is the tool-call idle allowance (a call that goes silent mid-write is stopped on
+ * time, not on size); this limit is only the backstop for a call that keeps streaming
+ * past every valid shape.
  */
+const STREAMED_JSON_ESCAPE_FACTOR = 6;
+const CREATE_STREAMED_ARGUMENT_LIMIT =
+  STREAMED_JSON_ESCAPE_FACTOR * (SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) + 2_000;
+const EDIT_STREAMED_ARGUMENT_LIMIT =
+  STREAMED_JSON_ESCAPE_FACTOR *
+    (50 * SPACE_BODY_MAX_LENGTH + 50 * 200 + SPACE_WRITE_MAX_LENGTH + 2_000 + 160 + 160 + 8 + 8) +
+  3_000;
 export const SPACE_WRITE_TOOL_ARGUMENT_LIMITS: ReadonlyMap<string, number> = new Map([
-  [CREATE_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 3],
-  [UPDATE_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 3],
-  [EDIT_SPACE_TOOL_NAME, SPACE_WRITE_MAX_LENGTH * 6],
+  [CREATE_SPACE_TOOL_NAME, CREATE_STREAMED_ARGUMENT_LIMIT],
+  [UPDATE_SPACE_TOOL_NAME, CREATE_STREAMED_ARGUMENT_LIMIT],
+  [EDIT_SPACE_TOOL_NAME, EDIT_STREAMED_ARGUMENT_LIMIT],
 ]);
 
 /**
@@ -279,7 +323,7 @@ Pictures: use only picture links that a search or page result in this chat retur
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
-update_space replaces the whole body: name, purpose, and status are required with it. edit_space changes part of a body without resending it: each entry in edits is a search/replace pair (type 'search') or an anchor-addressed block replacement (type 'block'). Use block edits for one section, search edits for a small change to a space with no markers: each search is an exact, case-sensitive substring copied verbatim from the latest get_space. A search that does not match fails the whole edit, so do not retry it: send the full updated body via update_space. An unknown or duplicate anchor also fails the edit, and the error lists the valid anchors. A space with no markers has one block, "auto-body", covering the whole body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until a successful full-body update or revert_space. Every update keeps the previous revision: to undo a bad update, call revert_space rather than rebuilding the content from memory. expected_revision and expected_aggregate_revision are optional: leave them out; if one is stale, the error names the current value, so retry once with it.
+update_space replaces the whole body: name, purpose, and status are required with it. edit_space changes part of a body without resending it: each entry in edits is a search/replace pair (type 'search') or an anchor-addressed block replacement (type 'block'). Use block edits for one section, search edits for a small change to a space with no markers: each search is an exact, case-sensitive substring copied verbatim from the latest get_space. A search that does not match fails the whole edit, so do not retry it: re-read the space and correct the search from the fresh read, or address the change to one of its blocks. An unknown or duplicate anchor also fails the edit, and the error lists the valid anchors. A space with no markers has one block, "auto-body", covering the whole body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body, and a successful update_space unlocks it too when the whole new body fits in one write. Every update keeps the previous revision: to undo a bad update, call revert_space rather than rebuilding the content from memory. expected_revision and expected_aggregate_revision are optional: leave them out; if one is stale, the error names the current value, so retry once with it.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -818,8 +862,8 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
-        'Replace one space wholesale by space_id or exact space_name. Name, purpose, and status are required; body is the full new body as one string with real line breaks. ' +
-        'For a partial change without resending the body, use edit_space. ' +
+        'Replace one space wholesale by space_id or exact space_name. Name, purpose, and status are required; body is the full new body as one string with real line breaks, at most about 4,000 characters. ' +
+        'For a partial change without resending the body, or any change to a body longer than that, use edit_space. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
       schema: UPDATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
@@ -830,7 +874,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'Change part of one space by space_id or exact space_name, without resending the body. ' +
         'edits is a list of up to 50 entries, applied in order: a search entry {type: "search", search, replace} replaces every occurrence of an exact, case-sensitive substring copied verbatim from a recent get_space; a block entry {type: "block", anchor, new_content} replaces one <!-- @block:name --> section, and empty new_content deletes it. ' +
-        'A search that matches nothing, or an unknown or duplicate anchor, fails the whole edit: do not retry it, send the full updated body via update_space instead. ' +
+        'A search that matches nothing, or an unknown or duplicate anchor, fails the whole edit: do not retry the same entry. Re-read the space with get_space (list_blocks names its sections) and correct the entry from the fresh read. ' +
         'The new content across one call may total at most about 4,000 characters; split a bigger change into several calls. ' +
         'Name, purpose, status, and format are optional. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',
@@ -849,7 +893,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: LIST_BLOCKS_TOOL_NAME,
       description:
-        "List one space's block anchors with an 80-character preview of each, without the body. Use it after a context compaction or before edit_space. The preamble (text before the first marker) is reported separately and changes only through a full-body update_space.",
+        "List one space's block anchors with an 80-character preview of each, without the body. Use it after a context compaction or before edit_space. The preamble (text before the first marker) is reported separately; it has no anchor, so change it with a search edit copied from get_space.",
       schema: LIST_BLOCKS_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,

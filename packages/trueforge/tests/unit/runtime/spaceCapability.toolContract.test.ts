@@ -356,15 +356,15 @@ describe('space contract: one string body, one edit shape, guided errors, name a
       space_name: 'Edit failures',
       edits: [{ type: 'search', search: 'absent words', replace: 'x' }],
     });
-    expect(await errorOf(missed)).toContain('then pass the full body via update_space');
+    expect(await errorOf(missed)).toContain('Re-read the space with get_space');
+    expect(await errorOf(missed)).toContain('make the change with edit_space in parts');
 
     const badAnchor = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Edit failures',
       edits: [{ type: 'block', anchor: 'nope', new_content: 'x' }],
     });
-    expect(await errorOf(badAnchor)).toContain(
-      'Retry edit_space with one of the valid anchors, or send the full updated body via update_space',
-    );
+    expect(await errorOf(badAnchor)).toContain('Retry edit_space with one of the valid anchors');
+    expect(await errorOf(badAnchor)).toContain('make it with a search edit copied from the fresh read');
 
     await createSpace(call, {
       name: 'Duplicate anchors',
