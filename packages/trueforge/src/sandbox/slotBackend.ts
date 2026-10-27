@@ -5,6 +5,7 @@ import {
   rawSandboxId,
   slotMirrorSocketPathsIn,
   SlotSandboxProvider,
+  slotSkillNetworkSocketPathsIn,
   slotSocketPathsIn,
   type SandboxBuild,
 } from '@truefoundry/trueforge-core/core';
@@ -12,6 +13,8 @@ import type { Logger } from 'winston';
 import configuration from '../config';
 import { PackageMirrorGateway } from './mirrors/packageMirrorGateway';
 import { packageMirrorTokens } from './mirrors/packageMirrorTokens';
+import { SkillNetworkGateway } from './skillnet/skillNetworkGateway';
+import { skillNetworkTokens } from './skillnet/skillNetworkTokens';
 
 /** Capabilities and the status page poll this; one probe per window keeps them cheap. */
 const STATUS_CACHE_MS = 10_000;
@@ -53,6 +56,14 @@ export function slotMirrorSocketPaths(): string[] {
   return slotMirrorSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });
 }
 
+/** Skill network socket of each slot, `<dir>/<n>/mirror/skillnet.sock`: where the slot agent reaches the skill network gateway. */
+export function slotSkillNetworkSocketPaths(): string[] {
+  return slotSkillNetworkSocketPathsIn({
+    dir: configuration.SANDBOX_SLOTS_DIR,
+    count: configuration.SANDBOX_SLOTS,
+  });
+}
+
 let mirrorGatewayStarted = false;
 
 /**
@@ -77,6 +88,32 @@ export async function startPackageMirrorGateway({ logger }: { logger: Logger }):
     logger.info('Package mirrors are listening for the sandbox slots');
   } catch (error) {
     logger.warn('Package mirrors could not start; sandbox package downloads stay off', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+let skillNetworkGatewayStarted = false;
+
+/**
+ * Starts the skill network gateway on its per-slot sockets. Best effort, like the mirrors: when
+ * the sockets cannot be opened, approved skill sites stay unreachable and every other sandbox
+ * call keeps working, so a gateway problem never takes the sandbox down.
+ */
+export async function startSkillNetworkGateway({ logger }: { logger: Logger }): Promise<void> {
+  if (skillNetworkGatewayStarted || !slotsBackendEnabled()) {
+    return;
+  }
+  skillNetworkGatewayStarted = true;
+  try {
+    const gateway = new SkillNetworkGateway({
+      registry: skillNetworkTokens,
+      logger: logger.child({ module: 'skill-network' }),
+    });
+    await gateway.listenOnSockets(slotSkillNetworkSocketPaths());
+    logger.info('Skill network gateway is listening for the sandbox slots');
+  } catch (error) {
+    logger.warn('Skill network gateway could not start; approved skill sites stay unreachable', {
       error: error instanceof Error ? error.message : String(error),
     });
   }

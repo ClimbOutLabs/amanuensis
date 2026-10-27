@@ -175,6 +175,14 @@ interface MemoEntry {
   count: number;
   disposition: ToolResultDisposition;
   remediation: ToolResultRemediation | undefined;
+  /**
+   * The turn's workspace mutation epoch when this result was produced. A
+   * successful write since then advances the epoch, and an entry stamped with
+   * an older epoch is never replayed: the call dispatches again and sees the
+   * post-write world. Verification entries already carry the epoch in their
+   * key, so for them the stamp always matches when the key does.
+   */
+  mutationEpoch: number;
 }
 
 export interface ToolCallMemoSnapshot {
@@ -186,6 +194,14 @@ export interface ToolCallMemoSnapshot {
     count: number;
     disposition: ToolResultDisposition;
     remediation: ToolResultRemediation | undefined;
+    /**
+     * The workspace mutation epoch when the result was produced (see
+     * MemoEntry.mutationEpoch). A snapshot written before read entries were
+     * stamped omits it; hydration treats such an entry as produced at the
+     * snapshot's own epoch, so its replay behavior for the rest of that turn
+     * is unchanged.
+     */
+    mutation_epoch?: number | undefined;
   }[];
   /** Side-effecting calls are remembered only as attempted; their responses are never replayed. */
   side_effect_attempts: { key: string; count: number }[];
@@ -223,7 +239,12 @@ export interface ToolCallMemoSnapshot {
   inspection_budget_warned: boolean;
   edit_observed: boolean;
   clarification_answered: boolean;
-  /** Monotonic host-owned generation used to scope repeatable verification commands. */
+  /**
+   * Monotonic host-owned generation advanced by every successful write. It
+   * scopes repeatable verification commands (through their memo keys) and
+   * memoized read replay (through each entry's stamp): a result produced at
+   * an older generation is never served again.
+   */
   workspace_mutation_epoch: number;
   /**
    * Host-authored notes that were decided (a guard's counter just reached its nudge threshold)
@@ -566,6 +587,7 @@ export function createToolCallMemoState(
   if (snapshot === undefined) {
     return state;
   }
+  const snapshotMutationEpoch = snapshot.workspace_mutation_epoch ?? 0;
   for (const entry of snapshot.read_results) {
     let disposition: ToolResultDisposition;
     let remediation: ToolResultRemediation | undefined;
@@ -579,12 +601,17 @@ export function createToolCallMemoState(
       disposition = entry.response.result.isError === true ? 'executed_nonzero' : 'executed_ok';
       remediation = undefined;
     }
+    // An entry a pre-stamp snapshot recorded carries no epoch of its own; it
+    // is treated as produced at the snapshot's epoch (see the field's note).
+    const mutationEpoch =
+      'mutation_epoch' in entry && entry.mutation_epoch !== undefined ? entry.mutation_epoch : snapshotMutationEpoch;
     state.entries.set(entry.key, {
       response: entry.response,
       failure: entry.failure,
       count: entry.count,
       disposition,
       remediation,
+      mutationEpoch,
     });
   }
   for (const entry of snapshot.side_effect_attempts) {
@@ -601,7 +628,7 @@ export function createToolCallMemoState(
   // Runtime hydration is the compatibility boundary for snapshots written
   // before the mutation epoch (or the no-progress counter) became part of
   // the canonical contract.
-  state.workspaceMutationEpoch = snapshot.workspace_mutation_epoch ?? 0;
+  state.workspaceMutationEpoch = snapshotMutationEpoch;
   state.consecutiveNoProgressBatches = snapshot.consecutive_no_progress_batches ?? 0;
   state.consecutiveFailedBatches = snapshot.consecutive_failed_batches ?? 0;
   for (const entry of snapshot.call_signatures ?? []) {
@@ -695,6 +722,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
         count: entry.count,
         disposition: entry.disposition,
         remediation: entry.remediation,
+        mutation_epoch: entry.mutationEpoch,
       })),
     side_effect_attempts: [...state.sideEffectAttempts.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -1083,6 +1111,7 @@ export function prepareSideEffectToolCalls({
       if (
         toolCall.tool_info.effect === 'edit' ||
         toolCall.tool_info.effect === 'commit' ||
+        toolCall.tool_info.effect === 'push' ||
         toolCall.tool_info.effect === 'execute'
       ) {
         projectedMutationEpoch += 1;
@@ -1677,7 +1706,13 @@ export async function executeToolCalls({
       const dispatchId = `dispatch-${createHash('sha256')
         .update(JSON.stringify([threadId, toolCall.id, key]), 'utf8')
         .digest('hex')}`;
-      const previous = shouldReplayCompleted ? memoState.entries.get(key) : undefined;
+      const completedEntry = shouldReplayCompleted ? memoState.entries.get(key) : undefined;
+      // An entry produced before the turn's latest successful write may
+      // describe a world that no longer exists, so only an entry stamped
+      // with the current mutation epoch may be replayed. A stale entry
+      // falls through to a fresh dispatch, whose result replaces it below.
+      const previous =
+        completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -1917,6 +1952,7 @@ export async function executeToolCalls({
               count: 1,
               disposition: result.result.isError === true ? 'executed_nonzero' : 'executed_ok',
               remediation: undefined,
+              mutationEpoch: memoState.workspaceMutationEpoch,
             };
           },
           (error: unknown) => {
@@ -1974,6 +2010,7 @@ export async function executeToolCalls({
           count: 1,
           disposition: failed ? 'executed_nonzero' : 'executed_ok',
           remediation: undefined,
+          mutationEpoch: memoState.workspaceMutationEpoch,
         });
       }
       const unavailable = isGithubFileContentUnavailable(response);
@@ -1998,7 +2035,9 @@ export async function executeToolCalls({
       if (
         isCallToolResponseResult(response) &&
         ((response.result.isError !== true &&
-          (toolCall.tool_info.effect === 'edit' || toolCall.tool_info.effect === 'commit')) ||
+          (toolCall.tool_info.effect === 'edit' ||
+            toolCall.tool_info.effect === 'commit' ||
+            toolCall.tool_info.effect === 'push')) ||
           toolCall.tool_info.effect === 'execute')
       ) {
         memoState.workspaceMutationEpoch += 1;

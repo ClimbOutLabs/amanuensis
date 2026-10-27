@@ -597,7 +597,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     className={auiInputClass('h-10')}
                     value={client.clientId}
                     autoComplete="off"
-                    onChange={event => setClient({ ...client, clientId: event.target.value })}
+                    onChange={event => {
+                      setCheck(null);
+                      setClient({ ...client, clientId: event.target.value });
+                    }}
                   />
                   <label className="block text-xs font-medium text-text-secondary" htmlFor="google-client-secret">
                     Client secret
@@ -608,7 +611,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     className={auiInputClass('h-10')}
                     value={client.clientSecret}
                     autoComplete="off"
-                    onChange={event => setClient({ ...client, clientSecret: event.target.value })}
+                    onChange={event => {
+                      setCheck(null);
+                      setClient({ ...client, clientSecret: event.target.value });
+                    }}
                   />
                   <label className="block text-xs font-medium text-text-secondary" htmlFor="google-client-json">
                     Or choose the downloaded client JSON
@@ -673,11 +679,17 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   Advanced, then Go to your app, then Continue. A window opens for this, so allow pop-ups for this site
                   if nothing appears.
                 </p>
+                {setup.mode === 'paste' ? (
+                  <p className="mt-2 text-text-secondary">
+                    If Google sends you to a page that won&apos;t load, copy the whole address from your browser&apos;s
+                    address bar and paste it here. That page is expected, and the address finishes the sign-in.
+                  </p>
+                ) : null}
                 <div className="mt-2">
                   <Button
                     size="small"
                     type="button"
-                    disabled={busy || offline || !hasClient}
+                    disabled={busy || offline || !hasClient || check?.ok !== true}
                     onClick={() =>
                       void beginConsent({
                         useSavedClient: false,
@@ -689,6 +701,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   </Button>
                   {!hasClient ? (
                     <p className="mt-1 text-xs text-text-secondary">Add your client ID and secret first.</p>
+                  ) : check?.ok !== true ? (
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Select Check my client above first. Connect opens once the check finds no problems.
+                    </p>
                   ) : null}
                 </div>
               </li>

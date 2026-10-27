@@ -18,6 +18,7 @@ import { paginateWithCursorGuard } from './pagination';
 import {
   connectRemoteMcp,
   isSessionExpiredError,
+  transportFailureDetail,
   type RemoteMcpConnection,
   type RemoteMcpTransportType,
 } from './remoteMcpClient';
@@ -188,8 +189,25 @@ export class RemoteMCP implements ToolSource {
         await this.resetConnection();
         return this.connectAndRun(headers, operation, false);
       }
-      throw error;
+      throw this.toTransportError(error) ?? error;
     }
+  }
+
+  /**
+   * A failure of the transport itself, restated with this server's name and the underlying
+   * reason, so a person reading the turn sees which server could not be reached and why
+   * instead of the bare "fetch failed" the fetch layer reports. Anything else (an answer the
+   * server gave, an auth refusal, an error already carrying its context) passes through as is.
+   */
+  private toTransportError(error: unknown): McpConnectionError | undefined {
+    if (error instanceof McpConnectionError) {
+      return undefined;
+    }
+    const detail = transportFailureDetail(error);
+    if (detail === undefined) {
+      return undefined;
+    }
+    return new McpConnectionError(`The ${this.name} server could not be reached: ${detail}.`, 502, { cause: error });
   }
 
   private async loadTools(): Promise<{ tools: AgentToolSchema[] }> {
