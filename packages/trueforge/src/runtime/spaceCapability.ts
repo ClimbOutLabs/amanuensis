@@ -35,6 +35,7 @@ import {
   LIST_SPACES_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   SPACE_SERVER_ID,
+  SPACE_WRITE_TOO_LONG_ERROR_CODE,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
@@ -1520,7 +1521,12 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceWriteTooLongError) {
-        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+        // The stable code rides beside the refusal text so the chat can show a plain note
+        // for this refusal instead of the failure line; the text itself is unchanged.
+        return toolResultResponse({
+          text: JSON.stringify({ error: error.message, error_code: SPACE_WRITE_TOO_LONG_ERROR_CODE }),
+          isError: true,
+        });
       }
       if (error instanceof SpaceEditNotFoundError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
