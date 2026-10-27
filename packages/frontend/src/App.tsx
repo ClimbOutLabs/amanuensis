@@ -26,6 +26,7 @@ import {
   type CurrentUser,
   type FirstRunGuideState,
   type RoutesConfig,
+  type SettingsOpenRequest,
   type SlotOverrides,
   type ThemeConfig,
   type TrueForgeServerConfig,
@@ -148,6 +149,7 @@ type BootState =
 const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec,
   openSettings,
+  settingsOpenRequest,
   displayName,
   overrides,
   onAgentActivity,
@@ -156,6 +158,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
+  settingsOpenRequest: SettingsOpenRequest | undefined;
   displayName: string;
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
@@ -179,6 +182,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         {...(ROUTES ? { routes: ROUTES } : {})}
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
+        {...(settingsOpenRequest ? { settingsOpenRequest } : {})}
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
@@ -221,11 +225,18 @@ function AmanShell({
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   // Approvals waiting in the active chat, for the rail's waiting status and panda.
   const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
+  // Settings requests from outside the chat tree (the rail's Audits link). Each ask raises
+  // the nonce, so asking again after Settings was closed asks again.
+  const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest | undefined>(undefined);
+  const openAudits = () => {
+    setSettingsOpenRequest(previous => ({ section: 'audit', nonce: (previous?.nonce ?? 0) + 1 }));
+  };
   return (
     <div className="aman-shell">
       <AmanChatSurface
         defaultAgentSpec={defaultAgentSpec}
         openSettings={openSettings}
+        settingsOpenRequest={settingsOpenRequest}
         displayName={displayName}
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
@@ -241,6 +252,7 @@ function AmanShell({
         buildRef={buildRef}
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
+        onOpenAudits={openAudits}
       />
     </div>
   );

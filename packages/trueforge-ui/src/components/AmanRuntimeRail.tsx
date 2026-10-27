@@ -8,9 +8,6 @@ import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
-import { useOptionalCatalogServer, useServerCapabilities } from '../server/ServerContext.js';
-import { useOptionalShellMode } from '../server/ShellModeContext.js';
-import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
@@ -58,6 +55,12 @@ export type AmanRuntimeRailProps = {
    * It is the body of the Activity row.
    */
   auditFeed?: ReactNode;
+  /**
+   * The host's way to open Settings at the Audit section. The rail renders outside the shell
+   * tree, so it cannot open Settings itself: the Audits link shows only when the host hands
+   * this over, and clicking it calls it.
+   */
+  onOpenAudits?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -169,16 +172,13 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   status: statusOverride,
   pendingApprovalIds = [],
   auditFeed,
+  onOpenAudits,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
   const sentinel = useOptionalSentinelApiState();
   const settings = sentinel?.settings ?? null;
   const rules = ruleSentences({ settings, assistant: assistantName });
-  const shell = useOptionalShellMode();
-  const catalog = useOptionalCatalogServer();
-  const capabilities = useServerCapabilities();
-  const settingsChromeEnabled = isSettingsChromeEnabled({ catalog, capabilities });
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
@@ -326,11 +326,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </p>
             )}
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
-            {shell && settingsChromeEnabled && (
+            {onOpenAudits !== undefined && (
               <button
                 type="button"
                 className="text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
-                onClick={() => shell.setSettingsOpen(true, 'audit')}
+                onClick={onOpenAudits}
               >
                 Audits
               </button>
