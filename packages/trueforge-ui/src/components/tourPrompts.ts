@@ -1,4 +1,4 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the home only offers examples that will work here. */
@@ -31,11 +31,13 @@ export const HOME_CARD_COUNT = 4;
 
 /** Appended under every card prompt, so the whole conversation stays short, one question at a time, and safe. */
 export const SHARED_RULES = `You are helping someone who is busy and may be tired. Rules for this whole conversation:
-- Ask one question at a time. Never send a list of questions.
-- When you offer choices, offer two or three, not more.
+- Ask one question at a time, and only for what is still missing. Never send a list of questions. Never ask the same thing twice in different words. When you offer choices, offer two or three, not more.
 - Keep every reply under ten lines unless I ask for more. Plain words, no jargon.
 - If I give you less than you need, make a sensible assumption, say it in one line, and carry on. Do not stall.
+- If I ask for something new or different partway through, do that first. My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first.
+- In any list or checklist, every line is a concrete action or a fact, never filler.
 - Never send, save, book, cancel, or change anything without asking me first, and ask with the exact thing you are about to do.
+- Offer to add something to my calendar only when you have a real date and time for it.
 - When the task is done, offer one next step in one line, usually to keep doing this for me on a schedule or to save it somewhere. If I say no or not now, accept it without arguing and stop.
 - If I say I'm stuck, overwhelmed, or can't start, make the next step smaller, not the explanation longer.`;
 
@@ -54,7 +56,7 @@ export const CARDS = {
   brief: {
     title: 'Your morning brief',
     detail: assistant => `${assistant} gathers your mail, calendar and to-dos into one note each morning`,
-    prompt: MORNING_BRIEF_PROMPT,
+    prompt: MORNING_BRIEF_CARD_PROMPT,
     icon: 'book-open',
     needs: ['calendar', 'email'],
     sharedRules: false,
@@ -63,7 +65,7 @@ export const CARDS = {
     title: 'Just tell me what matters today',
     detail: () => 'Three things, your free hour, and what to bring',
     prompt:
-      'Look at my calendar for today and unread email from the last day. Tell me the three things that matter most, when I have a free stretch, and anything I need to bring or prepare. Under ten lines. Then ask if I want this every weekday morning.',
+      'Look at my calendar for today and unread email from the last day. Tell me the three things that matter most, when I have a free stretch, and anything I need to bring or prepare. Flag anything that looks off, like a clash or a reply that is overdue. Under ten lines. Then ask if I want this every weekday morning.',
     icon: 'calendar-clock',
     needs: ['calendar', 'email'],
   },
@@ -100,7 +102,7 @@ export const CARDS = {
     title: "What's for dinner this week?",
     detail: () => 'Seven dinners and one shopping list',
     prompt:
-      "Ask me how many people are eating and anything anyone can't or won't eat. Then ask what's already in the fridge and cupboards. Plan seven simple dinners around that and give me one shopping list grouped by aisle. Ask before saving it, and offer to do this every weekend.",
+      "Plan this week's dinners and give me one shopping list grouped by aisle. Start from what's already in the fridge and cupboards; if you don't know what's there, ask me that one thing. If you don't know who is eating, ask me who is eating and whether anyone has an allergy or a food they won't eat. Keep weeknights under 30 minutes, use up anything that will spoil first. Offer to save the plan where I can tick it off, and save it only after I say yes. Offer to do it again next weekend.",
     icon: 'list-check',
   },
   waiting: {
@@ -154,14 +156,14 @@ export const CARDS = {
     title: 'Plan a birthday or a gathering',
     detail: () => "A to-do list and the day's timeline",
     prompt:
-      'Ask me who it is for, the date, roughly how many people, and the budget, one question at a time. Then give me a to-do list under ten items, in the order to do them, and a timeline for the day. Ask before adding anything to my calendar, and offer reminders for the two or three things that must happen early.',
+      'Ask me who it is for, the date, roughly how many people, and the budget, one question at a time. If I skip one, assume the usual and say so in one line. Then give me a to-do list under ten items, in the order to do them, and a timeline for the day. Ask before adding anything to my calendar, and offer reminders for the two or three things that must happen early.',
     icon: 'calendar-plus',
   },
   trip: {
     title: 'A trip is coming',
     detail: () => 'What to book, pack and sort out, in the right order',
     prompt:
-      "Ask me where I'm going, when, and who with. Then give me a checklist in three parts: book now, sort out the week before, pack the night before. Under fifteen lines total. Ask before adding dates to my calendar, and offer to remind me a week before.",
+      "Help me get ready for a trip. Ask me where I'm going and when, one question at a time, and who with only if it changes the plan. Take my answers as they are, even if they're short or joking, and never ask the same thing twice in different words. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack. Scale it to the time I have left. Each line is one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line. When I ask you to do something, like find tickets, do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first. Ask before adding anything to my calendar, and only offer a date or a reminder for a time that is real and still in the future.",
     icon: 'list-check',
   },
   remember: {
@@ -218,7 +220,7 @@ export const CARDS = {
     title: 'Help me decide',
     detail: () => 'Two options and a pick you can ignore',
     prompt:
-      "Ask me what I'm deciding between, then ask what matters most to me about it, one question at a time, three questions at most. Then lay the options out side by side on those three things, in a short table, and tell me which one you'd pick and why in two lines. Then stop.",
+      "First use what you already know about me. Then ask me what I'm deciding between, and what matters most to me about it, one question at a time, three questions at most. Then lay the options out side by side on those three things, in a short table, and tell me which one you'd pick and why in two lines. Then stop.",
     icon: 'sliders',
   },
   talk: {
@@ -246,7 +248,7 @@ export const CARDS = {
     title: 'Keep their care in one place',
     detail: () => 'Medicines, visits and questions in one place',
     prompt:
-      "Ask me who I look after and what I'd like to keep track of for them, one question at a time: medicines and times, upcoming appointments, questions for the next visit. Put it in one space with those three sections. Ask before creating it, and offer reminders for the medicine times.",
+      "Keep everything about someone I look after in one place: medicines and times, upcoming appointments, and questions for the next visit. Ask me who it is and what I'd like to track, one question at a time, then put it in one space with those three sections. Ask before creating it, and offer reminders for the medicine times.",
     icon: 'folder',
   },
   meds: {
@@ -320,14 +322,14 @@ export const CARDS = {
     title: 'A simple budget for this month',
     detail: () => 'What comes in, goes out, and is left',
     prompt:
-      "Ask me what comes in this month and the fixed things that must go out, one at a time, rounding is fine. Show me three numbers: in, must-pay, left over. Then ask if I want to set aside anything from what's left, and offer to save the budget and check in mid-month.",
+      "Ask me what comes in this month and the fixed things that must go out, one at a time, rounding is fine. If I'm not sure of a number, use a round guess and say it's a guess. Show me three numbers: in, must-pay, left over. Then ask if I want to set aside anything from what's left, and offer to save the budget and check in mid-month.",
     icon: 'chart',
   },
   sort_out: {
     title: 'What do I need to sort out first?',
     detail: () => 'Papers, bank, health care, housing',
     prompt:
-      'Ask me which country and city I live in and when I arrived. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Under fifteen lines. Ask before saving it, and offer to remind me of the next item each Monday.',
+      "Ask me which country and city I live in, and when I arrived, one question at a time. If I can't give you one of these, carry on with what you have and say which part is missing. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Under fifteen lines. Ask before saving it, and offer to remind me of the next item each Monday.",
     icon: 'list-check',
   },
   letter: {
@@ -363,7 +365,7 @@ export const CARDS = {
     title: 'Choose a neighborhood',
     detail: () => "Three options compared on rent, commute and what it's like to live there",
     prompt:
-      "Ask me the city, my budget, and where I'll spend most of my days. Search current rents and travel times, and compare three neighborhoods in a short table: rent with a source, commute time, and what living there is like in one line. Ask if I want to see them on a map.",
+      "Ask me the city, my budget, and where I'll spend most of my days, one question at a time. If I skip one, use what you have and say what you assumed. Search current rents and travel times, and compare three neighborhoods in a short table: rent with a source, commute time, and what living there is like in one line. Ask if I want to see them on a map.",
     icon: 'search',
   },
 } satisfies Record<string, TourCard>;

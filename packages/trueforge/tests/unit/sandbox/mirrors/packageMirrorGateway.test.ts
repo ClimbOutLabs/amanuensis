@@ -523,6 +523,43 @@ describe('isPublicAddress', () => {
   });
 });
 
+describe('PackageMirrorGateway sockets', () => {
+  function callSocket(socketPath: string, input: { path: string }): Promise<Reply> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest({ socketPath, path: input.path, method: 'GET' }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8'), headers: res.headers });
+        });
+      });
+      req.once('error', reject);
+      req.end();
+    });
+  }
+
+  it('opens each mirror socket so the slot agent, which runs as another user, can connect to it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aman-mirror-socket-'));
+    const socketPath = join(dir, 'mirror.sock');
+    const gateway = new PackageMirrorGateway({
+      registry: new PackageMirrorTokenRegistry(),
+      cacheDir: join(dir, 'cache'),
+      logger: silentLogger,
+    });
+    await gateway.listenOnSockets([socketPath]);
+    try {
+      // Connecting to a Unix socket needs write permission on the socket file itself. The slot
+      // agent runs as a different user than the app, so a socket left at the umask default (0755,
+      // owner only) refuses it; the gateway must open the socket beyond its owner.
+      expect(statSync(socketPath).mode & 0o777).toBe(0o666);
+      const reply = await callSocket(socketPath, { path: '/npm/leftpad' });
+      expect(reply.status).toBe(403);
+    } finally {
+      await gateway.close();
+    }
+  });
+});
+
 describe('PackageMirrorTokenRegistry', () => {
   const input = { tenant_id: 't', created_by: 'o', session_id: 's', repository_id: 'r' };
 

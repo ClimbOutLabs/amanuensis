@@ -1,4 +1,4 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { describe, expect, it } from 'vitest';
 
@@ -151,9 +151,9 @@ describe('card text', () => {
     }
   });
 
-  it('fills only the morning brief prompt for the brief card, with no rules', () => {
-    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_PROMPT);
-    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_PROMPT);
+  it('fills only the morning brief card prompt for the brief card, with no rules', () => {
+    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
+    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_CARD_PROMPT);
     expect(everyCard.filter(card => card.sharedRules === false)).toEqual([CARDS.brief]);
   });
 
@@ -195,6 +195,84 @@ describe('card text', () => {
       'broom',
     ]);
     for (const card of everyCard) expect(allowed.has(card.icon), card.title).toBe(true);
+  });
+});
+
+describe('the prompt fixes from the live trip run', () => {
+  it('asks only for what is still missing and never asks the same thing twice', () => {
+    expect(SHARED_RULES).toContain('only for what is still missing');
+    expect(SHARED_RULES).toContain('Never ask the same thing twice in different words');
+  });
+
+  it('lets the latest message win over the plan, but sends, saves and bookings still need a yes first', () => {
+    expect(SHARED_RULES).toContain(
+      'My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first',
+    );
+  });
+
+  it('keeps the same ask-first exception on the trip card, right after do that first', () => {
+    expect(CARDS.trip.prompt).toContain(
+      'do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first',
+    );
+  });
+
+  it('never sends a list of questions', () => {
+    expect(SHARED_RULES).toContain('Never send a list of questions.');
+  });
+
+  it('keeps the ask-first rule for sends, saves, bookings and changes in the shared rules', () => {
+    expect(SHARED_RULES).toContain('Never send, save, book, cancel, or change anything without asking me first');
+  });
+
+  it('asks first on every card whose prompt sends, saves or books', () => {
+    for (const card of everyCard) {
+      if (card.sharedRules === false) continue;
+      if (/\b(save|saving|saved|send|sending|book|booking)\b/i.test(card.prompt)) {
+        expect(card.prompt, card.title).toMatch(/\bask/i);
+      }
+    }
+  });
+
+  it('asks before saving the dinner plan', () => {
+    expect(CARDS.dinner.prompt).toContain(
+      'Offer to save the plan where I can tick it off, and save it only after I say yes',
+    );
+  });
+
+  it('asks who is eating and about allergies on the dinner card, when that is not known', () => {
+    expect(CARDS.dinner.prompt).toContain("If you don't know who is eating");
+    expect(CARDS.dinner.prompt).toContain("an allergy or a food they won't eat");
+  });
+
+  it('keeps every list line a concrete action or a fact, never filler', () => {
+    expect(SHARED_RULES).toContain('every line is a concrete action or a fact, never filler');
+  });
+
+  it('offers a calendar add only with a real date and time', () => {
+    expect(SHARED_RULES).toContain('only when you have a real date and time for it');
+  });
+
+  it('starts the dinner card with the plan, not a round of questions', () => {
+    expect(CARDS.dinner.prompt).toContain("Plan this week's dinners and give me one shopping list grouped by aisle");
+    expect(CARDS.dinner.prompt).not.toContain('Ask me how many people are eating');
+  });
+
+  it('asks only for what the trip checklist needs, one question at a time', () => {
+    expect(CARDS.trip.prompt).toContain('one question at a time');
+    expect(CARDS.trip.prompt).toContain('who with only if it changes the plan');
+    expect(CARDS.trip.prompt).not.toContain('sort out the week before');
+  });
+
+  it('builds the trip checklist from the answers and fits it to the time left', () => {
+    expect(CARDS.trip.prompt).toContain('make my checklist from what I actually told you');
+    expect(CARDS.trip.prompt).toContain('Scale it to the time I have left');
+    expect(CARDS.trip.prompt).toContain('Each line is one concrete thing to do');
+    expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
+  });
+
+  it('offers trip dates and reminders only for real times still in the future', () => {
+    expect(CARDS.trip.prompt).toContain('a time that is real and still in the future');
+    expect(CARDS.trip.prompt).not.toContain('remind me a week before');
   });
 });
 

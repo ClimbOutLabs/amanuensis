@@ -798,3 +798,104 @@ describe('runSandboxSlots modes', () => {
     expect(!result.ok && result.fix).not.toContain('pnpm');
   });
 });
+
+describe('the package mirror folders of an earlier install', () => {
+  /** Mirror volumes exist for the named slots; every other call answers as usual. */
+  function mirrors(existing: number[]): (call: Call) => Partial<CommandResult> | undefined {
+    return call => {
+      if (joined(call).startsWith('volume inspect')) {
+        const name = call.args[call.args.length - 1] ?? '';
+        return existing.includes(Number(name.slice(-1)))
+          ? { stdout: '[]\n' }
+          : { exitCode: 1, stderr: 'no such volume' };
+      }
+      return undefined;
+    };
+  }
+
+  test('existing mirror folders are handed to the app user in one throwaway container, after the build and before the slots start', async () => {
+    const { result, calls } = await run(mirrors([1, 2, 3, 4]));
+    expect(result.ok).toBe(true);
+    const repairs = calls.filter(call => call.args[0] === 'run');
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]?.args).toEqual([
+      'run',
+      '--rm',
+      '--user',
+      '0:0',
+      '--network',
+      'none',
+      '--cap-drop',
+      'ALL',
+      '--cap-add',
+      'CHOWN',
+      '--read-only',
+      '-v',
+      'aman_slot_mirror_1:/mirror-1',
+      '-v',
+      'aman_slot_mirror_2:/mirror-2',
+      '-v',
+      'aman_slot_mirror_3:/mirror-3',
+      '-v',
+      'aman_slot_mirror_4:/mirror-4',
+      '--entrypoint',
+      'chown',
+      'amanuensis-sandbox-slot:local',
+      '10001:10001',
+      '/mirror-1',
+      '/mirror-2',
+      '/mirror-3',
+      '/mirror-4',
+    ]);
+    const text = calls.map(joined);
+    const repairAt = calls.findIndex(call => call.args[0] === 'run');
+    expect(repairAt).toBeGreaterThan(text.findIndex(line => line.includes('build sandbox-1')));
+    expect(repairAt).toBeLessThan(text.findIndex(line => line.includes('up -d')));
+    expect(
+      result.ok && result.checks.some(check => check.message.includes('mirror folders belong to the app user')),
+    ).toBe(true);
+  });
+
+  test('only the mirror volumes that exist are handed over', async () => {
+    const { result, calls } = await run(mirrors([2]));
+    expect(result.ok).toBe(true);
+    const repair = calls.find(call => call.args[0] === 'run');
+    expect(repair?.args).toEqual(expect.arrayContaining(['-v', 'aman_slot_mirror_2:/mirror-1', '10001:10001']));
+    expect(repair?.args.some(arg => arg.includes('_slot_mirror_1') || arg.includes('_slot_mirror_3'))).toBe(false);
+    expect(repair?.args.some(arg => arg.includes('_slot_mirror_4'))).toBe(false);
+  });
+
+  test('with no mirror volumes yet, no repair container runs', async () => {
+    const { result, calls } = await run(mirrors([]));
+    expect(result.ok).toBe(true);
+    expect(calls.some(call => call.args[0] === 'run')).toBe(false);
+  });
+
+  test('a repair that fails stops the run before the slots start', async () => {
+    const { result, calls } = await run(call =>
+      call.args[0] === 'run' ? { exitCode: 1, stderr: 'chown failed' } : mirrors([1, 2, 3, 4])(call),
+    );
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('chown failed');
+    expect(calls.some(call => joined(call).includes('up -d'))).toBe(false);
+  });
+
+  test("a named install's mirror volumes are the ones repaired", async () => {
+    const { result, calls } = await run(mirrors([1, 2, 3, 4]), false, { instance: 'lab' });
+    expect(result.ok).toBe(true);
+    const repair = calls.find(call => call.args[0] === 'run');
+    expect(repair?.args).toEqual(
+      expect.arrayContaining(['-v', 'lab_slot_mirror_1:/mirror-1', '-v', 'lab_slot_mirror_4:/mirror-4']),
+    );
+  });
+
+  test('a read-only check and a build never inspect or repair the mirror volumes', async () => {
+    const checked = await run(mirrors([1, 2, 3, 4]), true, { mode: 'check' });
+    expect(checked.result.ok).toBe(true);
+    expect(checked.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
+    expect(checked.calls.some(call => call.args[0] === 'run')).toBe(false);
+    const built = await run(mirrors([1, 2, 3, 4]), false, { mode: 'build' });
+    expect(built.result.ok).toBe(true);
+    expect(built.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
+  });
+});
