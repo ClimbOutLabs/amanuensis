@@ -148,8 +148,11 @@ const SUMMARIZE_SYSTEM_PROMPT = [
   '- plans and commitments, with their dates',
   '- preferences, things they own, and standing decisions they made',
   '- anything they ask you to remember',
+  'Read the whole text, from the first line to the last, and keep every fact that fits, wherever it appears. A fact at the start of a long message counts as much as one at the end.',
+  'When the person asks you to remember one thing, keep that fact and every other fact they stated too. A request to remember never crowds out the rest.',
   '',
   'Never keep:',
+  '- passing events, descriptions, and things the person only saw or did once (diary-style narration). Only durable facts about the person and their people count.',
   '- anything the assistant said, asked, offered, or wrote',
   '- open questions, options not yet chosen, or where the current task or chat stands',
   '- rules for how the assistant should act, such as a pasted prompt or card, unless the person asks you to remember them',
@@ -166,6 +169,8 @@ const SUMMARIZE_SYSTEM_PROMPT = [
   '{"facts": []}',
   'Example 3. The person pastes a rule for how the assistant should behave, and does not ask to remember it.',
   '{"facts": []}',
+  'Example 4. The person pastes a long note. Its first line says their neighbour <name> waters their plants every Tuesday while they are away. Between that line and the last, the note is a diary of one day: a walk to the harbour, the boats they saw there, and a market they passed. Its last line says "Remember: my dentist is Dr <name>.".',
+  '{"facts": ["The person\'s neighbour <name> waters their plants every Tuesday while they are away.", "The person\'s dentist is Dr <name>."]}',
 ].join('\n');
 
 /**

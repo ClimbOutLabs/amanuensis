@@ -99,6 +99,22 @@ describe('buildSummarizationMessages', () => {
     expect(system).toContain('Never write "User" or "Assistant"');
   });
 
+  it('tells the model to keep facts from anywhere in the text, and that one request to remember never crowds out the rest', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('from the first line to the last');
+    expect(system).toContain('A fact at the start of a long message counts as much as one at the end');
+    expect(system).toContain('A request to remember never crowds out the rest');
+  });
+
+  it('tells the model to skip diary-style narration, so only durable facts about the person and their people count', () => {
+    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
+      ?.content;
+    expect(system).toContain('passing events, descriptions, and things the person only saw or did once');
+    expect(system).toContain('(diary-style narration)');
+    expect(system).toContain('Only durable facts about the person and their people count');
+  });
+
   it('gives the date of the chat in the time zone of the person', () => {
     const user = buildSummarizationMessages({
       userText: 'hi',
@@ -368,6 +384,48 @@ describe('summarizeTurnContent', () => {
     expect(sent).toContain('my cat is named Miso.');
     expect(sent).toContain('Part of this long turn was left out.');
     expect(sent.length).toBeLessThan(20000);
+  });
+
+  it('sends a long paste with the rule to keep the fact at its start as well as the one it ends by asking to remember, and returns exactly those two facts and nothing from the diary filler between them', async () => {
+    const llm = fakeSummarizer(
+      '{"facts": ["The person\'s neighbour Ana waters their plants every Tuesday while they are away.", "The person\'s dentist is Dr Patel."]}',
+    );
+    const createNonStream = jest.spyOn(llm, 'createNonStream');
+    const diaryDay = [
+      'I walked to the harbour in the morning and watched the fishing boats come in.',
+      'The market stalls were setting up, and I passed a stall selling oranges and lemons.',
+      'I sat on a bench by the water for a while and watched gulls circling over the pier.',
+      'On the way back I took the lane past the old lighthouse and stopped to look at the view.',
+      'I had a coffee at a small cafe and watched people passing in the street outside.',
+    ].join(' ');
+    const paste = [
+      'My neighbour Ana waters my plants every Tuesday while I am away.',
+      `${diaryDay} `.repeat(26),
+      'Remember: my dentist is Dr Patel.',
+    ].join('\n');
+    const result = await summarizeTurnContent({ ...base, userText: paste, resolveLlm: async () => llm });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: [
+        "The person's neighbour Ana waters their plants every Tuesday while they are away.",
+        "The person's dentist is Dr Patel.",
+      ],
+    });
+    const returned = result.status === 'summarized' ? result.facts.join(' ') : '';
+    expect(returned).not.toContain('harbour');
+    expect(returned).not.toContain('fishing boats');
+    expect(returned).not.toContain('market stalls');
+    expect(returned).not.toContain('gulls');
+    expect(returned).not.toContain('lighthouse');
+    const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
+    expect(sent).toContain('A fact at the start of a long message counts as much as one at the end');
+    expect(sent).toContain('A request to remember never crowds out the rest');
+    expect(sent).toContain('passing events, descriptions, and things the person only saw or did once');
+    expect(sent).toContain('Only durable facts about the person and their people count');
+    expect(sent).toContain('My neighbour Ana waters my plants every Tuesday while I am away.');
+    expect(sent).toContain('I walked to the harbour in the morning');
+    expect(sent).toContain('Remember: my dentist is Dr Patel.');
+    expect(sent).toContain('Part of this long turn was left out.');
   });
 
   it('cuts a long emoji paste on whole characters and still sees a request at its start', async () => {
