@@ -351,6 +351,8 @@ export class EmbeddingSubsystem {
     keywordHits: RankedMemory[];
     /** Live id → text from the caller's fresh scan; vector hits resolve here. */
     entryTexts: Map<string, string>;
+    /** Entries recall must not return (the chat being answered); also left out of the baseline. */
+    excludeIds?: ReadonlySet<string> | undefined;
     /** Query-embedding budget; falls back to FUSED_RANK_DEFAULT_TIMEOUT_MS when absent. */
     timeoutMs?: number;
   }): Promise<RankedMemory[] | undefined> {
@@ -391,7 +393,7 @@ export class EmbeddingSubsystem {
       const candidates: { id: string; vector: ArrayLike<number> }[] = [];
       for (const id of ids) {
         const entry = store.get(id);
-        if (entry !== undefined) {
+        if (entry !== undefined && input.excludeIds?.has(id) !== true) {
           candidates.push({ id, vector: entry.vector });
         }
       }

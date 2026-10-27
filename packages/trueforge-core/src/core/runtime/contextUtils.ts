@@ -107,14 +107,20 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 `;
 
 /**
- * Email is connected only through the Settings form, so the app password never passes through a
- * chat. Without this, a model asked to "set up email with this password" will try to use the
+ * Email and Calendar are connected only through the Settings form, so the app password never passes
+ * through a chat. Without this, a model asked to "set up email with this password" will try to use the
  * password somewhere, or repeat it back. The fix is a plain instruction to point at Settings and
  * never touch the password, not a per-tool special case.
  */
-export const EMAIL_PASSWORD_PROMPT = dedent`
-Email is connected only in Settings, under Connectors, Email, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect email with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, Email instead.
+function connectorPasswordPrompt({ connector, owner }: { connector: string; owner: string }): string {
+  return dedent`
+${connector} is connected only in Settings, under Connectors, ${connector}, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect ${owner} with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, ${connector} instead.
 `;
+}
+
+export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
+
+export const CALENDAR_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Calendar', owner: 'their calendar' });
 
 /**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
@@ -543,6 +549,28 @@ export function withHostUniqueToolCallIds<T extends { id: string }>(input: {
     used.add(id);
     return { ...call, id };
   });
+}
+
+/**
+ * Carries a set of provider tool call ids across withHostUniqueToolCallIds. The remap returns
+ * the calls in order, so a fact recorded against the provider ids (for example, which calls
+ * the stream stopped early for size) is rebuilt against the ids the calls carry now. Without
+ * this, a remapped call's recorded fact is silently lost: the set still names an id no call
+ * in the reply has.
+ */
+export function remapToolCallIdSet<T extends { id: string }>(input: {
+  before: readonly T[];
+  after: readonly T[];
+  ids: ReadonlySet<string>;
+}): Set<string> {
+  const remapped = new Set<string>();
+  input.before.forEach((call, index) => {
+    const replacement = input.after[index];
+    if (replacement !== undefined && input.ids.has(call.id)) {
+      remapped.add(replacement.id);
+    }
+  });
+  return remapped;
 }
 
 /** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */

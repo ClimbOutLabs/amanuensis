@@ -10,6 +10,7 @@ import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforg
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
@@ -40,6 +41,7 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
+import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
 import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
@@ -1972,6 +1974,96 @@ describe('runDataImport reads memory markers the way the vault does', () => {
   });
 });
 
+describe('runDataImport reads memory written before facts-only memory', () => {
+  const LEGACY_FILE = `memory/${TENANT}/memory/2026-09-01.md`;
+  const LEGACY_LOG = [
+    '## 2026-09-01T10:00:00.000Z',
+    '',
+    "Turn summary: - The person's dog is named Rex.",
+    '',
+    '> Chat title: Dog talk',
+    '',
+    '## 2026-09-01T11:00:00.000Z',
+    '',
+    'The person has a cat named Miso.',
+    '',
+    '<!-- session_id: chat-9 -->',
+    '',
+  ].join('\n');
+
+  async function legacyArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(LEGACY_FILE, Buffer.from(LEGACY_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  it('writes the old entries in the current shape into a Markdown target', async () => {
+    const { source, archive } = await legacyArchive();
+    const target = await makeInstance('target-legacy-markdown');
+    try {
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.memories).toBe(5);
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-09-01.md'), 'utf8');
+      expect(written).toBe(
+        [
+          '## 2026-09-01T10:00:00.000Z',
+          '',
+          "- The person's dog is named Rex.",
+          '',
+          '## 2026-09-01T11:00:00.000Z',
+          '',
+          'The person has a cat named Miso.',
+          '',
+          '<!-- session_id: chat-9 -->',
+          '',
+        ].join('\n'),
+      );
+      const reader = new MarkdownMemoryClient({ baseDir: target.memoryDir, namespace: TENANT });
+      const listed = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
+      if (!listed.ok) {
+        throw new Error('expected a vault listing');
+      }
+      const texts = listed.entries.map(entry => entry.text).join('\n');
+      expect(texts).toContain("The person's dog is named Rex.");
+      expect(texts).not.toContain('Turn summary');
+      expect(texts).not.toContain('Chat title');
+      expect(texts).not.toContain('session_id');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('sends the old entries to a client backend without the prefix or the title, and keeps the chat id', async () => {
+    const { source, archive } = await legacyArchive();
+    const target = await makeInstance('target-legacy-client');
+    try {
+      const retained: { content: string; context?: string | undefined; metadata?: Record<string, string> }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      const dog = retained.find(item => item.content.includes('Rex'));
+      expect(dog?.content).toBe("- The person's dog is named Rex.");
+      expect(dog?.context).toBeUndefined();
+      const cat = retained.find(item => item.content.includes('Miso'));
+      expect(cat?.content).toBe('The person has a cat named Miso.');
+      expect(cat?.metadata).toEqual({ session_id: 'chat-9' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport at scale', () => {
   it('imports a 2,000 chat, 50,000 event archive within a bounded memory growth', async () => {
     const source = await makeInstance('source-large');
@@ -2104,6 +2196,95 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       await source.close();
       await target.close();
     }
+  });
+
+  describe('the names Email and Calendar', () => {
+    const HOST_MAIL_URL = 'http://mail-email:9557/mcp';
+    const originalMail = configuration.MAIL_SIDECAR_MCP_URL;
+    const originalCalendar = configuration.CALENDAR_SIDECAR_MCP_URL;
+
+    beforeEach(() => {
+      configuration.MAIL_SIDECAR_MCP_URL = HOST_MAIL_URL;
+      configuration.CALENDAR_SIDECAR_MCP_URL = undefined;
+    });
+
+    afterAll(() => {
+      configuration.MAIL_SIDECAR_MCP_URL = originalMail;
+      configuration.CALENDAR_SIDECAR_MCP_URL = originalCalendar;
+    });
+
+    async function importNames(name: string[]): Promise<{ names: string[]; summary: string; marks: boolean[] }> {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-name');
+      try {
+        const records = [
+          connectorRecord('Email', { name: 'email-sidecar', url: 'https://mail.example.com/mcp' }, true),
+          connectorRecord('Calendar', { name: 'calendar-sidecar', url: HOST_MAIL_URL }, true),
+          connectorRecord('plain-one', { url: 'https://plain.example.com/mcp' }),
+        ].filter(record => name.includes(record.name));
+        const result = await runDataImport(importDeps(target), importRequest(await withConnectors(archive, records)));
+        const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
+        return {
+          names: servers.map(server => server.name).sort(),
+          summary: result.summary,
+          marks: servers.map(server => server.first_party),
+        };
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    }
+
+    it("leaves out an Email or Calendar that is not at this host's address, brings in the rest, and says so", async () => {
+      const imported = await importNames(['Email', 'Calendar', 'plain-one']);
+
+      expect(imported.names).toEqual(['plain-one']);
+      expect(imported.summary).toContain('Email and Calendar were left out.');
+      expect(imported.summary).toContain('Connect them in Settings.');
+    });
+
+    it('says the same in plain words for one left-out connector, and for a dry run', async () => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-dry');
+      try {
+        const tampered = await withConnectors(archive, [
+          connectorRecord('Email', { name: 'email-sidecar', url: 'https://mail.example.com/mcp' }, true),
+        ]);
+        const dry = await runDataImport(importDeps(target), { ...importRequest(tampered), dryRun: true });
+        expect(dry.summary).toContain(
+          'Email was left out. This computer sets up its own Email and Calendar. Connect it in Settings.',
+        );
+        expect(await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined })).toEqual([]);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
+
+    it('brings in Email at the address this host was set up with, without a first-party mark', async () => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance('target-reserved-host');
+      try {
+        const imported = await withConnectors(archive, [
+          connectorRecord('Email', { name: 'email-sidecar', url: HOST_MAIL_URL }, true),
+        ]);
+        const result = await runDataImport(importDeps(target), importRequest(imported));
+        const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
+        expect(servers.map(server => [server.name, server.first_party])).toEqual([['Email', false]]);
+        expect(result.summary).not.toContain('left out.');
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
+
+    it("imports onto a host with no Email set up by leaving the export's Email out", async () => {
+      configuration.MAIL_SIDECAR_MCP_URL = undefined;
+      const imported = await importNames(['Email', 'plain-one']);
+
+      expect(imported.names).toEqual(['plain-one']);
+      expect(imported.marks).toEqual([false]);
+    });
   });
 
   it('keeps only a sign-in marker, and resets trust and search flags', async () => {

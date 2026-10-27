@@ -100,6 +100,25 @@ describe('a member (non-admin) over HTTP', () => {
       expect([401, 403]).not.toContain(response.status);
     });
 
+    // The Email and Calendar accounts belong to the whole instance, so only an admin may read or change them.
+    const ACCOUNT_ROUTES: { method: string; path: string }[] = ['email', 'calendar'].flatMap(kind => [
+      { method: 'GET', path: `/api/v1/user/settings/${kind}/status` },
+      { method: 'POST', path: `/api/v1/user/settings/${kind}` },
+      { method: 'DELETE', path: `/api/v1/user/settings/${kind}` },
+    ]);
+
+    it.each(ACCOUNT_ROUTES)('refuses a member on $method $path', async ({ method, path }) => {
+      const body = method === 'GET' ? undefined : JSON.stringify({});
+      const response = await server.request(path, as(JUDGE, { method, ...(body === undefined ? {} : { body }) }));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: { message: 'Admin access required' } });
+    });
+
+    it.each(['email', 'calendar'])('lets the owner reach the %s status', async kind => {
+      const response = await server.request(`/api/v1/user/settings/${kind}/status`, as(OWNER));
+      expect(response.status).toBe(200);
+    });
+
     it('refuses an unauthenticated caller before any role check', async () => {
       const response = await server.request('/api/v1/settings/model-providers');
       expect(response.status).toBe(401);

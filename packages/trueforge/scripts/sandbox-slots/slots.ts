@@ -28,6 +28,8 @@ export class CommandNotFoundError extends Error {}
 
 export const SLOT_COUNT = 4;
 export const SLOT_IMAGE = 'amanuensis-sandbox-slot:local';
+/** The user the app runs as; it binds its package mirror sockets inside the mirror volumes. */
+const APP_USER = '10001:10001';
 export const APPARMOR_PROFILE = 'aman-sandbox-slot';
 /** Names the Compose project and volumes, so two installs on one Docker host never share slots. */
 export const DEFAULT_INSTANCE = 'aman';
@@ -312,6 +314,7 @@ class Slots {
       }
       if (mode === 'up') {
         this.stage('start');
+        await this.repairMirrorVolumes();
         await this.start();
       }
       if (mode !== 'build') {
@@ -470,6 +473,73 @@ class Slots {
       }
     }
     return stale;
+  }
+
+  /**
+   * Mirror volumes created before the slot image carried the mirror folder started out owned by
+   * root, and the app cannot bind its mirror socket in them; the folder holds only that socket, so
+   * handing it to the app user loses nothing. One throwaway container that may only change owners
+   * does it for every mirror volume that exists; a volume that does not exist yet is left alone, so
+   * the slot image seeds it with the right owner when the slots create it.
+   */
+  private async repairMirrorVolumes(): Promise<void> {
+    const existing: string[] = [];
+    for (let slot = 1; slot <= SLOT_COUNT; slot += 1) {
+      const name = `${this.options.instance}_slot_mirror_${String(slot)}`;
+      const inspect = await this.run({ args: ['volume', 'inspect', name] });
+      if (inspect.exitCode === 0) {
+        existing.push(name);
+      }
+    }
+    if (existing.length === 0) {
+      return;
+    }
+    const mounts: string[] = [];
+    const folders: string[] = [];
+    existing.forEach((name, index) => {
+      const folder = `/mirror-${String(index + 1)}`;
+      mounts.push('-v', `${name}:${folder}`);
+      folders.push(folder);
+    });
+    const repaired = await this.run({
+      args: [
+        'run',
+        '--rm',
+        '--user',
+        '0:0',
+        '--network',
+        'none',
+        '--cap-drop',
+        'ALL',
+        '--cap-add',
+        'CHOWN',
+        '--read-only',
+        ...mounts,
+        '--entrypoint',
+        'chown',
+        SLOT_IMAGE,
+        APP_USER,
+        ...folders,
+      ],
+    });
+    if (repaired.exitCode !== 0) {
+      const failed = withDetail({
+        sentence: 'The package mirror folders could not be handed to the app user',
+        detail: tail(repaired.stderr),
+      });
+      throw new StepFailure(
+        'start',
+        failed.message,
+        `Make sure Docker is running, then run ${this.options.command} --fix again. Package downloads stay off until the folders belong to the app user.`,
+        undefined,
+        failed.detail,
+      );
+    }
+    this.record({
+      step: 'start',
+      status: 'ok',
+      message: 'The package mirror folders belong to the app user, so the app can open its mirror sockets in them',
+    });
   }
 
   private async runDiskScript(args: string[]): Promise<CommandResult> {

@@ -108,5 +108,11 @@ COPY --from=agent /out/aman-slot-agent /usr/local/bin/aman-slot-agent
 COPY --from=guest / /rootfs
 RUN mkdir -p /workspace /run/aman /run/runsc /tmp \
  && chown 65532:65532 /workspace /run/aman
+# The package mirror volume mounts at /run/aman/mirror, and the installer starts the slots before the
+# app, so this dir is the one a fresh mirror volume takes its ownership from. The app binds the mirror
+# socket in it as its own user (10001), so the dir belongs to that user; the slot only connects through
+# the socket and writes nothing in the dir.
+RUN mkdir -p /run/aman/mirror \
+ && chown 10001:10001 /run/aman/mirror
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/aman-slot-agent"]

@@ -79,7 +79,7 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
   ]),
   ...words({ doing: 'Making a space', done: 'Changed a space', thing: 'A new space' }, ['create_space']),
   ...words({ doing: 'Updating the space', done: 'Changed a space', thing: 'A space change' }, [
-    'update_space',
+    'edit_space',
     'replace_text',
     'revert_space',
     'space_write',

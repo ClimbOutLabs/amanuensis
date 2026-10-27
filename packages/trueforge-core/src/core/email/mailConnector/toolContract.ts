@@ -20,6 +20,10 @@ export function isMailReadToolName(tool_name: string): boolean {
 /** Tools that deliver a message to recipients, so each recipient must be on the Email list. */
 export const MAIL_SEND_TOOL_NAMES = ['send_email', 'forward_email'] as const;
 
+export function isMailSendToolName(tool_name: string): boolean {
+  return MAIL_SEND_TOOL_NAMES.some(name => name === tool_name);
+}
+
 export const MAIL_WRITE_TOOL_NAMES = ['save_draft', ...MAIL_SEND_TOOL_NAMES, 'archive_emails'] as const;
 
 /** Every tool the model is offered on the Email connector, reads first. */
@@ -36,6 +40,9 @@ export const MAIL_ACCOUNT_ARGUMENT = 'account_name';
 
 /** Lists and searches messages; the host keeps it to a recent window when the call sets no date. */
 export const MAIL_LIST_TOOL_NAME = 'list_emails_metadata';
+
+/** Reads message bodies; its optional mark-as-read choice is the one read argument that changes the mailbox. */
+export const MAIL_CONTENT_TOOL_NAME = 'get_emails_content';
 
 /** Names a model tends to guess when it looks for the Email connector under another name. */
 export function isMailConnectorGuess(name: string): boolean {

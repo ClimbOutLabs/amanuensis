@@ -72,7 +72,7 @@ import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
 import { SkillCatalog } from './catalog/SkillCatalog';
-import { mailMcpUrlFromAccountUrl, type DistributedServerConfiguration } from './config';
+import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
@@ -107,7 +107,7 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
-import { registerCalendarConnectorAtBoot } from './runtime/calendarConnector';
+import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -696,7 +696,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
     registerMailConnectorFromSavedAccountInBackground({
       accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
-      mcpUrl: mailMcpUrlFromAccountUrl(configuration.MAIL_EMAIL_ACCOUNT_URL),
+      mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
       policyPath: configuration.MAIL_POLICY_FILE,
       fetchImpl: undefined,
       mcpServerStore: mcpOAuthStore,
@@ -704,9 +704,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     });
   }
-  // Registered at boot when the calendar sidecar is configured; a no-op otherwise.
-  await registerCalendarConnectorAtBoot({
-    url: configuration.CALENDAR_CONNECTOR_URL,
+  await registerCalendarConnectorForBoot({
+    accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+    secret: configuration.CALENDAR_ACCOUNT_SECRET,
+    connectorUrl: configuration.CALENDAR_CONNECTOR_URL,
+    mcpUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+    fetchImpl: undefined,
     mcpServerStore: mcpOAuthStore,
     tenant_id: TENANT_ID,
     logger,

@@ -84,7 +84,12 @@ function readSchema(value: unknown): ToolParameterSchema | undefined {
     ? value['required'].filter((entry): entry is string => typeof entry === 'string')
     : undefined;
   const items = readSchema(value['items']);
-  const enumValues = Array.isArray(value['enum']) ? value['enum'] : undefined;
+  // A single allowed value (a literal such as type "search") reads as a list of one choice.
+  const enumValues = Array.isArray(value['enum'])
+    ? value['enum']
+    : Object.hasOwn(value, 'const')
+      ? [value['const']]
+      : undefined;
   const anyOf = Array.isArray(value['anyOf'])
     ? value['anyOf']
         .map(entry => readSchema(entry))
@@ -121,10 +126,63 @@ export function toParameterSchema(parameters: Record<string, unknown> | undefine
   return readSchema(parameters) ?? {};
 }
 
-function describeSchema(schema: ToolParameterSchema): string {
+/** Most optional field names listed for an object option; the rest read as "and more". */
+const MAX_OPTIONAL_FIELDS_LISTED = 6;
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) {
+    return items.join('');
+  }
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`;
+}
+
+function hasNamedFields(schema: ToolParameterSchema): boolean {
+  return Object.keys(flattenAllOf(schema).properties ?? {}).length > 0;
+}
+
+/** One field of an object option: a literal reads as "type set to "search"", anything else as "search (text)". */
+function describeField(input: { name: string; schema: ToolParameterSchema }): string {
+  const { name, schema } = input;
+  if (schema.enum?.length === 1) {
+    return `${name} set to ${JSON.stringify(schema.enum[0])}`;
+  }
+  return `${name} (${describeSchema({ schema, detailed: false })})`;
+}
+
+/** An object that names its fields, in words: the fields it needs, then the ones it may also take. */
+function describeObjectFields(schema: ToolParameterSchema): string {
+  const flat = flattenAllOf(schema);
+  const properties = flat.properties ?? {};
+  const names = Object.keys(properties);
+  const required = names.filter(name => flat.required?.includes(name) === true);
+  const optional = names.filter(name => !required.includes(name));
+  const needs = required.map(name => describeField({ name, schema: properties[name] ?? {} }));
+  const shown = optional.slice(0, MAX_OPTIONAL_FIELDS_LISTED).join(', ');
+  const more = optional.length > MAX_OPTIONAL_FIELDS_LISTED ? ' and more' : '';
+  if (needs.length === 0) {
+    return `an object with the optional fields ${shown}${more}`;
+  }
+  const optionally = optional.length === 0 ? '' : `, and optionally ${shown}${more}`;
+  return `an object with ${joinWithAnd(needs)}${optionally}`;
+}
+
+/**
+ * What a value must be, in plain words. An object that names its fields lists them, so a union of
+ * object shapes tells each option apart. Only the top level lists fields (`detailed`): inside a
+ * field, an object reads shortly, so a deep schema never becomes a wall of text.
+ */
+function describeSchema(input: { schema: ToolParameterSchema; detailed: boolean }): string {
+  const { schema, detailed } = input;
   const union = schema.anyOf ?? schema.oneOf;
   if (union !== undefined && union.length > 0) {
-    return union.map(member => describeSchema(member)).join(' or ');
+    const options = [...new Set(union.map(member => describeSchema({ schema: member, detailed })))];
+    if (options.length === 1) {
+      return options.join('');
+    }
+    // Options that list fields can hold "and" and commas of their own, so they get a clear "either".
+    return detailed && union.some(hasNamedFields)
+      ? `either ${options.slice(0, -1).join(', ')}, or ${options.at(-1) ?? ''}`
+      : options.join(' or ');
   }
   if (schema.enum?.length === 0) {
     return 'left out (this tool does not take a value here)';
@@ -134,6 +192,9 @@ function describeSchema(schema: ToolParameterSchema): string {
     return `one of: ${shown.join(', ')}`;
   }
   const types = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type];
+  if (detailed && types.length === 1 && types[0] === 'object' && hasNamedFields(schema)) {
+    return describeObjectFields(schema);
+  }
   const named = types
     .map(entry =>
       entry === 'boolean'
@@ -189,7 +250,7 @@ interface CheckInput {
 }
 
 function problemAt(input: { path: string; schema: ToolParameterSchema }): ArgumentProblem {
-  return { path: input.path, expected: describeSchema(input.schema), example: undefined, optional: false };
+  return { path: input.path, expected: describeSchema({ schema: input.schema, detailed: true }), example: undefined, optional: false };
 }
 
 /** A schema that takes only true or false (or null): the one shape whose bad value can be safely left out. */
@@ -234,6 +295,24 @@ function flattenAllOf(schema: ToolParameterSchema): ToolParameterSchema {
   };
 }
 
+/** The one union option whose literal fields (such as type "block") all equal the value's own, if exactly one does. */
+function memberNamedByValue(input: { union: ToolParameterSchema[]; value: unknown }): ToolParameterSchema | undefined {
+  const { union, value } = input;
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const named = union.filter(member => {
+    const literals = Object.entries(flattenAllOf(member).properties ?? {}).filter(
+      ([, field]) => field.enum?.length === 1,
+    );
+    return (
+      literals.length > 0 &&
+      literals.every(([key, field]) => JSON.stringify(value[key]) === JSON.stringify(field.enum?.[0]))
+    );
+  });
+  return named.length === 1 ? named[0] : undefined;
+}
+
 /**
  * Checks one value against one schema node, repairing what is safe: boolean text becomes a real
  * boolean, and inside an object that names its fields, entries the schema does not name are
@@ -258,7 +337,15 @@ function checkValue(input: CheckInput): CheckOutcome {
       }
       repaired ??= outcome;
     }
-    return repaired ?? { value, problems: [problemAt({ path, schema })] };
+    if (repaired !== undefined) {
+      return repaired;
+    }
+    // A value that names its own option (type "block") is held to that option's fields, so the
+    // problem says which of them is wrong, not that the whole value fits no option.
+    const named = memberNamedByValue({ union, value });
+    return named === undefined
+      ? { value, problems: [problemAt({ path, schema })] }
+      : checkValue({ schema: named, value, path, dropUnusableBooleans });
   }
 
   if (schema.enum !== undefined) {
@@ -367,7 +454,7 @@ function checkObject(input: CheckInput & { value: Record<string, unknown> }): Ch
     if (!(name in cleaned) && !(name in value)) {
       problems.push({
         path: joinPath({ base: path, key: name }),
-        expected: `${describeSchema(properties[name] ?? {})} (this one is required)`,
+        expected: `${describeSchema({ schema: properties[name] ?? {}, detailed: true })} (this one is required)`,
         example: undefined,
         optional: false,
       });

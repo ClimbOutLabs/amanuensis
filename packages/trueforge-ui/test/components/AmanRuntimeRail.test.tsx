@@ -14,6 +14,25 @@ import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
+type MockShellMode = { setSettingsOpen: (open: boolean, section?: string) => void } | null;
+
+const shellModeState = vi.hoisted((): { current: MockShellMode } => ({ current: null }));
+
+const serverState = vi.hoisted((): { hasCatalog: boolean; settingsEnabled: boolean } => ({
+  hasCatalog: true,
+  settingsEnabled: true,
+}));
+
+vi.mock('@/server/ShellModeContext.js', () => ({
+  useOptionalShellMode: () => shellModeState.current,
+}));
+
+vi.mock('@/server/ServerContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ServerContext.js')>()),
+  useOptionalCatalogServer: () => (serverState.hasCatalog ? {} : null),
+  useServerCapabilities: () => ({ settings: { enabled: serverState.settingsEnabled } }),
+}));
+
 const fetchMock = vi.fn();
 
 /** The panda's accessible name carries the assistant's default display name. */
@@ -260,6 +279,29 @@ describe('AmanRuntimeRail', () => {
     // Nothing is drawn over the picture: no fade rule, and no gradient anywhere in the panel's rules.
     expect(stylesheet).not.toContain('.aman-runtime-rail__fade');
     expect(ruleOf('.aman-runtime-rail__picture')).not.toMatch(/gradient/);
+  });
+
+  it('sizes the section value, fold rows, waiting line and the Activity receipt on the --text-sm step', () => {
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The value sits a weight heavier than its label, at the same size, not a size jump.
+    const sectionValueRule = ruleOf('.aman-runtime-rail__section-value');
+    expect(sectionValueRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(sectionValueRule).toMatch(/font-weight: 500;/);
+    const summaryRule = ruleOf('.aman-runtime-rail__details-summary');
+    expect(summaryRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(summaryRule).toMatch(/font-weight: 500;/);
+    expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
+    // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
+    const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');
+    expect(railReceiptRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(railReceiptRule).not.toMatch(/0\.875rem/);
   });
 
   it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
@@ -651,6 +693,9 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    shellModeState.current = null;
+    serverState.hasCatalog = true;
+    serverState.settingsEnabled = true;
     fetchMock.mockImplementation(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -664,7 +709,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       'read_email',
       'list_events',
       'tavily_search',
-      'update_space',
+      'edit_space',
       'run_code',
       'write_file',
       'send_draft',
@@ -891,5 +936,45 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </RuntimeHarness>,
     );
     expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+  });
+
+  it('shows an Audits link in the Activity fold when shell context is available and settings chrome is enabled', () => {
+    const setSettingsOpen = vi.fn();
+    shellModeState.current = { setSettingsOpen };
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    const auditsLink = screen.getByRole('button', { name: 'Audits' });
+    expect(auditsLink).toBeInTheDocument();
+
+    fireEvent.click(auditsLink);
+
+    expect(setSettingsOpen).toHaveBeenCalledWith(true, 'audit');
+  });
+
+  it('does not show an Audits link when shell context is not available', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
+  });
+
+  it('does not show an Audits link when settings chrome is disabled, even with shell context', () => {
+    const setSettingsOpen = vi.fn();
+    shellModeState.current = { setSettingsOpen };
+    serverState.settingsEnabled = false;
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
   });
 });

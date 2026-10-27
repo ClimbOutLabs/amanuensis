@@ -144,8 +144,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```bash
     git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
     cp packages/trueforge/.env.example packages/trueforge/.env
+    export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
+
+    The `export` line makes a random secret that the app and the calendar container share, so only the app can use the calendar container's account port. Compose stops with a message if it is missing. Set it again in each new terminal, and run `docker compose down` and `up` with the same value; `pnpm smoke` makes one for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`

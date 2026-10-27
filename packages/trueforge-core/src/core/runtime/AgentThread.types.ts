@@ -300,6 +300,11 @@ export interface AgentThreadConstructorInput {
    */
   modelIdleTimeoutMs?: number | undefined;
   /**
+   * Bound in milliseconds on silence between a model call's chunks while one of
+   * its tool calls is open. Undefined falls back to DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS.
+   */
+  modelToolCallIdleTimeoutMs?: number | undefined;
+  /**
    * Bound in milliseconds on the pre-LLM context processor phase producing
    * progress before the turn fails visibly instead of hanging. Undefined falls
    * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).

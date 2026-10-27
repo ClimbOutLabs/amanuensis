@@ -11,7 +11,6 @@ import {
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
@@ -238,8 +237,8 @@ describe('scripted run: top ten dog breeds', () => {
     expect(stringField(read, 'body')).not.toContain('(to fill)');
 
     // Step 5: read the space, then replace it wholesale with a full table, first try:
-    // no refusal, no retry. A full-body update_space call carries the whole new body
-    // as one string, with name, purpose, and status required.
+    // no refusal, no retry. There is no whole-body tool: one edit_space call replaces
+    // the whole body it just read, verbatim, with the table.
     const tableBody = [
       '# Dog breeds',
       '',
@@ -249,13 +248,10 @@ describe('scripted run: top ten dog breeds', () => {
       '| --- | --- |',
       ...BREEDS.map((breed, index) => `| ${String(index + 1)} | ${breed} |`),
     ].join('\n');
-    const replacedResponse = await call(UPDATE_SPACE_TOOL_NAME, {
+    const replacedResponse = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      name: 'Dog breeds',
       purpose: 'Top ten dog breeds by intelligence, with other traits.',
-      status: 'active',
-      format: 'markdown',
-      body: tableBody,
+      edits: [{ type: 'search', search: stringField(read, 'body'), replace: tableBody }],
     });
     expect(isErrorResponse(replacedResponse)).toBe(false);
     const replacedText = textOf(replacedResponse);

@@ -24,8 +24,8 @@ const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 t
 /** The one line shown for a collection whose latest summary failed; a persona's collection names its persona. */
 export function summaryPendingLine(persona: string | null): string {
   return persona === null
-    ? "Couldn't make a summary of the latest chat. A later chat will make a new summary."
-    : `Couldn't make a summary of the latest chat with ${persona}. A later chat with ${persona} will make a new summary.`;
+    ? "Couldn't make a summary of the latest chat, so nothing from it was saved. In your next chat, ask to remember anything important again."
+    : `Couldn't make a summary of the latest chat with ${persona}, so nothing from it was saved. In your next chat with ${persona}, ask to remember anything important again.`;
 }
 
 /** The undo bar: forgotten memories wait here for the undo window before the server call. */

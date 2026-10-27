@@ -79,6 +79,8 @@ function modelClient(signal: AbortSignal) {
     signal,
     logger: makeSilentLogger(),
     streamTimeout: { firstChunkMs: 100, chunkMs: 50 },
+    // The partial call is open, so its allowance is the one the empty heartbeats must not extend.
+    toolCallChunkMs: 50,
     providerConfig: {
       provider: { type: 'custom' as const, name: 'synthetic' },
       model: { id: 'synthetic-model', name: 'synthetic-model' },

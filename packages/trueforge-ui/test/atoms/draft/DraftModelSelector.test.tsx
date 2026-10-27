@@ -69,6 +69,14 @@ describe('DraftModelSelector', () => {
     updateAgentSpec.mockReset();
   });
 
+  it('sizes the model button label on the --text-sm scale step, not a one-off literal', async () => {
+    renderSelector();
+
+    const trigger = await screen.findByTitle('Select model');
+    expect(trigger).toHaveClass('text-sm');
+    expect(trigger.className).not.toMatch(/text-\[0\.8125rem\]/);
+  });
+
   it('filters models and updates the agent spec when a model is selected', async () => {
     renderSelector();
 

@@ -5,9 +5,11 @@ import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent } fro
 import { useAuiState } from '../assistant-ui.js';
 import {
   useOptionalBugReport,
+  useOptionalBugReportDialog,
   type AppBugReportBundle,
   type BugReportApi,
   type BugReportBundle,
+  type BugReportDialogControl,
   type BugReportHandoffTarget,
 } from '../components/BugReportContext.js';
 import { Icon } from '../icons/Icon.js';
@@ -56,16 +58,16 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
   };
 }
 
+/** A menu row unmounts as it opens the dialog, so focus goes back to the menu's trigger instead. */
+function focusTargetFor(button: HTMLElement): HTMLElement {
+  const menuId = button.closest('[role="menu"]')?.id;
+  if (menuId == null || menuId === '') return button;
+  return document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menuId)}"]`) ?? button;
+}
+
 /**
- * "Report a bug" icon button in `ShellActions`, after Sessions. Opens a
- * compact modal to fetch a redacted diagnostic bundle — for the current session when a chat is
- * open, or an app-level bundle otherwise (build version and config flags only, no session
- * data) — then download it, copy it to the clipboard, or hand it off to the issue tracker.
+ * "Report a bug" button: an icon, or a labeled row for menus. Opens the app's bug report form.
  * Renders nothing when no host has wired a `BugReportProvider`.
- *
- * The `api == null` check happens here, before any hook that assumes an assistant-ui runtime
- * (`useAuiState`) runs — `ConnectedBugReportButton` below is only mounted once a provider exists,
- * so a host that never wires one never pays for (or risks) that dependency.
  */
 export function BugReportButton({
   row = false,
@@ -73,16 +75,48 @@ export function BugReportButton({
   /** Draws a labeled menu row, as in the rail's More menu, instead of an icon. */
   row?: boolean;
 }) {
-  const api = useOptionalBugReport();
-  if (api == null) {
+  const dialog = useOptionalBugReportDialog();
+  if (dialog == null) {
     return null;
   }
-  return <ConnectedBugReportButton api={api} row={row} />;
+  return (
+    <button
+      type="button"
+      aria-label="Report a bug"
+      title="Report a bug"
+      className={
+        row
+          ? auiButtonClass({ variant: 'ghost', className: railMenuRowClassName })
+          : auiButtonClass({ variant: 'ghost', size: 'icon' })
+      }
+      onClick={event => {
+        dialog.returnFocusRef.current = focusTargetFor(event.currentTarget);
+        dialog.setOpen(true);
+      }}
+    >
+      <Icon name="bug" size={row ? 14 : undefined} />
+      {row ? 'Report a bug' : null}
+    </button>
+  );
 }
 
-function ConnectedBugReportButton({ api, row }: { api: BugReportApi; row: boolean }) {
+/**
+ * The bug report form, mounted once by the app shell. The null checks run before
+ * `ConnectedBugReportDialog`, which needs an assistant-ui runtime (`useAuiState`).
+ */
+export function BugReportDialog() {
+  const api = useOptionalBugReport();
+  const dialog = useOptionalBugReportDialog();
+  if (api == null || dialog == null) {
+    return null;
+  }
+  return <ConnectedBugReportDialog api={api} dialog={dialog} />;
+}
+
+function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: BugReportDialogControl }) {
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, registerDialog, returnFocusRef } = dialog;
+  useEffect(registerDialog, [registerDialog]);
   const [description, setDescription] = useState('');
   // Off by default and reset with the modal: including the chat is a per-report choice, never sticky.
   const [includeChat, setIncludeChat] = useState(false);
@@ -118,31 +152,50 @@ function ConnectedBugReportButton({ api, row }: { api: BugReportApi; row: boolea
     setIncludeChat(false);
   }, [sessionId, clearGeneratedState]);
 
+  // Read through a ref so a host passing a fresh `api` object each render does not rerun the lookup.
+  const apiRef = useRef(api);
+  useEffect(() => {
+    apiRef.current = api;
+  }, [api]);
+
+  // Resolve the handoff target once per open. A host without one configured simply gets no
+  // "File on GitHub" button, and a failure here must not block the rest of the modal.
+  useEffect(() => {
+    if (!open) return;
+    setHandoff('loading');
+    const requestId = (handoffRequestRef.current += 1);
+    void apiRef.current
+      .getBugReportHandoff()
+      .then(target => {
+        if (handoffRequestRef.current === requestId) setHandoff(target);
+      })
+      .catch(() => {
+        if (handoffRequestRef.current === requestId) setHandoff(null);
+      });
+    // Closing bumps the token, so a lookup that settles after the dialog closed is ignored.
+    return () => {
+      handoffRequestRef.current += 1;
+    };
+  }, [open]);
+
   const handleOpenChange = (next: boolean): void => {
     setOpen(next);
-    if (next) {
-      // Resolve the handoff target once per open; a host without one configured simply gets no
-      // "File on GitHub" button. A failure here must not block the rest of the modal.
-      setHandoff('loading');
-      const requestId = (handoffRequestRef.current += 1);
-      void api
-        .getBugReportHandoff()
-        .then(target => {
-          if (handoffRequestRef.current === requestId) setHandoff(target);
-        })
-        .catch(() => {
-          if (handoffRequestRef.current === requestId) setHandoff(null);
-        });
-    } else {
-      // Fresh state on the next open — a stale report or description from a different session must
-      // not linger, and an in-flight generation must not commit after the modal closed.
-      clearGeneratedState();
-      handoffRequestRef.current += 1;
-      setDescription('');
-      setIncludeChat(false);
-      setHandoff(null);
-    }
+    if (next) return;
+    // Fresh state on the next open: a stale report or description from a different session must
+    // not linger, and an in-flight generation must not commit after the modal closed.
+    clearGeneratedState();
+    setDescription('');
+    setIncludeChat(false);
+    setHandoff(null);
   };
+
+  // Runs after the modal has closed, when the page behind it can take focus again.
+  useEffect(() => {
+    if (open) return;
+    const returnTo = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (returnTo?.isConnected) returnTo.focus();
+  }, [open, returnFocusRef]);
 
   const handleGenerate = (): void => {
     if (loading) return;
@@ -219,21 +272,6 @@ function ConnectedBugReportButton({ api, row }: { api: BugReportApi; row: boolea
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Report a bug"
-        title="Report a bug"
-        className={
-          row
-            ? auiButtonClass({ variant: 'ghost', className: railMenuRowClassName })
-            : auiButtonClass({ variant: 'ghost', size: 'icon' })
-        }
-        onClick={() => setOpen(true)}
-      >
-        <Icon name="bug" size={row ? 14 : undefined} />
-        {row ? 'Report a bug' : null}
-      </button>
-
       <CenteredModal
         open={open}
         onOpenChange={handleOpenChange}
