@@ -49,14 +49,17 @@ test('blake2b matches the published test vectors', () => {
   );
 });
 
-test('the compiled-in public key is the test key and parses', () => {
-  assert.equal(RELEASE_PUBLIC_KEY_MINISIGN, TEST_PUBLIC_KEY_MINISIGN);
+test('the compiled-in public key is the release key and parses', () => {
   const parsed = parseMinisignPublicKey(RELEASE_PUBLIC_KEY_MINISIGN);
   assert.ok(parsed !== null);
-  assert.equal(minisignPublicKeyBase64(parsed), TEST_PUBLIC_KEY_MINISIGN);
+  assert.equal(minisignPublicKeyBase64(parsed), RELEASE_PUBLIC_KEY_MINISIGN);
   const fromText = parseMinisignPublicKey(minisignPublicKeyText(parsed));
   assert.ok(fromText !== null);
-  assert.equal(minisignPublicKeyBase64(fromText), TEST_PUBLIC_KEY_MINISIGN);
+  assert.equal(minisignPublicKeyBase64(fromText), RELEASE_PUBLIC_KEY_MINISIGN);
+  // The key number, read little-endian from the key bytes, is the one
+  // named in the comment line of the owner's published public key.
+  const keyNumber = Buffer.from(parsed.keyNum).readBigUInt64LE(0).toString(16).padStart(16, '0').toUpperCase();
+  assert.equal(keyNumber, 'B0DFF7A12F1D697C');
 });
 
 test('a built manifest parses back to the same record', () => {
@@ -67,13 +70,28 @@ test('a built manifest parses back to the same record', () => {
   assert.deepEqual(manifestToBytes(buildManifest({ release: 'v1.2.3', files: FILES, sourceIds: IDS })), bytes);
 });
 
-test('a signed manifest checks out against the compiled-in key', () => {
+test('a signed manifest checks out against the key that signed it', () => {
   const manifest = buildManifest({ release: 'v1.2.3', files: FILES, sourceIds: IDS });
   const bytes = manifestToBytes(manifest);
   const signatureText = signMinisign({ data: bytes, privateKeyDer: testPrivateKeyDer(), keyNum: testKeyNum() });
-  const checked = checkSignedManifest({ manifestBytes: bytes, signatureText });
+  const checked = checkSignedManifest({
+    manifestBytes: bytes,
+    signatureText,
+    publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN,
+  });
   assert.ok('manifest' in checked);
   assert.deepEqual(checked.manifest, manifest);
+});
+
+test('a manifest signed with the test key is refused against the compiled-in key', () => {
+  const manifest = buildManifest({ release: 'v1.2.3', files: FILES, sourceIds: IDS });
+  const bytes = manifestToBytes(manifest);
+  const signatureText = signMinisign({ data: bytes, privateKeyDer: testPrivateKeyDer(), keyNum: testKeyNum() });
+  // No key is passed in, so the compiled-in release key is the one
+  // that counts, and the test key's signature must not check out.
+  const checked = checkSignedManifest({ manifestBytes: bytes, signatureText });
+  assert.ok('problem' in checked);
+  assert.equal(problemText(checked.problem), problemText(VERIFY_SIGNATURE_BAD));
 });
 
 test('a changed source id in the signed bytes is refused as a bad signature', () => {
@@ -85,7 +103,11 @@ test('a changed source id in the signed bytes is refused as a bad signature', ()
     files: FILES,
     sourceIds: { ...IDS, 'aman-app': 'aman-app:ffffffffffff' },
   });
-  const checked = checkSignedManifest({ manifestBytes: manifestToBytes(tampered), signatureText });
+  const checked = checkSignedManifest({
+    manifestBytes: manifestToBytes(tampered),
+    signatureText,
+    publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN,
+  });
   assert.ok('problem' in checked);
   assert.equal(problemText(checked.problem), problemText(VERIFY_SIGNATURE_BAD));
 });
@@ -96,7 +118,11 @@ test('a signature from another key is refused', () => {
   const manifest = buildManifest({ release: 'v1.2.3', files: FILES, sourceIds: IDS });
   const bytes = manifestToBytes(manifest);
   const signatureText = signMinisign({ data: bytes, privateKeyDer: der, keyNum: testKeyNum() });
-  const checked = checkSignedManifest({ manifestBytes: bytes, signatureText });
+  const checked = checkSignedManifest({
+    manifestBytes: bytes,
+    signatureText,
+    publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN,
+  });
   assert.ok('problem' in checked);
   assert.equal(problemText(checked.problem), problemText(VERIFY_SIGNATURE_BAD));
 });

@@ -15,7 +15,7 @@ import {
 } from '../../src/messages.ts';
 import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
 import { signMinisign } from '../../src/release/minisign.ts';
-import { testKeyNum, testPrivateKeyDer } from './testKeys.ts';
+import { TEST_PUBLIC_KEY_MINISIGN, testKeyNum, testPrivateKeyDer } from './testKeys.ts';
 
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
@@ -52,6 +52,9 @@ async function runVerifyOn(file: string | undefined): Promise<{ exitCode: number
       print: (line: string) => {
         printed.push(line);
       },
+      // The test key stands in for the compiled-in release key, so a
+      // record signed with it checks out in these tests.
+      releasePublicKey: TEST_PUBLIC_KEY_MINISIGN,
     },
     { file },
   );

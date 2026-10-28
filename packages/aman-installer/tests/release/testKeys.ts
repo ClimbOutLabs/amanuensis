@@ -1,9 +1,10 @@
-// The TEST key pair for this package's release tests. The public part
-// is the test key compiled into the executable (see
-// src/release/releasePublicKey.ts); the private part lives only here,
-// in the tests, and signs nothing real. The owner's real release key
-// replaces the public part before this change merges, and its private
-// part never enters this repository.
+// The TEST key pair for this package's release tests. It is a test
+// fixture only: the key compiled into the executable is the owner's
+// real release public key (see src/release/releasePublicKey.ts), and
+// tests that need a signature to check out pass this public part in
+// as the stand-in key. The private part lives only here, in the
+// tests, and signs nothing real. The real release key's private part
+// never enters this repository.
 
 export const TEST_PUBLIC_KEY_MINISIGN = 'RWS0Gj0C7C8Rs61nm8GmQwQmvsvt0yXPzlrvVDJqgVoKq9/xrzdWCIHR';
 export const TEST_KEY_NUM_HEX = 'b41a3d02ec2f11b3';
