@@ -183,6 +183,41 @@ describe('local document pipeline', () => {
     });
   });
 
+  it('reports a file that cannot be found as not found, never as an OCR problem', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'lease.pdf', path: 'uploads/lease.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error('error: uploads/lease.pdf: No such file or directory');
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe('Could not read lease.pdf: the file could not be found.');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('keeps the OCR tools sentence for a read file whose OCR tools are missing from the image', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([[]]),
+      runNativePdfText: async () => ({ total_pages: 1, pages: [{ page_number: 1, text: '' }] }),
+      runOcr: async () => {
+        throw new Error('sh: pdftoppm: not found');
+      },
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      'No extractable text in scan.pdf; local OCR requires pdftoppm and tesseract in the sandbox image.',
+    );
+  });
+
   it('bounds file count and extracted characters before returning evidence', async () => {
     const files = Array.from({ length: MAX_DOCUMENT_FILES + 1 }, (_, index) => ({
       filename: `image-${String(index)}.png`,
