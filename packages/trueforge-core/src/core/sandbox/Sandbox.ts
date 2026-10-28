@@ -16,7 +16,7 @@ import {
 } from '../errors';
 import type { ApprovalDecision, TextContentPart } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { DocumentScope, InternalToolCallInfo } from '../llm/LLMTypes';
 import { estimateTokensForString } from '../llm/usage';
 import type { MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -6546,6 +6546,31 @@ export class Sandbox extends LocalToolMCP {
   /** Download an attachment previously staged by {@link uploadUserFile}. */
   async downloadUserFile(filePath: string): Promise<Buffer> {
     const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(filePath);
+    return await this.provider.downloadFile({ sandboxId, path: canonicalFilePath });
+  }
+
+  /**
+   * The folders the document reader may read without asking: where uploads are staged, and the
+   * bound project folder. Host-derived from the provider and the session binding, so the
+   * permission classifier can check a document path before the tool runs.
+   */
+  documentReadScope(): DocumentScope {
+    return {
+      staged_uploads_dir: this.provider.getFileUploadsDir(this.promptSandboxId()),
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+      path_resolution: this.provider.filesystem ?? null,
+    };
+  }
+
+  /**
+   * Read one document file's bytes from the sandbox, resolving the path to its real location
+   * first. The document bridge stages these bytes as an upload before anything reads them;
+   * unlike {@link createDocumentSnapshot} this does not require the path to be staged already.
+   */
+  async downloadDocumentSourceFile(filePath: string): Promise<Buffer> {
+    const { sandboxInfo } = await this.ensureReadySandbox();
+    const sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
+    const canonicalFilePath = await this.canonicalSandboxPath({ sandboxId, path: filePath });
     return await this.provider.downloadFile({ sandboxId, path: canonicalFilePath });
   }
 

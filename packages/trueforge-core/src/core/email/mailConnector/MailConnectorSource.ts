@@ -14,10 +14,12 @@ import {
 import { isRecord } from '../../util/records';
 import { accountNamesOfResult, emailsOfResult } from './mailToolResults';
 import {
+  isMailComposeToolName,
   isMailReadToolName,
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_ACCOUNT_LIST_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
+  MAIL_DRAFT_TOOL_NAME,
   MAIL_LIST_TOOL_NAME,
 } from './toolContract';
 
@@ -33,6 +35,16 @@ const MAX_CACHED_CHATS = 1000;
 const ACCOUNTS_UNREADABLE =
   'The list of Email accounts could not be read, so nothing was done. Try again in a minute, and tell the person if it keeps failing.';
 const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in for you.';
+const DRAFT_RECIPIENT_NOTE =
+  'Recipients the person named must stay on the call: a recipient who is not on the Email list is handled by an approval card shown to the person, and a draft with no recipient is refused. Never leave recipients off to get past a refusal.';
+/** The ways the sidecar words its refusal when a recipient is not on the Email list. */
+const RECIPIENT_REFUSAL_WORDS = ['recipient policy denied', 'not in allowlist'];
+/**
+ * The plain stop that replaces the sidecar's raw refusal. The list can change between the approval check
+ * and the call, or the sidecar can still be loading it, so the raw refusal can still arrive.
+ */
+const RECIPIENT_NOT_LISTED =
+  'The mail service refused this because a recipient is not on the Email list. Nothing was saved or sent. Do not leave the recipient off, and do not ask the person to change a list: try the same call again with every recipient named, so the person can be asked on a card. If it keeps failing, tell the person.';
 const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
 
 function isMailConnectorTool(name: string): boolean {
@@ -62,7 +74,11 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
   const { properties, required } = tool.inputSchema;
   const account = properties?.[MAIL_ACCOUNT_ARGUMENT];
   const description =
-    tool.name === MAIL_LIST_TOOL_NAME ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim() : tool.description;
+    tool.name === MAIL_LIST_TOOL_NAME
+      ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim()
+      : tool.name === MAIL_DRAFT_TOOL_NAME
+        ? `${tool.description ?? ''} ${DRAFT_RECIPIENT_NOTE}`.trim()
+        : tool.description;
   if (properties === undefined || !isRecord(account)) {
     return { ...tool, description };
   }
@@ -83,6 +99,18 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
 
 function refusal(text: string): CallToolResponse {
   return toolResultResponse({ text: JSON.stringify({ error: text }), isError: true });
+}
+
+/** The sidecar's raw recipient refusal, in whichever text block it arrived, becomes the plain stop. */
+function plainRecipientRefusal(response: CallToolResponse): CallToolResponse {
+  if (!isCallToolResponseResult(response) || response.result.isError !== true) {
+    return response;
+  }
+  const said = response.result.content
+    .map(block => (block.type === 'text' ? block.text : ''))
+    .join('\n')
+    .toLowerCase();
+  return RECIPIENT_REFUSAL_WORDS.some(words => said.includes(words)) ? refusal(RECIPIENT_NOT_LISTED) : response;
 }
 
 /**
@@ -209,7 +237,8 @@ export class MailConnectorSource implements ToolSource {
     const send = (sent: Record<string, unknown>) =>
       this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
     if (params.name !== MAIL_LIST_TOOL_NAME || args['since'] !== undefined) {
-      return send(args);
+      const sent = await send(args);
+      return isMailComposeToolName(params.name) ? plainRecipientRefusal(sent) : sent;
     }
     const before = args['before'];
     const parsedBefore = typeof before === 'string' ? Date.parse(before) : Number.NaN;

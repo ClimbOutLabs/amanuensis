@@ -155,6 +155,8 @@ export type SentinelApprovalCard = {
   persona: SentinelApprovalPersona | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
+  /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
+  mail_draft?: boolean | undefined;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -566,6 +568,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
+    mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
   });
 }
 

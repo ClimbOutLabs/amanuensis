@@ -225,6 +225,10 @@ export const Tier3CardSchema = z
       .nullable()
       .optional()
       .describe('For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.'),
+    mail_draft: z
+      .boolean()
+      .optional()
+      .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
   })
   .openapi('Tier3Card');
 

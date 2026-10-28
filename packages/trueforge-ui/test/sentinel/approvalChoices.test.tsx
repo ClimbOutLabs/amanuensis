@@ -194,4 +194,10 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, schedule: { ...schedule, action: 'delete' } })).toBe(false);
     expect(offersChangeIt({ ...card, parsed_command: 'rm -rf /tmp/work' })).toBe(false);
   });
+
+  it('offers Change it for a mail send or draft to a new recipient, and not for a card with none', () => {
+    expect(offersChangeIt({ ...card, mail_new_recipients: ['a@x.com'] })).toBe(true);
+    expect(offersChangeIt({ ...card, mail_new_recipients: ['a@x.com'], mail_draft: true })).toBe(true);
+    expect(offersChangeIt({ ...card, mail_new_recipients: null })).toBe(false);
+  });
 });
