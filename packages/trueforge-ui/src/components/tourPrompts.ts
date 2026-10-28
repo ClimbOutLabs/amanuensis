@@ -29,17 +29,11 @@ export type TourCard = {
 /** How many cards the home shows at once. */
 export const HOME_CARD_COUNT = 4;
 
-/** Appended under every card prompt, so the whole conversation stays short, one question at a time, and safe. */
-export const SHARED_RULES = `You are helping someone who is busy and may be tired. Rules for this whole conversation:
-- Ask one question at a time, and only for what is still missing. Never send a list of questions. Never ask the same thing twice in different words. When you offer choices, offer two or three, not more.
-- Keep every reply under ten lines unless I ask for more. Plain words, no jargon.
-- If I give you less than you need, make a sensible assumption, say it in one line, and carry on. Do not stall.
-- If I ask for something new or different partway through, do that first. My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first.
-- In any list or checklist, every line is a concrete action or a fact, never filler.
-- Never send, save, book, cancel, or change anything without asking me first, and ask with the exact thing you are about to do.
-- Offer to add something to my calendar only when you have a real date and time for it.
-- When the task is done, offer one next step in one line, usually to keep doing this for me on a schedule or to save it somewhere. If I say no or not now, accept it without arguing and stop.
-- If I say I'm stuck, overwhelmed, or can't start, make the next step smaller, not the explanation longer.`;
+/** Appended under every card prompt: plain short replies, one question at a time, and nothing sent, saved or changed without a yes first. */
+export const SHARED_RULES = `- Plain words and short replies.
+- Ask one thing at a time when you need answers.
+- If you have to assume something, say what it is in one line, then carry on.
+- Never send, save, book, cancel, or change anything without asking me first, and ask with the exact thing you are about to do.`;
 
 /** What a card puts in the composer: its prompt, then the shared rules in plain view. */
 export function composerTextFor(card: TourCard): string {
@@ -88,14 +82,14 @@ export const CARDS = {
     title: "I can't get started",
     detail: assistant => `Tell ${assistant} what's stuck. Start small`,
     prompt:
-      "Ask me what I am stuck on. Then give me only the first step, something I can do in ten minutes or less, and how to begin it in two lines. Ask if I'll do it now. If yes, offer to check back in 30 minutes. If I say I still can't, make the step smaller, two minutes at most, and try again. Never give me the whole plan unless I ask.",
+      "I'm stuck on something and I can't get started. Ask me what it is. Then suggest one small first step I could do in about ten minutes, and tell me plainly how to begin. If I say that is still too much, make the step smaller without making a fuss about it. If I want the whole plan, I will ask. When I have done the first step, ask if I want the next one.",
     icon: 'play',
   },
   kindly: {
     title: 'Say it kindly',
     detail: () => 'The awkward message, written for you',
     prompt:
-      'Ask me who the message is for and what happened, one question at a time. Then write a short message under 120 words that sounds like me: match how I write in my own sent emails if you can see them, otherwise plain and friendly. Kind, clear, and firm where it needs to be. Show it to me and ask if I want it softer, firmer, or shorter. Ask before sending anything.',
+      'Ask me who the message is for and what happened. Then write a short message under 120 words that sounds like me: match how I write in my own sent emails if you can see them, otherwise plain and friendly. Kind, clear, and firm where it needs to be. Show it to me and ask if I want it softer, firmer, or shorter. Ask before sending anything.',
     icon: 'square-pen',
   },
   dinner: {
@@ -156,14 +150,14 @@ export const CARDS = {
     title: 'Plan a birthday or a gathering',
     detail: () => "A to-do list and the day's timeline",
     prompt:
-      'Ask me who it is for, the date, roughly how many people, and the budget, one question at a time. If I skip one, assume the usual and say so in one line. Then give me a to-do list under ten items, in the order to do them, and a timeline for the day. Ask before adding anything to my calendar, and offer reminders for the two or three things that must happen early.',
+      'Ask me who it is for, the date, roughly how many people, and the budget. If I skip one, assume the usual and say so in one line. Then give me a to-do list under ten items, in the order to do them, and a timeline for the day. Ask before adding anything to my calendar, and offer reminders for the two or three things that must happen early.',
     icon: 'calendar-plus',
   },
   trip: {
     title: 'A trip is coming',
     detail: () => 'What to book, pack and sort out, in the right order',
     prompt:
-      "Help me get ready for a trip. Ask me where I'm going and when, one question at a time, and who with only if it changes the plan. Take my answers as they are, even if they're short or joking, and never ask the same thing twice in different words. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack. Scale it to the time I have left. Each line is one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line. When I ask you to do something, like find tickets, do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first. Ask before adding anything to my calendar, and only offer a date or a reminder for a time that is real and still in the future.",
+      "Help me get ready for a trip. Ask me where I'm going and when, and who with only if it changes the plan. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack. Scale it to the time I have left. Each line is one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line.",
     icon: 'list-check',
   },
   remember: {
@@ -220,14 +214,14 @@ export const CARDS = {
     title: 'Help me decide',
     detail: () => 'Two options and a pick you can ignore',
     prompt:
-      "First use what you already know about me. Then ask me what I'm deciding between, and what matters most to me about it, one question at a time, three questions at most. Then lay the options out side by side on those three things, in a short table, and tell me which one you'd pick and why in two lines. Then stop.",
+      "First use what you already know about me. Then ask me what I'm deciding between, and what matters most to me about it. When you have enough, lay the options out side by side on those things, in a short table, and tell me which one you'd pick and why in a couple of lines.",
     icon: 'sliders',
   },
   talk: {
     title: 'Talk it through',
     detail: assistant => `${assistant} listens and asks one good question at a time`,
     prompt:
-      "Ask me what's going on. Listen. Reply in two or three lines at most each time, mostly with one good question, until I say I've got it or I'm done. Do not give advice unless I ask for it. At the end, offer to write down what I decided.",
+      "There's something I want to talk through. Ask me what's going on. Then mostly listen: keep your replies short, usually one good question, until I say I've got it or I'm done. If I want advice, I'll ask for it. At the end, offer to write down what I decided.",
     icon: 'message-square-text',
   },
   steps: {
@@ -241,14 +235,14 @@ export const CARDS = {
     title: 'Keep me company while I work',
     detail: assistant => `Set a timer. ${assistant} checks in when it ends, nothing more`,
     prompt:
-      'Ask me what I\'m about to work on and for how long, suggesting 25 minutes if I\'m not sure. Say "go" and nothing else. When the time is up, ask how it went in one line and whether I want another round. Never add tips or encouragement unless I ask.',
+      'I want company while I work. Ask me what I\'m about to work on and for how long, suggesting 25 minutes if I\'m not sure. Then just say "go". While I work, stay quiet unless I speak to you, and then answer what I actually said. When the time is up, ask how it went in one line and whether I want another round.',
     icon: 'clock',
   },
   care: {
     title: 'Keep their care in one place',
     detail: () => 'Medicines, visits and questions in one place',
     prompt:
-      "Keep everything about someone I look after in one place: medicines and times, upcoming appointments, and questions for the next visit. Ask me who it is and what I'd like to track, one question at a time, then put it in one space with those three sections. Ask before creating it, and offer reminders for the medicine times.",
+      "Keep everything about someone I look after in one place: medicines and times, upcoming appointments, and questions for the next visit. Ask me who it is and what I'd like to track, then put it in one space with those three sections. Ask before creating it, and offer reminders for the medicine times.",
     icon: 'folder',
   },
   meds: {
@@ -329,7 +323,7 @@ export const CARDS = {
     title: 'What do I need to sort out first?',
     detail: () => 'Papers, bank, health care, housing',
     prompt:
-      "Ask me which country and city I live in, and when I arrived, one question at a time. If I can't give you one of these, carry on with what you have and say which part is missing. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Under fifteen lines. Ask before saving it, and offer to remind me of the next item each Monday.",
+      "Ask me which country and city I live in, and when I arrived. If I can't give you one of these, carry on with what you have and say which part is missing. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Under fifteen lines. Ask before saving it, and offer to remind me of the next item each Monday.",
     icon: 'list-check',
   },
   letter: {
@@ -365,7 +359,7 @@ export const CARDS = {
     title: 'Choose a neighborhood',
     detail: () => "Three options compared on rent, commute and what it's like to live there",
     prompt:
-      "Ask me the city, my budget, and where I'll spend most of my days, one question at a time. If I skip one, use what you have and say what you assumed. Search current rents and travel times, and compare three neighborhoods in a short table: rent with a source, commute time, and what living there is like in one line. Ask if I want to see them on a map.",
+      "Ask me the city, my budget, and where I'll spend most of my days. If I skip one, use what you have and say what you assumed. Search current rents and travel times, and compare three neighborhoods in a short table: rent with a source, commute time, and what living there is like in one line. Ask if I want to see them on a map.",
     icon: 'search',
   },
 } satisfies Record<string, TourCard>;

@@ -82,6 +82,10 @@ describe('MailAttachmentProcessor', () => {
     expect(result.message.content).toContain('/tmp/uploads/');
     expect(result.message.content).toContain('untrusted data');
     expect(result.message.content).not.toContain(BASE64_BYTES);
+    expect(result.message.content).toContain(
+      'The file is in the sandbox workspace at this path. To read it, call extract_document_text with this path.',
+    );
+    expect(result.message.content).not.toContain('read it with the document tools');
   });
 
   it('leaves the raw provider output intact for output screening', async () => {

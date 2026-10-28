@@ -386,6 +386,8 @@ const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 const GIT_REFS_COMMAND =
   "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+/** How much of a failed capture read's output the failure log line keeps. */
+const MAX_CAPTURE_FAILURE_OUTPUT_CHARS = 500;
 
 export type RegisteredRepositoryCommandPurpose = 'build' | 'test' | 'verify';
 
@@ -2400,13 +2402,18 @@ export class Sandbox extends LocalToolMCP {
     // approval-required=false with their existing pre-dispatch failure.
     const sentinelHost = this.sentinelContext;
     let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    let classificationWorkspaceCwd: string | null = null;
     if (sentinelHost !== undefined) {
+      // The workspace classification judges this call against: the bound repository, else the
+      // session's, else the provider's default. Recorded on the call below so pre-dispatch
+      // verification re-checks containment against this same root.
+      classificationWorkspaceCwd =
+        this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
-        workspace_cwd:
-          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        workspace_cwd: classificationWorkspaceCwd,
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
@@ -2520,6 +2527,9 @@ export class Sandbox extends LocalToolMCP {
       mint_tool_name: params.name,
       mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
       ...(this.provider.filesystem === undefined ? {} : { path_resolution: this.provider.filesystem }),
+      // The workspace classification judged against, so the pre-dispatch recheck uses the
+      // same root even when the session itself has no workspace bound.
+      ...(sentinelStamp === undefined ? {} : { workspace_cwd: classificationWorkspaceCwd }),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
@@ -4074,7 +4084,12 @@ export class Sandbox extends LocalToolMCP {
       return undefined;
     }
     const env = gitHardeningEnv({ workspaceRoot: hardeningRoot });
-    const read = async (input: { command: string; commandCwd: string | undefined }): Promise<string | undefined> => {
+    let failureLogged = false;
+    const read = async (input: {
+      label: string;
+      command: string;
+      commandCwd: string | undefined;
+    }): Promise<string | undefined> => {
       const result = await this.hostExec({
         sandboxId,
         command: input.command,
@@ -4082,21 +4097,67 @@ export class Sandbox extends LocalToolMCP {
         env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
-      return successfulExec(result) ? result.response.result : undefined;
+      const failureOutput = result.success ? result.response.result : result.error;
+      const failureExitCode = result.success ? result.response.exitCode : null;
+      if (successfulExec(result)) {
+        return result.response.result;
+      }
+      if (!failureLogged) {
+        failureLogged = true;
+        // The capture fails closed from here and the caller can only report that it
+        // failed. This line is the record of why: which read failed, where it ran, and
+        // what git said, so the next live failure names its own cause.
+        this.logger.warn('Git repository state capture failed', {
+          repositoryId: this.boundRepository?.repository_id ?? null,
+          workspaceRoot: hardeningRoot,
+          read: input.label,
+          cwd: input.commandCwd ?? null,
+          exitCode: failureExitCode,
+          error: failureOutput.slice(0, MAX_CAPTURE_FAILURE_OUTPUT_CHARS),
+        });
+      }
+      return undefined;
     };
 
     try {
-      const workspaceRoot = (await read({ command: 'git rev-parse --show-toplevel', commandCwd: cwd }))?.trim();
+      const workspaceRoot = (
+        await read({
+          label: 'git rev-parse --show-toplevel',
+          command: 'git rev-parse --show-toplevel',
+          commandCwd: cwd,
+        })
+      )?.trim();
       if (!workspaceRoot) {
         return undefined;
       }
-      const branch = (await read({ command: 'git rev-parse --abbrev-ref HEAD', commandCwd: workspaceRoot }))?.trim();
-      const head = (await read({ command: 'git rev-parse HEAD', commandCwd: workspaceRoot }))?.trim();
-      const refs = await read({ command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
-      const taggedTrackedPaths = await read({ command: 'git ls-files -v -z', commandCwd: workspaceRoot });
-      const indexEntries = await read({ command: GIT_INDEX_ENTRIES_COMMAND, commandCwd: workspaceRoot });
-      const trackedWorktreeListing = await read({ command: TRACKED_WORKTREE_COMMAND, commandCwd: workspaceRoot });
+      const branch = (
+        await read({
+          label: 'git rev-parse --abbrev-ref HEAD',
+          command: 'git rev-parse --abbrev-ref HEAD',
+          commandCwd: workspaceRoot,
+        })
+      )?.trim();
+      const head = (
+        await read({ label: 'git rev-parse HEAD', command: 'git rev-parse HEAD', commandCwd: workspaceRoot })
+      )?.trim();
+      const refs = await read({ label: 'git for-each-ref', command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
+      const taggedTrackedPaths = await read({
+        label: 'git ls-files -v -z',
+        command: 'git ls-files -v -z',
+        commandCwd: workspaceRoot,
+      });
+      const indexEntries = await read({
+        label: 'git ls-files -s -z',
+        command: GIT_INDEX_ENTRIES_COMMAND,
+        commandCwd: workspaceRoot,
+      });
+      const trackedWorktreeListing = await read({
+        label: 'tracked worktree listing',
+        command: TRACKED_WORKTREE_COMMAND,
+        commandCwd: workspaceRoot,
+      });
       const untrackedPathList = await read({
+        label: 'git ls-files --others --exclude-standard -z',
         command: 'git ls-files --others --exclude-standard -z',
         commandCwd: workspaceRoot,
       });
@@ -4127,6 +4188,7 @@ export class Sandbox extends LocalToolMCP {
       for (const path of untrackedPaths) {
         const objectSha = (
           await read({
+            label: 'git hash-object',
             command: `git hash-object --no-filters -- ${shellEscape(path)}`,
             commandCwd: workspaceRoot,
           })
