@@ -196,7 +196,10 @@ interface SpaceWireBlock {
 }
 
 interface SpaceWireResult {
-  space?: { body: string; revision: number; name: string };
+  summary?: string;
+  revision_was_stale?: boolean;
+  block_results?: { anchor: string; new_length: number; deleted: boolean }[];
+  space?: { body: string; revision: number; name: string; purpose: string; status: string };
   blocks?: SpaceWireBlock[];
   revision?: number;
   error?: string;
@@ -905,5 +908,215 @@ describe('marked bodies keep their named anchors', () => {
     expect(await readBody(callTool, 'Marked insert')).toBe(
       '<!-- @block:pricing -->\n<p>Price</p>\n<p>Extra</p>\n<!-- @block:other -->\n<p>Other</p>',
     );
+  });
+});
+
+describe('append entries add content at the end with no anchor or fingerprint', () => {
+  const TABLE = ['# Breeds', '', '| Breed | Size |', '| --- | --- |', '| Poodle | Medium |'].join('\n');
+
+  it('an append after a table joins the table with one line break', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Papillon | Small |\n| Beagle | Small |' }],
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    expect(await readBody(callTool, 'Breeds')).toBe(`${TABLE}\n| Papillon | Small |\n| Beagle | Small |`);
+    const parsed = resultJson(response);
+    expect(parsed.revision_was_stale).toBeUndefined();
+    expect(parsed.block_results).toEqual([{ anchor: 'b2', new_length: 39, deleted: false }]);
+    expect((parsed.blocks ?? []).map(block => block.anchor)).toEqual(['b1', 'b2']);
+  });
+
+  it('an append after a paragraph starts a new block after a blank line', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Notes', body: 'First paragraph.\n' });
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Notes',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'Second paragraph.' }],
+    });
+    expect(await readBody(callTool, 'Notes')).toBe('First paragraph.\n\nSecond paragraph.');
+  });
+
+  it('an append after a marked block starts on the next line', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Marked append', body: '<!-- @block:pricing -->\n<p>Price</p>' });
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Marked append',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '<!-- @block:other -->\n<p>Other</p>' }],
+    });
+    expect(await readBody(callTool, 'Marked append')).toBe(
+      '<!-- @block:pricing -->\n<p>Price</p>\n<!-- @block:other -->\n<p>Other</p>',
+    );
+  });
+
+  it('an append with a stale revision is applied to the current end and says so', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Papillon | Small |' }],
+    });
+    const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Beagle | Small |' }],
+    });
+    expect(isErrorResponse(stale)).toBe(false);
+    const parsed = resultJson(stale);
+    expect(parsed.revision_was_stale).toBe(true);
+    expect(parsed.summary).toContain('The space had moved to revision 2; the content was appended to the current end.');
+    expect(await readBody(callTool, 'Breeds')).toBe(`${TABLE}\n| Papillon | Small |\n| Beagle | Small |`);
+  });
+
+  it('two appends in one call are refused with a plain message and nothing is saved', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [
+        { type: 'append', new_content: '| Papillon | Small |' },
+        { type: 'append', new_content: '| Beagle | Small |' },
+      ],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(resultJson(response).error).toContain('send at most one append entry, and put it last');
+    expect(await readBody(callTool, 'Breeds')).toBe(TABLE);
+  });
+
+  it('an append that is not the last entry is refused', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const outline = (await listBlocks(callTool, 'Breeds')).blocks ?? [];
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [
+        { type: 'append', new_content: '| Papillon | Small |' },
+        { type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: '# Dogs' },
+      ],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(resultJson(response).error).toContain('put it last');
+  });
+
+  it('an append plus a block entry keeps the normal revision rule and refuses a stale revision', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const outline = (await listBlocks(callTool, 'Breeds')).blocks ?? [];
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Papillon | Small |' }],
+    });
+    const bodyBefore = await readBody(callTool, 'Breeds');
+    const mixed = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: '# Dogs' },
+        { type: 'append', new_content: '| Beagle | Small |' },
+      ],
+    });
+    expect(isErrorResponse(mixed)).toBe(true);
+    expect(resultJson(mixed).revision).toBe(2);
+    expect(await readBody(callTool, 'Breeds')).toBe(bodyBefore);
+  });
+
+  it('a stale call that also changes purpose or status is refused, not applied as an append', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Papillon | Small |' }],
+    });
+    const bodyBefore = await readBody(callTool, 'Breeds');
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      purpose: 'Changed from a stale copy.',
+      status: 'archived',
+      edits: [{ type: 'append', new_content: '| Beagle | Small |' }],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(resultJson(response).revision).toBe(2);
+    expect(await readBody(callTool, 'Breeds')).toBe(bodyBefore);
+    const read = resultJson(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Breeds' }));
+    expect(read.space?.purpose).toBe('Breeds purpose.');
+    expect(read.space?.status).toBe('active');
+  });
+
+  it('the same append sent twice at an old revision is saved once', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const send = () =>
+      callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Breeds',
+        expected_revision: 1,
+        edits: [{ type: 'append', new_content: '| Papillon | Small |' }],
+      });
+    expect(isErrorResponse(await send())).toBe(false);
+    const again = await send();
+    expect(isErrorResponse(again)).toBe(false);
+    expect(resultJson(again).summary).toContain(
+      'That content is already at the end of the space, so nothing was added.',
+    );
+    expect(await readBody(callTool, 'Breeds')).toBe(`${TABLE}\n| Papillon | Small |`);
+    expect(resultJson(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Breeds' })).space?.revision).toBe(2);
+  });
+
+  it('plain text appended after a table row of a marked body starts after a blank line', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, {
+      name: 'Marked table',
+      body: '<!-- @block:t -->\n| A | B |\n| --- | --- |\n| 1 | 2 |',
+    });
+    await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Marked table',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'Source: field notes.' }],
+    });
+    expect(await readBody(callTool, 'Marked table')).toBe(
+      '<!-- @block:t -->\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nSource: field notes.',
+    );
+  });
+
+  it('table rows appended after plain text are flagged as a table with no header', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Notes', body: 'Some intro text.' });
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Notes',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '| Poodle | Medium |' }],
+    });
+    expect(resultJson(response).summary).toContain(
+      'The appended rows start a new table without a header row; add a header if they belong to a new table.',
+    );
+    const withHeader = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Notes',
+      expected_revision: 2,
+      edits: [{ type: 'append', new_content: 'Closing words.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |' }],
+    });
+    expect(resultJson(withHeader).summary).not.toContain('without a header row');
+  });
+
+  it('an append of only blank space is refused with a plain message', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const response = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: '\n  \n' }],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(resultJson(response).error).toContain('must have some text');
+    expect(await readBody(callTool, 'Breeds')).toBe(TABLE);
   });
 });

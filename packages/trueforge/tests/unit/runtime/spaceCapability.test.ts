@@ -167,9 +167,9 @@ describe('space capability', () => {
     const rendered = builder.build();
 
     const expectedSubstrings: string[] = [
-      'use only picture links that a search or page result in this chat returned',
-      'never one you made up',
-      'The host refuses any other link.',
+      'use only a picture link a search result or a page you opened in this chat returned',
+      'a plain link only from a search result',
+      'Never make one up; if you have none, leave pictures out and say so.',
     ];
     expectedSubstrings.forEach(substring => expect(rendered).toContain(substring));
   });
