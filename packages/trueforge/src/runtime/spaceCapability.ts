@@ -370,7 +370,7 @@ Pass body as one string with real line breaks: each table row on its own line, a
 
 If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment the host renders, not a bundled app. Author every html space on those classes, as one self-contained document with inline CSS. The host's sanitiser decides what actually renders.
 
-Pictures: use only picture links that a search or page result in this chat returned, never one you made up; search for a picture first if you need one. The host refuses any other link.
+Pictures: use only a picture link a search result or a page you opened in this chat returned; a plain link only from a search result. Never make one up; if you have none, leave pictures out and say so.
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
