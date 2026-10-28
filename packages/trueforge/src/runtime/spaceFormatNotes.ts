@@ -1,4 +1,4 @@
-import { isTableRow, isTableSeparatorRow, tableRowKeys } from './spaceTableRows';
+import { isTableRow, isTableSeparatorRow, rowCells } from './spaceTableRows';
 
 const MAX_NOTES = 5;
 const MAX_NAMED = 3;
@@ -6,17 +6,12 @@ const BOLD_SHARE_LIMIT = 0.4;
 const BOLD_MIN_LINES = 5;
 const MAX_TEXT_LINES_IN_A_SPLIT = 2;
 const BOLD_SPAN = /\*\*[^*]+\*\*/;
-const LIST_MARKER_AT_CELL_START = /(?:^|<br\s*\/?>)\s*(?:[-*+•]|\d+[.)])\s+\S/i;
+const LIST_MARKER_AT_CELL_START = /(?:^|<br\s*\/?>)\s*[-*+•]\s+\S/i;
 
 interface TableGroup {
   /** Zero-based index of the group's first line. */
   start: number;
   lines: string[];
-}
-
-function cellsOf(line: string): string[] {
-  const trimmed = line.trim();
-  return trimmed.slice(1, trimmed.length - 1).split('|');
 }
 
 function named(items: string[]): string {
@@ -65,13 +60,13 @@ export function spaceFormatNotes({ body, format }: { body: string; format: strin
   let previous: TableGroup | undefined;
   for (const group of groups) {
     const hasHeader = group.lines.length > 1 && isTableSeparatorRow(group.lines[1] ?? '');
-    const width = hasHeader ? cellsOf(group.lines[0] ?? '').length : 0;
+    const width = hasHeader ? rowCells(group.lines[0] ?? '').length : 0;
     group.lines.forEach((line, offset) => {
       const lineNumber = group.start + offset + 1;
-      if (hasHeader && offset > 1 && cellsOf(line).length !== width) {
-        ragged.push(`line ${String(lineNumber)} has ${String(cellsOf(line).length)} cells, not ${String(width)}`);
+      if (hasHeader && offset > 1 && rowCells(line).length !== width) {
+        ragged.push(`line ${String(lineNumber)} has ${String(rowCells(line).length)} cells, not ${String(width)}`);
       }
-      if (cellsOf(line).some(cell => LIST_MARKER_AT_CELL_START.test(cell))) {
+      if (rowCells(line).some(cell => LIST_MARKER_AT_CELL_START.test(cell))) {
         bulleted.push(String(lineNumber));
       }
     });
@@ -109,7 +104,7 @@ export function spaceFormatNotes({ body, format }: { body: string; format: strin
     );
   }
 
-  const textLines = lines.filter(line => line.trim() !== '');
+  const textLines = lines.filter(line => line.trim() !== '' && !isTableRow(line));
   const boldLines = textLines.filter(line => BOLD_SPAN.test(line)).length;
   if (textLines.length >= BOLD_MIN_LINES && boldLines / textLines.length > BOLD_SHARE_LIMIT) {
     notes.push(
@@ -117,10 +112,21 @@ export function spaceFormatNotes({ body, format }: { body: string; format: strin
     );
   }
 
-  const seen = new Set<string>();
   const repeated = new Set<string>();
-  for (const key of tableRowKeys(body)) {
-    (seen.has(key) ? repeated : seen).add(key);
+  for (const group of groups) {
+    const seen = new Set<string>();
+    group.lines.forEach((line, offset) => {
+      const isHeader = offset === 0 && isTableSeparatorRow(group.lines[1] ?? '');
+      if (isHeader || isTableSeparatorRow(line)) {
+        return;
+      }
+      const cells = rowCells(line).map(cell => cell.replace(/[*_`]/g, '').trim().toLowerCase());
+      const whole = cells.join('|');
+      if (seen.has(whole)) {
+        repeated.add(cells.find(cell => cell !== '') ?? whole);
+      }
+      seen.add(whole);
+    });
   }
   if (repeated.size > 0) {
     notes.push(`These table rows appear more than once: ${named([...repeated])}. Keep one row of each.`);

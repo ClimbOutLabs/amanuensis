@@ -67,4 +67,48 @@ describe('spaceFormatNotes', () => {
   it('returns at most five notes', () => {
     expect(notesFor('x').length).toBeLessThanOrEqual(5);
   });
+
+  it('does not call rows with a repeated first cell duplicates', () => {
+    const body = ['| Day | Time |', '| --- | --- |', '| Monday | 9am |', '| Monday | 2pm |'].join('\n');
+    expect(notesFor(body)).toEqual([]);
+  });
+
+  it('does not compare keys across two tables', () => {
+    const table = (heading: string) => `## ${heading}\n\n| Plan | Price |\n| --- | --- |\n| Basic | 5 |\n| Pro | 9 |`;
+    expect(notesFor(`${table('Monthly')}\n\n${table('Yearly')}`)).toEqual([]);
+  });
+
+  it('ignores rows inside code fences', () => {
+    const body = ['```', '| a | b |', '| a | b |', '```'].join('\n');
+    expect(notesFor(body)).toEqual([]);
+  });
+
+  it('flags a whole row repeated inside one table', () => {
+    const body = ['| Day | Time |', '| --- | --- |', '| Monday | 9am |', '| Monday | 9am |'].join('\n');
+    expect(notesFor(body)).toEqual([expect.stringContaining('monday')]);
+  });
+
+  it('reads short separators and tables without a closing pipe', () => {
+    expect(notesFor(['|a|b|', '|--|--|', '|1|2|'].join('\n'))).toEqual([]);
+    expect(notesFor(['| a | b', '| - | -', '| 1 | 2'].join('\n'))).toEqual([]);
+    const twoTables = ['## One', '| a | b |', '| - | - |', '| 1 | 2 |', '', '## Two', '|a|b|', '|--|--|', '|1|2|'].join(
+      '\n',
+    );
+    expect(notesFor(twoTables)).toEqual([]);
+  });
+
+  it('does not count an escaped pipe as a cell edge', () => {
+    const body = ['| Code | Kind |', '| --- | --- |', '| `a \\| b` | pipe |'].join('\n');
+    expect(notesFor(body)).toEqual([]);
+  });
+
+  it('flags only dash, star, plus and bullet markers in a cell', () => {
+    expect(notesFor(['| a | b |', '| - | - |', '| 1. one | 2) two |'].join('\n'))).toEqual([]);
+  });
+
+  it('does not count table rows toward the bold share', () => {
+    const rows = Array.from({ length: 8 }, (_, i) => `| **n${String(i)}** | x |`);
+    const body = ['| a | b |', '| --- | --- |', ...rows, 'Plain.', 'Plain.', 'Plain.', 'Plain.', 'Plain.'].join('\n');
+    expect(notesFor(body)).toEqual([]);
+  });
 });

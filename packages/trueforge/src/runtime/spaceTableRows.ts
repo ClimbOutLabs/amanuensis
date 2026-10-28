@@ -1,19 +1,28 @@
-const SEPARATOR_CELL = /^\s*:?-{3,}:?\s*$/;
+const SEPARATOR_CELL = /^:?-+:?$/;
 const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
-function cellsOf(line: string): string[] {
-  const trimmed = line.trim();
-  return trimmed.slice(1, trimmed.length - 1).split('|');
+/** The trimmed cells of a row: split on unescaped pipes, with the empty edge cells dropped. */
+export function rowCells(line: string): string[] {
+  const parts = line.trim().split(/(?<!\\)\|/);
+  parts.shift();
+  if (parts.length > 0 && (parts[parts.length - 1] ?? '').trim() === '') {
+    parts.pop();
+  }
+  return parts.map(cell => cell.trim());
 }
 
-/** A markdown table row: the trimmed line starts and ends with a pipe. */
+/** A markdown table row: the trimmed line starts with a pipe; the closing pipe is optional. */
 export function isTableRow(line: string): boolean {
   const trimmed = line.trim();
-  return trimmed.length >= 2 && trimmed.startsWith('|') && trimmed.endsWith('|');
+  return trimmed.length >= 2 && trimmed.startsWith('|');
 }
 
 export function isTableSeparatorRow(line: string): boolean {
-  return isTableRow(line) && cellsOf(line).every(cell => SEPARATOR_CELL.test(cell));
+  if (!isTableRow(line)) {
+    return false;
+  }
+  const cells = rowCells(line);
+  return cells.length > 0 && cells.every(cell => SEPARATOR_CELL.test(cell));
 }
 
 /**
@@ -24,7 +33,7 @@ export function tableRowKey(line: string): string | null {
   if (!isTableRow(line) || isTableSeparatorRow(line)) {
     return null;
   }
-  const [first, second] = cellsOf(line);
+  const [first, second] = rowCells(line);
   const keyCell = first !== undefined && RANK_CELL.test(first) && second !== undefined ? second : first;
   const key = (keyCell ?? '').replace(/[*_`]/g, '').trim().toLowerCase();
   return key === '' ? null : key;
