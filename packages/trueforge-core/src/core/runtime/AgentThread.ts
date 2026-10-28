@@ -259,6 +259,7 @@ import {
 import {
   clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
@@ -266,6 +267,7 @@ import {
   removedToolMessage,
   retryIsDue,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   STEP_BUDGET_SPENT_MESSAGE,
   stepBudgetFor,
   toolResultKind,
@@ -5100,6 +5102,25 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
+    // A step that landed a space write is progress, not spent budget; a build in parts needs many such steps.
+    const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
+    const refund = progressRefundFor({
+      refundsSoFar,
+      results: toolCallResults.flatMap(result => {
+        const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
+        // A call held for the owner has not run, so it earns no refund.
+        return call === undefined || call.tool_info.held_for_owner !== undefined
+          ? []
+          : [{ toolName: call.tool_info.original_tool_name, disposition: result.disposition, failure: result.failure }];
+      }),
+    });
+    if (refund > 0) {
+      replyTurn.progressRefundsByThread.set(this.threadId, refundsSoFar + refund);
+      replyTurn.stepsByThread.set(
+        this.threadId,
+        Math.max(0, (replyTurn.stepsByThread.get(this.threadId) ?? 0) - refund),
+      );
+    }
     for (const notice of removalNotices) {
       replyTurn.removedTools.push(notice.toolName);
       this.noteUnfinished(notice.reason);
@@ -5652,7 +5673,11 @@ export class AgentThread {
               yield* this.appendToContext({
                 context: [
                   internalSystemMessage(
-                    forcedAnswer === 'budget' ? STEP_BUDGET_SPENT_MESSAGE : REMOVED_TOOL_STREAK_MESSAGE,
+                    forcedAnswer === 'budget'
+                      ? (replyLedger.progressRefundsByThread.get(this.threadId) ?? 0) > 0
+                        ? STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE
+                        : STEP_BUDGET_SPENT_MESSAGE
+                      : REMOVED_TOOL_STREAK_MESSAGE,
                   ),
                 ],
                 output: [],
