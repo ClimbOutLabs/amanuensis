@@ -3,7 +3,7 @@ import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/sche
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
-import { CARDS, HOME_TOPICS, SHARED_RULES } from '@/components/tourPrompts.js';
+import { CARDS, HOME_TOPICS } from '@/components/tourPrompts.js';
 
 const noCapabilities = { email: false, calendar: false, sandbox: false, maps: true };
 const connected = { email: true, calendar: true, sandbox: false, maps: true };
@@ -137,16 +137,16 @@ describe('AmanTour home', () => {
     }
   });
 
-  it('sends the card prompt with the shared rules under it, and fills nothing', () => {
+  it('sends the card prompt on its own, and fills nothing', () => {
     const { props } = renderTour();
 
     expect(screen.getByRole('heading', { name: 'Some things Mannie can do' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
-    expect(props.onSend).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onSend).toHaveBeenLastCalledWith(CARDS.start.prompt);
     expect(props.onFill).not.toHaveBeenCalled();
   });
 
-  it('sends only the morning brief card prompt, with no rules, from the brief card', () => {
+  it('sends only the morning brief card prompt from the brief card', () => {
     const { props } = renderTour({ capabilities: connected });
 
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
@@ -184,7 +184,7 @@ describe('AmanTour home', () => {
     const { props } = renderTour({ canSend: false });
 
     fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
-    expect(props.onFill).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onFill).toHaveBeenLastCalledWith(CARDS.start.prompt);
     expect(props.onSend).not.toHaveBeenCalled();
   });
 
