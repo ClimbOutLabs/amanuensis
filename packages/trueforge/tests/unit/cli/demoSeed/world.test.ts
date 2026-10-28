@@ -3,10 +3,14 @@ import {
   SEND_DRAFT_TOOL_NAME,
   UPDATE_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { dayInZone, parseDemoDay, STORY, weekdayOffset } from '../../../../src/cli/demoSeed/storyDays.mjs';
-import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_USER_PROFILE } from '../../../../src/cli/demoSeed/world';
+import {
+  buildDemoWorld,
+  DEFAULT_DEMO_TIME_ZONE,
+  DEMO_BRIEF_TASK,
+  DEMO_USER_PROFILE,
+} from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
 import { SpaceContentSchema } from '../../../../src/schemas/space';
@@ -123,20 +127,60 @@ describe('buildDemoWorld content', () => {
     expect(DEFAULT_DEMO_TIME_ZONE).toBe('Europe/Lisbon');
   });
 
-  // Scheduled runs are never offered Gmail drafting or sending, so the brief may only suggest replies in its text.
-  it('seeds a Morning brief that reads calendar and inbox, suggests replies and never sends or saves', () => {
+  // The demo brief is the owner's own Personal Intelligence Briefing text. Drafts are written in the
+  // chat itself, never as email drafts, and nothing is sent or changed on the calendar.
+  it('seeds the Personal Intelligence Briefing as the Morning brief task', () => {
     const { scheduleManifest } = worldOn(MONDAY, DEFAULT_DEMO_TIME_ZONE);
+    const { task } = scheduleManifest;
 
     expect(scheduleManifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon', status: 'active' });
-    // The canonical brief comes first; the seed adds only its home address and reply lines after it.
-    expect(scheduleManifest.task.startsWith(MORNING_BRIEF_PROMPT)).toBe(true);
-    expect(scheduleManifest.task).toContain('write a short suggested reply in the brief');
-    expect(scheduleManifest.task).toContain('Do not send or save anything');
-    for (const tool of [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME]) {
-      expect(scheduleManifest.task).not.toContain(tool);
+    // The brief text comes first, word for word; the seed adds only the travel-from-home line after it.
+    expect(task.startsWith(DEMO_BRIEF_TASK)).toBe(true);
+    expect(
+      task.endsWith('Work out travel from my place, Travessa das Gaivotas 4, 1200-000 Lisboa, unless I say otherwise.'),
+    ).toBe(true);
+    // One fragment per section, so a dropped or reworded section fails here.
+    for (const fragment of [
+      'Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump.',
+      'Check which personas I have configured.',
+      "1. EMAIL: check what came in since yesterday's brief (inbox).",
+      'List what needs me, most important first, one line each: who, what they want, and by when.',
+      'Compare with memory to see if you can help Maya in any way.',
+      '2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and save them in the chat itself.',
+      "Dont draft emails. Don't send anything.",
+      '3. APPOINTMENTS I TRAVEL TO: for each event with an address, tell me when to leave',
+      'Add a buffer of 10 minutes.',
+      "4. BRIEFING FOR EACH APPOINTMENT: who I'm meeting, what we last emailed about, anything I promised them",
+      'Give me 2 or 3 talking points, and anything I need to bring.',
+      '5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.',
+      'send the relevant information to the relevant personas and get their opinion, advice, feedback, todo, etc on it. Let them be judge.',
+      'Never send email or change my calendar during the brief.',
+      'put it on my "Needs your OK" list.',
+      'PERSONAL INTELLIGENCE:',
+      'Personal detail comes only from what I know about Maya (memory/profile), never from a search.',
+      'Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences.',
+      'PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.',
+      'Surface the single most important actionable item first, on its own highlighted card, never buried.',
+      'OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
+    ]) {
+      expect(task).toContain(fragment);
     }
-    expect(scheduleManifest.task).not.toContain('Needs your OK');
-    expect(scheduleManifest.task).toContain('Travessa das Gaivotas 4, 1200-000 Lisboa');
+    // The five numbered sections stay in the owner's order.
+    const headers = [
+      '1. EMAIL:',
+      '2. DRAFT REPLIES:',
+      '3. APPOINTMENTS I TRAVEL TO:',
+      '4. BRIEFING FOR EACH APPOINTMENT:',
+      '5. TOMORROW AT A GLANCE:',
+    ];
+    const positions = headers.map(header => task.indexOf(header));
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // The old suggested-reply line is gone; the brief text covers drafts itself.
+    expect(task).not.toContain('write a short suggested reply in the brief');
+    for (const tool of [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME]) {
+      expect(task).not.toContain(tool);
+    }
   });
 
   it('seeds the two personas with a knowledge vault each', () => {
