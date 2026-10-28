@@ -9,6 +9,7 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
   '</tool_calls>',
   '</tool_call>',
   '</invoke>',
+  '</parameter>',
   '</｜DSML｜tool_calls>',
   '</｜DSML｜invoke>',
   '</function_results>',
@@ -19,7 +20,9 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
  * names the tags when it explains them, so seeing one starts a candidate instead of a capture:
  * the text is held while its shape is judged, and only a candidate that grows into the full
  * shape of a real call is treated as markup. A candidate that settles as prose is released as
- * the text it always was, and one still forming when the reply ends is released whole. The DSML
+ * the text it always was, and one still forming when the reply ends is released whole. A plain
+ * parameter tag is a candidate anywhere for the same reason; position settles it, since only
+ * one that opens its line is judged a call fragment, and one a sentence names is prose. The DSML
  * and chat-template tokens use a fullwidth bar (U+FF5C) inside the brackets; that character is data
  * the detector matches, never text Aman writes itself. A closing tag is a candidate too: it is a
  * stray marker and is hidden when nothing but blanks follows it on its line, and prose when words
@@ -31,6 +34,7 @@ const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_call',
   '<invoke',
   '<function=',
+  '<parameter',
   '[TOOL_CALLS]',
   '<｜',
   '<function_results',
@@ -291,6 +295,21 @@ function judgeOwnShape(text: string, startsLine: boolean, endOfStream: boolean):
     return /^<function=[\w.-]+>$/.test(text.slice(0, tagEnd + 1))
       ? { verdict: 'markup' }
       : { verdict: 'dead', deadLength: tagEnd + 1 };
+  }
+  if (text.startsWith('<parameter')) {
+    // The plain parameter form. A named one that opens its line is a call's argument on
+    // its own, the judgement the DSML parameter gets, in either spelling of the name
+    // (a name attribute, or the bare equals form). The same tag named inside a sentence
+    // is prose, and an unnamed one is prose wherever it sits.
+    const tagEnd = text.indexOf('>');
+    if (tagEnd === -1) {
+      return { verdict: 'undecided' };
+    }
+    const tag = text.slice(0, tagEnd + 1);
+    if (startsLine && (tagHasName(tag) || /^<parameter=[\w.-]+>$/.test(tag))) {
+      return { verdict: 'markup' };
+    }
+    return { verdict: 'dead', deadLength: tagEnd + 1 };
   }
   return { verdict: 'undecided' };
 }

@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { withFolderLock } from './folderLock.ts';
@@ -36,6 +36,21 @@ export function folderBackend(home: string, timing: LockTiming = LOCK_TIMING): S
           return [];
         }
         throw new StateStoreError(`the state folder ${dir} could not be read`, { cause: error });
+      }
+    },
+    statPath: async path => {
+      // A path that cannot be judged is a path that is not there, as the
+      // shell's file probes answer no on any error.
+      try {
+        const stats = await stat(join(home, path));
+        return {
+          mtimeSeconds: Math.floor(stats.mtimeMs / 1000),
+          mode: stats.mode,
+          size: stats.size,
+          isDirectory: stats.isDirectory(),
+        };
+      } catch {
+        return null;
       }
     },
     writeChangedFiles: async files => {

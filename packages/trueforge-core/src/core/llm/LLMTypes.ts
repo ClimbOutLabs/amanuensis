@@ -117,6 +117,13 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'How the Sentinel reads this call\'s file paths: the sandbox provider says "remote" when the sandbox filesystem is not the server\'s. Never model-authored.',
     ),
+  workspace_cwd: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Workspace the classifier judged this call against, recorded by the tool that classified it so pre-dispatch verification re-checks containment against the same root. Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),

@@ -1,4 +1,4 @@
-import { totalmem } from 'node:os';
+import { release, totalmem } from 'node:os';
 
 import type { Host, SystemKind } from './host.ts';
 
@@ -11,6 +11,10 @@ export class SystemHost implements Host {
 
   memoryBytes(): number {
     return totalmem();
+  }
+
+  kernelRelease(): string {
+    return release();
   }
 }
 

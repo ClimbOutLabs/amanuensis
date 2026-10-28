@@ -884,6 +884,72 @@ describe('run_code runs silently only for code Aman wrote in this chat', () => {
   );
 });
 
+describe('the run_code approval card shows the code it would run', () => {
+  test(
+    'inline code is on the card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print("hello")\n', language: 'python' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBe('print("hello")\n');
+    }),
+  );
+
+  test(
+    'a script file the call names is on the card as its text',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: false });
+      writeScript({ services, workspace, name: 'report.py', authored: false, content: 'print("from file")\n' });
+      const decision = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'report.py'), language: 'python' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBe('print("from file")\n');
+    }),
+  );
+
+  test(
+    'a script file that cannot be read leaves the card without code, and the card still asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'missing.py'), language: 'python' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBeNull();
+    }),
+  );
+
+  test(
+    'a script file over the checked-script bound leaves the card without code',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: false });
+      writeScript({ services, workspace, name: 'big.py', authored: false, content: `# ${'x'.repeat(300 * 1024)}\n` });
+      const decision = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'big.py'), language: 'python' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBeNull();
+    }),
+  );
+
+  test(
+    'a call that names no source leaves the card without code',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { language: 'python' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBeNull();
+    }),
+  );
+});
+
 describe('run_code and write_file in the sandbox appear in the activity list', () => {
   test(
     'a silent write and a silent run are both recorded as logged',
