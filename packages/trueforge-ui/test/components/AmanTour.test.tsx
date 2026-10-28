@@ -180,6 +180,25 @@ describe('AmanTour home', () => {
     expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
   });
 
+  it('places the setup ticket between the greeting and the tour body', () => {
+    const { container } = renderTour({ firstRun: true, onSkip: vi.fn() });
+
+    const heading = screen.getByRole('heading', { level: 1 });
+    const ticket = screen.getByText('Setup ticket');
+    const body = container.querySelector('.order-1');
+    if (body === null) {
+      throw new Error('the tour body is missing');
+    }
+    // The ticket is not inside the body that holds the pills and the cards, so the composer the
+    // thread renders after this component lands between the ticket and the pills.
+    expect(body.contains(ticket)).toBe(false);
+    expect(heading.compareDocumentPosition(ticket) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      ticket.compareDocumentPosition(screen.getByRole('list', { name: 'What would help you most?' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it('only fills the composer from a card when no model is set, so nothing is sent', () => {
     const { props } = renderTour({ canSend: false });
 
