@@ -274,19 +274,32 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing create_space');
-    expect(error).toContain('one write may carry at most 4,000');
+    expect(error).toContain('one write may carry at most 3,600');
     expect(error).toContain('Nothing was persisted');
     expect(error).toContain('add the rest with edit_space');
     // The refusal text is pinned word for word: it is what the model reads and it must not
     // drift. The stable code beside it is what the chat keys its plain note on.
     expect(error).toBe(
-      'Refusing create_space: this write carries 4,001 characters of new content, and one write may carry at most 4,000. ' +
+      'Refusing create_space: this write carries 4,001 characters of new content, and one write may carry at most 3,600. ' +
         'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.',
     );
     expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
 
     const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
     expect(resultJson(listed).spaces).toHaveLength(0);
+  });
+
+  it('accepts a create past the told number, under the real cap', async () => {
+    const store = new InMemorySpaceStore();
+    const response = await callTool(store, CREATE_SPACE_TOOL_NAME, {
+      name: 'Past the told number',
+      purpose: PURPOSE,
+      status: 'active',
+      body: 'x'.repeat(3_900),
+      format: 'markdown',
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    expect(resultJson(response).space?.body).toHaveLength(3_900);
   });
 
   it('accepts a create whose body is exactly at the cap', async () => {
@@ -329,7 +342,7 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing edit_space');
-    expect(error).toContain('one write may carry at most 4,000');
+    expect(error).toContain('one write may carry at most 3,600');
     expect(error).toContain('follow-up edit_space call');
     expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
 
@@ -362,7 +375,7 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing edit_space');
-    expect(error).toContain('one write may carry at most 4,000');
+    expect(error).toContain('one write may carry at most 3,600');
 
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
@@ -403,7 +416,7 @@ describe('the space write size cap', () => {
     expect(breedRows[39]).toContain('Breed 40');
   });
 
-  it('tells the model the cap and the parts flow in the instructions', () => {
+  it('tells the model the number to aim at and the parts flow in the instructions', () => {
     const capability = spaceCapability({
       store: new InMemorySpaceStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -417,8 +430,34 @@ describe('the space write size cap', () => {
     }
     firstBuilder(builder);
     const rendered = builder.build();
-    expect(rendered).toContain('one write carries at most about 4,000 characters of new content');
+    // The model is told one number, 3,600, which leaves headroom under the real cap;
+    // the cap itself is never reported to the model.
+    expect(rendered).toContain('one write carries at most about 3,600 characters of new content');
+    expect(rendered).not.toContain('4,000');
     expect(rendered).toContain('add the rest a few rows at a time');
+  });
+
+  it('tells the model the same number in the space tool descriptions', async () => {
+    const capability = spaceCapability({
+      store: new InMemorySpaceStore(),
+      authority: { tenantId: 'default', userRef: 'user-a' },
+      tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const listed = await toolSet.listTools();
+    const tools = 'result' in listed ? listed.result.tools : [];
+    for (const name of [CREATE_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME]) {
+      const tool = tools.find(candidate => candidate.name === name);
+      if (tool === undefined) {
+        throw new Error(`expected the ${name} tool to be listed`);
+      }
+      expect(tool.description ?? '').toContain('3,600');
+      expect(tool.description ?? '').not.toContain('4,000');
+    }
   });
 
   it('sets a streamed-argument limit for each write tool, above every valid call', () => {
