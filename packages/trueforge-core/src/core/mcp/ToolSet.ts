@@ -656,6 +656,7 @@ export class ToolSet implements IToolSet {
       sentinel,
       repository_id: null,
       workspace_cwd: sentinel.workspace_cwd,
+      path_resolution: info.path_resolution,
       action: {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
@@ -674,6 +675,7 @@ export class ToolSet implements IToolSet {
           open_world_hint: info.open_world_hint,
         },
         maps_hosts: info.maps_hosts,
+        document_scope: info.document_scope,
       },
     });
     const stamp = stampSentinelDecision({ decision });

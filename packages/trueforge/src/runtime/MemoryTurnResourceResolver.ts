@@ -25,6 +25,7 @@ import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCap
 import type { MemoryClient } from './memory/memoryClient';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
+import { isStaleSearchProviderMount } from './sessionResources';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
 export type { ToolOutputScreenConfig } from './toolOutputScreen';
@@ -40,6 +41,8 @@ export interface MemoryTurnContext {
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
+  /** Names of the catalog presets offered as a web search provider. Absent: no remembered mount is dropped as stale. */
+  searchProviderPresetNames?: (() => readonly string[]) | undefined;
   /** Off keys (see connectorOffKey) of the connectors the person turned off for this chat. Absent: nothing is off. */
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
@@ -137,6 +140,44 @@ function withConnectorAttached(spec: AgentSpec, serverName: string): AgentSpec {
   return attached === undefined ? spec : { ...spec, mcp_servers: [...servers, attached] };
 }
 
+/**
+ * The spec with remembered mounts of a deleted search provider removed. A chat's remembered
+ * spec can still name a connector the person deleted after moving the search provider role to
+ * another one; resolving that name would fail the whole turn, and the designated provider is
+ * attached anyway. Only preset names that are not set up and do not hold the role are dropped,
+ * one log line each; anything else is left for the ordinary unknown-server error. A set-up list
+ * that could not be read proves nothing is missing, so nothing is dropped then.
+ */
+function withoutStaleSearchProviderMounts(input: {
+  spec: AgentSpec;
+  searchProviderPresetNames: readonly string[];
+  configuredNames: readonly string[] | undefined;
+  designatedName: string | undefined;
+  logger: PersonaTurnResourceResolver['logger'];
+}): AgentSpec {
+  const servers = input.spec.mcp_servers;
+  if (servers === undefined || input.configuredNames === undefined) {
+    return input.spec;
+  }
+  const configured = new Set(input.configuredNames);
+  const kept = servers.filter(entry => {
+    const stale =
+      !configured.has(entry.name) &&
+      isStaleSearchProviderMount({
+        name: entry.name,
+        searchProviderPresetNames: input.searchProviderPresetNames,
+        designatedName: input.designatedName,
+      });
+    if (stale) {
+      input.logger.warn(
+        `Dropped a stale search provider mount "${entry.name}" from the turn spec: that connector is not configured and is not the designated search provider.`,
+      );
+    }
+    return !stale;
+  });
+  return kept.length === servers.length ? input.spec : { ...input.spec, mcp_servers: kept };
+}
+
 /** Adds host-enforced long-term memory (recall + retain) to the root thread of one turn. */
 export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
   readonly #memory: MemoryTurnContext;
@@ -192,7 +233,16 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
         : designatedSearchProvider;
     // The list holds Email and Calendar only when they are the host's own, so it also decides what is trusted by name.
     const setUpConnectorNames = await this.setUpConnectorNames;
-    const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);
+    const baseSpec = isSubAgent
+      ? input.spec
+      : withoutStaleSearchProviderMounts({
+          spec: input.spec,
+          searchProviderPresetNames: this.#memory.searchProviderPresetNames?.() ?? [],
+          configuredNames: setUpConnectorNames,
+          designatedName: designatedSearchProvider,
+          logger: this.logger,
+        });
+    const defaultedSpec = isSubAgent ? baseSpec : await this.#withDefaultSourcesAttached(baseSpec, turnedOff);
     const narrowedSpec =
       providerServerName === undefined || isSubAgent
         ? defaultedSpec
