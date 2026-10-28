@@ -1252,6 +1252,18 @@ function isReadOnlyDispatch(toolCall: InternalEnrichedToolCall): boolean {
 }
 
 /**
+ * Whether a settled read outcome is a failure the model would act on: the
+ * dispatch itself failed, or the provider answered with an error result.
+ * Non-result responses (auth, approval, client-side) are not failures to
+ * retry; each carries its own next step.
+ */
+function isFailedReadOutcome(outcome: ToolCallExecutionOutcome): boolean {
+  return (
+    outcome.failure || (isCallToolResponseResult(outcome.response) && outcome.response.result.isError === true)
+  );
+}
+
+/**
  * Per-batch admission limiter for concurrent read-only dispatch. At most
  * `maxConcurrency` tasks hold a permit at once; a released permit transfers
  * directly to the longest-waiting task. `acquire` rejects (and leaves the
@@ -2201,8 +2213,23 @@ export async function executeToolCalls({
       }),
     ),
   );
+  const epochBeforeStatefulPhase = memoState.workspaceMutationEpoch;
   for (const { index, toolCall } of statefulPhase) {
     outcomes.set(index, await executeOne(toolCall));
+  }
+  // A failed read in a mixed batch may have failed only because the write it
+  // depended on sits in the same batch and had not landed yet. When a
+  // stateful call moved the mutation epoch, each failed read gets one fresh
+  // dispatch and the fresh result replaces the failed one, whichever way the
+  // fresh attempt lands. Successful reads keep their pre-write result by
+  // design, and no read is re-dispatched more than once here.
+  if (memoState.workspaceMutationEpoch !== epochBeforeStatefulPhase) {
+    for (const { index, toolCall } of readPhase) {
+      const outcome = outcomes.get(index);
+      if (outcome !== undefined && isFailedReadOutcome(outcome)) {
+        outcomes.set(index, await executeOne(toolCall));
+      }
+    }
   }
   const results = assistantMessage.tool_calls.map((_, index) => {
     const outcome = outcomes.get(index);
