@@ -147,6 +147,7 @@ import {
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
+import { spaceClosingLine, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { resolveLocalTime } from '../util/clientTimezone';
@@ -4141,6 +4142,25 @@ export class AgentThread {
     ) {
       const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
       assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
+    }
+    // A reply that wrote spaces without naming them gets the host's own closing line, saved with the
+    // reply like the held-actions note above, so the person always learns which page changed.
+    if (
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !emptyTerminalFailure &&
+      !shouldNudgeForEmptyReasoning &&
+      (typeof assistantMessage.content === 'string' || assistantMessage.content === null)
+    ) {
+      const writes = spaceWritesThisTurn(this.context);
+      const prior = assistantMessage.content?.trim() ?? '';
+      if (writes.length > 0 && !writes.some(write => prior.includes(write.name))) {
+        const closing = spaceClosingLine({
+          writes,
+          unfinished: this.toolCallMemo.turn.unfinishedByThread.get(this.threadId),
+        });
+        assistantMessage.content = [prior, closing].filter(part => part !== '').join('\n\n');
+      }
     }
     const agentAssistantMessage = buildModelMessageEvent({
       // The terminal model event is authoritative. By this point the complete tool
