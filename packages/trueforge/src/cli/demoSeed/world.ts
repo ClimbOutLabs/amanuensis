@@ -1,5 +1,4 @@
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
@@ -24,6 +23,26 @@ export const DEMO_AGENT_NAME = `${DEMO_ID_PREFIX}-assistant`;
 /** Resource names are lowercase and hyphenated, so the Schedules page lists this as "morning-brief". */
 export const DEMO_SCHEDULE_NAME = 'morning-brief';
 export const DEMO_TASKS_SPACE_ID = `${DEMO_ID_PREFIX}-tasks`;
+
+/** The demo schedule's task, in the owner's own words; the demo does not use the product's morning brief prompt. */
+export const DEMO_BRIEF_TASK = `Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump. Check which personas I have configured. Understand what they do and their specialization and then do this, in order:
+1. EMAIL: check what came in since yesterday's brief (inbox). List what needs me, most important first, one line each: who, what they want, and by when. Check all email. Compare with memory to see if you can help Maya in any way.
+2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and save them in the chat itself. Dont draft emails. Don't send anything. Tell me which responses have been drafted in chat.
+3. APPOINTMENTS I TRAVEL TO: for each event with an address, tell me when to leave, how long it takes and the best way to get there (driving, transit or walking), with a map. Add a buffer of 10 minutes.
+4. BRIEFING FOR EACH APPOINTMENT: who I'm meeting, what we last emailed about, anything I promised them, and anything in my memories about them or the topic. Give me 2 or 3 talking points, and anything I need to bring.
+5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.
+
+After you have all of this, send the relevant information to the relevant personas and get their opinion, advice, feedback, todo, etc on it. Let them be judge. Once done, show that to me.
+Never send email or change my calendar during the brief. If something on the calendar needs changing, put it on my "Needs your OK" list.
+
+PERSONAL INTELLIGENCE:
+- Research is allowed to deepen external facts (people, organizations, events, topics). Keep searches neutral and public, never personal. Personal detail comes only from what I know about Maya (memory/profile), never from a search.
+- Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences. Personal, not a reading list; specifics come from my knowledge, not seeded here.
+- Be efficient, not truncated: cover what's useful richly, but no filler; each section tight, and the whole as short as possible while still genuinely useful.
+- PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.
+- Surface the single most important actionable item first, on its own highlighted card, never buried.
+
+OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
 
 /** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
 export const DEMO_USER_PROFILE =
@@ -121,11 +140,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       ].join(' '),
     }),
     scheduleManifest: ScheduleManifestSchema.parse({
-      task: [
-        MORNING_BRIEF_PROMPT,
-        `Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
-        'For any email that needs a reply, write a short suggested reply in the brief. Do not send or save anything.',
-      ].join(' '),
+      task: [DEMO_BRIEF_TASK, `Work out travel from my place, ${HOME.address}, unless I say otherwise.`].join(' '),
       cron: '30 7 * * *',
       timezone: input.timeZone,
       status: 'active',

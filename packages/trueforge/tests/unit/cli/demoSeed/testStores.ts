@@ -2,8 +2,11 @@ import type { Kysely, Transaction } from 'kysely';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createLogger } from 'winston';
+import { McpCatalog } from '../../../../src/catalog/McpCatalog';
+import { SkillCatalog } from '../../../../src/catalog/SkillCatalog';
 import { createKnowledgeLibrary } from '../../../../src/cli/demoSeed/knowledgeLibrary';
-import type { DemoSeedStores } from '../../../../src/cli/demoSeed/seed';
+import type { DemoSeedConnectors, DemoSeedStores } from '../../../../src/cli/demoSeed/seed';
 import { createSqliteDemoSeedStores } from '../../../../src/cli/demoSeed/stores';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
@@ -15,6 +18,18 @@ import { EMBEDDING_DIMENSIONS } from '../../../../src/runtime/memory/embeddingMo
 export const TENANT_ID = 'default';
 export const USER_ID = 'judge@example.com';
 export const MODEL_NAME = 'demo-provider/demo-model';
+/** The mail sidecar endpoint the installer writes into a demo instance's configuration. */
+export const MAIL_MCP_URL = 'http://mail-email:9557/mcp';
+
+/** The connector inputs a seed runs with: the shipped catalog and, unless overridden, the mail endpoint. */
+export function testConnectors(mailUrl: string | undefined = MAIL_MCP_URL): DemoSeedConnectors {
+  return {
+    mailUrl,
+    catalog: McpCatalog.loadShipped(),
+    skillCatalog: SkillCatalog.load(),
+    logger: createLogger({ silent: true }),
+  };
+}
 
 export type TestStores = DemoSeedStores<Transaction<Database>>;
 

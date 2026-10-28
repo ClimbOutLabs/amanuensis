@@ -1,4 +1,7 @@
 import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import { defaultSearchConnector } from '../../../../src/catalog/defaultSearchConnector';
+import { SkillCatalog } from '../../../../src/catalog/SkillCatalog';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
 import { dayInZone, parseDemoDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import {
@@ -13,7 +16,16 @@ import {
 } from '../../../../src/cli/demoSeed/world';
 import { SentinelAuditStore } from '../../../../src/db/sentinelAuditStore';
 import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
-import { createTestWorld, MODEL_NAME, TENANT_ID, USER_ID, type TestStores, type TestWorld } from './testStores';
+import {
+  createTestWorld,
+  MAIL_MCP_URL,
+  MODEL_NAME,
+  TENANT_ID,
+  testConnectors,
+  USER_ID,
+  type TestStores,
+  type TestWorld,
+} from './testStores';
 
 const scope = { tenantId: TENANT_ID, userId: USER_ID };
 const owner = { tenant_id: TENANT_ID, created_by: USER_ID };
@@ -37,7 +49,7 @@ function worldFor(now: Date) {
 }
 
 async function seed(stores: TestStores, now: Date) {
-  return seedDemoWorld({ stores, scope, world: worldFor(now), now });
+  return seedDemoWorld({ stores, scope, world: worldFor(now), now, connectors: testConnectors() });
 }
 
 async function vault(stores: TestStores) {
@@ -153,7 +165,13 @@ describe('demo seed against the real stores', () => {
       },
     };
 
-    const report = await seedDemoWorld({ stores: slow, scope, world: worldFor(DAY_ONE), now: DAY_ONE });
+    const report = await seedDemoWorld({
+      stores: slow,
+      scope,
+      world: worldFor(DAY_ONE),
+      now: DAY_ONE,
+      connectors: testConnectors(),
+    });
 
     expect(report.knowledge.still_indexing).toBe(11);
   });
@@ -214,7 +232,7 @@ describe('demo seed against the real stores', () => {
       modelName: MODEL_NAME,
     });
 
-    const report = await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_ONE });
+    const report = await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_ONE, connectors: testConnectors() });
 
     expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
     const body = await spaceBody(stores, DEMO_TASKS_SPACE_ID);
@@ -269,7 +287,7 @@ describe('demo seed against the real stores', () => {
     const today = parseDemoDay('2026-10-26');
     const rehearsal = buildDemoWorld({ today, timeZone: 'Europe/Lisbon', modelName: MODEL_NAME });
 
-    await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });
+    await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO, connectors: testConnectors() });
 
     expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 28, 10:00');
   });
@@ -596,6 +614,106 @@ describe('demo seed against the real stores', () => {
       expect(again.memory).toEqual({ created: NOTE_COUNT, updated: 0, unchanged: 0, removed: 0 });
       expect(again.knowledge).toMatchObject({ created: 11, unchanged: 0 });
       expect(await vault(stores)).toHaveLength(NOTE_COUNT);
+    });
+  });
+
+  describe('the connectors the brief needs', () => {
+    it('registers the Email connector and adds the search connector as part of the seed', async () => {
+      const report = await seed(stores, DAY_ONE);
+
+      expect(report.connectors).toEqual({ email: 'registered', search: 'added' });
+
+      const email = await stores.mcpServerStore.getServer({ tenant_id: TENANT_ID, name: MAIL_CONNECTOR_NAME });
+      expect(email).toMatchObject({
+        name: MAIL_CONNECTOR_NAME,
+        first_party: true,
+        manifest: { type: 'remote', url: MAIL_MCP_URL },
+      });
+
+      const search = await stores.mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'parallel-web' });
+      expect(search).toMatchObject({
+        name: 'parallel-web',
+        first_party: false,
+        manifest: { type: 'remote', url: 'https://search.parallel.ai/mcp', search_provider: true },
+      });
+    });
+
+    it('keeps both connectors ensured on a re-seed, without adding either twice', async () => {
+      await seed(stores, DAY_ONE);
+      const report = await seed(stores, DAY_TWO);
+
+      expect(report.connectors).toEqual({ email: 'registered', search: 'already_offered' });
+      const servers = await stores.mcpServerStore.listServers({
+        tenant_id: TENANT_ID,
+        names: [MAIL_CONNECTOR_NAME, 'parallel-web'],
+      });
+      expect(servers.map(server => server.name).sort()).toEqual([MAIL_CONNECTOR_NAME, 'parallel-web'].sort());
+    });
+
+    it('leaves email unregistered when the instance has no mail endpoint, and still adds search', async () => {
+      const report = await seedDemoWorld({
+        stores,
+        scope,
+        world: worldFor(DAY_ONE),
+        now: DAY_ONE,
+        connectors: { ...testConnectors(), mailUrl: undefined },
+      });
+
+      expect(report.connectors).toEqual({ email: 'unconfigured', search: 'added' });
+      expect(
+        await stores.mcpServerStore.getServer({ tenant_id: TENANT_ID, name: MAIL_CONNECTOR_NAME }),
+      ).toBeUndefined();
+      expect(await stores.mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'parallel-web' })).toBeDefined();
+    });
+
+    it('keeps a search connector the owner already chose, word for word', async () => {
+      const preset = defaultSearchConnector(testConnectors().catalog);
+      if (preset === undefined) {
+        throw new Error('The shipped catalog has no default search connector');
+      }
+      await stores.mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: preset.name,
+        manifest: { ...preset.manifest, description: 'Kept as the owner left it.' },
+        first_party: false,
+      });
+
+      const report = await seed(stores, DAY_ONE);
+
+      expect(report.connectors.search).toBe('kept_existing');
+      const search = await stores.mcpServerStore.getServer({ tenant_id: TENANT_ID, name: preset.name });
+      expect(search?.manifest).toMatchObject({ description: 'Kept as the owner left it.' });
+    });
+  });
+
+  describe('the skill the demo ships', () => {
+    it('enables the ten-x catalog skill as part of the seed, copied from the catalog entry', async () => {
+      const entry = SkillCatalog.load()
+        .list()
+        .find(skill => skill.name === 'ten-x');
+      if (entry === undefined) {
+        throw new Error('The shipped skill catalog has no ten-x entry');
+      }
+
+      const report = await seed(stores, DAY_ONE);
+
+      expect(report.skills).toEqual({ tenX: 'enabled' });
+      const skills = await stores.skillStore.listSkills({ tenant_id: TENANT_ID, names: undefined });
+      expect(skills).toHaveLength(1);
+      expect(skills[0]).toMatchObject({
+        name: 'ten-x',
+        network_approval: null,
+        manifest: { type: 'git', name: 'ten-x', url: entry.url, ref: entry.ref, description: entry.description },
+      });
+    });
+
+    it('leaves an enabled ten-x skill as it is on a re-seed', async () => {
+      await seed(stores, DAY_ONE);
+      const report = await seed(stores, DAY_TWO);
+
+      expect(report.skills).toEqual({ tenX: 'already_enabled' });
+      const skills = await stores.skillStore.listSkills({ tenant_id: TENANT_ID, names: ['ten-x'] });
+      expect(skills).toHaveLength(1);
     });
   });
 });
