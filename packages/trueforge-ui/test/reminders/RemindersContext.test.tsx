@@ -2,12 +2,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { RemindersMarker } from '@/atoms/lib/sessionReminders.js';
 import { ThreadListRow } from '@/atoms/ThreadListRow.js';
 import { ReminderNotificationPrompt } from '@/reminders/ReminderNotificationPrompt.js';
 import { RemindersProvider, useOptionalReminders } from '@/reminders/RemindersContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import type { AgentUIServer } from '@/server/types.js';
+import type { AgentUIServer, ListResult, ListSessionsParams, Session } from '@/server/types.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+
+import { createMockAgentUIServer } from '../server/mockServer.js';
 
 const POLL_MS = 1_000;
 const REMINDERS_ID = 'reminders-chat';
@@ -176,6 +179,54 @@ describe('Reminders notifications and unread mark', () => {
     renderProvider(server);
     await tick(0);
     expect(screen.getByTestId('unread')).toHaveTextContent('false');
+  });
+
+  it('finds the Reminders chat past the first page without asking for a page the API refuses', async () => {
+    stubNotification('denied');
+    // The sessions API serves at most 25 chats per page and refuses a larger
+    // ask, the way the real API answers a limit past its maximum.
+    const total = 60;
+    const remindersIndex = 40;
+    const remindersEntry: Session & { reminders: RemindersMarker } = {
+      id: REMINDERS_ID,
+      isMutable: false,
+      createdAt: '2026-10-26T12:00:00.000Z',
+      updatedAt: '2026-10-26T12:00:00.000Z',
+      reminders: { latestText: 'Call the dentist', latestAt: '2026-10-26T12:05:00.000Z' },
+    };
+    const sessions: Session[] = Array.from({ length: total }, (_, index) =>
+      index === remindersIndex
+        ? remindersEntry
+        : {
+            id: `chat-${String(index)}`,
+            isMutable: false,
+            createdAt: '2026-10-26T12:00:00.000Z',
+            updatedAt: '2026-10-26T12:00:00.000Z',
+          },
+    );
+    const requests: ListSessionsParams[] = [];
+    const listSessions = (request: ListSessionsParams = {}): Promise<ListResult<Session>> => {
+      requests.push(request);
+      const limit = request.limit ?? sessions.length;
+      if (limit > 25) return Promise.reject(new Error('page size refused'));
+      const start = request.pageToken === undefined ? 0 : Number(request.pageToken);
+      const data = sessions.slice(start, start + limit);
+      const next = start + limit;
+      return Promise.resolve(next < sessions.length ? { data, nextPageToken: String(next) } : { data });
+    };
+    const server = createMockAgentUIServer({
+      getSession: () => Promise.resolve(remindersEntry),
+      listSessions,
+    });
+
+    renderProvider(server);
+    await tick(0);
+
+    expect(screen.getByTestId('session')).toHaveTextContent(REMINDERS_ID);
+    expect(requests.length).toBeGreaterThan(1);
+    for (const request of requests) {
+      expect(request.limit).toBeLessThanOrEqual(25);
+    }
   });
 
   it('draws the unread mark on the chat list row', () => {

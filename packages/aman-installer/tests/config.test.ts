@@ -20,3 +20,21 @@ test('an empty AMANUENSIS_HOME is treated as not set', () => {
     '/home/person/.amanuensis',
   );
 });
+
+test('the doctor inputs default to the shell doctor paths', () => {
+  const config = installerConfig({ env: {}, homeDir: '/home/person' });
+  assert.equal(config.homeDir, '/home/person');
+  assert.equal(config.osReleasePath, '/etc/os-release');
+  assert.equal(config.dockerConfigDir, '/home/person/.docker');
+  assert.equal(config.appService, 'app');
+});
+
+test('the doctor inputs follow their environment settings', () => {
+  const config = installerConfig({
+    env: { DOCKER_CONFIG: '/data/docker', AMAN_OS_RELEASE: '/data/os-release', AMAN_DOCTOR_APP_SERVICE: 'web' },
+    homeDir: '/home/person',
+  });
+  assert.equal(config.osReleasePath, '/data/os-release');
+  assert.equal(config.dockerConfigDir, '/data/docker');
+  assert.equal(config.appService, 'web');
+});

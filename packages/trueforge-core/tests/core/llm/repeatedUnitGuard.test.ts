@@ -18,6 +18,9 @@ function run(pieces: string[]): { shown: string; stopped: boolean } {
 const CLOSING = 'Let me know if there is anything else you need.\n';
 const SENTENCE = 'Let me know if you need anything else.';
 const PLAN = 'Plan A is set. ';
+const LONG_SENTENCE = 'The pantry list now holds pasta, tomatoes, basil, garlic, olive oil and parmesan cheese.';
+const TWELVE_WORDS = 'Your space is ready with the headings and lines you asked for.';
+const ELEVEN_WORDS = 'Your space is ready with the headings and lines you asked.';
 
 describe('RepeatedUnitGuard', () => {
   it('streams text that repeats nothing straight through, piece by piece', () => {
@@ -115,5 +118,38 @@ describe('RepeatedUnitGuard', () => {
   it('does not count a line that is only inline code', () => {
     const text = '`npm test -- --watch in the package folder`.\n'.repeat(4);
     expect(run([text])).toEqual({ shown: text, stopped: false });
+  });
+
+  it('stops before the second copy of a long sentence, keeping only the first', () => {
+    const result = run(['Here is the result.\n', `${LONG_SENTENCE}\n`, `${LONG_SENTENCE}\n`, 'Anything else?\n']);
+    expect(result).toEqual({ shown: `Here is the result.\n${LONG_SENTENCE}\n`, stopped: true });
+  });
+
+  it('holds a second copy of a long sentence that arrives in small pieces, then stops it', () => {
+    const text = `Result follows.\n${LONG_SENTENCE}\n${LONG_SENTENCE}\n`;
+    expect(run(text.split(''))).toEqual({ shown: `Result follows.\n${LONG_SENTENCE}\n`, stopped: true });
+  });
+
+  it('stops a paragraph of long sentences before its second copy', () => {
+    const paragraph =
+      `${LONG_SENTENCE} ` + 'Saturday dinner moved to the garden table because the kitchen gets far too warm.\n';
+    expect(run([paragraph, paragraph, paragraph])).toEqual({ shown: paragraph, stopped: true });
+  });
+
+  it('still shows a short sentence twice and stops only at the third copy', () => {
+    const short = 'The train for Lisbon leaves at nine tonight.';
+    expect(run([`${short} ${short} ${short}`])).toEqual({ shown: `${short} ${short}`, stopped: true });
+  });
+
+  it('treats a sentence of exactly twelve words as long, so its second copy stops the reply', () => {
+    expect(run([`${TWELVE_WORDS}\n`, `${TWELVE_WORDS}\n`])).toEqual({
+      shown: `${TWELVE_WORDS}\n`,
+      stopped: true,
+    });
+  });
+
+  it('treats a sentence of eleven words as short, so it stops only at the third copy', () => {
+    const line = `${ELEVEN_WORDS}\n`;
+    expect(run([line, line, line])).toEqual({ shown: line.repeat(2), stopped: true });
   });
 });

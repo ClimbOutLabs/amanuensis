@@ -17,6 +17,12 @@ runCli(process.argv.slice(2), {
   print: (line: string) => {
     console.log(line);
   },
+  now: () => Math.floor(Date.now() / 1000),
+  homeDir: config.homeDir,
+  stateHome: host.kind === 'windows' ? null : config.stateHome,
+  osReleasePath: config.osReleasePath,
+  dockerConfigDir: config.dockerConfigDir,
+  appService: config.appService,
 }).then(
   exitCode => {
     process.exitCode = exitCode;
