@@ -590,7 +590,6 @@ describe('submitProfileLearning', () => {
             apiKey: 'sk-nebius',
             baseUrl: stub.baseUrl,
             model: 'nvidia/nemotron-3-super-120b-a12b',
-            cheaperModel: undefined,
           },
           logger: makeLogger(),
         });
