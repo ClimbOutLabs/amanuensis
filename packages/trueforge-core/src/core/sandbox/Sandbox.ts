@@ -386,6 +386,18 @@ const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 const GIT_REFS_COMMAND =
   "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+/** The same refs read without --include-root-refs, which only git 2.48 and newer knows. */
+const GIT_REFS_COMMAND_WITHOUT_ROOT_REFS =
+  "git for-each-ref --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+
+/**
+ * True when a failed refs read failed only because git does not know the
+ * --include-root-refs flag: git names the flag it rejected as an unknown option.
+ * Any other wording means the read failed for a real reason and must stay failed.
+ */
+function refsReadRejectedRootRefsFlag(failureOutput: string): boolean {
+  return failureOutput.includes('unknown option') && failureOutput.includes('include-root-refs');
+}
 /** How much of a failed capture read's output the failure log line keeps. */
 const MAX_CAPTURE_FAILURE_OUTPUT_CHARS = 500;
 
@@ -4089,14 +4101,31 @@ export class Sandbox extends LocalToolMCP {
       label: string;
       command: string;
       commandCwd: string | undefined;
+      withoutRootRefsCommand?: string | undefined;
     }): Promise<string | undefined> => {
-      const result = await this.hostExec({
+      let result = await this.hostExec({
         sandboxId,
         command: input.command,
         cwd: input.commandCwd,
         env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
+      if (
+        !successfulExec(result) &&
+        input.withoutRootRefsCommand !== undefined &&
+        refsReadRejectedRootRefsFlag(execResultOutputText(result))
+      ) {
+        // The git here predates the --include-root-refs flag, so the same read runs
+        // once more without it. The capture records HEAD and the branch separately,
+        // so the retried read still covers every ref this git can name.
+        result = await this.hostExec({
+          sandboxId,
+          command: input.withoutRootRefsCommand,
+          cwd: input.commandCwd,
+          env,
+          ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
+        });
+      }
       const failureOutput = result.success ? result.response.result : result.error;
       const failureExitCode = result.success ? result.response.exitCode : null;
       if (successfulExec(result)) {
@@ -4140,7 +4169,12 @@ export class Sandbox extends LocalToolMCP {
       const head = (
         await read({ label: 'git rev-parse HEAD', command: 'git rev-parse HEAD', commandCwd: workspaceRoot })
       )?.trim();
-      const refs = await read({ label: 'git for-each-ref', command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
+      const refs = await read({
+        label: 'git for-each-ref',
+        command: GIT_REFS_COMMAND,
+        commandCwd: workspaceRoot,
+        withoutRootRefsCommand: GIT_REFS_COMMAND_WITHOUT_ROOT_REFS,
+      });
       const taggedTrackedPaths = await read({
         label: 'git ls-files -v -z',
         command: 'git ls-files -v -z',
