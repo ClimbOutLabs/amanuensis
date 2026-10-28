@@ -1475,6 +1475,7 @@ export async function classifyUnstampedToolCall(input: {
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
+    path_resolution: info.path_resolution ?? info.document_scope?.path_resolution ?? undefined,
     action: {
       tool_name: info.original_tool_name,
       canonical_params: effectiveParams,
@@ -1493,6 +1494,7 @@ export async function classifyUnstampedToolCall(input: {
         open_world_hint: info.open_world_hint,
       },
       maps_hosts: info.maps_hosts,
+      document_scope: info.document_scope,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };

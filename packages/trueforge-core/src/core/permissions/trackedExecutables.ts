@@ -387,6 +387,37 @@ export function isInsideWorkspace(input: {
   return identity === root || identity.startsWith(`${root}${path.sep}`);
 }
 
+/**
+ * True when a path lies under a directory, comparing whole path components. A relative directory
+ * matches the same relative form (a provider whose staged paths are cwd-relative); an absolute
+ * directory is compared against the path's canonical identity when it has one, and against its
+ * normalized text when it does not, so a path in a remote sandbox still matches.
+ */
+export function isPathUnderDir(input: {
+  p: string;
+  dir: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): boolean {
+  const dir = input.dir.replace(/\\/g, '/').replace(/\/+$/g, '');
+  const p = input.p.replace(/\\/g, '/');
+  if (dir === '') {
+    return false;
+  }
+  if (!path.posix.isAbsolute(dir)) {
+    return p === dir || p.startsWith(`${dir}/`);
+  }
+  const identity =
+    canonicalFileIdentity({ p: input.p, cwd: input.cwd, resolution: input.resolution }) ??
+    (path.posix.isAbsolute(p) ? lexicalPath({ p, cwd: '/' }) : null);
+  const root =
+    canonicalFileIdentity({ p: dir, cwd: '/', resolution: input.resolution }) ?? lexicalPath({ p: dir, cwd: '/' });
+  if (identity === null || root === null) {
+    return false;
+  }
+  return isUnderRoot({ identity: identity.replace(/\\/g, '/'), root: root.replace(/\\/g, '/'), separator: '/' });
+}
+
 const INTERPRETERS = new Set([
   'sh',
   'bash',

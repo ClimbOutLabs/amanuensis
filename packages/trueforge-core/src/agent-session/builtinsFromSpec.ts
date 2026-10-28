@@ -78,7 +78,7 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
   ];
 
   if (!isChild && sandboxAvailable && sandbox !== undefined) {
-    capabilities.push(documentCapability({ sandbox, tracing }));
+    capabilities.push(documentCapability({ sandbox, tracing, boundRepository }));
   }
 
   if (!isChild && compactionContext !== undefined) {

@@ -10,8 +10,8 @@ export function isSupportedDocumentExtension(filename: string): boolean {
   return extension === '.pdf' || OCR_IMAGE_EXTENSIONS.has(extension);
 }
 
-/** Single source of truth for the unsupported-type issue text used within this module. */
-function unsupportedDocumentTypeIssue(filename: string): string {
+/** Single source of truth for the unsupported-type issue text. */
+export function unsupportedDocumentTypeIssue(filename: string): string {
   const extension = extname(filename).toLowerCase();
   // F2: office documents fail loudly with a way forward, not a dead end.
   if (OFFICE_DOCUMENT_EXTENSIONS.has(extension)) {

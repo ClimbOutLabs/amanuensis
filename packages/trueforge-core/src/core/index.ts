@@ -58,10 +58,9 @@ export type {
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
 export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
-export { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
+export { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
-  DOCUMENTS_SERVER_ID,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
   documentCapability,
 } from './capabilities/builtins/DocumentTools';

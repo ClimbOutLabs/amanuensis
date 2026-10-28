@@ -92,6 +92,20 @@ export const MapsHostsSchema = z
   })
   .describe('Configured maps upstream URLs for the approval card destination.');
 
+export const DocumentScopeSchema = z
+  .object({
+    staged_uploads_dir: z
+      .string()
+      .nullable()
+      .describe('Directory the sandbox stages uploaded files in, or null when it is not known.'),
+    workspace_cwd: z.string().nullable().describe('Bound project folder for this chat, or null when none is bound.'),
+    path_resolution: z
+      .enum(['host', 'remote'])
+      .nullable()
+      .describe("How this call's file paths are read: on the server's filesystem, or inside a remote sandbox."),
+  })
+  .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -151,6 +165,9 @@ export const InternalToolCallInfoSchema = z.object({
   ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
+  ),
+  document_scope: DocumentScopeSchema.optional().describe(
+    'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
@@ -348,6 +365,7 @@ export type ThinkingBlock = z.infer<typeof ThinkingBlockSchema>;
 export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
+export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;
