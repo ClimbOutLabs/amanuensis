@@ -180,6 +180,22 @@ function makeToolSet(store: SpaceToolStore) {
   return toolSet;
 }
 
+async function fingerprintOf(
+  toolSet: ReturnType<typeof makeToolSet>,
+  input: { spaceName: string; anchor: string },
+): Promise<string> {
+  const response = await toolSet.callTool({
+    name: GET_SPACE_TOOL_NAME,
+    arguments: { space_name: input.spaceName },
+  });
+  const parsed: { blocks?: { anchor: string; fingerprint: string }[] } = JSON.parse(resultText(response));
+  const block = (parsed.blocks ?? []).find(candidate => candidate.anchor === input.anchor);
+  if (block === undefined) {
+    throw new Error(`expected block ${input.anchor} in the get_space result for ${input.spaceName}`);
+  }
+  return block.fingerprint;
+}
+
 async function createDogBreeds(toolSet: ReturnType<typeof makeToolSet>): Promise<void> {
   const created = await toolSet.callTool({
     name: CREATE_SPACE_TOOL_NAME,
@@ -194,7 +210,15 @@ async function renameDogBreeds(toolSet: ReturnType<typeof makeToolSet>): Promise
     arguments: {
       space_name: 'Dog breeds',
       new_title: 'Dog breeds, ranked',
-      edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds, ranked' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(toolSet, { spaceName: 'Dog breeds', anchor: 'b1' }),
+          new_content: '# Dog breeds, ranked',
+        },
+      ],
     },
   });
   expect(isErrorResponse(renamed)).toBe(false);
@@ -253,7 +277,15 @@ describe('revert_space and the name the restored revision carried', () => {
       name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Dog breeds',
-        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds\nUpdated' }],
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'block',
+            anchor: 'b1',
+            fingerprint: await fingerprintOf(toolSet, { spaceName: 'Dog breeds', anchor: 'b1' }),
+            new_content: '# Dog breeds\nUpdated',
+          },
+        ],
       },
     });
     expect(isErrorResponse(edited)).toBe(false);
