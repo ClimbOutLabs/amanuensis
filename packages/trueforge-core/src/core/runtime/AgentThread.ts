@@ -2287,7 +2287,7 @@ export class AgentThread {
 
   private async auditHeld(input: {
     info: InternalToolCallInfo;
-    outcome: 'logged' | 'approved' | 'denied';
+    outcome: 'logged' | 'approved' | 'denied' | 'auto_denied';
     note: string;
   }): Promise<void> {
     if (this.sentinel === undefined) {
@@ -2302,6 +2302,19 @@ export class AgentThread {
       },
       ...input,
     });
+  }
+
+  /**
+   * Records that an approved send stopped while its addresses were being prepared, so the stopped
+   * attempt shows in the activity log. The throw that follows each call is unchanged, so a failed
+   * write is dropped rather than replacing the plain message the person is shown.
+   */
+  private async auditMailPrepareFailure(input: { info: InternalToolCallInfo; note: string }): Promise<void> {
+    try {
+      await this.auditHeld({ info: input.info, outcome: 'auto_denied', note: input.note });
+    } catch {
+      // The activity log being unavailable never changes what the person is told.
+    }
   }
 
   /**
@@ -2333,12 +2346,24 @@ export class AgentThread {
       if (added.length > 0) {
         const result = await sentinel.services.mail_add_recipients(ctx, added);
         if (result === 'refused') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The address could not be added to the Email list',
+          });
           throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
         }
         if (result === 'not_loaded') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The Email list did not load in time',
+          });
           throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
         }
       } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        await this.auditMailPrepareFailure({
+          info: call.tool_info,
+          note: 'The Email list did not load in time',
+        });
         throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
       }
     }

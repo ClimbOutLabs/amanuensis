@@ -972,6 +972,21 @@ export function isReadOnlyCall(
   return isSearchProviderRead(info);
 }
 
+/** The ways the Email sidecar words its refusal when a recipient is not on the Email list. */
+const MAIL_RECIPIENT_REFUSAL_WORDS = ['recipient policy denied', 'not in allowlist'];
+
+/** Whether a finished call's result is the Email sidecar refusing a recipient on policy grounds. */
+function isMailRecipientPolicyDenial(response: CallToolResponse): boolean {
+  if (!isCallToolResponseResult(response) || response.result.isError !== true) {
+    return false;
+  }
+  const said = response.result.content
+    .map(block => (block.type === 'text' ? block.text : ''))
+    .join('\n')
+    .toLowerCase();
+  return MAIL_RECIPIENT_REFUSAL_WORDS.some(words => said.includes(words));
+}
+
 function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
   return (
     info.search_provider_call === true &&
@@ -1603,6 +1618,26 @@ export async function executeToolCalls({
       sentinel,
     });
     if (sentinelVerificationError !== undefined) {
+      // The blocked result below is unchanged; this only leaves a row in the activity log, so a
+      // call stopped at the last check is visible beside the actions that ran.
+      if (sentinel !== undefined && sentinel.services.audit !== null) {
+        try {
+          await sentinel.services.audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: toolCall.tool_info.tier ?? 3,
+            tool_name: toolCall.tool_info.original_tool_name,
+            description: 'This call no longer matched the approval it was given, so it was not run.',
+            outcome: 'auto_denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a stopped call in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       return {
         toolCall,
         toolInfo,
@@ -2216,7 +2251,7 @@ export async function executeToolCalls({
   // relaxed Tier 2 calls record that they ran.
   if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
     const audit = sentinel.services.audit;
-    for (const { toolCall, disposition, admissionProvenance: admitted } of results) {
+    for (const { toolCall, disposition, response, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
@@ -2250,6 +2285,21 @@ export async function executeToolCalls({
         outcome,
         auto_deny_reason: outcome === 'auto_denied' ? APPROVAL_EXPIRED_REASON_CODE : null,
       });
+      // An approved send can still be refused by the mail service itself when a recipient is not
+      // on its list. The row above records the person's decision; this one records that the send
+      // was then refused, so the log does not read as if the message went out.
+      if (outcome === 'approved' && info.mail_send === true && isMailRecipientPolicyDenial(response)) {
+        await audit.record({
+          tenant_id: sentinel.identity.tenant_id,
+          created_by: sentinel.identity.created_by,
+          conversation_id: sentinel.identity.conversation_id,
+          tier: info.tier,
+          tool_name: info.original_tool_name,
+          description: 'The mail service refused the recipient after this send was approved, so the message was not sent.',
+          outcome: 'denied',
+          auto_deny_reason: null,
+        });
+      }
     }
   }
   for (const {
