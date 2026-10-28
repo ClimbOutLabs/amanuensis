@@ -70,6 +70,7 @@ import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
+import { isTableSeparatorRow, tableRowKeys } from './spaceTableRows';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
@@ -539,6 +540,54 @@ class SpaceShrinkRefusedError extends Error {
     this.space_id = input.space_id;
     this.current_length = input.current_length;
     this.new_length = input.new_length;
+  }
+}
+
+/**
+ * Thrown when a block replacement would drop a table's header or saved rows. Fail-closed policy,
+ * not a delta failure: the model's copy is current, the new content is the problem.
+ */
+class SpaceTableRowsRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpaceTableRowsRefusedError';
+  }
+}
+
+function describeRowNames(keys: readonly string[]): string {
+  const shown = keys.slice(0, 10).join(', ');
+  return keys.length > 10 ? `${shown}, and ${String(keys.length - 10)} more` : shown;
+}
+
+/** Refuses a block replacement of table content that loses the header or saved rows. */
+function checkTableBlockReplacement(input: {
+  anchor: string;
+  old_content: string;
+  new_content: string;
+  confirm_shrink: boolean | undefined;
+}): void {
+  const { anchor, old_content, new_content, confirm_shrink } = input;
+  const oldKeys = tableRowKeys(old_content);
+  const newKeys = tableRowKeys(new_content);
+  if (oldKeys.length === 0 || newKeys.length === 0) {
+    return;
+  }
+  const hasSeparator = (text: string): boolean => text.split('\n').some(isTableSeparatorRow);
+  if (hasSeparator(old_content) && !hasSeparator(new_content)) {
+    throw new SpaceTableRowsRefusedError(
+      `Block ${anchor} holds the table's header and its first ${String(oldKeys.length)} rows. ` +
+        'The new content has rows but no header, so it would replace them and break the table. ' +
+        'To add rows, use an append entry. To change these rows, send the whole block with its header.',
+    );
+  }
+  const kept = new Set(newKeys);
+  const missing = oldKeys.filter(key => !kept.has(key));
+  if (missing.length > 0 && confirm_shrink !== true) {
+    throw new SpaceTableRowsRefusedError(
+      `This change to block ${anchor} would remove ${String(missing.length)} rows that are saved now: ` +
+        `${describeRowNames(missing)}. To add rows, use an append entry. ` +
+        'If you really mean to remove these rows, send the call again with confirm_shrink: true.',
+    );
   }
 }
 
@@ -1099,11 +1148,16 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
  * before anything is persisted, and the resulting length is
  * checked arithmetically before the new body is built, mirroring the other edit paths.
  */
-function applyEditEntries(input: { space_id: string; body: string; edits: readonly SpaceEditEntry[] }): {
+function applyEditEntries(input: {
+  space_id: string;
+  body: string;
+  edits: readonly SpaceEditEntry[];
+  confirm_shrink: boolean | undefined;
+}): {
   body: string;
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
 } {
-  const { space_id, body, edits } = input;
+  const { space_id, body, edits, confirm_shrink } = input;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
   const byAnchor = new Map<string, SpaceSegment[]>();
@@ -1165,6 +1219,12 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
         deletions.add(target);
         block_results.push({ anchor, new_length: 0, deleted: true });
       } else {
+        checkTableBlockReplacement({
+          anchor,
+          old_content: body.slice(target.coreStart, target.coreEnd),
+          new_content: entry.new_content,
+          confirm_shrink,
+        });
         replacements.set(target, entry.new_content);
         const leadLength = target.marked ? markedLeadSeparator(body, target).length : 0;
         block_results.push({ anchor, new_length: leadLength + entry.new_content.length, deleted: false });
@@ -1518,7 +1578,12 @@ class SpaceTool extends LocalToolMCP {
     let body: string;
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
     try {
-      const applied = applyEditEntries({ space_id: input.space_id, body: current.body, edits: input.edits });
+      const applied = applyEditEntries({
+        space_id: input.space_id,
+        body: current.body,
+        edits: input.edits,
+        confirm_shrink: input.confirm_shrink,
+      });
       body = applied.body;
       block_results = applied.block_results;
     } catch (error) {
@@ -1882,7 +1947,7 @@ class SpaceTool extends LocalToolMCP {
       if (error instanceof SpaceNameLookupError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
-      if (error instanceof SpaceShrinkRefusedError) {
+      if (error instanceof SpaceShrinkRefusedError || error instanceof SpaceTableRowsRefusedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyTooLongError) {

@@ -907,3 +907,79 @@ describe('marked bodies keep their named anchors', () => {
     );
   });
 });
+
+describe('a block replacement may not drop saved table rows', () => {
+  const header = ['# Breeds', '', '| Rank | Breed |', '| --- | --- |'];
+  const breeds = ['Papillon', 'Rottweiler', 'Beagle', 'Poodle'];
+  const rows = breeds.map((breed, index) => `| ${String(index + 1)} | ${breed} |`);
+
+  async function seed() {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: [...header, ...rows].join('\n') });
+    const blocks = (await listBlocks(callTool, 'Breeds')).blocks ?? [];
+    const table = blocks[1];
+    if (table === undefined) {
+      throw new Error('expected a table block');
+    }
+    return { callTool, table, before: await readBody(callTool, 'Breeds') };
+  }
+
+  const replace = (
+    callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+    table: SpaceWireBlock,
+    new_content: string,
+    extra: Record<string, unknown> = {},
+  ) =>
+    callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: table.anchor, fingerprint: table.fingerprint, new_content }],
+      ...extra,
+    });
+
+  it('refuses rows without a header and leaves the body unchanged', async () => {
+    const { callTool, table, before } = await seed();
+    const refused = await replace(callTool, table, '| 5 | Collie |');
+    expect(isErrorResponse(refused)).toBe(true);
+    expect(resultJson(refused).error).toContain('no header');
+    expect(resultJson(refused).error).toContain('append entry');
+    expect(await readBody(callTool, 'Breeds')).toBe(before);
+  });
+
+  it('refuses a subset of the saved rows, naming the missing ones', async () => {
+    const { callTool, table, before } = await seed();
+    const refused = await replace(callTool, table, [...header.slice(2), rows[0]].join('\n'));
+    expect(isErrorResponse(refused)).toBe(true);
+    expect(resultJson(refused).error).toContain('would remove 3 rows');
+    expect(resultJson(refused).error).toContain('rottweiler, beagle, poodle');
+    expect(await readBody(callTool, 'Breeds')).toBe(before);
+  });
+
+  it('applies the same subset with confirm_shrink', async () => {
+    const { callTool, table } = await seed();
+    const applied = await replace(callTool, table, [...header.slice(2), rows[0]].join('\n'), { confirm_shrink: true });
+    expect(isErrorResponse(applied)).toBe(false);
+    expect(await readBody(callTool, 'Breeds')).not.toContain('Rottweiler');
+  });
+
+  it('applies a replacement that keeps every row and changes cells', async () => {
+    const { callTool, table } = await seed();
+    const changed = [...header.slice(2), ...rows.map(row => `${row} good |`)].join('\n');
+    const applied = await replace(callTool, table, changed);
+    expect(isErrorResponse(applied)).toBe(false);
+    expect(await readBody(callTool, 'Breeds')).toContain('| 2 | Rottweiler | good |');
+  });
+
+  it('leaves a paragraph replacement alone', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: ['# Breeds', '', 'Old note.'].join('\n') });
+    const blocks = (await listBlocks(callTool, 'Breeds')).blocks ?? [];
+    const note = blocks[1];
+    if (note === undefined) {
+      throw new Error('expected a paragraph block');
+    }
+    const applied = await replace(callTool, note, 'New note.');
+    expect(isErrorResponse(applied)).toBe(false);
+    expect(await readBody(callTool, 'Breeds')).toContain('New note.');
+  });
+});
