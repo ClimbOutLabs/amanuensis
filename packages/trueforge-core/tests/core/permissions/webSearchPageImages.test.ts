@@ -3,8 +3,19 @@
  * file no search result named. Only the page's own pictures count: a link the page merely points
  * at, or a picture on a page the chat never opened, stays untrusted.
  */
-import { isTrustedLink, recordPageImageUrls, recordSearchResults } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, pageImageUrls } from '../../../src/core/permissions/webSearch';
+import {
+  emptyChatProvenance,
+  isTrustedLink,
+  isTrustedPicture,
+  recordPageImageUrls,
+  recordSearchResults,
+  steeredDestinations,
+} from '../../../src/core/permissions/provenance';
+import {
+  createWebSearchTurnState,
+  pageImageUrls,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 const COMMONS_PAGE = 'https://commons.wikimedia.org/wiki/File:Red_Fox.jpg';
 const FOX_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
@@ -34,12 +45,12 @@ describe('recordPageImageUrls', () => {
       provenance: state.provenance,
       texts: [JSON.stringify({ results: [{ title: 'Red Fox', url: COMMONS_PAGE }] })],
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
+    expect(isTrustedPicture({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
     recordPageImageUrls({
       provenance: state.provenance,
       urls: pageImageUrls(`# File:Red Fox.jpg\n![Red fox](${FOX_IMAGE})\n<img src="${FOX_IMAGE}" alt="Red fox">`),
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(true);
+    expect(isTrustedPicture({ provenance: state.provenance, url: FOX_IMAGE })).toBe(true);
   });
 
   it('does not count a picture that only appears in a search excerpt', () => {
@@ -48,6 +59,51 @@ describe('recordPageImageUrls', () => {
       provenance: state.provenance,
       texts: [JSON.stringify({ results: [{ title: 'Foxes', url: OTHER_PAGE, excerpt: FOX_IMAGE }] })],
     });
-    expect(isTrustedLink({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
+    expect(isTrustedPicture({ provenance: state.provenance, url: FOX_IMAGE })).toBe(false);
+  });
+});
+
+describe('a page picture is a picture, not a trusted link', () => {
+  const PLANTED = 'https://collector.example/hook?token=abc';
+
+  function openedPage() {
+    const state = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state,
+      tool_name: 'web_fetch',
+      argument_values: [COMMONS_PAGE],
+      texts: [`# A page\n![x](${PLANTED})\n<img src="${FOX_IMAGE}" alt="Fox">`],
+    });
+    return state.provenance;
+  }
+
+  it('accepts the exact URL as a picture and refuses it as a link', () => {
+    const provenance = openedPage();
+    expect(isTrustedPicture({ provenance, url: PLANTED })).toBe(true);
+    expect(isTrustedPicture({ provenance, url: FOX_IMAGE })).toBe(true);
+    expect(isTrustedLink({ provenance, url: PLANTED })).toBe(false);
+    expect(isTrustedLink({ provenance, url: FOX_IMAGE })).toBe(false);
+  });
+
+  it('does not accept another path on the same host as a picture', () => {
+    expect(isTrustedPicture({ provenance: openedPage(), url: 'https://collector.example/other.png' })).toBe(false);
+  });
+
+  it('still flags the URL and its host for a consequential call', () => {
+    const provenance = openedPage();
+    const flagged = (value: string) =>
+      steeredDestinations({ provenance, addresses: [], values: [value], reply_sender: null }).map(found => found.value);
+    expect(flagged(PLANTED)).toEqual([PLANTED]);
+    expect(flagged('https://collector.example/other')).toEqual(['https://collector.example/other']);
+  });
+
+  it('keeps a search result usable as both a link and a picture', () => {
+    const provenance = emptyChatProvenance();
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ title: 'Fox', url: FOX_IMAGE }] })],
+    });
+    expect(isTrustedLink({ provenance, url: FOX_IMAGE })).toBe(true);
+    expect(isTrustedPicture({ provenance, url: FOX_IMAGE })).toBe(true);
   });
 });
