@@ -70,6 +70,7 @@ import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
+import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
@@ -601,6 +602,8 @@ interface WriteOutcome {
    * a re-read.
    */
   blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+  /** Set when an over-size write saved only its leading lines; says where to continue. */
+  partial?: WritePrefix & { continue_after: { anchor: string; fingerprint: string } | null };
 }
 
 /**
@@ -620,8 +623,16 @@ function spaceLink(space_id: string): string {
  */
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
   const { name, revision } = result.record;
+  const lead = `${outcome.action} space "${name}" (revision ${String(revision)})`;
+  const { partial } = outcome;
+  const summary =
+    partial === undefined
+      ? `${lead}.`
+      : outcome.action === 'Created'
+        ? `${lead} with the first ${String(partial.saved_lines)} lines of the content. One write holds about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters, so the ${String(partial.unsaved_lines)} lines from "${partial.unsaved_from}" on were not saved. Add them with an append entry, starting at that line. Do not resend the saved lines.`
+        : `${lead} with the first ${String(partial.saved_lines)} lines of the new content; the ${String(partial.unsaved_lines)} lines from "${partial.unsaved_from}" on were not saved. Append them next. Do not resend the saved lines.`;
   return JSON.stringify({
-    summary: `${outcome.action} space "${name}" (revision ${String(revision)}).`,
+    summary,
     space: {
       name,
       link: spaceLink(result.record.id),
@@ -636,6 +647,14 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
     aggregate_revision: result.aggregate_revision,
     ...(outcome.block_results === undefined ? {} : { block_results: outcome.block_results }),
     ...(outcome.blocks === undefined ? {} : { blocks: outcome.blocks }),
+    ...(partial === undefined
+      ? {}
+      : {
+          saved_lines: partial.saved_lines,
+          unsaved_lines: partial.unsaved_lines,
+          unsaved_from: partial.unsaved_from,
+          continue_after: partial.continue_after,
+        }),
   });
 }
 
@@ -1258,6 +1277,40 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
   return { body: parts.join(''), block_results };
 }
 
+/** A block this short is a placeholder, so replacing it loses nothing worth keeping. */
+const PLACEHOLDER_BLOCK_MAX_LENGTH = 200;
+
+/**
+ * The leading lines of an over-size lone entry that can be saved, or null when the call
+ * must be refused whole: html, a block entry over real content, or no useful prefix.
+ */
+function salvageableEditContent(input: {
+  entry: SpaceEditEntry;
+  current: SpaceRecord;
+  format: SpaceRecord['format'];
+}): WritePrefix | null {
+  const { entry, current, format } = input;
+  if (format !== 'markdown') {
+    return null;
+  }
+  if (entry.type === 'block') {
+    const target = segmentSpaceBody(current.body).segments.find(segment => segment.anchor === entry.anchor.trim());
+    const isPlaceholder = target !== undefined && target.coreEnd - target.coreStart <= PLACEHOLDER_BLOCK_MAX_LENGTH;
+    if (!isPlaceholder) {
+      return null;
+    }
+  }
+  return prefixWithinCap({ content: entry.new_content, cap: SPACE_WRITE_GUIDANCE_MAX_LENGTH });
+}
+
+function lastBlockRef(blocks: readonly { anchor: string; fingerprint: string }[]): {
+  anchor: string;
+  fingerprint: string;
+} | null {
+  const last = blocks[blocks.length - 1];
+  return last === undefined ? null : { anchor: last.anchor, fingerprint: last.fingerprint };
+}
+
 /**
  * The block outline of one body at one revision: every block's anchor, fingerprint,
  * and a preview of its first line, in order, plus the preamble of a marked body. list_blocks returns
@@ -1443,12 +1496,22 @@ class SpaceTool extends LocalToolMCP {
       format: input.format,
       web_search: this.options.webSearch,
     });
+    // Markdown only: a cut html page would be left with unclosed tags.
+    let body = input.body;
+    let cut: WritePrefix | null = null;
     if (input.body.length > SPACE_WRITE_MAX_LENGTH) {
-      throw new SpaceWriteTooLongError({
-        tool: CREATE_SPACE_TOOL_NAME,
-        space_id: null,
-        new_length: input.body.length,
-      });
+      cut =
+        input.format === 'markdown'
+          ? prefixWithinCap({ content: input.body, cap: SPACE_WRITE_GUIDANCE_MAX_LENGTH })
+          : null;
+      if (cut === null) {
+        throw new SpaceWriteTooLongError({
+          tool: CREATE_SPACE_TOOL_NAME,
+          space_id: null,
+          new_length: input.body.length,
+        });
+      }
+      body = cut.kept;
     }
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
@@ -1462,11 +1525,18 @@ class SpaceTool extends LocalToolMCP {
       name: input.name,
       purpose: input.purpose,
       status: input.status,
-      body: input.body,
+      body,
       format: input.format,
       expected_aggregate_revision,
     });
-    return { mutation, action: 'Created' };
+    // The outline lets the next edit chain from real anchors and fingerprints.
+    const blocks = blockOutline(mutation.record.body).blocks;
+    return {
+      mutation,
+      action: 'Created',
+      blocks,
+      ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks) } }),
+    };
   }
 
   /**
@@ -1479,12 +1549,17 @@ class SpaceTool extends LocalToolMCP {
     const input = { ...request, space_id: await this.resolveSpaceId(request.space_name) };
     // The write cap counts only new content: every entry's new_content, and nothing else.
     const new_content_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
-    if (new_content_length > SPACE_WRITE_MAX_LENGTH) {
-      throw new SpaceWriteTooLongError({
+    // Only a single entry can be cut to a prefix; anything else is refused whole.
+    const lone = input.edits.length === 1 ? input.edits[0] : undefined;
+    const over_cap = new_content_length > SPACE_WRITE_MAX_LENGTH;
+    const refuseTooLong = (): SpaceWriteTooLongError =>
+      new SpaceWriteTooLongError({
         tool: EDIT_SPACE_TOOL_NAME,
         space_id: input.space_id,
         new_length: new_content_length,
       });
+    if (over_cap && lone === undefined) {
+      throw refuseTooLong();
     }
     // Refuse a locked delta before the expensive reads: the burn loop this guards against
     // would otherwise keep paying an aggregate-revision resolve plus a full-body read per
@@ -1515,6 +1590,13 @@ class SpaceTool extends LocalToolMCP {
         next_step: 'Pick a different new_title, or leave the name unchanged.',
       });
     }
+    let cut: WritePrefix | null = null;
+    if (over_cap && lone !== undefined) {
+      cut = salvageableEditContent({ entry: lone, current, format: input.format ?? current.format });
+      if (cut === null) {
+        throw refuseTooLong();
+      }
+    }
     let body: string;
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
     try {
@@ -1533,6 +1615,16 @@ class SpaceTool extends LocalToolMCP {
       format: input.format ?? current.format,
       web_search: this.options.webSearch,
     });
+    if (cut !== null && lone !== undefined) {
+      // The links were checked on the full content above; now save only the part that fits.
+      const salvaged = applyEditEntries({
+        space_id: input.space_id,
+        body: current.body,
+        edits: [{ ...lone, new_content: cut.kept }],
+      });
+      body = salvaged.body;
+      block_results = salvaged.block_results;
+    }
     this.checkShrink(input.space_id, current, body, input.confirm_shrink, EDIT_SPACE_TOOL_NAME);
     if (body.length === 0) {
       throw new SpaceBodyEmptyError({ space_id: input.space_id });
@@ -1557,6 +1649,9 @@ class SpaceTool extends LocalToolMCP {
     // The fresh outline of the new body, at the new revision: the next edit chains
     // from these anchors instead of paying a re-read first.
     outcome.blocks = blockOutline(mutation.record.body).blocks;
+    if (cut !== null) {
+      outcome.partial = { ...cut, continue_after: lastBlockRef(outcome.blocks) };
+    }
     // Reset only after the durable write succeeds. Resetting earlier (e.g. right after the
     // local delta application) would clear the counter even when shrink validation or the
     // store write then fails — unlocking a loop that never actually converged. A delta

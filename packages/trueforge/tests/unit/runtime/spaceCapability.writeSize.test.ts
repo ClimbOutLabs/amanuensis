@@ -194,6 +194,10 @@ interface SpaceWireResult {
   blocks?: { anchor: string; fingerprint: string }[];
   error?: string;
   error_code?: string;
+  summary?: string;
+  unsaved_lines?: number;
+  unsaved_from?: string;
+  continue_after?: { anchor: string; fingerprint: string } | null;
 }
 
 function resultText(response: CallToolResponse): string {
@@ -379,6 +383,135 @@ describe('the space write size cap', () => {
 
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
+  });
+
+  describe('saving what fits', () => {
+    const createInput = (body: string, format: 'markdown' | 'html' = 'markdown') => ({
+      name: 'Dog breeds',
+      purpose: PURPOSE,
+      status: 'active',
+      body,
+      format,
+    });
+
+    it('saves the leading rows of a 60-row create and says where to continue', async () => {
+      const store = new InMemorySpaceStore();
+      const body = tablePart(1, 60);
+      const response = await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body));
+      expect(isErrorResponse(response)).toBe(false);
+      const parsed = resultJson(response);
+      const saved = parsed.space?.body ?? '';
+      expect(saved.length).toBeLessThanOrEqual(3_600);
+      expect(body.startsWith(saved)).toBe(true);
+      const savedRows = saved.split('\n').filter(line => /^\| Breed \d/.test(line)).length;
+      expect(savedRows).toBeGreaterThan(10);
+      expect(savedRows).toBeLessThan(60);
+      const next = String(savedRows + 1).padStart(2, '0');
+      expect(parsed.unsaved_from).toBe(
+        body
+          .split('\n')
+          .find(line => line.startsWith(`| Breed ${next} `))
+          ?.slice(0, 80),
+      );
+      expect(parsed.unsaved_lines).toBe(60 - savedRows);
+      expect(parsed.summary).toContain('with the first');
+      expect(parsed.summary).toContain('were not saved');
+      expect(parsed.summary).toContain('Do not resend the saved lines.');
+      expect(parsed.continue_after?.anchor).toBe(parsed.blocks?.[parsed.blocks.length - 1]?.anchor);
+    });
+
+    it('returns the block outline from a plain create', async () => {
+      const store = new InMemorySpaceStore();
+      const response = await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(tablePart(1, 5)));
+      const parsed = resultJson(response);
+      expect(parsed.blocks?.length).toBe(2);
+      expect(parsed.blocks?.[0]?.fingerprint).toMatch(/^[0-9a-f]{8}$/);
+      expect(parsed.unsaved_from).toBeUndefined();
+    });
+
+    it('saves a prefix of an over-size single insert', async () => {
+      const store = new InMemorySpaceStore();
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(tablePart(1, 5)));
+      const last = await lastBlockOf((name, args) => callTool(store, name, args), 'Dog breeds');
+      const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        expected_revision: 1,
+        edits: [{ type: 'insert', after: last.anchor, fingerprint: last.fingerprint, new_content: rowRange(6, 60) }],
+      });
+      expect(isErrorResponse(response)).toBe(false);
+      const parsed = resultJson(response);
+      expect(parsed.summary).toContain('were not saved');
+      expect(parsed.unsaved_lines).toBeGreaterThan(0);
+      const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' });
+      const body = resultJson(read).space?.body ?? '';
+      expect(body.startsWith(tablePart(1, 5))).toBe(true);
+      expect(body).not.toContain('Breed 60');
+      expect(body.split('\n').filter(line => /^\| Breed \d/.test(line)).length).toBe(60 - (parsed.unsaved_lines ?? 0));
+    });
+
+    it('saves a prefix into a placeholder block but not over real content', async () => {
+      const store = new InMemorySpaceStore();
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput('# Title\n\nplaceholder'));
+      const blocks =
+        resultJson(await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Dog breeds' })).blocks ?? [];
+      const placeholder = blocks[1];
+      const saved = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'block',
+            anchor: placeholder?.anchor,
+            fingerprint: placeholder?.fingerprint,
+            new_content: rowRange(1, 60),
+          },
+        ],
+      });
+      expect(isErrorResponse(saved)).toBe(false);
+      expect(resultJson(saved).unsaved_lines).toBeGreaterThan(0);
+
+      const filled = await callTool(store, CREATE_SPACE_TOOL_NAME, { ...createInput(tablePart(1, 5)), name: 'Real' });
+      const real = (resultJson(filled).blocks ?? [])[1];
+      const refused = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Real',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: real?.anchor, fingerprint: real?.fingerprint, new_content: rowRange(1, 60) }],
+      });
+      expect(isErrorResponse(refused)).toBe(true);
+      expect(resultJson(refused).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+    });
+
+    it('still refuses an over-size html create', async () => {
+      const store = new InMemorySpaceStore();
+      const body = `<ul>\n${rowRange(1, 60)
+        .split('\n')
+        .map(line => `<li>${line}</li>`)
+        .join('\n')}\n</ul>`;
+      const response = await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body, 'html'));
+      expect(isErrorResponse(response)).toBe(true);
+      expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+    });
+
+    it('refuses an over-size line that no part could hold', async () => {
+      const store = new InMemorySpaceStore();
+      const response = await callTool(
+        store,
+        CREATE_SPACE_TOOL_NAME,
+        createInput(`# Title\n\nintro\n\n${'x'.repeat(5_000)}`),
+      );
+      expect(isErrorResponse(response)).toBe(true);
+      expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+    });
+
+    it('refuses the whole call when a link in the unsaved tail is not allowed', async () => {
+      const store = new InMemorySpaceStore();
+      const body = `${tablePart(1, 60)}\n\n[Docs](https://example.invalid/never-searched)`;
+      const response = await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body));
+      expect(isErrorResponse(response)).toBe(true);
+      expect(resultJson(response).error_code).toBeUndefined();
+      const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
+      expect(resultJson(listed).spaces).toHaveLength(0);
+    });
   });
 
   it('builds a 40-row table in parts: a small create, then follow-up edits past the cap in total', async () => {

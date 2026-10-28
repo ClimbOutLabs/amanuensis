@@ -529,6 +529,7 @@ describe('space capability', () => {
         updated_at: '2026-09-13T00:00:00.000Z',
       },
       aggregate_revision: 1,
+      blocks: [{ anchor: 'b1', fingerprint: blockFingerprint('Body text.'), preview: 'Body text.', occurrences: 1 }],
     });
   });
 
