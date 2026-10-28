@@ -896,6 +896,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   };
 }
 
@@ -973,6 +974,7 @@ try {
     turnArtifactStore,
     chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1168,7 +1170,7 @@ try {
 
   // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
   // approved skill sites stay unreachable and everything else keeps working.
-  await startSkillNetworkGateway({ logger });
+  await startSkillNetworkGateway({ logger, audit: sentinelAuditStore });
 
   const server = serve(
     {

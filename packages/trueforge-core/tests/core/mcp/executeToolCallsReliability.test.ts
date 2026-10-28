@@ -1260,4 +1260,139 @@ describe('turn-scoped tool-call reliability', () => {
     expect(github.callTool).toHaveBeenCalledTimes(2);
     expect(second.toolCallResults[0]).toMatchObject({ memoized: false });
   });
+
+  // A name-aware spaces stand-in for the same-batch pins below: get_space
+  // answers from the set of names create_space has landed, so a read of a
+  // not-yet-created name fails and the same read after its create succeeds.
+  function namedSpacesToolSet(input: { createFails: boolean }): { spaces: IToolSet; getCalls: () => number } {
+    const created = new Set<string>();
+    let gets = 0;
+    const spaces: IToolSet = {
+      name: 'spaces',
+      id: 'spaces',
+      preload: true,
+      hasPreloadedTools: true,
+      listTools: jest.fn(),
+      toolCallInfo: jest.fn(),
+      callTool: jest.fn((params: { name: string; arguments?: Record<string, unknown> | undefined }) => {
+        if (params.name === 'create_space') {
+          if (input.createFails) {
+            return Promise.resolve(toolResultResponse({ text: 'The space could not be created.', isError: true }));
+          }
+          const createdName = params.arguments?.['name'];
+          if (typeof createdName === 'string') {
+            created.add(createdName);
+          }
+          return Promise.resolve(toolResultResponse({ text: 'Space created.' }));
+        }
+        gets += 1;
+        const wanted = params.arguments?.['space_name'];
+        if (typeof wanted === 'string' && created.has(wanted)) {
+          return Promise.resolve(
+            toolResultResponse({ text: JSON.stringify({ name: wanted, body: 'breed table rows' }) }),
+          );
+        }
+        return Promise.resolve(
+          toolResultResponse({
+            text: JSON.stringify({
+              error: `No space is named "${typeof wanted === 'string' ? wanted : ''}". Call list_spaces to see the spaces you have.`,
+            }),
+            isError: true,
+          }),
+        );
+      }),
+    };
+    return { spaces, getCalls: () => gets };
+  }
+
+  function spacesBatch(input: {
+    createName: string;
+    readName: string;
+  }): InternalEnrichedAssistantMessage {
+    const create = assistantCall({
+      id: 'create',
+      name: 'create_space',
+      arguments: { name: input.createName, body: '# Dog breeds' },
+      effect: 'edit',
+    });
+    const read = assistantCall({
+      id: 'read',
+      name: 'get_space',
+      arguments: { space_name: input.readName },
+      effect: 'inspect',
+    });
+    return {
+      role: 'assistant',
+      content: null,
+      tool_calls: [...(create.tool_calls ?? []), ...(read.tool_calls ?? [])],
+    };
+  }
+
+  it('runs a read from the same batch again once the write it depends on has landed', async () => {
+    const { spaces, getCalls } = namedSpacesToolSet({ createFails: false });
+    const mapping = new Map([
+      ['get_space', { toolSet: spaces, originalToolName: 'get_space' }],
+      ['create_space', { toolSet: spaces, originalToolName: 'create_space' }],
+    ]);
+
+    const result = await executeToolCalls({
+      assistantMessage: spacesBatch({ createName: 'Dog breeds', readName: 'Dog breeds' }),
+      toolMapping: mapping,
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    // The read dispatched once before the create landed and once after it,
+    // and the result the model sees is the fresh one.
+    expect(getCalls()).toBe(2);
+    expect(result.toolCallResults[0]).toMatchObject({ disposition: 'executed_ok' });
+    expect(result.toolCallResults[1]).toMatchObject({ memoized: false, disposition: 'executed_ok' });
+    expect(result.toolCallResults[1]?.message.content).toContain('breed table rows');
+    expect(result.toolCallResults[1]?.message.content).not.toContain('No space is named');
+  });
+
+  it('keeps the fresh failure when a same-batch read still fails after the write lands', async () => {
+    const { spaces, getCalls } = namedSpacesToolSet({ createFails: false });
+    const mapping = new Map([
+      ['get_space', { toolSet: spaces, originalToolName: 'get_space' }],
+      ['create_space', { toolSet: spaces, originalToolName: 'create_space' }],
+    ]);
+
+    const result = await executeToolCalls({
+      assistantMessage: spacesBatch({ createName: 'Dog breeds', readName: 'Cat breeds' }),
+      toolMapping: mapping,
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    // One re-dispatch, no loop: the read ran before the create and once after
+    // it, and the fresh failure is the result the model sees.
+    expect(getCalls()).toBe(2);
+    expect(result.toolCallResults[1]).toMatchObject({ memoized: false, disposition: 'executed_nonzero' });
+    expect(result.toolCallResults[1]?.message.content).toContain('No space is named');
+    expect(result.toolCallResults[1]?.message.content).toContain('Cat breeds');
+  });
+
+  it('does not run a same-batch read again when the write in the batch failed', async () => {
+    const { spaces, getCalls } = namedSpacesToolSet({ createFails: true });
+    const mapping = new Map([
+      ['get_space', { toolSet: spaces, originalToolName: 'get_space' }],
+      ['create_space', { toolSet: spaces, originalToolName: 'create_space' }],
+    ]);
+
+    const result = await executeToolCalls({
+      assistantMessage: spacesBatch({ createName: 'Dog breeds', readName: 'Dog breeds' }),
+      toolMapping: mapping,
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    expect(getCalls()).toBe(1);
+    expect(result.toolCallResults[1]).toMatchObject({ disposition: 'executed_nonzero' });
+    expect(result.toolCallResults[1]?.message.content).toContain('No space is named');
+    expect(result.toolCallResults[1]?.message.content).toContain('Dog breeds');
+  });
 });

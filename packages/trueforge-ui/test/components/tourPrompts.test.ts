@@ -12,7 +12,6 @@ import {
   HOME_TOPICS,
   homeCardsFor,
   isHomeTopicId,
-  SHARED_RULES,
   visibleTourCards,
   type TourCapabilities,
   type TourCard,
@@ -144,17 +143,15 @@ describe('homeCardsFor', () => {
 });
 
 describe('card text', () => {
-  it('puts the shared rules under every card prompt after a blank line', () => {
+  it('puts only the card prompt in the composer, with nothing added under it', () => {
     for (const card of everyCard) {
-      if (card.sharedRules === false) continue;
-      expect(composerTextFor(card)).toBe(`${card.prompt}\n\n${SHARED_RULES}`);
+      expect(composerTextFor(card)).toBe(card.prompt);
     }
   });
 
-  it('fills only the morning brief card prompt for the brief card, with no rules', () => {
+  it('fills the morning brief card prompt for the brief card', () => {
     expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
     expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_CARD_PROMPT);
-    expect(everyCard.filter(card => card.sharedRules === false)).toEqual([CARDS.brief]);
   });
 
   it('writes every card in plain words, names the assistant only through its display name, and uses no dashes', () => {
@@ -198,44 +195,29 @@ describe('card text', () => {
   });
 });
 
-describe('the rewritten rules and cards', () => {
-  it('keeps the shared rules to four short lines', () => {
-    expect(SHARED_RULES.split('\n')).toHaveLength(4);
-    expect(SHARED_RULES).toContain('Plain words and short replies');
-    expect(SHARED_RULES).toContain('Ask one thing at a time when you need answers');
-    expect(SHARED_RULES).toContain('If you have to assume something, say what it is in one line');
+describe('the rewritten cards', () => {
+  it('carries none of the shared rules lines that were taken out, on any card', () => {
+    const removed = [
+      'Plain words and short replies',
+      'Ask one thing at a time when you need answers',
+      'If you have to assume something, say what it is in one line',
+      'Never send, save, book, cancel, or change anything without asking me first',
+      'ask with the exact thing you are about to do',
+    ];
+    for (const card of everyCard) {
+      for (const line of removed) expect(composerTextFor(card), card.title).not.toContain(line);
+    }
   });
 
-  it('carries no act-first or latest-message-wins line, in the shared rules or on any card', () => {
-    expect(SHARED_RULES).not.toContain('do that first');
-    expect(SHARED_RULES).not.toContain('latest message wins');
+  it('carries no act-first or latest-message-wins line on any card', () => {
     for (const card of everyCard) {
       expect(card.prompt, card.title).not.toContain('do that first');
       expect(card.prompt, card.title).not.toContain('latest message wins');
     }
   });
 
-  it('carries no global line cap, next-step offer, or stuck rule in the shared rules', () => {
-    expect(SHARED_RULES).not.toContain('under ten lines');
-    expect(SHARED_RULES).not.toContain('offer one next step');
-    expect(SHARED_RULES).not.toContain('make the next step smaller');
-  });
-
-  it('rests the one-question rule in the shared block, not restated on the cards', () => {
-    for (const card of everyCard) {
-      if (card.sharedRules === false) continue;
-      expect(card.prompt, card.title).not.toContain('one question at a time');
-    }
-  });
-
-  it('keeps the ask-first rule for sends, saves, bookings and changes in the shared rules', () => {
-    expect(SHARED_RULES).toContain('Never send, save, book, cancel, or change anything without asking me first');
-    expect(SHARED_RULES).toContain('ask with the exact thing you are about to do');
-  });
-
   it('asks first on every card whose prompt sends, saves or books', () => {
     for (const card of everyCard) {
-      if (card.sharedRules === false) continue;
       if (/\b(save|saving|saved|send|sending|book|booking)\b/i.test(card.prompt)) {
         expect(card.prompt, card.title).toMatch(/\bask/i);
       }

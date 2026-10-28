@@ -849,6 +849,53 @@ describe('approving a held mail send to an address not on the Email list', () =>
     expect(h.callTool).not.toHaveBeenCalled();
   });
 
+  it('records the refused address add in the activity log, and nothing else about the stopped send', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('refused');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(NEW_RECIPIENT_REFUSED);
+
+    const stopped = h.audit.filter(record => record.outcome === 'auto_denied');
+    expect(stopped).toEqual([
+      expect.objectContaining({
+        tool_name: 'send_email',
+        description: expect.stringContaining('The address could not be added to the Email list'),
+      }),
+    ]);
+  });
+
+  it('records the add in the activity log when the sidecar does not load the list in time', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+
+    const stopped = h.audit.filter(record => record.outcome === 'auto_denied');
+    expect(stopped).toEqual([
+      expect.objectContaining({
+        tool_name: 'send_email',
+        description: expect.stringContaining('The Email list did not load in time'),
+      }),
+    ]);
+  });
+
+  it('records the stopped send in the activity log when the loaded list check fails', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, args: JSON.stringify({ ...MAIL_SEND_ARGS, recipients: ['dana@example.com'] }) },
+    });
+    h.mailLoaded.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+
+    const stopped = h.audit.filter(record => record.outcome === 'auto_denied');
+    expect(stopped).toEqual([
+      expect.objectContaining({
+        tool_name: 'send_email',
+        description: expect.stringContaining('The Email list did not load in time'),
+      }),
+    ]);
+  });
+
   it('refuses a chat-wide approval for it, so nothing is added or sent', async () => {
     const { h, context } = await heldSend(['dana@example.com']);
 

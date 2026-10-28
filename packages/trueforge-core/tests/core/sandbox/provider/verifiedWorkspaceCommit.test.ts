@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,5 +69,76 @@ describe('verifiedWorkspaceCommitCommand', () => {
     });
     expect(JSON.parse(stdout)).toEqual(expect.objectContaining({ status: 'blocked' }));
     expect(await readFile(marker, 'utf8')).toBe('');
+  });
+
+  /** Runs git in the fixture repo and returns its raw output. */
+  async function gitBuffer(args: string[]): Promise<Buffer> {
+    const { stdout } = await execFileAsync('git', ['-C', repo, ...args], { encoding: 'buffer' });
+    return stdout;
+  }
+
+  /** The receipt a capture of this repo would record, computed with the refs read this git accepts. */
+  async function currentReceipt(): Promise<typeof STALE_RECEIPT> {
+    const digest = (value: Buffer): string => createHash('sha256').update(value).digest('hex');
+    let refs: Buffer;
+    try {
+      refs = await gitBuffer([
+        'for-each-ref',
+        '--include-root-refs',
+        '--sort=refname',
+        '--format=%(refname)%00%(objectname)%00%(symref)%00',
+      ]);
+    } catch {
+      // Git before 2.48 rejects the flag; its refs read is the same list without it.
+      refs = await gitBuffer(['for-each-ref', '--sort=refname', '--format=%(refname)%00%(objectname)%00%(symref)%00']);
+    }
+    return {
+      branch: (await gitBuffer(['rev-parse', '--abbrev-ref', 'HEAD'])).toString('utf8').trim(),
+      head: (await gitBuffer(['rev-parse', 'HEAD'])).toString('utf8').trim(),
+      refsSha256: digest(refs),
+      indexSha256: digest(
+        await gitBuffer(['diff', '--cached', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', 'HEAD', '--']),
+      ),
+      trackedWorktreeSha256: digest(
+        await gitBuffer(['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--']),
+      ),
+      untrackedSha256: digest(Buffer.from('[]', 'utf8')),
+    };
+  }
+
+  async function runCommitCheck(receipt: typeof STALE_RECEIPT): Promise<{ status: string }> {
+    const command = verifiedWorkspaceCommitCommand({ command: 'true', workspaceRoot: repo, receipt });
+    const { stdout } = await execFileAsync('/bin/sh', ['-c', command], {
+      cwd: repo,
+      env: { PATH: `${toolFolder}:/usr/bin:/bin` },
+    });
+    const parsed: unknown = JSON.parse(stdout);
+    if (typeof parsed !== 'object' || parsed === null || !('status' in parsed) || typeof parsed.status !== 'string') {
+      throw new Error('the commit check did not answer with a status');
+    }
+    return { status: parsed.status };
+  }
+
+  it('accepts a matching receipt on a git without the root refs flag', async () => {
+    // The git on this machine is older than 2.48, so the check can only pass if
+    // its refs read falls back to the same read without the flag.
+    const result = await runCommitCheck(await currentReceipt());
+    expect(result.status).toBe('completed');
+  });
+
+  it('sends the refs read with the root refs flag before any fallback', () => {
+    const command = verifiedWorkspaceCommitCommand({ command: 'true', workspaceRoot: repo, receipt: STALE_RECEIPT });
+    const withFlag = command.indexOf('"for-each-ref", "--include-root-refs"');
+    const withoutFlag = command.indexOf('"for-each-ref", "--sort=refname"');
+    expect(withFlag).toBeGreaterThan(-1);
+    expect(withoutFlag).toBeGreaterThan(withFlag);
+  });
+
+  it('still blocks when the refs read fails for another reason', async () => {
+    const receipt = await currentReceipt();
+    // A damaged packed-refs file makes the refs read fail with a different error.
+    await writeFile(join(repo, '.git', 'packed-refs'), 'garbage-not-a-pack\n');
+    const result = await runCommitCheck(receipt);
+    expect(result.status).toBe('blocked');
   });
 });
