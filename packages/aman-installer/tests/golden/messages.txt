@@ -4,6 +4,7 @@ Run aman --version to see which version this is.
 Run aman doctor to check this computer and each instance.
 Run aman doctor docker to check that Docker is ready for Aman.
 Run aman status to see what is installed and whether it is running.
+Run aman verify and name a downloaded file to check it against its signed release record.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from the Start menu, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
@@ -40,3 +41,13 @@ Instance main is partly running at http://127.0.0.1:8791.
 Instance main is stopped.
 Instance main: whether it is running is unknown.
 No instance has been made yet.
+aman verify needs the name of the downloaded file to check. Run aman verify again and name the file you downloaded from the release page.
+The release record that goes with this download is missing. Download manifest.json from the same release page into the same folder, then run aman verify again.
+The signature that goes with this release record is missing. Download manifest.json.minisig from the same release page into the same folder, then run aman verify again.
+The release record could not be read. Download manifest.json again from the Aman release page, then run aman verify again.
+The signature on this release record does not check out. Download the release files again from the Aman release page, then run aman verify again.
+The downloaded file could not be read. Download it again from the Aman release page, then run aman verify again.
+The download aman-linux-x64 is not in the release record. Check the name against the files on the Aman release page, then run aman verify again.
+The download aman-linux-x64 does not match the release record. Download it again from the Aman release page, then run aman verify again.
+The image names in the release record do not match this copy of the Aman code. Make the release record again from a clean copy of the release, then check it again.
+aman-linux-x64 matches the signed release record.
