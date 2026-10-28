@@ -1,6 +1,7 @@
 aman 0.0.0
 Aman installer. It sets up Aman on this computer and checks that things work.
 Run aman --version to see which version this is.
+Run aman doctor to check this computer and each instance.
 Run aman doctor docker to check that Docker is ready for Aman.
 Run aman status to see what is installed and whether it is running.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
