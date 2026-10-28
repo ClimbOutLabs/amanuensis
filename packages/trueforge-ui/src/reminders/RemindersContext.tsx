@@ -7,9 +7,10 @@ import { useOptionalServer } from '../server/ServerContext.js';
 
 /** How often the open tab asks whether a reminder has come in. */
 export const REMINDERS_POLL_MS = 30_000;
-/** Pages of recent chats looked through to find the Reminders chat, 50 chats each, when the page opens or a reminder is set. */
-const FULL_FIND_PAGES = 3;
-const FIND_PAGE_SIZE = 50;
+/** Pages of recent chats looked through to find the Reminders chat, 25 chats each, when the page opens or a reminder is set. */
+const FULL_FIND_PAGES = 6;
+/** The sessions API serves at most 25 chats in one page and refuses a larger ask, so the search pages at that size. */
+const FIND_PAGE_SIZE = 25;
 
 const SEEN_AT_KEY = 'aman.reminders.seen_at';
 const NOTIFIED_AT_KEY = 'aman.reminders.notified_at';
