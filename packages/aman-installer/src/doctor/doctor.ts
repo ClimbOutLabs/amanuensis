@@ -28,8 +28,9 @@ export interface DoctorDeps {
   // schedule are looked for under it, as the shell doctor looks.
   homeDir: string;
   // The state home as a folder on this computer, or null when the state
-  // lives in the volume (Windows): a check that reads files in the home
-  // (backup times, the certificate authority) reads them here.
+  // lives in the volume (Windows): the tls check mounts this folder for
+  // its certificate read and probes with its certificate, and a backup
+  // line names a folder in it.
   stateHome: string | null;
   // The file that names the system (/etc/os-release, or the shell
   // doctor's AMAN_OS_RELEASE override).
@@ -190,7 +191,7 @@ function plural(count: number, word: string): string {
 // reason on one line, and the closing verdict in the shell's words.
 export function doctorTextLines(records: readonly CheckRecord[], instanceNames: readonly string[]): string[] {
   const lines: string[] = [];
-  const renderScope = (scope: string, title: string): void => {
+  const renderScope = ({ scope, title }: { scope: string; title: string }): void => {
     lines.push('', title);
     let skipIds: string[] = [];
     let skipDetail = '';
@@ -224,9 +225,9 @@ export function doctorTextLines(records: readonly CheckRecord[], instanceNames: 
     }
     flushSkipped();
   };
-  renderScope('machine', 'Checking this computer');
+  renderScope({ scope: 'machine', title: 'Checking this computer' });
   for (const name of instanceNames) {
-    renderScope(name, `Checking instance ${name}`);
+    renderScope({ scope: name, title: `Checking instance ${name}` });
   }
   let fails = 0;
   let warns = 0;

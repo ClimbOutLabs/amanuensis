@@ -73,11 +73,6 @@ async function lstatOrNull(path: string): Promise<Stats | null> {
   }
 }
 
-async function fileModeText(path: string): Promise<string> {
-  const stats = await statOrNull(path);
-  return stats === null ? '' : (stats.mode & 0o7777).toString(8);
-}
-
 function normalizeArch(arch: string): string {
   if (arch === 'x86_64' || arch === 'amd64') {
     return 'amd64';
@@ -257,7 +252,8 @@ async function checkRuntime(deps: DoctorDeps, list: CheckList, ctx: MachineConte
     });
     return;
   }
-  if (ctx.dockerSecurity.toLowerCase().includes('rootless')) {
+  // The shell matches the raw SecurityOptions text, case-sensitively.
+  if (ctx.dockerSecurity.includes('rootless')) {
     list.record({
       scope: 'machine',
       id: 'runtime',
@@ -655,46 +651,20 @@ function uiPath(deps: DoctorDeps, path: string): string {
   return path;
 }
 
-// When a backup was made. On a folder home the folder's own time is read,
-// as the shell reads it. In the volume the store names the backups but
-// keeps no times, so the time in the backup's name is used: the installer
-// names each backup by the time it was made.
-async function backupTime(deps: DoctorDeps, name: string): Promise<number | null> {
-  if (deps.stateHome !== null) {
-    const stats = await statOrNull(join(deps.stateHome, 'backups', name));
-    if (stats?.isDirectory() !== true) {
-      return null;
-    }
-    return Math.floor(stats.mtimeMs / 1000);
-  }
-  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(name);
-  if (match === null) {
-    return null;
-  }
-  return (
-    Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5]),
-      Number(match[6]),
-    ) / 1000
-  );
-}
-
 // True when any of the three schedules the installer can make is in place:
 // a systemd timer that is enabled, a launchd agent, or a crontab line.
+// The shell tests for a file with [ -f ]; a folder at either path does
+// not count.
 async function backupSchedulePresent(deps: DoctorDeps): Promise<boolean> {
   const timer = join(deps.homeDir, '.config/systemd/user/aman-backup.timer');
-  if ((await statOrNull(timer)) !== null) {
+  if ((await statOrNull(timer))?.isFile() === true) {
     const enabled = await capture(deps, 'systemctl', ['--user', 'is-enabled', 'aman-backup.timer']);
     if (enabled.started && enabled.exitCode === 0) {
       return true;
     }
   }
   const agent = join(deps.homeDir, 'Library/LaunchAgents/com.amanuensis.backup.plist');
-  if ((await statOrNull(agent)) !== null) {
+  if ((await statOrNull(agent))?.isFile() === true) {
     return true;
   }
   const cron = await deps.runner.run('crontab', ['-l']);
@@ -702,17 +672,11 @@ async function backupSchedulePresent(deps: DoctorDeps): Promise<boolean> {
 }
 
 // A schedule turned on within the last two days has not had its first run
-// yet. In the volume the record's own time is not readable, so a mode
-// there is not counted recent.
-async function backupModeIsRecent(deps: DoctorDeps): Promise<boolean> {
-  if (deps.stateHome === null) {
-    return false;
-  }
-  const stats = await statOrNull(join(deps.stateHome, 'state/backups'));
-  if (stats === null) {
-    return false;
-  }
-  return deps.now() - Math.floor(stats.mtimeMs / 1000) < 172800;
+// yet. The store reads the record's own time on a folder home; in the
+// volume that time is not readable, so a mode there is not counted recent.
+function backupModeIsRecent(deps: DoctorDeps, summary: StateSummary): boolean {
+  const time = summary.backupsModeTimeSeconds;
+  return time !== null && deps.now() - time < 172800;
 }
 
 async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSummary): Promise<void> {
@@ -730,15 +694,17 @@ async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSumm
   }
   let newest = '';
   let newestTime = 0;
-  for (const name of summary.backups) {
-    const time = await backupTime(deps, name);
-    if (time !== null && time > newestTime) {
-      newestTime = time;
-      newest = name;
+  for (const entry of summary.backupEntries) {
+    if (entry.timeSeconds !== null && entry.timeSeconds > newestTime) {
+      newestTime = entry.timeSeconds;
+      newest = entry.name;
     }
   }
   const now = deps.now();
-  const ageDays = newest === '' ? -1 : Math.floor((now - newestTime) / 86400);
+  // The shell divides whole numbers, which drops the fraction toward
+  // zero: a backup newer than this computer's clock is 0 days old there,
+  // never -1, so the count is cut the same way here.
+  const ageDays = newest === '' ? -1 : Math.trunc((now - newestTime) / 86400);
   const days = ageDays === 1 ? '1 day' : `${String(ageDays)} days`;
   const scheduled = await backupSchedulePresent(deps);
   const mode = summary.backupsMode ?? '';
@@ -751,7 +717,7 @@ async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSumm
         detail: 'Daily backups are on, but the schedule that runs them is missing.',
         fix: 'Run aman doctor backup --fix',
       });
-    } else if (ageDays < 0 && (await backupModeIsRecent(deps))) {
+    } else if (ageDays < 0 && backupModeIsRecent(deps, summary)) {
       list.record({
         scope: 'machine',
         id: 'backup',
@@ -984,12 +950,14 @@ async function checkoutProblem(dir: string): Promise<string | null> {
   if (resolved !== null) {
     let ancestor = dirname(resolved);
     for (;;) {
+      // The walk stops where the shell's stops: the root folder itself
+      // is not judged.
+      if (ancestor === '/') {
+        break;
+      }
       const stats = await statOrNull(ancestor);
       if (stats !== null && stats.mode & 0o022 && !(stats.mode & 0o1000)) {
         return 'parent';
-      }
-      if (ancestor === '/') {
-        break;
       }
       ancestor = dirname(ancestor);
     }
@@ -1070,9 +1038,10 @@ function originHost(origin: string): string {
 // Https on the instances opened on the network: the authority and its key,
 // the certificate (how long it lasts, which addresses it lists) and a real
 // answer over https from this computer. One line for the worst thing
-// found. The check reads the authority's files in the state home, so on
-// Windows, where the state is in the volume the store does not read these
-// files from, it records nothing in this stage.
+// found. The authority's facts come through the store; the certificate
+// read mounts the state home's tls folder and the probe uses its
+// certificate file, so on Windows, where the state lives in the volume,
+// the check records nothing in this stage.
 async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, summary: StateSummary): Promise<void> {
   const serving = summary.instances.filter(servesHttps);
   if (serving.length === 0 || deps.stateHome === null) {
@@ -1097,15 +1066,14 @@ async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, 
       fix = next.fix;
     }
   };
-  const rootCrt = await statOrNull(join(caDir, 'root.crt'));
-  const keyMode = await fileModeText(join(caDir, 'root.key'));
-  if (rootCrt === null || keyMode === '') {
+  const ca = summary.certificateAuthority;
+  if (!ca.certPresent || ca.keyMode === null) {
     note({
       state: 'fail',
       detail: 'The certificate authority of this computer is missing, so devices cannot trust Aman.',
       fix: tlsFix,
     });
-  } else if (keyMode !== '600') {
+  } else if (ca.keyMode !== '600') {
     note({
       state: 'fail',
       detail: "The key of this computer's certificate authority can be read by other users.",
@@ -1113,13 +1081,10 @@ async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, 
     });
   }
   const image = summary.release?.appImage ?? '';
-  const fingerprint = async (): Promise<string> => {
-    const text = await readTextOrNull(join(caDir, 'root.fingerprint'));
-    return text === null ? '' : (text.split('\n')[0] ?? '');
-  };
+  const fingerprint = ca.fingerprint ?? '';
   for (const instance of serving) {
     const name = instance.name;
-    if (ctx.dockerOk && image !== '' && rootCrt !== null) {
+    if (ctx.dockerOk && image !== '' && ca.certPresent) {
       const uid = (await capture(deps, 'id', ['-u'])).stdout.trim();
       const gid = (await capture(deps, 'id', ['-g'])).stdout.trim();
       const info = await capture(deps, 'docker', [
@@ -1157,14 +1122,17 @@ async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, 
       } else {
         const leafDays = Number.parseInt(leafDaysText, 10);
         const rootDays = rootDaysText === '' ? null : Number.parseInt(rootDaysText, 10);
-        if (leafDays <= 0 || (rootDays ?? 1) <= 0) {
+        // A pki answer with no root days takes the shell's substitutions:
+        // -1 in the run-out test, so a missing root count reads as run
+        // out, and -1000 in the warning test below.
+        if (leafDays <= 0 || (rootDays ?? -1) <= 0) {
           note({
             state: 'fail',
             detail: `The https certificate of instance ${name} has run out, so devices refuse it.`,
             fix: tlsFix,
           });
-        } else if (leafDays < 60 || (rootDays ?? 1000) < 60) {
-          const days = leafDays < (rootDays ?? 1000) ? leafDays : (rootDays ?? 1000);
+        } else if (leafDays < 60 || (rootDays ?? -1000) < 60) {
+          const days = leafDays < (rootDays ?? -1000) ? leafDays : (rootDays ?? -1000);
           note({
             state: 'warn',
             detail: `The https certificate of instance ${name} ends in ${String(days)} days.`,
@@ -1199,12 +1167,12 @@ async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, 
               fix: tlsFix,
             });
           } else if (state === 'ok') {
-            detail = `Https is on; the certificate of instance ${name} lasts ${String(leafDays)} more days, and Aman renews it in its last 60 days. Authority fingerprint, to compare on a device before trusting it: ${await fingerprint()}`;
+            detail = `Https is on; the certificate of instance ${name} lasts ${String(leafDays)} more days, and Aman renews it in its last 60 days. Authority fingerprint, to compare on a device before trusting it: ${fingerprint}`;
           }
         }
       }
     }
-    if (rootCrt !== null) {
+    if (ca.certPresent) {
       const tlsPort = registryValue(instance.entries, 'tls_port') ?? '';
       const probe = await deps.runner.run('curl', [
         '-sS',
@@ -1242,11 +1210,8 @@ async function checkTls(deps: DoctorDeps, list: CheckList, ctx: MachineContext, 
   if (state === 'ok' && detail === '') {
     detail = "Https is on, with a certificate from this computer's own authority.";
   }
-  if (state !== 'ok') {
-    const stats = await statOrNull(join(caDir, 'root.fingerprint'));
-    if (stats !== null && stats.size > 0) {
-      detail += ` Authority fingerprint, to compare on a device before trusting it: ${await fingerprint()}`;
-    }
+  if (state !== 'ok' && ca.fingerprintHasContent) {
+    detail += ` Authority fingerprint, to compare on a device before trusting it: ${fingerprint}`;
   }
   list.record({ scope: 'machine', id: 'tls', state: state, detail: detail, fix: fix });
 }

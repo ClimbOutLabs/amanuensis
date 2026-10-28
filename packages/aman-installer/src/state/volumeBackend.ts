@@ -1,7 +1,14 @@
 import pins from '../../../../installer/release.json' with { type: 'json' };
 import type { ProcessRunner } from '../runner/processRunner.ts';
 import { LOCK_TIMING, type LockTiming } from './lockTiming.ts';
-import { StateBusyError, StateDockerError, StateImageError, StateStoreError, type StateBackend } from './state.ts';
+import {
+  BACKUPS_DIR,
+  StateBusyError,
+  StateDockerError,
+  StateImageError,
+  StateStoreError,
+  type StateBackend,
+} from './state.ts';
 import { buildTar, parseTar } from './tar.ts';
 
 // The Windows shape: state lives in the aman_home volume, as the starter
@@ -213,6 +220,30 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
         .split('\n')
         .map(line => line.trim())
         .filter(line => line !== '');
+    },
+    statPath: path => {
+      // The volume keeps no times of its own, and reading more of it costs
+      // a container run, so the only stat answered here is a backup's: its
+      // time is the time in its name. The backup record's own time and the
+      // tls folder are not read from the volume in this stage.
+      const prefix = `${BACKUPS_DIR}/`;
+      if (!path.startsWith(prefix)) {
+        return Promise.resolve(null);
+      }
+      const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(path.slice(prefix.length));
+      if (match === null) {
+        return Promise.resolve(null);
+      }
+      const timeSeconds =
+        Date.UTC(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5]),
+          Number(match[6]),
+        ) / 1000;
+      return Promise.resolve({ mtimeSeconds: timeSeconds, mode: 0, size: 0, isDirectory: true });
     },
     writeChangedFiles: async changed => {
       const tar = buildTar(changed.map(file => ({ path: file.path, mode: 0o600, text: file.text })));

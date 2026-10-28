@@ -102,16 +102,19 @@ interface JsonRecord {
   fix: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isJsonRecord(value: unknown): value is JsonRecord {
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
   return (
-    typeof record['id'] === 'string' &&
-    typeof record['state'] === 'string' &&
-    typeof record['detail'] === 'string' &&
-    typeof record['fix'] === 'string'
+    typeof value['id'] === 'string' &&
+    typeof value['state'] === 'string' &&
+    typeof value['detail'] === 'string' &&
+    typeof value['fix'] === 'string'
   );
 }
 
@@ -122,12 +125,11 @@ interface DoctorDocument {
 
 function parseDocument(text: string): DoctorDocument {
   const value: unknown = JSON.parse(text);
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     throw new Error('the doctor document is not an object');
   }
-  const doc = value as Record<string, unknown>;
-  const machineRaw = doc['machine'];
-  const instancesRaw = doc['instances'];
+  const machineRaw = value['machine'];
+  const instancesRaw = value['instances'];
   if (!Array.isArray(machineRaw) || !machineRaw.every(isJsonRecord)) {
     throw new Error('the machine checks are not records');
   }

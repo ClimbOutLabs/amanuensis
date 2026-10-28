@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { cp, mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -43,8 +43,40 @@ async function goldenSummary(): Promise<unknown> {
 }
 
 test('the folder reader gives the golden summary for the fixture home', async () => {
-  const store = createStateStore(folderBackend(FIXTURE_HOME));
-  assert.deepEqual(await store.readSummary(), await goldenSummary());
+  // The golden pins the fields both backends share. The backup times and
+  // the schedule record's time are this backend's own file times, so the
+  // copy's times are pinned first and those fields are checked apart.
+  const copy = await mkdtemp(join(tmpdir(), 'aman-fixture-'));
+  const homeCopy = join(copy, 'home');
+  await cp(FIXTURE_HOME, homeCopy, { recursive: true });
+  const backupOneTime = 1_800_000_000;
+  const backupTwoTime = 1_800_086_400;
+  const modeTime = 1_800_100_000;
+  await utimes(
+    join(homeCopy, 'backups', '20261020T030405Z'),
+    new Date(backupOneTime * 1000),
+    new Date(backupOneTime * 1000),
+  );
+  await utimes(
+    join(homeCopy, 'backups', '20261021T030405Z-keep'),
+    new Date(backupTwoTime * 1000),
+    new Date(backupTwoTime * 1000),
+  );
+  await utimes(join(homeCopy, 'state', 'backups'), new Date(modeTime * 1000), new Date(modeTime * 1000));
+  const store = createStateStore(folderBackend(homeCopy));
+  const { backupEntries, backupsModeTimeSeconds, certificateAuthority, ...shared } = await store.readSummary();
+  assert.deepEqual(shared, await goldenSummary());
+  assert.deepEqual(backupEntries, [
+    { name: '20261020T030405Z', timeSeconds: backupOneTime },
+    { name: '20261021T030405Z-keep', timeSeconds: backupTwoTime },
+  ]);
+  assert.equal(backupsModeTimeSeconds, modeTime);
+  assert.deepEqual(certificateAuthority, {
+    certPresent: true,
+    keyMode: null,
+    fingerprint: null,
+    fingerprintHasContent: false,
+  });
 });
 
 test('the volume reader gives the same summary for the same fixture, packed as a tar', async () => {
@@ -91,7 +123,22 @@ test('the volume reader gives the same summary for the same fixture, packed as a
     new Map([[readLine, okBytesResult(buildTar(tarred))]]),
   );
   const store = createStateStore(volumeBackend(runner));
-  assert.deepEqual(await store.readSummary(), await goldenSummary());
+  const { backupEntries, backupsModeTimeSeconds, certificateAuthority, ...shared } = await store.readSummary();
+  assert.deepEqual(shared, await goldenSummary());
+  // The volume reads a backup's time from the time in its name, and does
+  // not read the schedule record's time or the tls folder in this stage,
+  // so those fields are checked apart from the shared golden.
+  assert.deepEqual(backupEntries, [
+    { name: '20261020T030405Z', timeSeconds: Date.UTC(2026, 9, 20, 3, 4, 5) / 1000 },
+    { name: '20261021T030405Z-keep', timeSeconds: Date.UTC(2026, 9, 21, 3, 4, 5) / 1000 },
+  ]);
+  assert.equal(backupsModeTimeSeconds, null);
+  assert.deepEqual(certificateAuthority, {
+    certPresent: false,
+    keyMode: null,
+    fingerprint: null,
+    fingerprintHasContent: false,
+  });
 });
 
 test('the shell doctor names the same instances as the reader, from the same home', async () => {

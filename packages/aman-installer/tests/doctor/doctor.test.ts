@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, chown, mkdir, mkdtemp, readFile, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -46,16 +46,19 @@ interface JsonRecord {
   fix: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isJsonRecord(value: unknown): value is JsonRecord {
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
   return (
-    typeof record['id'] === 'string' &&
-    typeof record['state'] === 'string' &&
-    typeof record['detail'] === 'string' &&
-    typeof record['fix'] === 'string'
+    typeof value['id'] === 'string' &&
+    typeof value['state'] === 'string' &&
+    typeof value['detail'] === 'string' &&
+    typeof value['fix'] === 'string'
   );
 }
 
@@ -66,12 +69,11 @@ interface DoctorDocument {
 
 function parseDocument(text: string): DoctorDocument {
   const value: unknown = JSON.parse(text);
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     throw new Error('the doctor document is not an object');
   }
-  const doc = value as Record<string, unknown>;
-  const machineRaw = doc['machine'];
-  const instancesRaw = doc['instances'];
+  const machineRaw = value['machine'];
+  const instancesRaw = value['instances'];
   if (!Array.isArray(machineRaw) || !machineRaw.every(isJsonRecord)) {
     throw new Error('the machine checks are not records');
   }
@@ -441,6 +443,18 @@ test('a user who cannot use Docker yet gets the group fix', async () => {
   });
 });
 
+test('Docker answering in its own words fails with its first line', async () => {
+  const odd: ProcessResult = { started: true, exitCode: 1, stdout: 'the daemon is confused\n', stderr: '' };
+  const world = await makeWorld({ answers: withAnswer(readyAnswers(), INFO_LINE, odd) });
+  const { doc } = await runJson(world);
+  assert.deepEqual(recordById(doc.machine, 'docker'), {
+    id: 'docker',
+    state: 'fail',
+    detail: 'Docker did not answer: the daemon is confused',
+    fix: 'Open Docker Desktop and wait until it says it is running, then run aman doctor.',
+  });
+});
+
 test('Compose missing and Compose too old name version 2', async () => {
   const composeLine = commandLine('docker', ['compose', 'version', '--short']);
   const missing = await makeWorld({
@@ -555,6 +569,16 @@ test('images: no release record warns, a missing image fails, a wrong CPU type f
   });
 });
 
+test('images: a release record with no images warns that none are listed', async () => {
+  const world = await makeWorld({ release: JSON.stringify({ schema: '1', source_ref: 'abc123' }) });
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'images'), {
+    id: 'images',
+    state: 'warn',
+    detail: 'The release record lists no images.',
+    fix: 'Run install.sh again from the folder Aman was installed from.',
+  });
+});
+
 async function diskWorld(availKb: number | null): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), 'aman-doctor-dfroot-'));
   const answers = withAnswer(readyAnswers(), INFO_LINE, infoAnswer({ root }));
@@ -586,6 +610,13 @@ test('disk: under 2 GB fails, under 10 GB warns, an unreadable answer warns', as
     state: 'warn',
     detail: 'The free space for Docker data could not be read.',
     fix: 'Run aman doctor disk --fix',
+  });
+  const plenty = await diskWorld(20971520);
+  assert.deepEqual(recordById((await runJson(plenty)).doc.machine, 'disk'), {
+    id: 'disk',
+    state: 'ok',
+    detail: '20.0 GB is free for Docker data.',
+    fix: '',
   });
 });
 
@@ -699,6 +730,45 @@ test('backup: off and old warns; no mode yet reads plainly; a fresh daily mode w
   });
 });
 
+test('backup: no backup at all reads plainly; one ahead of the clock is 0 days old', async () => {
+  const none = await makeWorld({ backupsMode: null, backups: [] });
+  assert.deepEqual(recordById((await runJson(none)).doc.machine, 'backup'), {
+    id: 'backup',
+    state: 'ok',
+    detail: 'No backup yet; one is made automatically before your first upgrade.',
+    fix: '',
+  });
+  // The shell counts whole days toward zero, so a backup an hour newer
+  // than this computer's clock is 0 days old there, never -1.
+  const ahead = await makeWorld({ backups: [{ name: '20261010T130000Z', ageSeconds: -3600 }] });
+  assert.deepEqual(recordById((await runJson(ahead)).doc.machine, 'backup'), {
+    id: 'backup',
+    state: 'ok',
+    detail: 'Daily backups are on; the last one is 0 days old.',
+    fix: '',
+  });
+  const offRecent = await makeWorld({
+    backupsMode: 'off',
+    backups: [{ name: '20261008T120000Z', ageSeconds: 2 * 86400 }],
+  });
+  assert.deepEqual(recordById((await runJson(offRecent)).doc.machine, 'backup'), {
+    id: 'backup',
+    state: 'ok',
+    detail: 'Automatic backups are off.',
+    fix: '',
+  });
+  const unsetOld = await makeWorld({
+    backupsMode: null,
+    backups: [{ name: '20260930T120000Z', ageSeconds: 10 * 86400 }],
+  });
+  assert.deepEqual(recordById((await runJson(unsetOld)).doc.machine, 'backup'), {
+    id: 'backup',
+    state: 'warn',
+    detail: 'The last backup is 10 days old.',
+    fix: 'Run aman backup',
+  });
+});
+
 test('sandbox: a stopped slot names its failed safety check in plain words', async () => {
   const psLine = commandLine('docker', ['ps', '-a', '--format', PS_FORMAT]);
   const stopped = 'slot0001|proj-slots-sandbox-1|exited|Exited (1) 2 hours ago|sandbox-1';
@@ -740,6 +810,59 @@ test('checkout: links and group-writable files fail with their fixes', async () 
   noRecord((await runJson(noSource)).doc.machine, 'checkout');
 });
 
+test('sandbox: a stopped slot whose log names no check fails plainly', async () => {
+  const psLine = commandLine('docker', ['ps', '-a', '--format', PS_FORMAT]);
+  const stopped = 'slot0001|proj-slots-sandbox-1|exited|Exited (1) 2 hours ago|sandbox-1';
+  const answers = withAnswer(readyAnswers(), psLine, okResult(`${stopped}\n`));
+  answers.set(
+    commandLine('docker', ['logs', '--tail', '50', 'slot0001']),
+    okResult('starting\nthe slot stopped without a word\n'),
+  );
+  const world = await makeWorld({ answers });
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'sandbox'), {
+    id: 'sandbox',
+    state: 'fail',
+    detail: 'One of the sandbox slots is not running properly, and its log does not say which check failed.',
+    fix: 'Run aman doctor sandbox --fix',
+  });
+});
+
+test('checkout: a writable folder above the checkout fails as a parent problem', async () => {
+  const world = await makeWorld();
+  const parent = await mkdtemp(join(tmpdir(), 'aman-doctor-parent-'));
+  await chmod(parent, 0o777);
+  const checkoutDir = join(parent, 'aman-checkout');
+  await write(join(checkoutDir, 'installer', 'install.sh'), '#!/bin/sh\n', 0o755);
+  await write(join(checkoutDir, 'installer', 'lib', 'part.sh'), '# part\n', 0o644);
+  await chmod(checkoutDir, 0o755);
+  await chmod(join(checkoutDir, 'installer'), 0o755);
+  await chmod(join(checkoutDir, 'installer', 'lib'), 0o755);
+  await write(join(world.stateHome, 'state', 'source'), `${checkoutDir}\n`);
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'checkout'), {
+    id: 'checkout',
+    state: 'fail',
+    detail:
+      'A folder above the folder Aman was installed from can be changed by other users, so Aman will not run its installer from it.',
+    fix: 'Move the folder to one only you can change, such as one inside your home folder, then run install.sh from there.',
+  });
+});
+
+test('checkout: a checkout owned by another user fails as an owner problem', async () => {
+  // Only a run as root can hand a file to another user, so the case is
+  // made where it can be made and skipped where it cannot.
+  if (process.getuid?.() !== 0) {
+    return;
+  }
+  const world = await makeWorld();
+  await chown(join(world.checkoutDir, 'installer', 'install.sh'), 1000, 1000);
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'checkout'), {
+    id: 'checkout',
+    state: 'fail',
+    detail: 'The folder Aman was installed from belongs to another user, so Aman will not run its installer from it.',
+    fix: 'Copy it to a folder of yours and run install.sh from there.',
+  });
+});
+
 const HTTPS_INSTANCE = { main: { tls: 'local', tls_port: '8443', origins: 'https://aman.test:8443' } };
 
 // A world whose instance serves https, with the authority in place. The
@@ -748,8 +871,12 @@ async function tlsWorld(options: {
   keyMode?: number;
   pki?: string;
   curlStatus?: string;
+  backupsMode?: string;
 }): Promise<{ world: World; doc: DoctorDocument }> {
-  const world = await makeWorld({ instances: HTTPS_INSTANCE });
+  const world = await makeWorld({
+    instances: HTTPS_INSTANCE,
+    ...(options.backupsMode === undefined ? {} : { backupsMode: options.backupsMode }),
+  });
   await write(join(world.stateHome, 'tls', 'ca', 'root.crt'), 'cert\n');
   await write(join(world.stateHome, 'tls', 'ca', 'root.key'), 'key\n', options.keyMode ?? 0o600);
   await write(join(world.stateHome, 'tls', 'ca', 'root.fingerprint'), 'AB:CD:EF\n');
@@ -849,9 +976,139 @@ test('tls: a short-lived certificate warns; silence over https fails', async () 
 test('tls: a missing authority fails before any certificate is read', async () => {
   const world = await makeWorld({ instances: HTTPS_INSTANCE });
   const { doc } = await runJson(world);
-  const record = recordById(doc.machine, 'tls');
-  assert.equal(record.state, 'fail');
-  assert.ok(record.detail.startsWith('The certificate authority of this computer is missing'));
+  assert.deepEqual(recordById(doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'fail',
+    detail: 'The certificate authority of this computer is missing, so devices cannot trust Aman.',
+    fix: 'Run aman doctor tls --fix',
+  });
+});
+
+test('runtime: the old Engine record names the whole problem and its fix', async () => {
+  const world = await makeWorld({
+    answers: withAnswer(readyAnswers(), INFO_LINE, infoAnswer({ version: '27.5.1' })),
+  });
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'runtime'), {
+    id: 'runtime',
+    state: 'fail',
+    detail:
+      'Docker Engine 27.5.1 lets other devices on your network reach ports meant for this computer only. Install Docker Engine 28 or newer (install.sh --print-root-steps shows the steps), then run this again.',
+    fix: 'Install a current Docker Engine (install.sh --print-root-steps shows the steps), then run aman doctor.',
+  });
+});
+
+test('an instance whose app is stopped is skipped plainly', async () => {
+  const appPsLine = commandLine('docker', [
+    'ps',
+    '-a',
+    '--filter',
+    'label=com.docker.compose.project=aman-main',
+    '--format',
+    PS_FORMAT,
+  ]);
+  const world = await makeWorld({ answers: withAnswer(readyAnswers(), appPsLine, okResult('')) });
+  const { doc } = await runJson(world);
+  assert.deepEqual(doc.instances['main'], [
+    { id: 'service', state: 'off', detail: 'Skipped: the app is not running.', fix: '' },
+  ]);
+});
+
+const FINGERPRINT_SUFFIX = ' Authority fingerprint, to compare on a device before trusting it: AB:CD:EF';
+
+test('tls: an unconstrained authority, one missing a name, and a certificate missing a name each warn', async () => {
+  const unconstrained = await tlsWorld({
+    pki: '{"root_days_left":400,"leaf_days_left":200,"leaf_names":["aman.test"],"root_constrained":false,"root_covers_leaf":true}',
+    curlStatus: '200',
+  });
+  assert.deepEqual(recordById(unconstrained.doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'warn',
+    detail:
+      'The certificate authority of this computer, from an earlier version, can vouch for more names than it should. A new one covers only the names Aman is opened at and private addresses; each device then trusts it again.' +
+      FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor tls --fix',
+  });
+  const uncovered = await tlsWorld({
+    pki: '{"root_days_left":400,"leaf_days_left":200,"leaf_names":["aman.test"],"root_constrained":true,"root_covers_leaf":false}',
+    curlStatus: '200',
+  });
+  assert.deepEqual(recordById(uncovered.doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'warn',
+    detail:
+      'The certificate authority of this computer does not cover every name of instance main. A new one does; each device then trusts it again.' +
+      FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor tls --fix',
+  });
+  const unlisted = await tlsWorld({
+    pki: '{"root_days_left":400,"leaf_days_left":200,"leaf_names":["other.test"],"root_constrained":true,"root_covers_leaf":true}',
+    curlStatus: '200',
+  });
+  assert.deepEqual(recordById(unlisted.doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'warn',
+    detail: 'The https certificate of instance main does not list: aman.test.' + FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor tls --fix',
+  });
+});
+
+test('tls: a certificate that has run out fails, and a pki answer with no root days counts as run out', async () => {
+  const expired = await tlsWorld({
+    pki: '{"root_days_left":400,"leaf_days_left":0,"leaf_names":["aman.test"],"root_constrained":true,"root_covers_leaf":true}',
+    curlStatus: '200',
+  });
+  assert.deepEqual(recordById(expired.doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'fail',
+    detail: 'The https certificate of instance main has run out, so devices refuse it.' + FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor tls --fix',
+  });
+  // The shell reads a missing root count as -1 in this test: run out, even
+  // with leaf days to spare.
+  const noRoot = await tlsWorld({
+    pki: '{"leaf_days_left":200,"leaf_names":["aman.test"],"root_constrained":true,"root_covers_leaf":true}',
+    curlStatus: '200',
+  });
+  assert.deepEqual(recordById(noRoot.doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'fail',
+    detail: 'The https certificate of instance main has run out, so devices refuse it.' + FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor tls --fix',
+  });
+});
+
+test('tls: with daily backups off, a healthy certificate warns that renewal is not automatic', async () => {
+  const { doc } = await tlsWorld({ pki: HEALTHY_PKI, curlStatus: '200', backupsMode: 'off' });
+  assert.deepEqual(recordById(doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'warn',
+    detail:
+      'Daily backups are off, so the https certificate is renewed only when you run an aman command in its last 60 days, or run aman doctor tls --fix.' +
+      FINGERPRINT_SUFFIX,
+    fix: 'Run aman doctor backup --fix',
+  });
+});
+
+test('tls: with no certificate read possible, the plain https line is recorded', async () => {
+  const world = await makeWorld({
+    instances: HTTPS_INSTANCE,
+    release: JSON.stringify({
+      schema: '1',
+      source_ref: 'abc123',
+      stt_image: 'aman-stt:test1',
+      dex_image: 'aman-dex:test1',
+    }),
+  });
+  await write(join(world.stateHome, 'tls', 'ca', 'root.crt'), 'cert\n');
+  await write(join(world.stateHome, 'tls', 'ca', 'root.key'), 'key\n', 0o600);
+  await write(join(world.stateHome, 'tls', 'ca', 'root.fingerprint'), 'AB:CD:EF\n');
+  const { doc } = await runJson(world);
+  assert.deepEqual(recordById(doc.machine, 'tls'), {
+    id: 'tls',
+    state: 'ok',
+    detail: "Https is on, with a certificate from this computer's own authority.",
+    fix: '',
+  });
 });
 
 test('the in-image call: a failed run names its first line; unknown lines are dropped', async () => {
