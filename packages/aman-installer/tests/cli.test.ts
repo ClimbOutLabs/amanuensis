@@ -11,6 +11,7 @@ import {
   problemText,
   UNKNOWN_DOCTOR_CHECK,
   unknownCommandProblem,
+  UPGRADE_NOT_WINDOWS,
 } from '../src/messages.ts';
 import {
   okResult,
@@ -135,4 +136,33 @@ test('status on a computer with nothing installed prints the not-installed probl
   const exitCode = await runCli(['status'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(NOT_INSTALLED)]);
+});
+
+test('doctor --local runs the doctor instead of refusing the flag', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['doctor', '--local'], deps);
+  assert.equal(exitCode, 1);
+  assert.ok(!printed.includes(problemText(UNKNOWN_DOCTOR_CHECK)));
+  assert.ok(printed.includes('Checking this computer'));
+});
+
+test('doctor --json --local prints the checks as data, in either order', async () => {
+  for (const args of [
+    ['doctor', '--json', '--local'],
+    ['doctor', '--local', '--json'],
+  ]) {
+    const { deps, printed } = makeCli(new Map());
+    const exitCode = await runCli(args, deps);
+    assert.equal(exitCode, 1);
+    assert.equal(printed.length, 1);
+    const doc: unknown = JSON.parse(printed[0] ?? '');
+    assert.ok(typeof doc === 'object' && doc !== null && 'machine' in doc);
+  }
+});
+
+test('upgrade refuses plainly where it cannot run', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['upgrade'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(UPGRADE_NOT_WINDOWS)]);
 });

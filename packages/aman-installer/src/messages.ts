@@ -24,6 +24,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
+  'Run aman upgrade to update Aman on Windows to the newest version.',
   'Run aman verify and name a downloaded file to check it against its signed release record.',
 ];
 
@@ -254,6 +255,85 @@ export function verifyOkLine(fileName: string): string {
   return `${printable(fileName)} matches the signed release record.`;
 }
 
+export const UPGRADE_NOT_WINDOWS: Problem = {
+  happened: 'Aman cannot update itself from here on this computer.',
+  fix: 'Update Aman with the installer command, the way you installed it.',
+};
+
+export const UPGRADE_PROGRAM_MISSING: Problem = {
+  happened: 'Aman is installed, but its program is not in place on this computer.',
+  fix: 'Run Aman Setup once to put the program in place, then run Update Aman again.',
+};
+
+export const UPGRADE_SOURCE_MISSING: Problem = {
+  happened: 'This release does not carry the source files the update needs.',
+  fix: 'Run Update Aman from the Start menu again later, when a fixed release is out.',
+};
+
+export const UPGRADE_DOWNLOAD_FAILED: Problem = {
+  happened: 'The newest version of Aman could not be downloaded.',
+  fix: 'Check your internet connection, then run Update Aman from the Start menu again.',
+};
+
+// The fix sentence is the doctor's own, for the first check that failed:
+// the gate refuses in the doctor's words, not a second set of words.
+export function upgradeNotReadyProblem(doctorFix: string): Problem {
+  const fix = doctorFix.replace(/\.+$/, '');
+  return {
+    happened: 'Aman is not ready to update.',
+    fix: fix === '' ? 'Run aman doctor to see what needs fixing.' : `${fix}.`,
+  };
+}
+
+export const UPGRADE_SMOKE_FAILED: Problem = {
+  happened: 'The new version of Aman did not start, so the update was stopped and your Aman is unchanged.',
+  fix: 'Run Update Aman from the Start menu again later.',
+};
+
+export const UPGRADE_REPLACE_FAILED: Problem = {
+  happened: 'The new Aman program could not be put in place.',
+  fix: 'Close any Aman window that is open, then run Update Aman from the Start menu again.',
+};
+
+export const UPGRADE_SOURCE_FAILED: Problem = {
+  happened: 'The new Aman program is in place, but the update itself did not finish.',
+  fix: 'Run Update Aman from the Start menu again to finish the update.',
+};
+
+export const UPGRADE_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so the update cannot go ahead.',
+  fix: 'Open Docker Desktop from the Start menu, then run Update Aman again.',
+};
+
+export const UPGRADE_ROLLED_BACK: Problem = {
+  happened: 'The update did not work, so the previous version of Aman was put back.',
+  fix: 'Run Check Aman from the Start menu to see what needs fixing.',
+};
+
+export const UPGRADE_NOT_PUT_BACK: Problem = {
+  happened: 'The update did not work, and the previous version could not be fully put back.',
+  fix: 'Run Check Aman from the Start menu to see how things stand.',
+};
+
+export const UPGRADE_CONTAINER_FAILED: Problem = {
+  happened: 'The update stopped before it finished.',
+  fix: 'Run Check Aman from the Start menu to see how things stand.',
+};
+
+export function upgradeQuestionLine(release: string): string {
+  return `A newer Aman, ${printable(release)}, is ready. Update to it now?`;
+}
+
+export const UPGRADE_DECLINED_LINE = 'Nothing was updated.';
+
+export const UPGRADE_UP_TO_DATE_LINE = 'Aman is already up to date.';
+
+export const UPGRADE_EXE_IN_PLACE_LINE = 'The new Aman program is in place; it runs the next time Aman starts.';
+
+export function upgradeDoneLine(release: string): string {
+  return `Aman is updated to ${printable(release)}.`;
+}
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -294,5 +374,22 @@ export function allMessageLines(): string[] {
   lines.push(problemText(verifyChangedProblem('aman-linux-x64')));
   lines.push(problemText(VERIFY_SOURCE_IDS_MISMATCH));
   lines.push(verifyOkLine('aman-linux-x64'));
+  lines.push(problemText(UPGRADE_NOT_WINDOWS));
+  lines.push(problemText(UPGRADE_PROGRAM_MISSING));
+  lines.push(problemText(UPGRADE_SOURCE_MISSING));
+  lines.push(problemText(UPGRADE_DOWNLOAD_FAILED));
+  lines.push(problemText(upgradeNotReadyProblem('Run aman doctor')));
+  lines.push(problemText(UPGRADE_SMOKE_FAILED));
+  lines.push(problemText(UPGRADE_REPLACE_FAILED));
+  lines.push(problemText(UPGRADE_SOURCE_FAILED));
+  lines.push(problemText(UPGRADE_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(UPGRADE_ROLLED_BACK));
+  lines.push(problemText(UPGRADE_NOT_PUT_BACK));
+  lines.push(problemText(UPGRADE_CONTAINER_FAILED));
+  lines.push(upgradeQuestionLine('v0.0.0'));
+  lines.push(UPGRADE_DECLINED_LINE);
+  lines.push(UPGRADE_UP_TO_DATE_LINE);
+  lines.push(UPGRADE_EXE_IN_PLACE_LINE);
+  lines.push(upgradeDoneLine('v0.0.0'));
   return lines;
 }

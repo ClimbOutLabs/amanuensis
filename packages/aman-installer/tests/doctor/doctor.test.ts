@@ -349,6 +349,38 @@ test('the ready run asks Docker exactly the shell questions', async () => {
   assert.equal(world.recording.goldenText(), golden);
 });
 
+test('a local run passes --local to the instance doctor and asks nothing more', async () => {
+  const answers = readyAnswers();
+  const plainLine = commandLine('docker', [
+    'exec',
+    '-e',
+    `AMAN_HOST_EPOCH=${String(NOW)}`,
+    'app00001',
+    'aman',
+    'doctor',
+    '--text',
+  ]);
+  const localLine = commandLine('docker', [
+    'exec',
+    '-e',
+    `AMAN_HOST_EPOCH=${String(NOW)}`,
+    'app00001',
+    'aman',
+    'doctor',
+    '--text',
+    '--local',
+  ]);
+  const plain = answers.get(plainLine);
+  assert.ok(plain !== undefined);
+  answers.delete(plainLine);
+  answers.set(localLine, plain);
+  const world = await makeWorld({ answers });
+  const exitCode = await runDoctor(world.deps, { json: true, local: true });
+  assert.equal(exitCode, 0);
+  const golden = await readFile(new URL('../golden/doctor-commands-local.txt', import.meta.url), 'utf8');
+  assert.equal(world.recording.goldenText(), golden);
+});
+
 function withAnswer(
   answers: Map<string, ProcessResult>,
   line: string,
