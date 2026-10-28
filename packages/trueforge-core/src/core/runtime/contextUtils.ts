@@ -1,5 +1,6 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
   EventType,
@@ -121,11 +122,11 @@ ${connector} is connected only in Settings, under Connectors, ${connector}, with
 export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
 
 /**
- * A demo instance refuses to send mail but lets a draft be saved. The model is told so, or it answers "send it"
+ * A demo instance refuses to send from the Email account but lets a draft be saved. The model is told so, or it answers "send it"
  * with a pointer to Settings and prints a draft instead of saving one.
  */
 export const DEMO_EMAIL_PROMPT = dedent`
-This demo cannot send email. When the person asks you to send or draft an email, save it as a draft with save_draft; that asks the person first. Use the address they gave, and fill in names you know instead of placeholders.
+On this demo, the Email account cannot send. When the person asks you to send or draft a message from it, save it as a draft with ${MAIL_DRAFT_TOOL_NAME}; that asks the person first. Use the address they gave, and fill in names you know instead of placeholders.
 `;
 
 export const CALENDAR_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Calendar', owner: 'their calendar' });
