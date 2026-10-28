@@ -70,7 +70,7 @@ import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
-import { isTableSeparatorRow, tableRowKeys } from './spaceTableRows';
+import { isTableRow, isTableSeparatorRow, tableRowEntries } from './spaceTableRows';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
@@ -554,41 +554,79 @@ class SpaceTableRowsRefusedError extends Error {
   }
 }
 
-function describeRowNames(keys: readonly string[]): string {
-  const shown = keys.slice(0, 10).join(', ');
-  return keys.length > 10 ? `${shown}, and ${String(keys.length - 10)} more` : shown;
+function plural({ count, noun }: { count: number; noun: string }): string {
+  return `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/** Refuses a block replacement of table content that loses the header or saved rows. */
-function checkTableBlockReplacement(input: {
+const hasSeparatorRow = (text: string): boolean => text.split('\n').some(isTableSeparatorRow);
+
+/**
+ * Refuses replacing or deleting the block that holds a table's header with anything that has no
+ * header, because the table would lose its header and saved rows.
+ */
+function checkTableHeaderKept({
+  anchor,
+  old_content,
+  new_content,
+}: {
   anchor: string;
   old_content: string;
   new_content: string;
-  confirm_shrink: boolean | undefined;
 }): void {
-  const { anchor, old_content, new_content, confirm_shrink } = input;
-  const oldKeys = tableRowKeys(old_content);
-  const newKeys = tableRowKeys(new_content);
-  if (oldKeys.length === 0 || newKeys.length === 0) {
+  if (!hasSeparatorRow(old_content) || hasSeparatorRow(new_content)) {
     return;
   }
-  const hasSeparator = (text: string): boolean => text.split('\n').some(isTableSeparatorRow);
-  if (hasSeparator(old_content) && !hasSeparator(new_content)) {
+  const rowCount = tableRowEntries(old_content).length;
+  const lead = `Block ${anchor} holds the table's header and its first ${plural({ count: rowCount, noun: 'row' })}. `;
+  if (new_content === '') {
     throw new SpaceTableRowsRefusedError(
-      `Block ${anchor} holds the table's header and its first ${String(oldKeys.length)} rows. ` +
-        'The new content has rows but no header, so it would replace them and break the table. ' +
+      `${lead}Deleting it would break the table. To change these rows, send the whole block with its header.`,
+    );
+  }
+  if (tableRowEntries(new_content).length > 0) {
+    throw new SpaceTableRowsRefusedError(
+      `${lead}The new content has rows but no header, so it would replace them and break the table. ` +
         'To add rows, use an append entry. To change these rows, send the whole block with its header.',
     );
   }
-  const kept = new Set(newKeys);
-  const missing = oldKeys.filter(key => !kept.has(key));
-  if (missing.length > 0 && confirm_shrink !== true) {
-    throw new SpaceTableRowsRefusedError(
-      `This change to block ${anchor} would remove ${String(missing.length)} rows that are saved now: ` +
-        `${describeRowNames(missing)}. To add rows, use an append entry. ` +
-        'If you really mean to remove these rows, send the call again with confirm_shrink: true.',
-    );
+}
+
+/** Refuses an edit after which fewer rows with some key are saved than before, across the whole body. */
+function checkSavedRowsKept({
+  old_body,
+  new_body,
+  confirm_shrink,
+}: {
+  old_body: string;
+  new_body: string;
+  confirm_shrink: boolean | undefined;
+}): void {
+  if (confirm_shrink === true) {
+    return;
   }
+  const newCounts = new Map<string, number>();
+  for (const { key } of tableRowEntries(new_body)) {
+    newCounts.set(key, (newCounts.get(key) ?? 0) + 1);
+  }
+  const lost: string[] = [];
+  for (const { key, label } of tableRowEntries(old_body)) {
+    const remaining = newCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      newCounts.set(key, remaining - 1);
+    } else {
+      lost.push(label);
+    }
+  }
+  if (lost.length === 0) {
+    return;
+  }
+  const shown = lost.slice(0, 10).join(', ');
+  const names = lost.length > 10 ? `${shown}, and ${String(lost.length - 10)} more` : shown;
+  throw new SpaceTableRowsRefusedError(
+    `This change would remove ${plural({ count: lost.length, noun: 'row' })} that ${lost.length === 1 ? 'is' : 'are'} saved now: ${names}. ` +
+      'To add rows, use an append entry. To fix a name, send the row with its new name and confirm_shrink: true. ' +
+      'If you really mean to remove these rows, send the call again with confirm_shrink: true.',
+  );
 }
 
 export interface SpaceTurnAuthority {
@@ -1003,11 +1041,8 @@ function structuralSegments(body: string): SpaceSegment[] {
   }
   const isBlank = (index: number): boolean => (lines[index] ?? '').trim() === '';
   const isHeading = (index: number): boolean => /^#{1,6}(\s|$)/.test(maskedLines[index] ?? '');
-  const isTableRow = (index: number): boolean => (maskedLines[index] ?? '').trim().startsWith('|');
-  const isSeparatorRow = (index: number): boolean => {
-    const trimmed = (maskedLines[index] ?? '').trim();
-    return trimmed.startsWith('|') && trimmed.includes('-') && /^\|[\s:|-]*$/.test(trimmed);
-  };
+  const isRowAt = (index: number): boolean => isTableRow(maskedLines[index] ?? '');
+  const isSeparatorRow = (index: number): boolean => isTableSeparatorRow(maskedLines[index] ?? '');
 
   // Runs: stretches of non-blank lines. A heading is a run of its own, one line:
   // changing a heading never means resending the section under it, and the content
@@ -1039,9 +1074,9 @@ function structuralSegments(body: string): SpaceSegment[] {
   for (const run of runs) {
     let index = run.first;
     while (index < run.last) {
-      if (!isTableRow(index)) {
+      if (!isRowAt(index)) {
         let end = index;
-        while (end < run.last && !isTableRow(end)) {
+        while (end < run.last && !isRowAt(end)) {
           end += 1;
         }
         pieces.push({ first: index, last: end });
@@ -1049,7 +1084,7 @@ function structuralSegments(body: string): SpaceSegment[] {
         continue;
       }
       let regionEnd = index;
-      while (regionEnd < run.last && isTableRow(regionEnd)) {
+      while (regionEnd < run.last && isRowAt(regionEnd)) {
         regionEnd += 1;
       }
       const pinned = regionEnd - index >= 2 && isSeparatorRow(index + 1) ? 2 : 0;
@@ -1215,16 +1250,15 @@ function applyEditEntries(input: {
       });
     }
     if (entry.type === 'block') {
+      checkTableHeaderKept({
+        anchor,
+        old_content: body.slice(target.coreStart, target.coreEnd),
+        new_content: entry.new_content,
+      });
       if (entry.new_content === '') {
         deletions.add(target);
         block_results.push({ anchor, new_length: 0, deleted: true });
       } else {
-        checkTableBlockReplacement({
-          anchor,
-          old_content: body.slice(target.coreStart, target.coreEnd),
-          new_content: entry.new_content,
-          confirm_shrink,
-        });
         replacements.set(target, entry.new_content);
         const leadLength = target.marked ? markedLeadSeparator(body, target).length : 0;
         block_results.push({ anchor, new_length: leadLength + entry.new_content.length, deleted: false });
@@ -1261,7 +1295,7 @@ function applyEditEntries(input: {
   };
   const insertText = (segment: SpaceSegment, content: string): string => {
     const core = body.slice(segment.coreStart, segment.coreEnd);
-    const continuesTable = lastLineOf(core).trim().startsWith('|') && firstLineOf(content).trim().startsWith('|');
+    const continuesTable = isTableRow(lastLineOf(core)) && isTableRow(firstLineOf(content));
     if (continuesTable) {
       return `\n${content}`;
     }
@@ -1315,7 +1349,11 @@ function applyEditEntries(input: {
     }
     parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
   }
-  return { body: parts.join(''), block_results };
+  const newBody = parts.join('');
+  if (replacements.size > 0 || deletions.size > 0) {
+    checkSavedRowsKept({ old_body: body, new_body: newBody, confirm_shrink });
+  }
+  return { body: newBody, block_results };
 }
 
 /**

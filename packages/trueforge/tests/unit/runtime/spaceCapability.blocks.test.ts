@@ -951,7 +951,7 @@ describe('a block replacement may not drop saved table rows', () => {
     const refused = await replace(callTool, table, [...header.slice(2), rows[0]].join('\n'));
     expect(isErrorResponse(refused)).toBe(true);
     expect(resultJson(refused).error).toContain('would remove 3 rows');
-    expect(resultJson(refused).error).toContain('rottweiler, beagle, poodle');
+    expect(resultJson(refused).error).toContain('Rottweiler, Beagle, Poodle');
     expect(await readBody(callTool, 'Breeds')).toBe(before);
   });
 
@@ -981,5 +981,134 @@ describe('a block replacement may not drop saved table rows', () => {
     const applied = await replace(callTool, note, 'New note.');
     expect(isErrorResponse(applied)).toBe(false);
     expect(await readBody(callTool, 'Breeds')).toContain('New note.');
+  });
+});
+
+describe('saved rows are compared across the whole body', () => {
+  const pad = 'x'.repeat(40);
+  const head = ['# Big', '', '| Breed | Group | Note |', '| --- | --- | --- |'];
+  const makeRows = (names: string[]) => names.map(name => `| ${name} | herd | ${pad} |`);
+
+  async function seedBig(names: string[], tableHead: string[] = head) {
+    const { store, callTool } = makeHarness();
+    await store.createSpace({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      id: 'big',
+      name: 'Big',
+      purpose: 'Rows probe.',
+      status: 'active',
+      format: 'markdown',
+      body: [...tableHead, ...makeRows(names)].join('\n'),
+      expected_aggregate_revision: 0,
+    });
+    const blocks = (await listBlocks(callTool, 'Big')).blocks ?? [];
+    return { callTool, blocks };
+  }
+
+  const edit = (
+    callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+    edits: Record<string, unknown>[],
+    extra: Record<string, unknown> = {},
+  ) => callTool(EDIT_SPACE_TOOL_NAME, { space_name: 'Big', expected_revision: 1, edits, ...extra });
+
+  const names = Array.from({ length: 40 }, (_, index) => `Breed${String(index).padStart(2, '0')}`);
+
+  function pick(blocks: SpaceWireBlock[], index: number): SpaceWireBlock {
+    const block = blocks[index];
+    if (block === undefined) {
+      throw new Error('expected block');
+    }
+    return block;
+  }
+
+  it('applies a row moved from the second row block to the first', async () => {
+    const { callTool, blocks } = await seedBig(names);
+    const first = pick(blocks, 1);
+    const second = pick(blocks, 2);
+    const body = (await readBody(callTool, 'Big')).split('\n');
+    const split = body.findIndex(line => line.startsWith(second.preview.slice(0, 12)));
+    const moved = body[split];
+    if (moved === undefined) {
+      throw new Error('expected a row');
+    }
+    const firstContent = [...body.slice(2, split), moved].join('\n');
+    const secondContent = body.slice(split + 1).join('\n');
+    const applied = await edit(callTool, [
+      { type: 'block', anchor: first.anchor, fingerprint: first.fingerprint, new_content: firstContent },
+      { type: 'block', anchor: second.anchor, fingerprint: second.fingerprint, new_content: secondContent },
+    ]);
+    expect(resultJson(applied).error).toBeUndefined();
+  });
+
+  it('applies a reverse sort across both row blocks', async () => {
+    const { callTool, blocks } = await seedBig(names);
+    const first = pick(blocks, 1);
+    const second = pick(blocks, 2);
+    const body = (await readBody(callTool, 'Big')).split('\n');
+    const split = body.findIndex(line => line.startsWith(second.preview.slice(0, 12)));
+    const reversed = body.slice(4).reverse();
+    const half = reversed.length - (body.length - split);
+    const applied = await edit(callTool, [
+      {
+        type: 'block',
+        anchor: first.anchor,
+        fingerprint: first.fingerprint,
+        new_content: [...head.slice(2), ...reversed.slice(0, half)].join('\n'),
+      },
+      {
+        type: 'block',
+        anchor: second.anchor,
+        fingerprint: second.fingerprint,
+        new_content: reversed.slice(half).join('\n'),
+      },
+    ]);
+    expect(resultJson(applied).error).toBeUndefined();
+  });
+
+  it('refuses dropping one of two rows that share a key', async () => {
+    const { callTool, blocks } = await seedBig(['Same', 'Same', 'Other']);
+    const table = pick(blocks, 1);
+    const refused = await edit(callTool, [
+      {
+        type: 'block',
+        anchor: table.anchor,
+        fingerprint: table.fingerprint,
+        new_content: [...head.slice(2), ...makeRows(['Same', 'Other'])].join('\n'),
+      },
+    ]);
+    expect(resultJson(refused).error).toContain('would remove 1 row that is saved now: Same');
+    expect(resultJson(refused).error).toContain('confirm_shrink: true');
+  });
+
+  it('refuses emptying the header block even when rows are inserted elsewhere', async () => {
+    const { callTool, blocks } = await seedBig(['A', 'B']);
+    const table = pick(blocks, 1);
+    const heading = pick(blocks, 0);
+    const refused = await edit(callTool, [
+      { type: 'block', anchor: table.anchor, fingerprint: table.fingerprint, new_content: '' },
+      {
+        type: 'insert',
+        after: heading.anchor,
+        fingerprint: heading.fingerprint,
+        new_content: makeRows(['A', 'B']).join('\n'),
+      },
+    ]);
+    expect(resultJson(refused).error).toContain('holds the table');
+    expect(await readBody(callTool, 'Big')).toContain('| --- |');
+  });
+
+  it.each([
+    ['dashes without spaces', ['# Big', '', '|Breed|Note|', '|-|-|']],
+    ['colon dashes', ['# Big', '', '| Breed | Note |', '|:--|:--|']],
+    ['no closing pipes', ['# Big', '', '| Breed | Note', '| --- | ---']],
+  ])('refuses rows without a header for a table with %s', async (_label, tableHead) => {
+    const { callTool, blocks } = await seedBig(['A', 'B'], tableHead);
+    const table = pick(blocks, 1);
+    const refused = await edit(callTool, [
+      { type: 'block', anchor: table.anchor, fingerprint: table.fingerprint, new_content: makeRows(['C']).join('\n') },
+    ]);
+    expect(resultJson(refused).error).toContain('no header');
+    expect(resultJson(refused).error).not.toContain('confirm_shrink');
   });
 });
