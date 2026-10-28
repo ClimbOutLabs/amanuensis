@@ -21,6 +21,7 @@ export function versionLine(version: string): string {
 export const HELP_LINES: readonly string[] = [
   'Aman installer. It sets up Aman on this computer and checks that things work.',
   'Run aman --version to see which version this is.',
+  'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
 ];

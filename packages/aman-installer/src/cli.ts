@@ -1,12 +1,15 @@
 import { runStatus } from './commands/status.ts';
 import { checkDocker } from './doctor/dockerDoctor.ts';
+import { runDoctor, type DoctorDeps } from './doctor/doctor.ts';
 import type { Host } from './host/host.ts';
 import { HELP_LINES, UNKNOWN_DOCTOR_CHECK, problemText, unknownCommandProblem, versionLine } from './messages.ts';
 import type { ProcessRunner } from './runner/processRunner.ts';
 import type { StateStore } from './state/state.ts';
 import { INSTALLER_VERSION } from './version.ts';
 
-export interface CliDeps {
+// The doctor's extra inputs ride along in the same deps, so every command
+// is built from the one deps object main wires up.
+export interface CliDeps extends DoctorDeps {
   host: Host;
   runner: ProcessRunner;
   store: StateStore;
@@ -26,6 +29,12 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
     return 0;
   }
   if (first === 'doctor') {
+    if (second === undefined) {
+      return runDoctor(deps, { json: false });
+    }
+    if (second === '--json') {
+      return runDoctor(deps, { json: true });
+    }
     if (second === 'docker') {
       return checkDocker(deps);
     }
