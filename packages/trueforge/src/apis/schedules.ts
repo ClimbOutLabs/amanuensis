@@ -8,6 +8,11 @@ import {
   type Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
+import {
+  CREATE_SCHEDULE_TOOL_NAME,
+  SET_REMINDER_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
@@ -129,6 +134,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** The activity log a firing is written to; absent, firings run exactly as before and are not recorded. */
+  audit?: AuditLogWriter | null | undefined;
 }
 
 export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecutionDeps<TTransaction> {
@@ -136,6 +143,42 @@ export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecution
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
+}
+
+/**
+ * One activity log row for a firing, keyed on the chat the run belongs to, so a schedule that ran
+ * is visible beside the actions taken in chats. A failed write is only logged: it never changes
+ * the run, which has already started.
+ */
+async function recordScheduleFiring(input: {
+  audit: AuditLogWriter | null | undefined;
+  logger: Logger;
+  item: ScheduleDispatchItem;
+  session_id: string;
+  tool_name: string;
+  description: string;
+}): Promise<void> {
+  if (input.audit === undefined || input.audit === null) {
+    return;
+  }
+  try {
+    await input.audit.record({
+      tenant_id: input.item.schedule.tenant_id,
+      created_by: input.item.schedule.created_by_subject.subject_id,
+      conversation_id: input.session_id,
+      tier: 1,
+      tool_name: input.tool_name,
+      description: input.description,
+      outcome: 'logged',
+      auto_deny_reason: null,
+    });
+  } catch (error) {
+    input.logger.warn('Could not record a schedule firing in the activity log', {
+      schedule_id: input.item.schedule.id,
+      run_id: input.item.run.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
@@ -151,12 +194,21 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
     // A reminder needs no model: the host writes its line into the Reminders chat itself.
-    await deliverReminder({
+    const deliveredSessionId = await deliverReminder({
       item,
       sessions: deps.sessions,
       sessionStore: deps.sessionStore,
       agentStore: deps.agentStore,
       now: new Date(),
+      audit: deps.audit,
+    });
+    await recordScheduleFiring({
+      audit: deps.audit,
+      logger: deps.logger,
+      item,
+      session_id: deliveredSessionId,
+      tool_name: SET_REMINDER_TOOL_NAME,
+      description: `The reminder ran: ${item.schedule.manifest.task}`,
     });
     return;
   }
@@ -170,6 +222,14 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   if (prepared === undefined) {
     return;
   }
+  await recordScheduleFiring({
+    audit: deps.audit,
+    logger: deps.logger,
+    item,
+    session_id: prepared.session.session_id,
+    tool_name: CREATE_SCHEDULE_TOOL_NAME,
+    description: `The schedule "${item.schedule.name}" ran.`,
+  });
   const personalizationProfile = await deps.personalizationStore.getProfile({
     tenant_id: item.schedule.tenant_id,
     created_by: prepared.userRef,

@@ -1,3 +1,4 @@
+import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import { chmod, mkdir, unlink } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { connect as netConnect, type Socket } from 'node:net';
@@ -15,6 +16,11 @@ const CONNECT_TIMEOUT_MS = 30_000;
 export interface SkillNetworkGatewayOptions {
   registry: SkillNetworkTokenRegistry;
   logger: Logger;
+  /**
+   * The activity log a refused connection is also written to, so a stopped attempt shows beside
+   * the actions that ran. Absent or null, refusals are only written to the server log, as before.
+   */
+  audit?: AuditLogWriter | null | undefined;
   /**
    * Test seam only: replaces the real dial (guarded DNS, public addresses only) with a local
    * stand-in, for any host name. The server never sets this; its gateway always resolves names
@@ -34,12 +40,14 @@ export interface SkillNetworkGatewayOptions {
 export class SkillNetworkGateway {
   readonly #registry: SkillNetworkTokenRegistry;
   readonly #logger: Logger;
+  readonly #audit: AuditLogWriter | null;
   readonly #connectUpstream: SkillNetworkGatewayOptions['connectUpstream'];
   readonly #servers: Server[] = [];
 
   constructor(options: SkillNetworkGatewayOptions) {
     this.#registry = options.registry;
     this.#logger = options.logger.child({ module: 'SkillNetworkGateway' });
+    this.#audit = options.audit ?? null;
     this.#connectUpstream = options.connectUpstream;
   }
 
@@ -102,22 +110,26 @@ export class SkillNetworkGateway {
         message: 'The connection request did not name a site.',
         host: undefined,
         grant: undefined,
+        auditDescription: undefined,
       });
       return;
     }
+    // The grant is read before the port check so a refused connection can still be written to the
+    // activity log under its chat; the checks, their order, and their messages are unchanged.
+    const tokenHeader = input.headers[SKILL_NETWORK_TOKEN_HEADER];
+    const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+    const grant = token === undefined ? undefined : this.#registry.resolve(token);
     if (target.port !== 443) {
       this.#refuse({
         socket,
         status: 403,
         message: 'Only secure (HTTPS) connections are carried. Connect to port 443.',
         host: target.host,
-        grant: undefined,
+        grant,
+        auditDescription: `A skill tried to reach ${target.host} without a secure connection, and it was refused.`,
       });
       return;
     }
-    const tokenHeader = input.headers[SKILL_NETWORK_TOKEN_HEADER];
-    const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
-    const grant = token === undefined ? undefined : this.#registry.resolve(token);
     if (grant === undefined) {
       this.#refuse({
         socket,
@@ -126,6 +138,7 @@ export class SkillNetworkGateway {
           'This chat has no network approval. Approve the skill’s sites in Settings, then Skills, and try again.',
         host: target.host,
         grant: undefined,
+        auditDescription: undefined,
       });
       return;
     }
@@ -136,6 +149,7 @@ export class SkillNetworkGateway {
         message: `${target.host} is not one of the sites approved for the skills in this chat. To allow it, the skill must name it and the new list must be approved in Settings, then Skills.`,
         host: target.host,
         grant,
+        auditDescription: `A skill tried to reach ${target.host}, which is not one of its approved sites, and the connection was refused.`,
       });
       return;
     }
@@ -158,6 +172,9 @@ export class SkillNetworkGateway {
         host: target.host,
         grant,
         log: false,
+        // A connection that simply fails to open was stopped by no rule, so it leaves
+        // no activity log row; the warn line above is its record.
+        auditDescription: undefined,
       });
       return;
     }
@@ -188,6 +205,8 @@ export class SkillNetworkGateway {
     host: string | undefined;
     grant: SkillNetworkGrant | undefined;
     log?: boolean;
+    /** The activity log line for this refusal; left out when the call names no chat to file it under. */
+    auditDescription: string | undefined;
   }): void {
     if (input.log !== false) {
       this.#logger.warn('Skill network connection refused', {
@@ -197,6 +216,29 @@ export class SkillNetworkGateway {
         hosts: input.grant?.hosts,
         message: input.message,
       });
+    }
+    // The refusal is answered first and in full; the activity log row is written alongside it and
+    // a failed write is only logged, never a reason to change the answer.
+    if (this.#audit !== null && input.grant !== undefined && input.auditDescription !== undefined) {
+      const grant = input.grant;
+      const description = input.auditDescription;
+      void this.#audit
+        .record({
+          tenant_id: grant.tenant_id,
+          created_by: grant.created_by,
+          conversation_id: grant.session_id,
+          tier: 3,
+          tool_name: 'skill_network',
+          description,
+          outcome: 'auto_denied',
+          auto_deny_reason: null,
+        })
+        .catch((error: unknown) => {
+          this.#logger.warn('Could not record a refused skill network connection in the activity log', {
+            host: input.host,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     }
     const body = `${input.message}\n`;
     input.socket.end(

@@ -7,6 +7,7 @@ import {
   SlotSandboxProvider,
   slotSkillNetworkSocketPathsIn,
   slotSocketPathsIn,
+  type AuditLogWriter,
   type SandboxBuild,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -100,7 +101,13 @@ let skillNetworkGatewayStarted = false;
  * the sockets cannot be opened, approved skill sites stay unreachable and every other sandbox
  * call keeps working, so a gateway problem never takes the sandbox down.
  */
-export async function startSkillNetworkGateway({ logger }: { logger: Logger }): Promise<void> {
+export async function startSkillNetworkGateway({
+  logger,
+  audit,
+}: {
+  logger: Logger;
+  audit?: AuditLogWriter | null | undefined;
+}): Promise<void> {
   if (skillNetworkGatewayStarted || !slotsBackendEnabled()) {
     return;
   }
@@ -109,6 +116,7 @@ export async function startSkillNetworkGateway({ logger }: { logger: Logger }): 
     const gateway = new SkillNetworkGateway({
       registry: skillNetworkTokens,
       logger: logger.child({ module: 'skill-network' }),
+      audit: audit ?? null,
     });
     await gateway.listenOnSockets(slotSkillNetworkSocketPaths());
     logger.info('Skill network gateway is listening for the sandbox slots');
