@@ -926,6 +926,8 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
 
     const auditsLink = screen.getByRole('button', { name: 'Audits' });
     expect(auditsLink).toBeInTheDocument();
+    expect(auditsLink).toHaveClass('justify-self-start');
+    expect(auditsLink).toHaveClass('text-left');
 
     fireEvent.click(auditsLink);
 
