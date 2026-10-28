@@ -907,3 +907,75 @@ describe('marked bodies keep their named anchors', () => {
     );
   });
 });
+
+describe('nothing-changed refusal and format notes', () => {
+  const TABLE = ['| Breed | Size |', '| --- | --- |', '| Beagle | Small |'].join('\n');
+
+  it('refuses an edit that leaves the space as it is and keeps the revision', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: '# Dogs\n\nHello.' });
+    const blocks = (await listBlocks(callTool, 'Dogs')).blocks ?? [];
+    const second = blocks[1];
+    const edited = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dogs',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: second?.anchor, fingerprint: second?.fingerprint, new_content: 'Hello.' }],
+    });
+    expect(isErrorResponse(edited)).toBe(true);
+    expect(resultJson(edited).error).toContain('This edit changes nothing');
+    expect((await listBlocks(callTool, 'Dogs')).revision).toBe(1);
+  });
+
+  it('does not count the refusal as a failed delta', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: '# Dogs\n\nHello.' });
+    const second = ((await listBlocks(callTool, 'Dogs')).blocks ?? [])[1];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dogs',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: second?.anchor, fingerprint: second?.fingerprint, new_content: 'Hello.' }],
+      });
+    }
+    const changed = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dogs',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: second?.anchor, fingerprint: second?.fingerprint, new_content: 'Bye.' }],
+    });
+    expect(isErrorResponse(changed)).toBe(false);
+  });
+
+  it('accepts an edit that changes only metadata', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: '# Dogs\n\nHello.' });
+    const second = ((await listBlocks(callTool, 'Dogs')).blocks ?? [])[1];
+    const renamed = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dogs',
+      expected_revision: 1,
+      new_title: 'Hounds',
+      edits: [{ type: 'block', anchor: second?.anchor, fingerprint: second?.fingerprint, new_content: 'Hello.' }],
+    });
+    expect(isErrorResponse(renamed)).toBe(false);
+  });
+
+  it('carries format_notes on read and write results', async () => {
+    const { callTool } = makeHarness();
+    const created = await callTool(CREATE_SPACE_TOOL_NAME, {
+      name: 'Dogs',
+      purpose: 'Dogs.',
+      status: 'active',
+      format: 'markdown',
+      body: `${TABLE}\n| Beagle | Small |`,
+    });
+    const noteOf = (response: CallToolResponse): unknown => JSON.parse(resultText(response)).format_notes;
+    expect(noteOf(created)).toEqual([expect.stringContaining('beagle')]);
+    expect(noteOf(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Dogs' }))).toEqual([
+      expect.stringContaining('beagle'),
+    ]);
+    expect(noteOf(await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: 'Dogs' }))).toEqual([
+      expect.stringContaining('beagle'),
+    ]);
+    await createSpace(callTool, { name: 'Clean', body: TABLE });
+    expect(noteOf(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Clean' }))).toEqual([]);
+  });
+});
