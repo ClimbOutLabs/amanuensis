@@ -184,6 +184,19 @@ describe('buildDemoWorld content', () => {
     expect(world.profile.user_profile).toBe(DEMO_USER_PROFILE);
   });
 
+  it('gives the assistant a name, a character and a voice, with learning on', () => {
+    const { profile, agentSpec } = worldOn(MONDAY);
+
+    expect(profile.assistant_name).toBe('Nata');
+    expect(profile.assistant_identity).toContain('Have opinions.');
+    expect(profile.assistant_identity).toContain('Come back with answers, not questions');
+    expect(profile.assistant_identity).toContain('Never preachy, never flowery.');
+    expect(profile.voice_guidance).toBe('Warm, friendly, honest, direct and caring.');
+    expect(profile.learning_enabled).toBe(true);
+    expect(agentSpec.instructions).toContain('You are Nata');
+    expect(agentSpec.instructions).toContain('Warm, friendly, honest, direct and caring.');
+  });
+
   it('never tells the assistant that Maya or her world is made up', () => {
     const world = buildDemoWorld({ today: MONDAY, timeZone: 'Europe/Lisbon', modelName: 'provider/model' });
 
