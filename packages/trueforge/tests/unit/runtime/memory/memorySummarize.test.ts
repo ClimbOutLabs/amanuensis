@@ -1156,7 +1156,8 @@ describe('what the summary keeps', () => {
     ['a condition said another way', "I'm diabetic", '', 'Maya has diabetes.'],
     ['accented words', 'Mon café préféré est le Café Müller', '', "Maya's favourite cafe is Cafe Muller."],
     ['a Chinese message', '我的女儿叫小明', '', '玛雅的女儿叫小明。'],
-    ['a fact in another script than the message', '我的医生是李博士', '', "Maya's doctor is Dr Li."],
+    ['a Japanese message with a Japanese fact', '私の娘はリリーです', '', '玛雅の娘はリリーです。'],
+    ['a fact in another script that shares a name', '私の娘はLilyです', '', "Maya's daughter is Lily."],
   ])('keeps a real fact: %s', async (_label, userText, question, fact) => {
     const { llm } = recordingSummarizer(JSON.stringify({ facts: [fact] }));
 

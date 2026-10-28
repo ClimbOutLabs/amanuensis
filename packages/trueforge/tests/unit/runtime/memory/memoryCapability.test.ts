@@ -2404,7 +2404,11 @@ describe('extractPreviousExchange origin', () => {
     expect(extractPreviousExchange(exchangeWithTool('exec'))?.origin).toBe('tool_ingested');
   });
 
-  it('leaves the exchange as the person own when only a space tool ran', () => {
-    expect(extractPreviousExchange(exchangeWithTool('edit_space'))?.origin).toBe('user_stated');
+  it('marks the exchange for a space tool, whose result holds a stored body', () => {
+    expect(extractPreviousExchange(exchangeWithTool('edit_space'))?.origin).toBe('tool_ingested');
+  });
+
+  it('leaves the exchange as the person own when only a task tool ran', () => {
+    expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
   });
 });

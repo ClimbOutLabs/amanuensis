@@ -204,6 +204,7 @@ function summarizeSystemPrompt(personName: string | undefined): string {
     '- greetings, thanks, or short answers such as "yes" or "this week"',
     '',
     "The exchange holds only what the person wrote. A line marked context only is the assistant's last question; use it to understand a short reply, and never keep anything from it.",
+    'Write each fact in the language the person wrote in.',
     name === undefined
       ? 'Write each fact as one complete sentence in the third person, about "the person". Never write "User" or "Assistant".'
       : `Write each fact as one complete sentence with ${name} as its subject, the way you would write a note about a friend. Never write "User" or "Assistant", and never use "the person" as the subject of a fact.`,
@@ -359,10 +360,12 @@ function sameWord({ a, b }: { a: string; b: string }): boolean {
 }
 
 /**
- * Keeps a fact only when it comes from the person's own words (or from the assistant's last question,
- * given only for a short reply). A fact whose every name and number appears there is kept. Otherwise
- * it is kept when enough of its content words appear there. Stop words, task verbs and the person's
- * own name do not count. A fact in another script than the message is kept: the words cannot be compared.
+ * Keeps a fact only when it comes from the person's own words. The fact must share at least one name,
+ * number or content word with the person's text; the assistant's last question (given only for a short
+ * reply) can help match a short answer to its fact but is never the only source, so a bare "yes" keeps
+ * nothing. A fact whose every name and number appears in what was said is kept. Otherwise it is kept when
+ * enough of its content words appear there. Stop words, task verbs and the person's own name do not
+ * count. A fact in another script than the message is kept only when it shares a name or number with it.
  */
 export function keepFactsFromPerson({
   facts,
@@ -375,24 +378,29 @@ export function keepFactsFromPerson({
   assistantQuestion?: string | undefined;
   personName: string | undefined;
 }): string[] {
-  const said = [userText, assistantQuestion ?? ''].join('\n');
-  const saidScript = dominantScript(said);
+  const personScript = dominantScript(userText);
   const ownName = new Set(wordsOf(foldText(usablePersonName(personName) ?? '')));
-  const saidWords = wordsOf(foldText(said)).map(stem);
-  const isSaid = (word: string): boolean => saidWords.some(candidate => sameWord({ a: word, b: candidate }));
+  const matchesAny = (words: readonly string[]) => (word: string) =>
+    words.some(candidate => sameWord({ a: word, b: candidate }));
+  const isFromPerson = matchesAny(wordsOf(foldText(userText)).map(stem));
+  const isFromQuestion = matchesAny(wordsOf(foldText(assistantQuestion ?? '')).map(stem));
+  const isSaid = (word: string): boolean => isFromPerson(word) || isFromQuestion(word);
   const isCounted = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ownName.has(word);
   const isContent = (word: string): boolean =>
     isCounted(word) && (word.length >= 3 || SINGLE_CHARACTER_WORD.test(word) || /^\d+$/.test(word));
   return facts.filter(fact => {
-    const factScript = dominantScript(fact);
-    if (saidScript !== undefined && factScript !== undefined && saidScript !== factScript) {
-      return true;
-    }
     const anchors = anchorsOf({ fact, isCounted });
+    const factScript = dominantScript(fact);
+    if (personScript === undefined || (factScript !== undefined && personScript !== factScript)) {
+      return anchors.some(isFromPerson);
+    }
+    const words = [...new Set(wordsOf(foldText(fact)).map(stem).filter(isContent))];
+    if (!anchors.some(isFromPerson) && !words.some(isFromPerson)) {
+      return false;
+    }
     if (anchors.length > 0 && anchors.every(isSaid)) {
       return true;
     }
-    const words = [...new Set(wordsOf(foldText(fact)).map(stem).filter(isContent))];
     return words.length > 0 && words.filter(isSaid).length / words.length >= MIN_SHARED_WORD_SHARE;
   });
 }

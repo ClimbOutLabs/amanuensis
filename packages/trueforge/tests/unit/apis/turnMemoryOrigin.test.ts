@@ -96,12 +96,10 @@ describe('drainTurnEvents memory origin', () => {
     expect(await retainedOrigin({ attachedFiles: false })).toBe('user_stated');
   });
 
-  it('does not mark a turn that only wrote a space or kept task state', async () => {
+  it('does not mark a turn that only kept task state', async () => {
     const earlier = [
-      ...toolRound({ id: 'c1', name: 'space__create_space' }),
-      ...toolRound({ id: 'c2', name: 'edit_space' }),
-      ...toolRound({ id: 'c3', name: 'create_schedule' }),
-      ...toolRound({ id: 'c4', name: 'record_finding' }),
+      ...toolRound({ id: 'c1', name: 'record_finding' }),
+      ...toolRound({ id: 'c2', name: 'replace_task_checklist' }),
     ];
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
   });
@@ -116,8 +114,15 @@ describe('drainTurnEvents memory origin', () => {
     'exec',
     'run_code',
     'get_weather',
+    'edit_space',
+    'get_space',
+    'revert_space',
+    'list_blocks',
+    'list_reminders',
+    'list_schedules',
+    'create_schedule',
   ])('marks a turn that read outside content with %s', async name => {
-    const earlier = [...toolRound({ id: 'c1', name: 'edit_space' }), ...toolRound({ id: 'c2', name })];
+    const earlier = [...toolRound({ id: 'c1', name: 'record_finding' }), ...toolRound({ id: 'c2', name })];
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
   });
 
@@ -127,14 +132,14 @@ describe('drainTurnEvents memory origin', () => {
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
   });
 
-  it('does not mark a turn when the wrapper reaches a host space tool', async () => {
-    const args = JSON.stringify({ mcp_server: 'space', tool_name: 'edit_space', input: {} });
+  it('does not mark a turn when the wrapper reaches a host task tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'tasks', tool_name: 'record_finding', input: {} });
     const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
   });
 
   it('marks a turn whose tool response has no matching call', async () => {
-    const earlier = toolRound({ id: 'c1', name: 'edit_space' }).slice(1);
+    const earlier = toolRound({ id: 'c1', name: 'record_finding' }).slice(1);
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
   });
 });

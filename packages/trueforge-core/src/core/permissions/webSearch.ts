@@ -7,18 +7,7 @@ import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
-import {
-  CANCEL_REMINDER_TOOL_NAME,
-  CREATE_SCHEDULE_TOOL_NAME,
-  DELETE_SCHEDULE_TOOL_NAME,
-  LIST_REMINDERS_TOOL_NAME,
-  LIST_SCHEDULES_TOOL_NAME,
-  PAUSE_SCHEDULE_TOOL_NAME,
-  RESUME_SCHEDULE_TOOL_NAME,
-  SET_REMINDER_TOOL_NAME,
-} from '../schedules/toolContract';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
-import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '../spaces/toolContract';
 import {
   emptyChatProvenance,
   namesUrl,
@@ -166,24 +155,13 @@ function baseToolName(toolName: string): string {
 }
 
 /**
- * Host tools whose results hold nothing written outside the chat: spaces, task state, schedules and
- * reminders. This is the only list; any tool not on it, including every connector, shell tool and
+ * Host tools whose results never contain stored or outside text: the finding recorder answers with a fixed
+ * line, and the task checklist writer answers with the checklist the model just wrote. Spaces, schedules and
+ * reminders are not here: their results echo stored bodies, names and tasks that may hold page text saved in
+ * an earlier turn. This is the only list; any tool not on it, including every connector, shell tool and
  * unknown name, counts as bringing in outside content.
  */
-const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  ...SPACE_READ_TOOL_NAMES,
-  ...SPACE_WRITE_TOOL_NAMES,
-  CREATE_SCHEDULE_TOOL_NAME,
-  LIST_SCHEDULES_TOOL_NAME,
-  PAUSE_SCHEDULE_TOOL_NAME,
-  RESUME_SCHEDULE_TOOL_NAME,
-  DELETE_SCHEDULE_TOOL_NAME,
-  SET_REMINDER_TOOL_NAME,
-  LIST_REMINDERS_TOOL_NAME,
-  CANCEL_REMINDER_TOOL_NAME,
-  TASK_STATE_TOOL_NAME,
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-]);
+const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
 /** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
 export function toolReturnsOutsideContent(toolName: string): boolean {
