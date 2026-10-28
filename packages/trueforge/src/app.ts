@@ -3,6 +3,7 @@ import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
+  existingSandboxIdForProvider,
   extractErrorLogFields,
   rawSandboxId,
   repositoryRootsMatch,
@@ -324,6 +325,79 @@ export interface ServerDeps<TTransaction> {
   authorizer: Authorizer;
   /** Exact secret values this server holds; Sentinel's outbound guard and the data export both read them. */
   outboundSecrets: SentinelServices['outboundSecrets'];
+}
+
+/**
+ * Whether the sandbox the chat last used already holds a real checkout at the
+ * workspace path. Git must name the path as the checkout root and HEAD must
+ * resolve to a commit, so an empty folder, a repo with no commits yet, and the
+ * leftover of an interrupted clone do not count. The recorded sandbox id goes
+ * through the same provider gate turn admit uses, and any failure to tell
+ * counts as no checkout, so start work refuses plainly instead of failing.
+ */
+export async function resolveCheckoutExistsInSessionSandbox(input: {
+  deps: {
+    sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSession' | 'getTurn'>;
+    logger: Logger;
+    sandboxProviderResolver: typeof resolveSandboxProvider | undefined;
+    resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
+  };
+  c: Context;
+  session_id: string;
+  workspace_cwd: string;
+}): Promise<boolean> {
+  const { deps, c, session_id, workspace_cwd } = input;
+  try {
+    const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id });
+    if (session === undefined) {
+      return false;
+    }
+    const recordedSandboxId = await sandboxIdOfLastTurn({
+      deps: { sessionStore: deps.sessionStore, logger: deps.logger },
+      record: session,
+    });
+    if (recordedSandboxId === undefined) {
+      return false;
+    }
+    const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+    const provider = await resolver({
+      tenant_id: TENANT_ID,
+      store: deps.resolveSandboxProviderStore(c),
+      logger: deps.logger,
+      sessionId: session_id,
+    });
+    if (provider === undefined) {
+      return false;
+    }
+    const sandboxId = existingSandboxIdForProvider({
+      existingSandboxId: recordedSandboxId,
+      currentProviderType: provider.type,
+    });
+    if (sandboxId === undefined) {
+      return false;
+    }
+    const root = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse --show-toplevel',
+      cwd: workspace_cwd,
+    });
+    if (
+      !root.success ||
+      root.response.exitCode !== 0 ||
+      !repositoryRootsMatch({ expected: workspace_cwd, actual: root.response.result.trim() })
+    ) {
+      return false;
+    }
+    const head = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse HEAD',
+      cwd: workspace_cwd,
+    });
+    return head.success && head.response.exitCode === 0 && head.response.result.trim().length > 0;
+  } catch (error) {
+    deps.logger.warn('Could not check for a checkout before starting work', extractErrorLogFields(error));
+    return false;
+  }
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -1059,39 +1133,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           });
           return provider?.getWorkspaceDir();
         },
-        resolveCheckoutExists: async ({ c, session_id, workspace_cwd }) => {
-          const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id });
-          if (session === undefined) {
-            return false;
-          }
-          const sandboxId = await sandboxIdOfLastTurn({
-            deps: { sessionStore: deps.sessionStore, logger: deps.logger },
-            record: session,
-          });
-          if (sandboxId === undefined) {
-            return false;
-          }
-          const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
-          const provider = await resolver({
-            tenant_id: TENANT_ID,
-            store: deps.resolveSandboxProviderStore(c),
-            logger: deps.logger,
-            sessionId: session_id,
-          });
-          if (provider === undefined) {
-            return false;
-          }
-          const result = await provider.exec({
-            sandboxId: rawSandboxId(sandboxId),
-            command: 'git rev-parse --show-toplevel',
-            cwd: workspace_cwd,
-          });
-          return (
-            result.success &&
-            result.response.exitCode === 0 &&
-            repositoryRootsMatch({ expected: workspace_cwd, actual: result.response.result.trim() })
-          );
-        },
+        resolveCheckoutExists: ({ c, session_id, workspace_cwd }) =>
+          resolveCheckoutExistsInSessionSandbox({
+            deps: {
+              sessionStore: deps.sessionStore,
+              logger: deps.logger,
+              sandboxProviderResolver: deps.sandboxProviderResolver,
+              resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+            },
+            c,
+            session_id,
+            workspace_cwd,
+          }),
       }),
       authMiddleware,
     ),
