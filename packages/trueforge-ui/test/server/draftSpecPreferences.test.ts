@@ -8,7 +8,9 @@ import {
   readDraftSpecPreferences,
   selectAgentDraftSpecPreferences,
   selectChatDraftSpecPreferences,
+  skillsNeedSandbox,
   withCapabilitiesSandbox,
+  withoutSkillsWhenSandboxUnavailable,
   writeDraftSpecPreferences,
 } from '@/server/draftSpecPreferences.js';
 
@@ -199,5 +201,35 @@ describe('withCapabilitiesSandbox', () => {
     const spec = { model: { name: 'model' }, config: { sandbox: { enabled: false } } };
 
     expect(withCapabilitiesSandbox(spec, false)).toBe(spec);
+  });
+});
+
+describe('withoutSkillsWhenSandboxUnavailable', () => {
+  const spec = { model: { name: 'model' }, skills: [{ name: 'find-skills' }] };
+
+  it('sends no skills while the sandbox is unavailable', () => {
+    expect(withoutSkillsWhenSandboxUnavailable(spec, false)).toEqual({ model: { name: 'model' } });
+    expect(skillsNeedSandbox(spec, false)).toBe(true);
+  });
+
+  it('keeps skills when the sandbox is available or not yet known', () => {
+    expect(withoutSkillsWhenSandboxUnavailable(spec, true)).toBe(spec);
+    expect(withoutSkillsWhenSandboxUnavailable(spec, undefined)).toBe(spec);
+  });
+
+  it('leaves a spec without skills as it is', () => {
+    const plain = { model: { name: 'model' }, config: { sandbox: { enabled: false } } };
+
+    expect(withoutSkillsWhenSandboxUnavailable(plain, false)).toBe(plain);
+    expect(skillsNeedSandbox(plain, false)).toBe(false);
+  });
+
+  it('keeps the stored choice when the sandbox goes off and on again', () => {
+    window.localStorage.clear();
+    writeDraftSpecPreferences('chat', spec);
+    withoutSkillsWhenSandboxUnavailable(spec, false);
+    writeDraftSpecPreferences('chat', spec);
+    expect(readDraftSpecPreferences('chat')?.skills).toEqual([{ name: 'find-skills' }]);
+    expect(withoutSkillsWhenSandboxUnavailable(spec, true).skills).toEqual([{ name: 'find-skills' }]);
   });
 });

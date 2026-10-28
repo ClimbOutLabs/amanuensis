@@ -138,22 +138,15 @@ describe('a stored chat draft seed naming a deleted connector', () => {
 describe('reconcileDraftSandbox for a new chat', () => {
   const skills = [{ name: 'find-skills' }];
 
-  it('turns the sandbox off and leaves out skills when the sandbox is not available', () => {
+  it('turns the sandbox off when it is not available and does not touch the skills', () => {
     const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
 
     expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({
       config: { sandbox: { enabled: false } },
-      skills: [],
     });
   });
 
-  it('leaves out skills when the sandbox is off and not available', () => {
-    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: false } } };
-
-    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({ skills: [] });
-  });
-
-  it('keeps skills when the sandbox is available', () => {
+  it('changes nothing when the sandbox is available', () => {
     const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
 
     expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({});

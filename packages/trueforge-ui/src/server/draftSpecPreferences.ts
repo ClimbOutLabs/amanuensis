@@ -100,6 +100,22 @@ export function withCapabilitiesSandbox(spec: AgentSpec, sandboxEnabled: boolean
   };
 }
 
+/** Skills run in the sandbox, so a spec with skills cannot be sent while the sandbox is unavailable. */
+export function skillsNeedSandbox(spec: AgentSpec | null | undefined, sandboxEnabled: boolean | null | undefined) {
+  return sandboxEnabled === false && spec?.skills !== undefined && spec.skills.length > 0;
+}
+
+/** The spec to send: skills left out while the sandbox is unavailable. The draft and its stored choices keep them. */
+export function withoutSkillsWhenSandboxUnavailable(
+  spec: AgentSpec,
+  sandboxEnabled: boolean | null | undefined,
+): AgentSpec {
+  if (!skillsNeedSandbox(spec, sandboxEnabled)) return spec;
+  const { skills, ...rest } = spec;
+  void skills;
+  return rest;
+}
+
 function readStoredSpec(key: string): AgentSpec | null {
   if (typeof window === 'undefined') return null;
   try {

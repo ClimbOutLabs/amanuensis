@@ -36,7 +36,7 @@ export function sendRefusalText({ refusal, assistantName }: { refusal: SendRefus
     case 'stopped_by_restart':
       return `This reply stopped when ${assistantName} restarted. Send your message again.`;
     case 'skills_off_without_sandbox':
-      return 'Skills are off for this chat because the sandbox is not ready yet.';
+      return 'Skills are off for this chat because the space they run in is not ready yet.';
   }
 }
 

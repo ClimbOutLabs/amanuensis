@@ -35,7 +35,7 @@ const sendLines: Array<[SendRefusal, string]> = [
   ],
   ['turn_could_not_start', 'That reply could not start. Send your message again.'],
   ['stopped_by_restart', 'This reply stopped when Juniper restarted. Send your message again.'],
-  ['skills_off_without_sandbox', 'Skills are off for this chat because the sandbox is not ready yet.'],
+  ['skills_off_without_sandbox', 'Skills are off for this chat because the space they run in is not ready yet.'],
 ];
 
 const answerLines: Array<[TurnRefusalCode, string]> = [

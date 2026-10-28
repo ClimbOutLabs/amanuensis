@@ -29,7 +29,8 @@ import {
 } from '../server/ChatConnectorChoiceContext.js';
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
-import { ServerProvider } from '../server/ServerContext.js';
+import { withoutSkillsWhenSandboxUnavailable } from '../server/draftSpecPreferences.js';
+import { ServerProvider, useServerCapabilities } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
 import {
   DEFAULT_AGENT_CONFIG,
@@ -40,7 +41,7 @@ import {
 } from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
 import type { TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
-import type { AgentUIServer } from '../server/types.js';
+import type { AgentSpec, AgentUIServer } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
@@ -237,7 +238,11 @@ function ChatProviderFromShell({
   // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
   useEffect(() => connectorChoice?.clearPending(), [connectorChoice, runtimeKey]);
 
+  const sandboxEnabled = useServerCapabilities()?.sandbox.enabled;
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
+    // A new chat is sent without skills while the sandbox is unavailable; the server refuses them then.
+    const sendable = (spec: AgentSpec) =>
+      isCreateAgent ? spec : withoutSkillsWhenSandboxUnavailable(spec, sandboxEnabled);
     return {
       ...server,
       createSession: request => {
@@ -248,11 +253,15 @@ function ChatProviderFromShell({
           server,
           store: connectorChoice,
           metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
-          request,
+          request: { ...request, agentSpec: sendable(request.agentSpec) },
         });
       },
+      updateSession: request =>
+        server.updateSession(
+          request.agentSpec === undefined ? request : { ...request, agentSpec: sendable(request.agentSpec) },
+        ),
     };
-  }, [server, isCreateAgent, connectorChoice]);
+  }, [server, isCreateAgent, connectorChoice, sandboxEnabled]);
 
   const cachedRuntimeServer = useMemo(
     () => withSessionListCache({ server: serverWithCreateIntent, cache: sessionListCache }),
