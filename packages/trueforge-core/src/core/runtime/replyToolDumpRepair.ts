@@ -13,10 +13,14 @@ export const TOOL_RESULT_DUMP_FALLBACK_LINE =
 /** A dumped object counts as a copy of a result only when at least this many of its keys are the result's. */
 const MIN_MATCHING_KEYS = 4;
 
+/** At least this many of the keys an object shares with a result must carry the result's own values. */
+const MIN_EQUAL_VALUES = 2;
+
 /**
  * One tool result from this turn, reduced to what a dump is matched against: the result's
  * top-level keys and values, and its own written lead line (its `summary` field) when it
- * carries one.
+ * carries one. A result that rides under one naming key contributes two shapes: its own,
+ * and the shape of the object inside the key, because a dump can carry either one.
  */
 export interface TurnToolResultShape {
   toolName: string;
@@ -37,6 +41,62 @@ function envelopedResult(parsed: Record<string, unknown>): Record<string, unknow
   }
   const result = parsed['result'];
   return isRecord(result) ? result : undefined;
+}
+
+/**
+ * The object inside a single-key wrapper: a record with exactly one key whose value is
+ * itself a record unwraps to that inner record. Anything else (several keys, or one key
+ * holding a plain value) has no inner object. Tools often return their result under one
+ * naming key, like { "set": { ... } }, and a dump can carry the wrapper or just the
+ * inside, so both sides of the match look exactly one level in, never further.
+ */
+function singleKeyInner(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const keys = Object.keys(record);
+  if (keys.length !== 1) {
+    return undefined;
+  }
+  const only = keys[0];
+  if (only === undefined) {
+    return undefined;
+  }
+  const value = record[only];
+  return isRecord(value) ? value : undefined;
+}
+
+/** One result reduced to its matching shape; the written line is read at this level. */
+function resultShape(toolName: string, result: Record<string, unknown>): TurnToolResultShape {
+  const summary = result['summary'];
+  return {
+    toolName,
+    keys: new Set(Object.keys(result)),
+    values: result,
+    summary: typeof summary === 'string' && summary.trim() !== '' ? summary : undefined,
+  };
+}
+
+/**
+ * A value's canonical JSON text: object keys sorted at every level, so two values that
+ * are deeply equal produce the same text however their keys were ordered, and different
+ * values produce different text.
+ */
+function canonicalJsonText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(item => canonicalJsonText(item)).join(',')}]`;
+  }
+  if (isRecord(value)) {
+    const entries = Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJsonText(value[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  if (typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return String(value);
+  }
+  // Not a JSON value (undefined and the like): one fixed text, distinct from every JSON value's.
+  return 'undefined';
 }
 
 /**
@@ -85,13 +145,12 @@ export function turnToolResultShapes(context: readonly ContextMessage[]): TurnTo
       continue;
     }
     const result = envelopedResult(parsed) ?? parsed;
-    const summary = result['summary'];
-    shapes.push({
-      toolName: nameByCallId.get(message.tool_call_id) ?? 'unknown',
-      keys: new Set(Object.keys(result)),
-      values: result,
-      summary: typeof summary === 'string' && summary.trim() !== '' ? summary : undefined,
-    });
+    const toolName = nameByCallId.get(message.tool_call_id) ?? 'unknown';
+    shapes.push(resultShape(toolName, result));
+    const inner = singleKeyInner(result);
+    if (inner !== undefined) {
+      shapes.push(resultShape(toolName, inner));
+    }
   }
   return shapes;
 }
@@ -184,22 +243,32 @@ function objectEnd(text: string, start: number): number {
   return -1;
 }
 
+/** What stands in a dumped object's place, and the tool whose result it copies. */
+interface DumpMatch {
+  toolName: string;
+  /** The result's own written line to swap in, or '' when the object is taken out instead. */
+  replacement: string;
+}
+
 /**
- * The result a dumped object most likely copies. The gate is the shape: at least four keys
- * in common, and at least two thirds of the object's keys are the result's, so a copy
- * trimmed of a few keys still counts while a different object that happens to share a few
- * field names does not. When more than one of this turn's results passes the gate (two
- * calls to similar tools can return near-identical shapes), the one whose values the object
- * also carries is the copy's source.
+ * The result a dumped object copies, judged by shape and by values together. The shape
+ * half: at least four keys in common, and at least two thirds of the object's keys are the
+ * result's, so a copy trimmed of a few keys still counts. The value half: at least half of
+ * the shared keys must carry the result's own values, and at least two must, so an object
+ * that merely wears a result's field names (an example in prose, the person's own object
+ * quoted back) is left alone: a trimmed copy shares most of its values, those share few or
+ * none. When more than one of this turn's results passes, the one the object agrees with
+ * on the most values is its source; when two agree equally, no value tells them apart, and
+ * the object is taken out rather than replaced with a guessed line.
  */
 function matchingResult(
   candidate: Record<string, unknown>,
   results: readonly TurnToolResultShape[],
-): TurnToolResultShape | undefined {
+): DumpMatch | undefined {
   const keys = new Set(Object.keys(candidate));
   let best: TurnToolResultShape | undefined;
   let bestValueMatches = -1;
-  let bestKeyMatches = 0;
+  let tied = false;
   for (const result of results) {
     let keyMatches = 0;
     let valueMatches = 0;
@@ -208,20 +277,30 @@ function matchingResult(
         continue;
       }
       keyMatches += 1;
-      if (JSON.stringify(candidate[key]) === JSON.stringify(result.values[key])) {
+      if (canonicalJsonText(candidate[key]) === canonicalJsonText(result.values[key])) {
         valueMatches += 1;
       }
     }
-    if (keyMatches < MIN_MATCHING_KEYS || keyMatches * 3 < keys.size * 2) {
+    if (
+      keyMatches < MIN_MATCHING_KEYS ||
+      keyMatches * 3 < keys.size * 2 ||
+      valueMatches < MIN_EQUAL_VALUES ||
+      valueMatches * 2 < keyMatches
+    ) {
       continue;
     }
-    if (valueMatches > bestValueMatches || (valueMatches === bestValueMatches && keyMatches > bestKeyMatches)) {
+    if (valueMatches > bestValueMatches) {
       best = result;
       bestValueMatches = valueMatches;
-      bestKeyMatches = keyMatches;
+      tied = false;
+    } else if (valueMatches === bestValueMatches) {
+      tied = true;
     }
   }
-  return best;
+  if (best === undefined) {
+    return undefined;
+  }
+  return { toolName: best.toolName, replacement: tied ? '' : (best.summary ?? '') };
 }
 
 interface SegmentRepair {
@@ -262,14 +341,25 @@ function repairSegment(segmentText: string, results: readonly TurnToolResultShap
       continue;
     }
     // A pasted envelope is a dump of the result it wraps: match on the wrapped result, and
-    // the whole envelope is what gets repaired.
-    const match = matchingResult(envelopedResult(parsed) ?? parsed, results);
+    // the whole envelope is what gets repaired. A result under one naming key can be pasted
+    // with the key on or left off, so the object inside the key is matched as well; either
+    // way the span repaired is the whole object as it stands in the reply.
+    const level = envelopedResult(parsed) ?? parsed;
+    const inner = singleKeyInner(level);
+    const variants = inner === undefined ? [level] : [level, inner];
+    let match: DumpMatch | undefined;
+    for (const variant of variants) {
+      match = matchingResult(variant, results);
+      if (match !== undefined) {
+        break;
+      }
+    }
     if (match === undefined) {
       // A JSON object that copies none of this turn's results is the model's own to keep.
       i = end + 1;
       continue;
     }
-    const replacement = match.summary ?? '';
+    const replacement = match.replacement;
     let spanStart = i;
     let spanEnd = end + 1;
     if (replacement === '') {

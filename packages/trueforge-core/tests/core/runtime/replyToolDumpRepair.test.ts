@@ -63,6 +63,32 @@ const SPACE_ENVELOPE = JSON.stringify({
   result: SPACE_RESULT_OBJECT,
 });
 
+/** The reminder specimen from a live chat: the result rides under one naming key. */
+const REMINDER_RESULT_OBJECT = {
+  id: '01m6036031y1a6ngk50bj4tqrr',
+  what: 'Go cut the onions',
+  when: 'Once, on Tuesday, October 27 at 6:51 PM',
+  time_zone: 'America/Los_Angeles',
+  repeats: false,
+  next: 'Tuesday, October 27 at 6:51 PM',
+};
+const REMINDER_WRAPPER_RESULT = JSON.stringify({ set: REMINDER_RESULT_OBJECT });
+const REMINDER_ENVELOPE = JSON.stringify({
+  schema_version: 'tool.response.v2',
+  outcome: { disposition: 'executed_ok' },
+  result: { set: REMINDER_RESULT_OBJECT },
+});
+
+/** A wrapper result whose inner object carries a written line of its own. */
+const REMINDER_CREATED_RESULT = JSON.stringify({
+  created: {
+    summary: 'Reminder set for 6:51 PM: Go cut the onions',
+    id: '01m6036031y1a6ngk50bj4tqrr',
+    what: 'Go cut the onions',
+    when: 'Once, on Tuesday, October 27 at 6:51 PM',
+  },
+});
+
 /** A result with no written line of its own. */
 const PLAIN_RESULT_OBJECT = {
   name: 'Test Kitchen Notes',
@@ -82,6 +108,34 @@ function shapeOf(toolName: string, result: Record<string, unknown>): TurnToolRes
     values: result,
     summary: typeof summary === 'string' ? summary : undefined,
   };
+}
+
+/** The shapes the collector reads from a one-call turn whose tool replied with `content`. */
+function shapesFromToolReply(toolName: string, content: string): TurnToolResultShape[] {
+  const context: ContextMessage[] = [
+    { role: 'user', content: 'Please do it.' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: { name: toolName, arguments: '{}' },
+          tool_info: {
+            type: 'mcp',
+            mcp_server_id: 'reminders',
+            mcp_server_name: 'reminders',
+            original_tool_name: toolName,
+            is_approval_required: false,
+            is_client_side: false,
+          },
+        },
+      ],
+    },
+    { role: 'tool', tool_call_id: 'call-1', content },
+  ];
+  return turnToolResultShapes(context);
 }
 
 describe('messageAsksForJson', () => {
@@ -143,6 +197,33 @@ describe('turnToolResultShapes', () => {
     expect(shapes[0]?.toolName).toBe('create_space');
     expect(shapes[0]?.summary).toBe(SPACE_SUMMARY);
     expect(shapes[0]?.keys).toEqual(new Set(Object.keys(SPACE_RESULT_OBJECT)));
+  });
+
+  it('a result under one naming key adds the shape inside the key as well', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'Remind me to go cut the onions at 6:51 PM.' },
+      callMessage('call-1', 'set_reminder'),
+      { role: 'tool', tool_call_id: 'call-1', content: REMINDER_WRAPPER_RESULT },
+    ];
+    const shapes = turnToolResultShapes(context);
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0]?.keys).toEqual(new Set(['set']));
+    expect(shapes[1]?.toolName).toBe('set_reminder');
+    expect(shapes[1]?.keys).toEqual(new Set(Object.keys(REMINDER_RESULT_OBJECT)));
+    expect(shapes[1]?.values).toEqual(REMINDER_RESULT_OBJECT);
+    expect(shapes[1]?.summary).toBeUndefined();
+  });
+
+  it('the shape inside a naming key is added when the result arrives in its envelope too', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'Remind me to go cut the onions at 6:51 PM.' },
+      callMessage('call-1', 'set_reminder'),
+      { role: 'tool', tool_call_id: 'call-1', content: REMINDER_ENVELOPE },
+    ];
+    const shapes = turnToolResultShapes(context);
+    expect(shapes).toHaveLength(2);
+    expect(shapes[1]?.keys).toEqual(new Set(Object.keys(REMINDER_RESULT_OBJECT)));
+    expect(shapes[1]?.values).toEqual(REMINDER_RESULT_OBJECT);
   });
 
   it('stops at the person’s latest message, so an earlier turn’s results do not count', () => {
@@ -302,6 +383,132 @@ describe('repairToolResultDump', () => {
       personAskedForJson: false,
     });
     expect(repair?.text).toBe(`First:\n\n${SPACE_SUMMARY}\n\nSecond:`);
+  });
+
+  it('leaves an example object that wears a result’s field names but none of its values alone', () => {
+    const example = JSON.stringify({
+      summary: 'An example line, not a real one.',
+      name: 'An Example Space',
+      link: '/spaces/example',
+      purpose: 'Showing what the fields mean',
+    });
+    const text = `For example, a result looks like this: ${example}`;
+    expect(repairToolResultDump({ text, results: [spaceShape], personAskedForJson: false })).toBeUndefined();
+  });
+
+  it('leaves the person’s own object alone when the reply quotes it back', () => {
+    const personsOwn = JSON.stringify({
+      summary: 'My own draft, in my words.',
+      name: 'Sunday Prep',
+      link: '/spaces/sunday-prep',
+      purpose: 'Meals for the week ahead',
+      status: 'draft',
+      format: 'plain text',
+      revision: 4,
+      created_at: '2026-10-20T09:15:00.000Z',
+      updated_at: '2026-10-21T11:40:00.000Z',
+    });
+    const text = `You gave me this earlier:\n\n${personsOwn}`;
+    expect(repairToolResultDump({ text, results: [spaceShape], personAskedForJson: false })).toBeUndefined();
+  });
+
+  it('leaves a two-entry list alone when its entries share field names but not the result’s values', () => {
+    const first = {
+      name: 'First entry',
+      link: '/entries/first',
+      purpose: 'One of two',
+      status: 'pending',
+      revision: 9,
+      updated_at: '2026-10-25T08:00:00.000Z',
+    };
+    const second = {
+      name: 'Second entry',
+      link: '/entries/second',
+      purpose: 'Two of two',
+      status: 'active',
+      revision: 8,
+      updated_at: '2026-10-25T09:00:00.000Z',
+    };
+    const text = `The two entries: [${JSON.stringify(first)}, ${JSON.stringify(second)}]`;
+    expect(repairToolResultDump({ text, results: [spaceShape], personAskedForJson: false })).toBeUndefined();
+  });
+
+  it('takes an object out rather than guessing when two results agree with it equally', () => {
+    // Both results carry the same keys and agree on every value the object carries; they
+    // differ only in the keys the object dropped, so no value says which one it copies.
+    const alpha = {
+      summary: 'Created space "Alpha" (revision 1).',
+      name: 'Alpha',
+      link: '/spaces/Alpha',
+      purpose: 'Shared purpose',
+      status: 'active',
+      format: 'markdown',
+      revision: 1,
+      created_at: '2026-10-27T10:00:00.000Z',
+      updated_at: '2026-10-27T10:00:00.000Z',
+    };
+    const beta = {
+      ...alpha,
+      summary: 'Created space "Beta" (revision 1).',
+      name: 'Beta',
+      link: '/spaces/Beta',
+      created_at: '2026-10-27T11:00:00.000Z',
+      updated_at: '2026-10-27T11:00:00.000Z',
+    };
+    const carried = JSON.stringify({ purpose: 'Shared purpose', status: 'active', format: 'markdown', revision: 1 });
+    const shapes = [shapeOf('create_space', alpha), shapeOf('create_space', beta)];
+    const repair = repairToolResultDump({
+      text: `Here is the entry.\n\n${carried}\n\nThat is all.`,
+      results: shapes,
+      personAskedForJson: false,
+    });
+    expect(repair?.text).toBe('Here is the entry.\n\nThat is all.');
+    const whole = repairToolResultDump({ text: carried, results: shapes, personAskedForJson: false });
+    expect(whole?.text).toBe(TOOL_RESULT_DUMP_FALLBACK_LINE);
+  });
+
+  it('repairs the live specimen: a wrapper result pasted whole becomes the fallback line', () => {
+    const shapes = shapesFromToolReply('set_reminder', REMINDER_WRAPPER_RESULT);
+    const repair = repairToolResultDump({ text: REMINDER_WRAPPER_RESULT, results: shapes, personAskedForJson: false });
+    expect(repair?.text).toBe(TOOL_RESULT_DUMP_FALLBACK_LINE);
+    expect(repair?.toolName).toBe('set_reminder');
+  });
+
+  it('repairs the live specimen with prose around it, and the prose stands', () => {
+    const shapes = shapesFromToolReply('set_reminder', REMINDER_WRAPPER_RESULT);
+    const repair = repairToolResultDump({
+      text: `All set.\n\n${REMINDER_WRAPPER_RESULT}\n\nI will remind you at 6:51 PM.`,
+      results: shapes,
+      personAskedForJson: false,
+    });
+    expect(repair?.text).toBe('All set.\n\nI will remind you at 6:51 PM.');
+  });
+
+  it('repairs the live specimen when it keeps its response envelope', () => {
+    const shapes = shapesFromToolReply('set_reminder', REMINDER_WRAPPER_RESULT);
+    const repair = repairToolResultDump({
+      text: `All set.\n\n${REMINDER_ENVELOPE}`,
+      results: shapes,
+      personAskedForJson: false,
+    });
+    expect(repair?.text).toBe('All set.');
+  });
+
+  it('repairs a wrapper result pasted with the naming key left off', () => {
+    const shapes = shapesFromToolReply('set_reminder', REMINDER_WRAPPER_RESULT);
+    const repair = repairToolResultDump({
+      text: `Done.\n\n${JSON.stringify(REMINDER_RESULT_OBJECT)}\n\nAnything else?`,
+      results: shapes,
+      personAskedForJson: false,
+    });
+    expect(repair?.text).toBe('Done.\n\nAnything else?');
+  });
+
+  it('swaps a wrapper dump for the written line its inner object carries', () => {
+    const shapes = shapesFromToolReply('set_reminder', REMINDER_CREATED_RESULT);
+    const repair = repairToolResultDump({ text: REMINDER_CREATED_RESULT, results: shapes, personAskedForJson: false });
+    expect(repair?.text).toBe('Reminder set for 6:51 PM: Go cut the onions');
+    expect(repair?.toolName).toBe('set_reminder');
   });
 });
 
