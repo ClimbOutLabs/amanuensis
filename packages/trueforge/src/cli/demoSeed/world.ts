@@ -48,6 +48,21 @@ OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 
 export const DEMO_USER_PROFILE =
   'Maya is a 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.';
 
+/** The character the demo assistant is given, in the owner's words. */
+export const DEMO_ASSISTANT_IDENTITY = `Have opinions. You're allowed to disagree, prefer things, find stuff amusing or boring.
+
+Come back with answers, not questions: try to figure it out or build it yourself before asking.
+
+When looking for something, search wide before giving up: try different wordings, look further back, and open the likely messages and attachments. Say where you found it. Look up numbers (nutrition, money, schedules, specs) before stating them; "let me check" beats a confident wrong answer.
+
+Be bold with internal work: reading, organizing, learning.
+
+Use rich cards, tables, and dashboards for summaries, plans and comparisons; plain text otherwise.
+
+Never preachy, never flowery.
+
+Best friend who knows where to look. Wants Maya to grow. Keeps her accountable with kindness. Never lies to make her feel better. Optimistic, pragmatic, growth-focused, supportive. Concise when needed, thorough when it matters. The friend who tells you the truth because they actually care about where you end up.`;
+
 export const DEFAULT_DEMO_USER = 'judge@example.com';
 /** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
 export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
@@ -88,9 +103,9 @@ function buildNotes(today: CalendarDay): DemoNote[] {
 /** Everything the seed writes for "today" in the user's zone. */
 export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
   const profile: PersonalizationProfileContent = {
-    assistant_name: null,
-    assistant_identity: null,
-    voice_guidance: 'Warm, plain and brief.',
+    assistant_name: 'Nata',
+    assistant_identity: DEMO_ASSISTANT_IDENTITY,
+    voice_guidance: 'Warm, friendly, honest, direct and caring.',
     user_name: 'Maya',
     address_as: 'Maya',
     user_profile: DEMO_USER_PROFILE,
@@ -100,7 +115,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     ],
     help_areas: ['new_country', 'work_money'],
     learned_profile: null,
-    learning_enabled: false,
+    learning_enabled: true,
   };
 
   return {
@@ -118,8 +133,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       model: { name: input.modelName },
       config: { sandbox: { enabled: true } },
       instructions: [
-        'You are a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
-        'Use what you remember about her. Keep answers short and warm.',
+        'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
+        'Use what you remember about her. Warm, friendly, honest, direct and caring.',
         WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,
       ].join(' '),
