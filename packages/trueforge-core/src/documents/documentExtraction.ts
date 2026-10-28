@@ -119,8 +119,17 @@ function linesFromText(text: string): DocumentTextLine[] {
 
 function issueMessage(error: unknown, filename: string): string {
   const detail = error instanceof Error ? error.message : String(error);
-  if (/not found|enoent|cannot find/i.test(detail)) {
+  // The OCR sentence belongs only to a file that was read but gave no text because the
+  // OCR tools are missing from the sandbox image; a file that cannot be found is a
+  // different failure and must say so, or the model goes hunting in the sandbox.
+  if (
+    /no extractable text/i.test(detail) ||
+    /(?:pdftoppm|tesseract|pdftotext|pdfinfo)[^\n]*not found|command not found/i.test(detail)
+  ) {
     return `No extractable text in ${filename}; local OCR requires pdftoppm and tesseract in the sandbox image.`;
+  }
+  if (/not found|enoent|cannot find|no such file/i.test(detail)) {
+    return `Could not read ${filename}: the file could not be found.`;
   }
   return `Could not extract ${filename}: ${detail}`;
 }

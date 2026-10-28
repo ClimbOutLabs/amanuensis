@@ -8,6 +8,11 @@ jobs into it one at a time.
 What it can do today:
 
 - `aman --version` prints its version.
+- `aman doctor` checks this computer (Docker, its runtime, its credential
+  store, the images, free disk, memory, the clock, backups, the sandbox
+  slots, the folder Aman was installed from, and https) and then each
+  instance, by running the instance's own doctor inside its app container.
+  `aman doctor --json` prints the same checks as data. It changes nothing.
 - `aman doctor docker` checks that Docker is installed, running, has its
   Compose tool, has at least 6 GB of memory to work with, and reports its
   Engine version. Each failed check says the one thing to do next, in the

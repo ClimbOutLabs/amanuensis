@@ -194,6 +194,7 @@ export type { ResponseFormat } from './llm/responseFormat';
 export { streamDeadlineDetailsOf } from './llm/streamDeadline';
 export type { StreamDeadlineDetails } from './llm/streamDeadline';
 export {
+  ModelOutputRepetitionError,
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,

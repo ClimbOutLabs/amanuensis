@@ -701,6 +701,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
         mcpServerStore: deps.resolveMcpServerStore(c, current),
         skillStore: deps.resolveSkillStore(c),
         sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+        searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
       });
     } catch (error) {
       if (error instanceof HTTPException && error.status === 422) {

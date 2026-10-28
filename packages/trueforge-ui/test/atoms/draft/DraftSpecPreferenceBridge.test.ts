@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { reconcileDraftSpecPreferences } from '@/atoms/draft/DraftSpecPreferenceBridge.js';
-import type { AgentSpec, ModelSelection } from '@/server/types.js';
+import { reconcileDraftSpecMounts, reconcileDraftSpecPreferences } from '@/atoms/draft/DraftSpecPreferenceBridge.js';
+import {
+  CHAT_DRAFT_SPEC_PREFERENCES_STORAGE_KEY,
+  readDraftSpecPreferences,
+  writeDraftSpecPreferences,
+} from '@/server/draftSpecPreferences.js';
+import type { AgentSpec, ConnectorState, ModelSelection } from '@/server/types.js';
 
 const qwen: ModelSelection = { id: 'qwen', name: 'gemma/qwen', provider: { name: 'gemma' }, properties: {} };
 const claude: ModelSelection = {
@@ -68,5 +73,60 @@ describe('reconcileDraftSpecPreferences', () => {
         skillsEnabled: true,
       }),
     ).toEqual({});
+  });
+});
+
+describe('reconcileDraftSpecMounts', () => {
+  const tavily: ConnectorState = { id: 'tavily', name: 'tavily', authenticated: true };
+  const github: ConnectorState = { id: 'github', name: 'github', authenticated: true };
+
+  it('drops a mount for a connector that is not configured and keeps the configured ones', () => {
+    const agentSpec: AgentSpec = {
+      model: { name: 'gemma/qwen' },
+      mcpServers: [{ name: 'parallel-web' }, { name: 'tavily' }, { name: 'github' }],
+    };
+
+    expect(reconcileDraftSpecMounts({ agentSpec, connectors: [tavily, github] })).toEqual({
+      mcpServers: [{ name: 'tavily' }, { name: 'github' }],
+    });
+  });
+
+  it('changes nothing when every mount is configured', () => {
+    const agentSpec: AgentSpec = {
+      model: { name: 'gemma/qwen' },
+      mcpServers: [{ name: 'tavily' }],
+    };
+
+    expect(reconcileDraftSpecMounts({ agentSpec, connectors: [tavily] })).toEqual({});
+  });
+
+  it('changes nothing when the spec mounts no connectors', () => {
+    const agentSpec: AgentSpec = { model: { name: 'gemma/qwen' } };
+
+    expect(reconcileDraftSpecMounts({ agentSpec, connectors: [tavily] })).toEqual({});
+  });
+});
+
+describe('a stored chat draft seed naming a deleted connector', () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(CHAT_DRAFT_SPEC_PREFERENCES_STORAGE_KEY);
+  });
+
+  it('produces a new-chat spec without that mount, and keeps configured mounts', () => {
+    writeDraftSpecPreferences('chat', {
+      model: { name: 'gemma/qwen' },
+      mcpServers: [{ name: 'parallel-web' }, { name: 'tavily' }],
+    });
+
+    const seed = readDraftSpecPreferences('chat');
+    expect(seed).not.toBeNull();
+    if (seed === null) return;
+    const update = reconcileDraftSpecMounts({
+      agentSpec: seed,
+      connectors: [{ id: 'tavily', name: 'tavily', authenticated: true }],
+    });
+    const newChatSpec: AgentSpec = { ...seed, ...update };
+
+    expect(newChatSpec.mcpServers).toEqual([{ name: 'tavily' }]);
   });
 });

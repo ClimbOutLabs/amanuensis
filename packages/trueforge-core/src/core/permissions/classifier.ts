@@ -104,7 +104,7 @@ import {
 } from './outboundGuard';
 import { carriedPrivateDetails, hasReadContent, namesUrl, steeredDestinations, steeredLinks } from './provenance';
 import { isRunnerWorkflow } from './runner';
-import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
+import { scriptFileLoadsOnlyStandardCode, scriptFileText, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
   guardRuleSay,
   holdSay,
@@ -1141,6 +1141,32 @@ async function runCodePlacement({
     return null;
   }
   return scriptFileLoadsOnlyStandardCode({ runtime, file: identity, resolution: ctx.path_resolution }) ? detail : null;
+}
+
+/**
+ * What the run_code approval card shows as the code it would run: the call's own `code`, or the
+ * text of the script file the call names. Null when neither is available (the call names no
+ * source, or the script file cannot be read or is over the checked-script bound); the card still
+ * asks, it just shows no code.
+ */
+function runCodeCardText(params: Record<string, unknown>, ctx: ClassifyContext): string | null {
+  const code = stringParam(params, 'code');
+  if (code !== null) {
+    return code;
+  }
+  const scriptPath = stringParam(params, 'script_path');
+  if (scriptPath === null) {
+    return null;
+  }
+  const identity = canonicalFileIdentity({
+    p: scriptPath,
+    cwd: resolveIdentityCwd(ctx, null),
+    resolution: ctx.path_resolution,
+  });
+  if (identity === null) {
+    return null;
+  }
+  return scriptFileText({ file: identity, resolution: ctx.path_resolution });
 }
 
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -3413,7 +3439,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination: null,
           recipient: null,
           amount: null,
-          parsed_command: null,
+          parsed_command: name === 'run_code' ? runCodeCardText(action.canonical_params, ctx) : null,
           outbound_text: null,
           destination_host: null,
           outbound_truncated: false,
