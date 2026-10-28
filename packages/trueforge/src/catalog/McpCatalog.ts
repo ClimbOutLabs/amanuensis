@@ -46,6 +46,11 @@ export class McpCatalog {
     });
   }
 
+  /** Names of the presets offered as a web search provider (today parallel-web and tavily). */
+  searchProviderPresetNames(): readonly string[] {
+    return this.mcpServers.filter(entry => entry.search_provider === true).map(entry => entry.name);
+  }
+
   /**
    * The preset at this endpoint, undefined for any other server. Matched on origin and path so a
    * key carried in the query string does not hide a known provider.
