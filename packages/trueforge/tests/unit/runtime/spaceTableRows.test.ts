@@ -1,10 +1,12 @@
 import {
   isTableRow,
   isTableSeparatorRow,
+  orphanedRowGroupCount,
   tableRowEntries,
   tableRowKey,
-  tableRowKeys,
 } from '../../../src/runtime/spaceTableRows';
+
+const keysOf = (content: string): string[] => tableRowEntries(content).map(entry => entry.key);
 
 describe('table row parsing', () => {
   it('recognises rows and separators', () => {
@@ -16,7 +18,9 @@ describe('table row parsing', () => {
     expect(isTableSeparatorRow('|-|-|')).toBe(true);
     expect(isTableSeparatorRow('|:--|:--')).toBe(true);
     expect(isTableRow('| 1 | Papillon')).toBe(true);
-    expect(tableRowKeys('| Rank | Breed\n| --- | ---\n| 1 | Papillon')).toEqual(['papillon']);
+    expect(keysOf('| Rank | Breed\n| --- | ---\n| 1 | Papillon')).toEqual(['papillon']);
+    expect(isTableSeparatorRow('| --- | |')).toBe(true);
+    expect(isTableSeparatorRow('| |')).toBe(false);
   });
 
   it('keys a row by its first cell, skipping a rank cell', () => {
@@ -30,13 +34,24 @@ describe('table row parsing', () => {
 
   it('lists data row keys without the header', () => {
     const content = ['| Rank | Breed |', '| --- | --- |', '| 1 | Papillon |', '| 2 | Beagle |'].join('\n');
-    expect(tableRowKeys(content)).toEqual(['papillon', 'beagle']);
-    expect(tableRowKeys('| 5 | Collie |\n| 6 | Pug |')).toEqual(['collie', 'pug']);
+    expect(keysOf(content)).toEqual(['papillon', 'beagle']);
+    expect(keysOf('| 5 | Collie |\n| 6 | Pug |')).toEqual(['collie', 'pug']);
   });
 });
 
-describe('table row labels', () => {
-  it('keeps the key cell as written, without markup', () => {
-    expect(tableRowEntries('| 1 | **Papillon** | x |')).toEqual([{ key: 'papillon', label: 'Papillon' }]);
+describe('table row labels and groups', () => {
+  it('labels a row with the whole row as written', () => {
+    expect(tableRowEntries('| 1 | **Papillon** | x |')).toEqual([
+      { key: 'papillon', label: '| 1 | **Papillon** | x |' },
+    ]);
+  });
+
+  it('skips lines inside code fences', () => {
+    expect(keysOf('```\n| grep error\n```\n| a | b |')).toEqual(['a']);
+  });
+
+  it('counts row groups that have no separator', () => {
+    expect(orphanedRowGroupCount('| a |\n| b |\n\ntext\n\n| H |\n| --- |\n| c |')).toBe(1);
+    expect(orphanedRowGroupCount('```\n| grep x\n```')).toBe(0);
   });
 });

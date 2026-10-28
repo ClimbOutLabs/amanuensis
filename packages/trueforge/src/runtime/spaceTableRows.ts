@@ -1,6 +1,9 @@
+import { maskDocumentationRegions } from './spaceDocumentationMask';
+
 /** Markdown table row parsing: the one owner of row and separator detection for space bodies. */
 
 const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
+const MARKUP = /[*_`]/g;
 const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
 /** A row is any line that starts with a pipe; the closing pipe is optional. */
@@ -15,7 +18,16 @@ function rowCells(line: string): string[] {
 }
 
 export function isTableSeparatorRow(line: string): boolean {
-  return isTableRow(line) && rowCells(line).every(cell => SEPARATOR_CELL.test(cell));
+  return isTableRow(line) && separatorCells(line);
+}
+
+/** Every cell is a dash run or empty, and at least one has dashes. */
+function separatorCells(line: string): boolean {
+  const cells = rowCells(line);
+  return (
+    cells.some(cell => SEPARATOR_CELL.test(cell)) &&
+    cells.every(cell => cell.trim() === '' || SEPARATOR_CELL.test(cell))
+  );
 }
 
 /** The cell that identifies a row as written: its first cell, or its second when the first is a rank. */
@@ -29,7 +41,7 @@ function keyCellOf(line: string): string | null {
 }
 
 function normalizeKey(cell: string): string {
-  return cell.replace(/[*_`]/g, '').trim().toLowerCase();
+  return cell.replace(MARKUP, '').trim().toLowerCase();
 }
 
 export function tableRowKey(line: string): string | null {
@@ -38,9 +50,13 @@ export function tableRowKey(line: string): string | null {
   return key === '' ? null : key;
 }
 
-/** Data rows in order, with each row's key cell as written; the header is the row above a separator. */
+/**
+ * Data rows in order, each with its whole row as written; the header is the row above a separator.
+ * Lines inside code fences are text, not rows.
+ */
 export function tableRowEntries(content: string): { key: string; label: string }[] {
-  const lines = content.split('\n');
+  const lines = maskDocumentationRegions(content).split('\n');
+  const originals = content.split('\n');
   const entries: { key: string; label: string }[] = [];
   for (const [index, line] of lines.entries()) {
     if (isTableSeparatorRow(lines[index + 1] ?? '')) {
@@ -48,12 +64,32 @@ export function tableRowEntries(content: string): { key: string; label: string }
     }
     const key = tableRowKey(line);
     if (key !== null) {
-      entries.push({ key, label: (keyCellOf(line) ?? key).replace(/[*_`]/g, '').trim() });
+      entries.push({ key, label: (originals[index] ?? line).trim() });
     }
   }
   return entries;
 }
 
-export function tableRowKeys(content: string): string[] {
-  return tableRowEntries(content).map(entry => entry.key);
+/** Runs of consecutive table rows that have no separator row: row groups with no header. */
+export function orphanedRowGroupCount(content: string): number {
+  let orphans = 0;
+  let inRun = false;
+  let hasSeparator = false;
+  const close = (): void => {
+    if (inRun && !hasSeparator) {
+      orphans += 1;
+    }
+    inRun = false;
+    hasSeparator = false;
+  };
+  for (const line of maskDocumentationRegions(content).split('\n')) {
+    if (!isTableRow(line)) {
+      close();
+      continue;
+    }
+    inRun = true;
+    hasSeparator ||= isTableSeparatorRow(line);
+  }
+  close();
+  return orphans;
 }

@@ -951,7 +951,7 @@ describe('a block replacement may not drop saved table rows', () => {
     const refused = await replace(callTool, table, [...header.slice(2), rows[0]].join('\n'));
     expect(isErrorResponse(refused)).toBe(true);
     expect(resultJson(refused).error).toContain('would remove 3 rows');
-    expect(resultJson(refused).error).toContain('Rottweiler, Beagle, Poodle');
+    expect(resultJson(refused).error).toContain('| 2 | Rottweiler |');
     expect(await readBody(callTool, 'Breeds')).toBe(before);
   });
 
@@ -1077,7 +1077,7 @@ describe('saved rows are compared across the whole body', () => {
         new_content: [...head.slice(2), ...makeRows(['Same', 'Other'])].join('\n'),
       },
     ]);
-    expect(resultJson(refused).error).toContain('would remove 1 row that is saved now: Same');
+    expect(resultJson(refused).error).toContain('would remove 1 row that is saved now: | Same | herd |');
     expect(resultJson(refused).error).toContain('confirm_shrink: true');
   });
 
@@ -1094,8 +1094,82 @@ describe('saved rows are compared across the whole body', () => {
         new_content: makeRows(['A', 'B']).join('\n'),
       },
     ]);
-    expect(resultJson(refused).error).toContain('holds the table');
+    expect(resultJson(refused).error).toContain('no header');
     expect(await readBody(callTool, 'Big')).toContain('| --- |');
+  });
+
+  it('applies deleting a whole one-block table with confirm_shrink', async () => {
+    const { callTool, blocks } = await seedBig(['A', 'B']);
+    const table = pick(blocks, 1);
+    const applied = await edit(
+      callTool,
+      [{ type: 'block', anchor: table.anchor, fingerprint: table.fingerprint, new_content: '' }],
+      { confirm_shrink: true },
+    );
+    expect(resultJson(applied).error).toBeUndefined();
+  });
+
+  it('applies deleting both blocks of a table with confirm_shrink', async () => {
+    const { callTool, blocks } = await seedBig(names);
+    const edits = [pick(blocks, 1), pick(blocks, 2)].map(block => ({
+      type: 'block',
+      anchor: block.anchor,
+      fingerprint: block.fingerprint,
+      new_content: '',
+    }));
+    const applied = await edit(callTool, edits, { confirm_shrink: true });
+    expect(resultJson(applied).error).toBeUndefined();
+    expect(await readBody(callTool, 'Big')).not.toContain('Breed00');
+  });
+
+  it('refuses replacing the header block of a two-block table with text, even when confirmed', async () => {
+    const { callTool, blocks } = await seedBig(names);
+    const first = pick(blocks, 1);
+    const refused = await edit(
+      callTool,
+      [{ type: 'block', anchor: first.anchor, fingerprint: first.fingerprint, new_content: 'Gone.' }],
+      { confirm_shrink: true },
+    );
+    expect(resultJson(refused).error).toContain('no header');
+  });
+
+  it('edits a code block that contains a pipe, and a table inside a fence', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, {
+      name: 'Big',
+      body: [
+        '# Notes',
+        '',
+        '```',
+        'cat log | grep error',
+        '```',
+        '',
+        '```',
+        '| a | b |',
+        '| --- | --- |',
+        '| x | y |',
+        '```',
+      ].join('\n'),
+    });
+    const blocks = (await listBlocks(callTool, 'Big')).blocks ?? [];
+    const code = pick(blocks, 1);
+    const fenced = pick(blocks, 2);
+    const first = await edit(callTool, [
+      {
+        type: 'block',
+        anchor: code.anchor,
+        fingerprint: code.fingerprint,
+        new_content: '```\ncat log | grep warn\n```',
+      },
+      {
+        type: 'block',
+        anchor: fenced.anchor,
+        fingerprint: fenced.fingerprint,
+        new_content: '```\n| a | b |\n| --- | --- |\n| z | y |\n```',
+      },
+    ]);
+    expect(resultJson(first).error).toBeUndefined();
+    expect(await readBody(callTool, 'Big')).toContain('| z | y |');
   });
 
   it.each([

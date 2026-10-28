@@ -69,8 +69,9 @@ import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { maskDocumentationRegions } from './spaceDocumentationMask';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
-import { isTableRow, isTableSeparatorRow, tableRowEntries } from './spaceTableRows';
+import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
@@ -558,37 +559,18 @@ function plural({ count, noun }: { count: number; noun: string }): string {
   return `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-const hasSeparatorRow = (text: string): boolean => text.split('\n').some(isTableSeparatorRow);
-
 /**
- * Refuses replacing or deleting the block that holds a table's header with anything that has no
- * header, because the table would lose its header and saved rows.
+ * Refuses an edit that leaves table rows with no header above them, which breaks the table.
+ * Judged on the result, so deleting a whole table or rewriting it with its header still applies.
  */
-function checkTableHeaderKept({
-  anchor,
-  old_content,
-  new_content,
-}: {
-  anchor: string;
-  old_content: string;
-  new_content: string;
-}): void {
-  if (!hasSeparatorRow(old_content) || hasSeparatorRow(new_content)) {
+function checkNoOrphanedRows({ old_body, new_body }: { old_body: string; new_body: string }): void {
+  if (orphanedRowGroupCount(new_body) <= orphanedRowGroupCount(old_body)) {
     return;
   }
-  const rowCount = tableRowEntries(old_content).length;
-  const lead = `Block ${anchor} holds the table's header and its first ${plural({ count: rowCount, noun: 'row' })}. `;
-  if (new_content === '') {
-    throw new SpaceTableRowsRefusedError(
-      `${lead}Deleting it would break the table. To change these rows, send the whole block with its header.`,
-    );
-  }
-  if (tableRowEntries(new_content).length > 0) {
-    throw new SpaceTableRowsRefusedError(
-      `${lead}The new content has rows but no header, so it would replace them and break the table. ` +
-        'To add rows, use an append entry. To change these rows, send the whole block with its header.',
-    );
-  }
+  throw new SpaceTableRowsRefusedError(
+    'This change would leave table rows with no header, so it would break the table. ' +
+      'To add rows, use an append entry. To change these rows, send the whole block with its header.',
+  );
 }
 
 /** Refuses an edit after which fewer rows with some key are saved than before, across the whole body. */
@@ -848,83 +830,6 @@ export interface ListBlocksResult {
  * with an unclosed marker), so keep the classes disjoint if this pattern ever changes.
  */
 const BLOCK_ANCHOR_PATTERN = /<!--\s*@block:\s*([A-Za-z0-9][A-Za-z0-9_.-]*(?: +[A-Za-z0-9][A-Za-z0-9_.-]*)*)\s*-->/g;
-
-/**
- * Masks regions of a body where a literal `<!-- @block:… -->` is documentation text, not a
- * structural marker: fenced code blocks (``` / ~~~) and <pre>/<code> elements. Masked
- * characters become spaces, so offsets into the masked body match the original body and the
- * marker regex can run on it directly.
- *
- * This is fail-closed by construction: without masking, a fenced sample documenting the
- * marker syntax would parse as a real addressable block, and an edit_space call could
- * silently destroy everything after it — the exact fail-open class the reliability work
- * exists to eliminate. An unclosed fence or tag masks to the end of the body.
- *
- * Single O(n) line pass with indexOf-based tag counting: no nested quantifiers, so this
- * cannot reintroduce the backtracking the anchor pattern was fixed for.
- */
-function maskDocumentationRegions(body: string): string {
-  const lines = body.split('\n');
-  let fence: { char: string; minLength: number } | null = null;
-  let tagDepth = 0;
-  const masked = lines.map(line => {
-    const lower = line.toLowerCase();
-    let isCode = fence !== null || tagDepth > 0;
-
-    // Fenced code blocks: ``` or ~~~, up to 3 leading spaces (CommonMark). An info string
-    // is allowed on the opening line; the closing line is the fence alone.
-    const fenceOpen = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    let closedFence = false;
-    if (fenceOpen !== null) {
-      const sequence: string = fenceOpen[1] ?? '';
-      const char = sequence.charAt(0);
-      if (fence === null) {
-        fence = { char, minLength: sequence.length };
-        isCode = true;
-      } else if (char === fence.char) {
-        // Closing line: the same fence character, at least as long, and nothing else.
-        const closePattern = new RegExp(`^ {0,3}[${char}]{${String(fence.minLength)},}\\s*$`);
-        if (closePattern.test(line)) {
-          fence = null;
-          closedFence = true;
-        }
-        isCode = true;
-      } else {
-        // A fence-like line of the other style inside a fence is content.
-        isCode = true;
-      }
-    }
-
-    // <pre> / <code> elements: crude open/close counting with indexOf (no regex
-    // backtracking). Over-matching (e.g. `<preview>`) only masks more, never less.
-    // Not counted inside a fenced code block: every line there is masked already, and a
-    // literal "<pre>" in the sample text must not leak into the tag depth. A fence-closing
-    // line still counts its tags — a <pre> after the closing fence is real.
-    if (fence === null || closedFence) {
-      const opens = countAny(lower, ['<pre', '<code']);
-      const closes = countAny(lower, ['</pre', '</code']);
-      if (opens > 0) {
-        isCode = true;
-      }
-      tagDepth = Math.max(0, tagDepth + opens - closes);
-    }
-
-    return isCode ? line.replace(/[\s\S]/g, ' ') : line;
-  });
-  return masked.join('\n');
-}
-
-function countAny(haystack: string, needles: string[]): number {
-  let count = 0;
-  for (const needle of needles) {
-    let index = 0;
-    while ((index = haystack.indexOf(needle, index)) !== -1) {
-      count += 1;
-      index += needle.length;
-    }
-  }
-  return count;
-}
 
 /**
  * Splits a body into its preamble (text before the first marker, never addressable by anchor)
@@ -1250,11 +1155,6 @@ function applyEditEntries(input: {
       });
     }
     if (entry.type === 'block') {
-      checkTableHeaderKept({
-        anchor,
-        old_content: body.slice(target.coreStart, target.coreEnd),
-        new_content: entry.new_content,
-      });
       if (entry.new_content === '') {
         deletions.add(target);
         block_results.push({ anchor, new_length: 0, deleted: true });
@@ -1351,6 +1251,7 @@ function applyEditEntries(input: {
   }
   const newBody = parts.join('');
   if (replacements.size > 0 || deletions.size > 0) {
+    checkNoOrphanedRows({ old_body: body, new_body: newBody });
     checkSavedRowsKept({ old_body: body, new_body: newBody, confirm_shrink });
   }
   return { body: newBody, block_results };
