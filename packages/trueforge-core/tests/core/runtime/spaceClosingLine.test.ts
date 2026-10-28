@@ -8,7 +8,7 @@ import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { EMPTY_ANSWER_NUDGE_MESSAGE, internalSystemMessage } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { makeSilentLogger } from '../harnessMocks';
+import { makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 const LINK = '/spaces/space_dogs';
 const LINE = `I saved 2 changes to the space [Dog breeds](${LINK}).`;
@@ -31,9 +31,14 @@ async function* replyStream(
   };
 }
 
-function writeHistory(): ContextMessage[] {
-  const history: ContextMessage[] = [{ role: 'user', content: 'Build a dog breeds page.' }];
-  for (const id of ['c1', 'c2']) {
+function writeHistory({
+  user = 'Build a dog breeds page.',
+  ids = ['c1', 'c2'],
+  name = 'Dog breeds',
+  result,
+}: { user?: string; ids?: string[]; name?: string; result?: string } = {}): ContextMessage[] {
+  const history: ContextMessage[] = [{ role: 'user', content: user }];
+  for (const id of ids) {
     history.push(
       {
         role: 'assistant',
@@ -42,7 +47,7 @@ function writeHistory(): ContextMessage[] {
           {
             id,
             type: 'function',
-            function: { name: 'edit_space', arguments: JSON.stringify({ space_name: 'Dog breeds' }) },
+            function: { name: 'edit_space', arguments: JSON.stringify({ space_name: name }) },
             tool_info: {
               type: 'mcp',
               mcp_server_id: 'space',
@@ -57,7 +62,7 @@ function writeHistory(): ContextMessage[] {
       {
         role: 'tool',
         tool_call_id: id,
-        content: JSON.stringify({ summary: 'Updated space "Dog breeds".', space: { name: 'Dog breeds', link: LINK } }),
+        content: result ?? JSON.stringify({ summary: 'Updated space.', space: { name, link: LINK } }),
       },
     );
   }
@@ -68,10 +73,14 @@ async function runReply({
   replies,
   history = writeHistory(),
   budget = false,
+  toolSets = [],
+  parent,
 }: {
   replies: (string | null)[];
   history?: ContextMessage[];
   budget?: boolean;
+  toolSets?: ReturnType<typeof makeMockIMCPServer>[];
+  parent?: { thread_id: string; tool_call_id: string };
 }) {
   const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> => {
     const reply = replies[Math.min(create.mock.calls.length - 1, replies.length - 1)];
@@ -91,7 +100,8 @@ async function runReply({
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
-    definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+    definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets },
+    parent,
     context: history,
   });
   const finals: string[] = [];
@@ -145,5 +155,41 @@ describe('the closing line after space writes', () => {
   it('adds the continue wording when the reply ended by the step budget', async () => {
     const { finals } = await runReply({ replies: ['Here is where I got to.'], budget: true });
     expect(finals.at(-1)).toContain('I stopped before the page was complete. Ask me to continue.');
+  });
+
+  it('is written once when the grounding nudge brings a second final answer', async () => {
+    const searchTools = makeMockIMCPServer({
+      name: 'web',
+      preload: true,
+      tools: [
+        {
+          name: 'web_search',
+          description: 'Search the web',
+          inputSchema: { ...OBJECT_INPUT_SCHEMA, properties: { query: { type: 'string' } }, required: ['query'] },
+          preload: true,
+        },
+      ],
+    });
+    const history = writeHistory({ user: 'Make a space for my 2027 trip plan.', ids: ['c1'], name: 'Trip plan' });
+    const { finals } = await runReply({ replies: ['Done.', 'Done, from memory.'], history, toolSets: [searchTools] });
+    expect(finals.filter(content => content.includes('I saved'))).toHaveLength(1);
+    expect(finals).toHaveLength(2);
+  });
+
+  it('adds nothing on a sub-agent thread', async () => {
+    const { finals } = await runReply({ replies: ['All done.'], parent: { thread_id: 'root', tool_call_id: 'x' } });
+    expect(finals).toEqual(['All done.']);
+  });
+
+  it('matches the space name in any letter case', async () => {
+    const { finals } = await runReply({ replies: ['The DOG BREEDS page is ready.'] });
+    expect(finals).toEqual(['The DOG BREEDS page is ready.']);
+  });
+
+  it('does not repeat the budget notice the reply already carries', async () => {
+    const { finals } = await runReply({ replies: [null], budget: true });
+    expect(finals.at(-1)).toContain('Stopped after many steps without finishing.');
+    expect(finals.at(-1)).toContain('I saved 2 changes');
+    expect(finals.at(-1)).not.toContain('Ask me to continue');
   });
 });

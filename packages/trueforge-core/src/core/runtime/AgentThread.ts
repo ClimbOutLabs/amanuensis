@@ -1735,6 +1735,8 @@ export class AgentThread {
   // for every turn and latches true the first time the grounding nudge fires,
   // so a turn gets at most one.
   private groundingNudgeSentThisTurn = false;
+  // The closing line goes on the turn's first final message only, so a nudged second answer does not repeat it.
+  private spaceClosingLineWritten = false;
   // When a loop guard fires, the turn gets one bounded recovery pass: a host
   // note telling the model to write its final answer from gathered results
   // instead of ending with no answer. This latches true so a second guard
@@ -4150,15 +4152,21 @@ export class AgentThread {
       !hasToolCalls(assistantMessage) &&
       !emptyTerminalFailure &&
       !shouldNudgeForEmptyReasoning &&
+      this.parent === undefined &&
+      !this.spaceClosingLineWritten &&
       (typeof assistantMessage.content === 'string' || assistantMessage.content === null)
     ) {
       const writes = spaceWritesThisTurn(this.context);
       const prior = assistantMessage.content?.trim() ?? '';
-      if (writes.length > 0 && !writes.some(write => prior.includes(write.name))) {
+      const lowerPrior = prior.toLowerCase();
+      if (writes.length > 0 && !writes.some(write => lowerPrior.includes(write.name.toLowerCase()))) {
+        const unfinished = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
         const closing = spaceClosingLine({
           writes,
-          unfinished: this.toolCallMemo.turn.unfinishedByThread.get(this.threadId),
+          unfinished,
+          noticeShown: (['budget', 'failed'] as const).some(kind => prior.includes(unfinishedNotice(kind))),
         });
+        this.spaceClosingLineWritten = true;
         assistantMessage.content = [prior, closing].filter(part => part !== '').join('\n\n');
       }
     }

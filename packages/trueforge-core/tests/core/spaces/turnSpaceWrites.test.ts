@@ -99,30 +99,59 @@ describe('spaceClosingLine', () => {
   const edits = { name: 'Dog breeds', link: DOGS_LINK, created: false, changes: 3, last_failed: false };
 
   it('says how many changes were saved', () => {
-    expect(spaceClosingLine({ writes: [edits], unfinished: undefined })).toBe(
+    expect(spaceClosingLine({ writes: [edits], unfinished: undefined, noticeShown: false })).toBe(
       `I saved 3 changes to the space [Dog breeds](${DOGS_LINK}).`,
     );
   });
 
   it('says a space was created', () => {
-    expect(spaceClosingLine({ writes: [{ ...edits, created: true, changes: 1 }], unfinished: undefined })).toBe(
-      `I created the space [Dog breeds](${DOGS_LINK}).`,
-    );
+    expect(
+      spaceClosingLine({
+        writes: [{ ...edits, created: true, changes: 1 }],
+        unfinished: undefined,
+        noticeShown: false,
+      }),
+    ).toBe(`I created the space [Dog breeds](${DOGS_LINK}).`);
   });
 
   it('adds the refused wording when the last write failed', () => {
-    expect(spaceClosingLine({ writes: [{ ...edits, last_failed: true }], unfinished: undefined })).toContain(
-      'My last change to it was refused, so the page may be incomplete. Ask me to finish it.',
-    );
+    expect(
+      spaceClosingLine({ writes: [{ ...edits, last_failed: true }], unfinished: undefined, noticeShown: false }),
+    ).toContain('My last change to it was refused, so the page may be incomplete. Ask me to finish it.');
   });
 
   it('adds the continue wording when the reply ended by the step budget', () => {
-    expect(spaceClosingLine({ writes: [edits], unfinished: 'budget' })).toContain(
+    expect(spaceClosingLine({ writes: [edits], unfinished: 'budget', noticeShown: false })).toContain(
       'I stopped before the page was complete. Ask me to continue.',
     );
   });
 
   it('is empty without writes', () => {
-    expect(spaceClosingLine({ writes: [], unfinished: 'budget' })).toBe('');
+    expect(spaceClosingLine({ writes: [], unfinished: 'budget', noticeShown: false })).toBe('');
+  });
+
+  it('escapes a name that tries to close the link and start another', () => {
+    const line = spaceClosingLine({
+      writes: [{ ...edits, name: 'Evil](https://evil.example/login) [x\n' }],
+      unfinished: undefined,
+      noticeShown: false,
+    });
+    expect(line).toBe(`I saved 3 changes to the space [Evil\\](https://evil.example/login) \\[x](${DOGS_LINK}).`);
+  });
+
+  it('names the space in the refused wording when several were written', () => {
+    const other = { ...edits, name: 'Cat breeds', link: '/spaces/space_cats' };
+    const line = spaceClosingLine({
+      writes: [{ ...edits, last_failed: true }, other],
+      unfinished: undefined,
+      noticeShown: false,
+    });
+    expect(line).toContain('My last change to Dog breeds was refused');
+  });
+
+  it('keeps only the saved part when the reply already carries a host notice', () => {
+    expect(
+      spaceClosingLine({ writes: [{ ...edits, last_failed: true }], unfinished: 'budget', noticeShown: true }),
+    ).toBe(`I saved 3 changes to the space [Dog breeds](${DOGS_LINK}).`);
   });
 });

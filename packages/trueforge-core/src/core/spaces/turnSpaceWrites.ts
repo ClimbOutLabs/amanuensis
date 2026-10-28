@@ -85,8 +85,16 @@ function plural(count: number): string {
   return count === 1 ? '1 change' : `${String(count)} changes`;
 }
 
+/** A name is person-visible link text, so it cannot close the link or start another one. */
+function safeSpaceName(name: string): string {
+  return name
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[\\[\]]/g, match => `\\${match}`);
+}
+
 function spaceLinkText(write: SpaceWrites): string {
-  return `[${write.name}](${write.link})`;
+  return `[${safeSpaceName(write.name)}](${write.link})`;
 }
 
 function savedPart(write: SpaceWrites): string {
@@ -102,9 +110,12 @@ function savedPart(write: SpaceWrites): string {
 export function spaceClosingLine({
   writes,
   unfinished,
+  noticeShown,
 }: {
   writes: readonly SpaceWrites[];
   unfinished: UnfinishedKind | undefined;
+  /** The reply already carries the host's own step-budget or failure notice, so the caveats would repeat it. */
+  noticeShown: boolean;
 }): string {
   if (writes.length === 0) {
     return '';
@@ -113,11 +124,16 @@ export function spaceClosingLine({
   const [first = '', ...rest] = parts;
   const sentence = `I ${rest.length === 0 ? first : `${first}, and I ${rest.join(', and I ')}`}.`;
   const extra: string[] = [];
-  if (writes.some(write => write.last_failed)) {
-    extra.push('My last change to it was refused, so the page may be incomplete. Ask me to finish it.');
-  }
-  if (unfinished === 'budget') {
-    extra.push('I stopped before the page was complete. Ask me to continue.');
+  if (!noticeShown) {
+    const refused = writes.filter(write => write.last_failed);
+    const [firstRefused] = refused;
+    if (firstRefused !== undefined) {
+      const subject = writes.length === 1 ? 'it' : refused.map(write => safeSpaceName(write.name)).join(' and ');
+      extra.push(`My last change to ${subject} was refused, so the page may be incomplete. Ask me to finish it.`);
+    }
+    if (unfinished === 'budget') {
+      extra.push('I stopped before the page was complete. Ask me to continue.');
+    }
   }
   return [sentence, ...extra].join(' ');
 }
