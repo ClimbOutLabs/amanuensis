@@ -198,30 +198,39 @@ describe('card text', () => {
   });
 });
 
-describe('the prompt fixes from the live trip run', () => {
-  it('asks only for what is still missing and never asks the same thing twice', () => {
-    expect(SHARED_RULES).toContain('only for what is still missing');
-    expect(SHARED_RULES).toContain('Never ask the same thing twice in different words');
+describe('the rewritten rules and cards', () => {
+  it('keeps the shared rules to four short lines', () => {
+    expect(SHARED_RULES.split('\n')).toHaveLength(4);
+    expect(SHARED_RULES).toContain('Plain words and short replies');
+    expect(SHARED_RULES).toContain('Ask one thing at a time when you need answers');
+    expect(SHARED_RULES).toContain('If you have to assume something, say what it is in one line');
   });
 
-  it('lets the latest message win over the plan, but sends, saves and bookings still need a yes first', () => {
-    expect(SHARED_RULES).toContain(
-      'My latest message wins over the plan, but sending, saving, booking, cancelling or changing anything still needs my yes first',
-    );
+  it('carries no act-first or latest-message-wins line, in the shared rules or on any card', () => {
+    expect(SHARED_RULES).not.toContain('do that first');
+    expect(SHARED_RULES).not.toContain('latest message wins');
+    for (const card of everyCard) {
+      expect(card.prompt, card.title).not.toContain('do that first');
+      expect(card.prompt, card.title).not.toContain('latest message wins');
+    }
   });
 
-  it('keeps the same ask-first exception on the trip card, right after do that first', () => {
-    expect(CARDS.trip.prompt).toContain(
-      'do that first, but sending, saving, booking, cancelling or changing anything still needs my yes first',
-    );
+  it('carries no global line cap, next-step offer, or stuck rule in the shared rules', () => {
+    expect(SHARED_RULES).not.toContain('under ten lines');
+    expect(SHARED_RULES).not.toContain('offer one next step');
+    expect(SHARED_RULES).not.toContain('make the next step smaller');
   });
 
-  it('never sends a list of questions', () => {
-    expect(SHARED_RULES).toContain('Never send a list of questions.');
+  it('rests the one-question rule in the shared block, not restated on the cards', () => {
+    for (const card of everyCard) {
+      if (card.sharedRules === false) continue;
+      expect(card.prompt, card.title).not.toContain('one question at a time');
+    }
   });
 
   it('keeps the ask-first rule for sends, saves, bookings and changes in the shared rules', () => {
     expect(SHARED_RULES).toContain('Never send, save, book, cancel, or change anything without asking me first');
+    expect(SHARED_RULES).toContain('ask with the exact thing you are about to do');
   });
 
   it('asks first on every card whose prompt sends, saves or books', () => {
@@ -244,21 +253,12 @@ describe('the prompt fixes from the live trip run', () => {
     expect(CARDS.dinner.prompt).toContain("an allergy or a food they won't eat");
   });
 
-  it('keeps every list line a concrete action or a fact, never filler', () => {
-    expect(SHARED_RULES).toContain('every line is a concrete action or a fact, never filler');
-  });
-
-  it('offers a calendar add only with a real date and time', () => {
-    expect(SHARED_RULES).toContain('only when you have a real date and time for it');
-  });
-
   it('starts the dinner card with the plan, not a round of questions', () => {
     expect(CARDS.dinner.prompt).toContain("Plan this week's dinners and give me one shopping list grouped by aisle");
     expect(CARDS.dinner.prompt).not.toContain('Ask me how many people are eating');
   });
 
-  it('asks only for what the trip checklist needs, one question at a time', () => {
-    expect(CARDS.trip.prompt).toContain('one question at a time');
+  it('asks only for what the trip checklist needs', () => {
     expect(CARDS.trip.prompt).toContain('who with only if it changes the plan');
     expect(CARDS.trip.prompt).not.toContain('sort out the week before');
   });
@@ -270,9 +270,35 @@ describe('the prompt fixes from the live trip run', () => {
     expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
   });
 
-  it('offers trip dates and reminders only for real times still in the future', () => {
-    expect(CARDS.trip.prompt).toContain('a time that is real and still in the future');
-    expect(CARDS.trip.prompt).not.toContain('remind me a week before');
+  it('does not presume my answers on the trip card or defend against them', () => {
+    expect(CARDS.trip.prompt).not.toContain('short or joking');
+    expect(CARDS.trip.prompt).not.toContain('Never ask the same thing twice');
+  });
+
+  it('makes the start card one small first step, with no check-back script', () => {
+    expect(CARDS.start.prompt).toContain('one small first step I could do in about ten minutes');
+    expect(CARDS.start.prompt).toContain('make the step smaller without making a fuss');
+    expect(CARDS.start.prompt).not.toContain('check back in 30 minutes');
+    expect(CARDS.start.prompt).not.toContain('two lines');
+    expect(CARDS.start.prompt).not.toContain('two minutes');
+  });
+
+  it('lets the talk card listen, with advice only when it is asked for', () => {
+    expect(CARDS.talk.prompt).toContain("If I want advice, I'll ask for it");
+    expect(CARDS.talk.prompt).not.toContain('Do not give advice unless I ask for it');
+    expect(CARDS.talk.prompt).not.toContain('two or three lines');
+  });
+
+  it('keeps the company card quiet without sealing it shut', () => {
+    expect(CARDS.company.prompt).toContain('stay quiet unless I speak to you');
+    expect(CARDS.company.prompt).not.toContain('nothing else');
+    expect(CARDS.company.prompt).not.toContain('Never add tips or encouragement');
+  });
+
+  it('lays the decide options side by side without scripting the ending', () => {
+    expect(CARDS.decide.prompt).toContain('lay the options out side by side');
+    expect(CARDS.decide.prompt).not.toContain('three questions at most');
+    expect(CARDS.decide.prompt).not.toContain('Then stop');
   });
 });
 

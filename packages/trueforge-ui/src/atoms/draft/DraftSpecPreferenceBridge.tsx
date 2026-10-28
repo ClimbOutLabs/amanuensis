@@ -29,6 +29,23 @@ function filterMounts<T extends object>(mounts: T[] | undefined, availableNames:
   return filtered.length === mounts.length ? mounts : filtered;
 }
 
+/**
+ * Only the mounts of a spec, checked against the configured connectors: a mount whose
+ * connector is gone comes out, everything else stays. Kept apart from the full reconcile so
+ * the bridge can apply it as soon as the connector list alone has been read, without waiting
+ * for the model and skill lists or for every list to have loaded without error.
+ */
+export function reconcileDraftSpecMounts({
+  agentSpec,
+  connectors,
+}: {
+  agentSpec: AgentSpec;
+  connectors: ConnectorState[];
+}): Partial<AgentSpec> {
+  const nextMcpServers = filterMounts(agentSpec.mcpServers, new Set(connectors.map(connector => connector.name)));
+  return nextMcpServers === agentSpec.mcpServers ? {} : { mcpServers: nextMcpServers };
+}
+
 export function reconcileDraftSpecPreferences({
   agentSpec,
   models,
@@ -59,9 +76,9 @@ export function reconcileDraftSpecPreferences({
     }
   }
 
-  const nextMcpServers = filterMounts(agentSpec.mcpServers, new Set(connectors.map(connector => connector.name)));
-  if (nextMcpServers !== agentSpec.mcpServers) {
-    update.mcpServers = nextMcpServers;
+  const mountUpdate = reconcileDraftSpecMounts({ agentSpec, connectors });
+  if (mountUpdate.mcpServers !== undefined) {
+    update.mcpServers = mountUpdate.mcpServers;
   }
 
   if (skillsEnabled === false) {
@@ -126,7 +143,7 @@ export function DraftSpecPreferenceBridge() {
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
   const capabilities = useServerCapabilities();
   const sandboxEnabled = capabilities?.sandbox.enabled;
-  const { models, skills, connectors, loaded, error, ensureLoaded } = useDraftCatalog();
+  const { models, skills, connectors, connectorsLoaded, loaded, error, ensureLoaded } = useDraftCatalog();
   const isPlainDraft = mode.status === 'active' && mode.isMutable && mode.agentId == null && pendingSessionId == null;
   const preferenceKind = mode.status === 'active' && mode.isMutable && mode.isCreateAgent ? 'agent' : 'chat';
 
@@ -148,6 +165,18 @@ export function DraftSpecPreferenceBridge() {
       updateAgentSpec(update);
     }
   }, [agentSpec, isPlainDraft, preferenceKind, sandboxEnabled, updateAgentSpec]);
+
+  useEffect(() => {
+    // Mounts are reconciled as soon as the connector list alone has been read. The full
+    // reconcile below waits for every list, and one errored list would otherwise leave a
+    // remembered mount of a deleted connector in the spec the first turn sends. The remember
+    // effect above then saves the healed spec, so the stored seed loses the mount too.
+    if (!isPlainDraft || agentSpec == null || updateAgentSpec == null || !connectorsLoaded) return;
+    const update = reconcileDraftSpecMounts({ agentSpec, connectors });
+    if (Object.keys(update).length > 0) {
+      updateAgentSpec(update);
+    }
+  }, [agentSpec, connectors, connectorsLoaded, isPlainDraft, updateAgentSpec]);
 
   useEffect(() => {
     if (!isPlainDraft || agentSpec == null || updateAgentSpec == null || !loaded || error != null) return;

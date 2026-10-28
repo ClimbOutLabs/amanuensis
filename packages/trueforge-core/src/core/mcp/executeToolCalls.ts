@@ -905,6 +905,11 @@ async function verifySentinelPreDispatch(input: {
     },
     ctx: {
       ...sentinel.identity,
+      // The workspace the classifier judged against, when the classifying tool recorded
+      // it (the sandbox does): the containment recheck runs against that same root, which
+      // for a chat with no repository bound is the provider's default workspace rather
+      // than no workspace at all.
+      workspace_cwd: info.workspace_cwd ?? sentinel.identity.workspace_cwd,
       services: sentinel.services,
       offline,
       path_resolution: info.path_resolution,
