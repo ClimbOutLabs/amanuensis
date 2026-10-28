@@ -193,3 +193,22 @@ test('adopt finds the install from an instance alone, with no release record', a
   assert.equal(code, 0);
   assert.deepEqual(lines, [ADOPTED_LINE]);
 });
+
+test('adopt run twice against the same end state leaves it unchanged and says the same line', async () => {
+  const jobs = jobsWith();
+  const store = storeWith(summaryWith({ release: RELEASE }));
+  const first = await run(store, jobs);
+  assert.equal(first.code, 0);
+  assert.deepEqual(first.lines, [ADOPTED_LINE]);
+  const endState = {
+    shortcuts: jobs.shortcuts.map(shortcut => ({ ...shortcut })),
+    forwarderContents: jobs.forwarderContents,
+    userPath: jobs.userPath,
+  };
+  const second = await run(store, jobs);
+  assert.equal(second.code, 0);
+  assert.deepEqual(second.lines, [ADOPTED_LINE]);
+  assert.deepEqual(jobs.shortcuts, endState.shortcuts);
+  assert.equal(jobs.forwarderContents, endState.forwarderContents);
+  assert.equal(jobs.userPath, endState.userPath);
+});

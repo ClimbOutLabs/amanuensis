@@ -235,6 +235,18 @@ test('open with a browser that will not open names the address to go to', async 
   assert.deepEqual(lines, [problemText(openBrowserFailedProblem('http://127.0.0.1:8792'))]);
 });
 
+test('open follows the recorded app port when the public address names another port', async () => {
+  const jobs = jobsWith();
+  const summary = summaryWith([
+    { name: 'main', entries: parseRegistry('name=main\napp_port=8807\npublic_url=http://127.0.0.1:8792\n') },
+  ]);
+  const { code, lines, probes } = await run({ runner: new DockerRunner(), store: storeWith(summary), jobs });
+  assert.equal(code, 0);
+  assert.deepEqual(probes, ['http://127.0.0.1:8807/healthz']);
+  assert.deepEqual(jobs.browserUrls, ['http://127.0.0.1:8807']);
+  assert.deepEqual(lines, [openReadyLine('http://127.0.0.1:8807')]);
+});
+
 test('open refuses on a computer that is not Windows', async () => {
   const jobs = jobsWith();
   const { code, lines } = await run({
