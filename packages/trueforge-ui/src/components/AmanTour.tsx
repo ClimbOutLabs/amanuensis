@@ -89,8 +89,8 @@ export type AmanTourProps = {
 };
 
 /**
- * The home on an ordinary new chat. The greeting comes first and the rest orders after the
- * composer, which the thread renders between the two.
+ * The home on an ordinary new chat. The greeting and the setup ticket come first; the rest
+ * orders after the composer, which the thread renders between the two.
  */
 export function AmanTour({
   capabilities,
@@ -124,6 +124,9 @@ export function AmanTour({
         )}
       </h1>
 
+      {/* With the greeting, ahead of the composer: the ticket never splits the pills from their cards. */}
+      {firstRun ? setupTicket : null}
+
       {/* Shares the home column's edges: no width or side padding of its own (see .aman-home-greeting in styles.css). */}
       <div className="order-1 flex w-full flex-col gap-5 pb-4">
         {canSend ? null : (
@@ -155,8 +158,6 @@ export function AmanTour({
             );
           })}
         </ul>
-
-        {firstRun ? setupTicket : null}
 
         <section className="mt-7 flex flex-col gap-5" aria-labelledby="aman-home-cards-heading">
           <h2 id="aman-home-cards-heading" className="m-0 text-[0.8125rem] font-normal text-text-secondary">

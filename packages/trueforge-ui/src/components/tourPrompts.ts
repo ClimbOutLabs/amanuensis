@@ -22,22 +22,14 @@ export type TourCard = {
   icon: string;
   /** Capabilities that unlock the example; it shows when any one of them is present. Absent when it works on any instance. */
   needs?: readonly (keyof TourCapabilities)[];
-  /** False when the answer is a structured note that the shared rules would bend. */
-  sharedRules?: false;
 };
 
 /** How many cards the home shows at once. */
 export const HOME_CARD_COUNT = 4;
 
-/** Appended under every card prompt: plain short replies, one question at a time, and nothing sent, saved or changed without a yes first. */
-export const SHARED_RULES = `- Plain words and short replies.
-- Ask one thing at a time when you need answers.
-- If you have to assume something, say what it is in one line, then carry on.
-- Never send, save, book, cancel, or change anything without asking me first, and ask with the exact thing you are about to do.`;
-
-/** What a card puts in the composer: its prompt, then the shared rules in plain view. */
+/** What a card puts in the composer: its prompt, with nothing added to it. */
 export function composerTextFor(card: TourCard): string {
-  return card.sharedRules === false ? card.prompt : `${card.prompt}\n\n${SHARED_RULES}`;
+  return card.prompt;
 }
 
 /** The examples whose capability this instance has; the rest are left out, not greyed out. */
@@ -53,13 +45,12 @@ export const CARDS = {
     prompt: MORNING_BRIEF_CARD_PROMPT,
     icon: 'book-open',
     needs: ['calendar', 'email'],
-    sharedRules: false,
   },
   today: {
     title: 'Just tell me what matters today',
     detail: () => 'Three things, your free hour, and what to bring',
     prompt:
-      'Look at my calendar for today and unread email from the last day. Tell me the three things that matter most, when I have a free stretch, and anything I need to bring or prepare. Flag anything that looks off, like a clash or a reply that is overdue. Under ten lines. Then ask if I want this every weekday morning.',
+      'Look at my calendar for today and unread email from the last day. Tell me the three things that matter most, when I have a free stretch, and anything I need to bring or prepare. Flag anything that looks off, like a clash or a reply that is overdue. Then ask if I want this every weekday morning.',
     icon: 'calendar-clock',
     needs: ['calendar', 'email'],
   },
@@ -75,35 +66,35 @@ export const CARDS = {
     title: "Everything's in my head",
     detail: assistant => `Say it all out loud. ${assistant} sorts it`,
     prompt:
-      'Ask me what is on my mind, one item at a time, and just acknowledge each one in a few words until I say I\'m done. Then sort everything into three short lists: today, this week, later. One line per item. Ask before saving the lists to a space, and offer to check in tomorrow on the "today" list.',
+      "I have a lot on my mind and I want to get it out of my head. Can I say it all out loud while you keep track of it? When I say I'm done, sort it into three lists for me: today, this week and later. Ask me before saving the lists to a space, and check in with me tomorrow on the today list.",
     icon: 'lightbulb',
   },
   start: {
     title: "I can't get started",
     detail: assistant => `Tell ${assistant} what's stuck. Start small`,
     prompt:
-      "I'm stuck on something and I can't get started. Ask me what it is. Then suggest one small first step I could do in about ten minutes, and tell me plainly how to begin. If I say that is still too much, make the step smaller without making a fuss about it. If I want the whole plan, I will ask. When I have done the first step, ask if I want the next one.",
+      "I'm stuck on something and I can't get started. Ask me what it is. Then suggest one small first step I could do in about ten minutes, and tell me plainly how to begin. If I say that is still too much, make the step smaller without making a fuss about it. Just the first step for now, please. When I have done the first step, ask if I want the next one.",
     icon: 'play',
   },
   kindly: {
     title: 'Say it kindly',
     detail: () => 'The awkward message, written for you',
     prompt:
-      'Ask me who the message is for and what happened. Then write a short message under 120 words that sounds like me: match how I write in my own sent emails if you can see them, otherwise plain and friendly. Kind, clear, and firm where it needs to be. Show it to me and ask if I want it softer, firmer, or shorter. Ask before sending anything.',
+      'I need to write a message that could come out wrong, and I want to say it kindly. Ask me who it is for and what happened, then write a short message that sounds like me: match how I write in my own sent emails if you can see them, otherwise plain and friendly. Kind, clear, and firm where it needs to be. Show it to me first; I might ask you to make it softer, firmer or shorter. Ask me before sending anything.',
     icon: 'square-pen',
   },
   dinner: {
     title: "What's for dinner this week?",
     detail: () => 'Seven dinners and one shopping list',
     prompt:
-      "Plan this week's dinners and give me one shopping list grouped by aisle. Start from what's already in the fridge and cupboards; if you don't know what's there, ask me that one thing. If you don't know who is eating, ask me who is eating and whether anyone has an allergy or a food they won't eat. Keep weeknights under 30 minutes, use up anything that will spoil first. Offer to save the plan where I can tick it off, and save it only after I say yes. Offer to do it again next weekend.",
+      "Plan this week's dinners and give me one shopping list grouped by aisle. Start from what's already in the fridge and cupboards; if you don't know what's there, ask me. If you don't know who is eating, ask me who is eating and whether anyone has an allergy or a food they won't eat. Keep weeknights under 30 minutes, use up anything that will spoil first. Offer to save the plan where I can tick it off, and save it only after I say yes. I'd like to do it again next weekend.",
     icon: 'list-check',
   },
   waiting: {
     title: "Answer the one that's waiting",
     detail: assistant => `${assistant} finds the reply you've been avoiding and drafts it`,
     prompt:
-      'Find the oldest email in my inbox that is clearly waiting on a reply from me. Tell me in two lines what it is and why it matters. Then draft a short reply that matches how I wrote earlier in the thread and show it to me. Ask before sending. Then ask if I want the next one.',
+      'Find the oldest email in my inbox that is clearly waiting on a reply from me. Tell me briefly what it is and why it matters. Then draft a short reply that matches how I wrote earlier in the thread and show it to me. Ask before sending. Then ask if I want the next one.',
     icon: 'square-pen',
     needs: ['email'],
   },
@@ -119,7 +110,7 @@ export const CARDS = {
     title: 'Catch me up on a thread',
     detail: () => 'A long thread in five lines, and what you need to do',
     prompt:
-      'Ask me which thread, or take the longest unread one. Read all of it. Tell me in five lines what happened, what is being asked of me, and by when. Then ask if I want a reply drafted.',
+      'Ask me which thread, or take the longest unread one. Read all of it, then give me the short version: what happened, what is being asked of me, and by when. Then ask if I want a reply drafted.',
     icon: 'message-square-text',
     needs: ['email'],
   },
@@ -127,14 +118,14 @@ export const CARDS = {
     title: 'Give me a fresh start',
     detail: () => 'Pick three things to finish today and let the rest wait',
     prompt:
-      'Ask me to list what is weighing on me, one at a time. When I\'m done, suggest the three I should finish today and say in one line why those three. Put the rest in a "later" list without judgment. Ask before saving the lists, and offer to re-check at the end of the day.',
+      'Ask me what is weighing on me, one thing at a time. When I\'m done, help me pick the three I should finish today and tell me why those three. The rest can go on a "later" list, no judgment. Ask me before saving the lists, and check back with me at the end of the day.',
     icon: 'broom',
   },
   next_meeting: {
     title: 'Get me ready for the next one',
     detail: () => "Who's in it, what it's about, three things to say",
     prompt:
-      'Look at my next meeting or appointment on the calendar and any email about it. Tell me who will be there, what it is about, and three things I should say or ask. Under ten lines. Ask if I want a reminder 15 minutes before with this note.',
+      'Look at my next meeting or appointment on the calendar and any email about it. Tell me who will be there, what it is about, and three things I should say or ask. Ask if I want a reminder 15 minutes before with this note.',
     icon: 'calendar-clock',
     needs: ['calendar'],
   },
@@ -142,7 +133,7 @@ export const CARDS = {
     title: 'This week at a glance',
     detail: () => 'Appointments, school, birthdays and bills in one list',
     prompt:
-      'Look at my calendar and email for the next seven days. Give me one list of what is coming up, each with its day: appointments, school and family things, birthdays, bills and deadlines. Under fifteen lines. Mark anything that overlaps or looks wrong. Ask if I want this every Sunday evening.',
+      'Look at my calendar and email for the next seven days. Give me one list of what is coming up, each with its day: appointments, school and family things, birthdays, bills and deadlines. Mark anything that overlaps or looks wrong. Ask if I want this every Sunday evening.',
     icon: 'calendar',
     needs: ['calendar', 'email'],
   },
@@ -150,7 +141,7 @@ export const CARDS = {
     title: 'Plan a birthday or a gathering',
     detail: () => "A to-do list and the day's timeline",
     prompt:
-      'Ask me who it is for, the date, roughly how many people, and the budget. If I skip one, assume the usual and say so in one line. Then give me a to-do list under ten items, in the order to do them, and a timeline for the day. Ask before adding anything to my calendar, and offer reminders for the two or three things that must happen early.',
+      "Ask me who it is for, the date, roughly how many people, and the budget. If I skip one, assume the usual and just say what you assumed. Then give me a short to-do list in the order to do things, and a timeline for the day. Ask me before adding anything to my calendar, and I'd like reminders for the two or three things that must happen early.",
     icon: 'calendar-plus',
   },
   trip: {
@@ -179,70 +170,70 @@ export const CARDS = {
     title: 'Say no',
     detail: () => 'A clear no that keeps the relationship',
     prompt:
-      "Ask me what I'm being asked to do and who is asking. Then write a short, warm, clear no under 100 words that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), with no over-explaining. Offer one alternative only if I say there is one. Show it to me and ask before sending.",
+      "Ask me what I'm being asked to do and who is asking. Then write a short, warm, clear no that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), without over-explaining. Only offer an alternative if I say there is one. Show it to me and ask before sending.",
     icon: 'square-pen',
   },
   ask_for: {
     title: 'Ask for something',
     detail: () => 'A raise, a refund, a favor. No apologies',
     prompt:
-      "Ask me what I'm asking for and from whom. Then write a short, direct request under 120 words that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), saying what I want, why it is reasonable, and what I'd like to happen next. No apologies in it. Show it to me and ask before sending.",
+      "Ask me what I'm asking for and from whom. Then write a short, direct request that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), saying what I want, why it is reasonable, and what I'd like to happen next, with no apologies in it. Show it to me and ask before sending.",
     icon: 'square-pen',
   },
   follow_up: {
     title: 'Follow up without nagging',
     detail: () => 'A polite nudge that is easy to answer',
     prompt:
-      "Ask me who I'm following up with and what I'm waiting on, or find the thread if I name it. Write a two-sentence follow-up that is friendly and makes it easy to reply with one word. Ask before sending, and offer to remind me again in a week if there's no answer.",
+      "Ask me who I'm following up with and what I'm waiting on, or find the thread if I name it. Write a short, friendly follow-up that is easy to answer in one word. Ask before sending, and remind me again in a week if there's no answer.",
     icon: 'clock-rotate-left',
   },
   thanks: {
     title: 'Thank someone properly',
     detail: () => 'A thank-you that sounds like you, not a card from the shop',
     prompt:
-      'Ask me who it is for and what they did. Then write a short thank-you, three to five sentences, specific to what they did, that sounds like me (match my own sent emails if you can see them, otherwise warm and plain). Show it to me and ask before sending.',
+      'Ask me who it is for and what they did. Then write a short thank-you, specific to what they did, that sounds like me (match my own sent emails if you can see them, otherwise warm and plain). Show it to me and ask before sending.',
     icon: 'message-square-text',
   },
   explain: {
     title: 'Explain this to me',
     detail: assistant => `Paste a letter or message. ${assistant} tells you what it means and what to do`,
     prompt:
-      'I will paste or describe a letter, message or document next. Tell me in plain words what it says, whether I need to do anything, and by when. Under eight lines. Ask before writing any reply.',
+      'I will paste or describe a letter, message or document next. Tell me in plain words what it says, whether I need to do anything, and by when. Ask before writing any reply.',
     icon: 'file',
   },
   decide: {
     title: 'Help me decide',
     detail: () => 'Two options and a pick you can ignore',
     prompt:
-      "First use what you already know about me. Then ask me what I'm deciding between, and what matters most to me about it. When you have enough, lay the options out side by side on those things, in a short table, and tell me which one you'd pick and why in a couple of lines.",
+      "I'm trying to decide something. Ask me what I'm deciding between, and what matters most to me about it. Then lay the options out side by side on those things, and tell me which one you'd pick and why.",
     icon: 'sliders',
   },
   talk: {
     title: 'Talk it through',
     detail: assistant => `${assistant} listens and asks one good question at a time`,
     prompt:
-      "There's something I want to talk through. Ask me what's going on. Then mostly listen: keep your replies short, usually one good question, until I say I've got it or I'm done. If I want advice, I'll ask for it. At the end, offer to write down what I decided.",
+      "There's something I want to talk through. Ask me what's going on, then mostly listen and ask me one good question at a time to help me think it through, until I say I've got it or I'm done. If I want advice, I'll ask for it. At the end, offer to write down what I decided.",
     icon: 'message-square-text',
   },
   steps: {
     title: 'Break it into steps',
     detail: () => 'A big thing split into small ones you can tick off',
     prompt:
-      'Ask me what the big thing is and when it needs to be done. Then split it into five to eight steps, each something I can do in one sitting, in order, with a rough day for each. Ask before saving it as a list I can tick off, and offer to check in after the first step.',
+      'Ask me what the big thing is and when it needs to be done. Then split it into five to eight steps, each something I can do in one sitting, in order, with a rough day for each. Ask before saving it as a list I can tick off, and check in with me after the first step.',
     icon: 'list-check',
   },
   company: {
     title: 'Keep me company while I work',
     detail: assistant => `Set a timer. ${assistant} checks in when it ends, nothing more`,
     prompt:
-      'I want company while I work. Ask me what I\'m about to work on and for how long, suggesting 25 minutes if I\'m not sure. Then just say "go". While I work, stay quiet unless I speak to you, and then answer what I actually said. When the time is up, ask how it went in one line and whether I want another round.',
+      'I want company while I work. Ask me what I\'m about to work on and for how long, suggesting 25 minutes if I\'m not sure. Then just say "go". While I work, stay quiet unless I speak to you, and then answer what I actually said. When the time is up, ask me how it went and whether I want another round.',
     icon: 'clock',
   },
   care: {
     title: 'Keep their care in one place',
     detail: () => 'Medicines, visits and questions in one place',
     prompt:
-      "Keep everything about someone I look after in one place: medicines and times, upcoming appointments, and questions for the next visit. Ask me who it is and what I'd like to track, then put it in one space with those three sections. Ask before creating it, and offer reminders for the medicine times.",
+      "Keep everything about someone I look after in one place: medicines and times, upcoming appointments, and questions for the next visit. Ask me who it is and what I'd like to track, then put it in one space with those three sections. Ask before creating it, and I'd like reminders for the medicine times.",
     icon: 'folder',
   },
   meds: {
@@ -256,7 +247,7 @@ export const CARDS = {
     title: 'Get ready for their appointment',
     detail: () => 'What to bring, what has changed, and what to ask',
     prompt:
-      'Find their next appointment in my calendar or email, or ask me when it is. Ask me what has changed since the last visit. Then write a short note to bring, under ten lines, and three questions to ask. Ask if I want it saved and a reminder the evening before.',
+      'Find their next appointment in my calendar or email, or ask me when it is. Ask me what has changed since the last visit. Then write a short note to bring, and three questions to ask. Ask if I want it saved and a reminder the evening before.',
     icon: 'calendar',
     needs: ['calendar', 'email'],
   },
@@ -264,7 +255,7 @@ export const CARDS = {
     title: 'School and activities this week',
     detail: () => 'Pickups, forms, events and what to send in, by day',
     prompt:
-      'Look at my calendar and email for the next seven days for anything about school, clubs or activities: pickups, forms, events, things to send in. List them by day, under fifteen lines, and mark anything that needs an answer from me. Ask if I want this every Sunday.',
+      'Look at my calendar and email for the next seven days for anything about school, clubs or activities: pickups, forms, events, things to send in. List them by day, and mark anything that needs an answer from me. Ask if I want this every Sunday.',
     icon: 'calendar',
     needs: ['calendar', 'email'],
   },
@@ -272,14 +263,14 @@ export const CARDS = {
     title: 'Share the load at home',
     detail: () => 'Who does what this week, as a chart you can share',
     prompt:
-      'Ask me who lives here and which jobs need doing each week. Make a fair weekly chart, one row per person, that rotates the jobs nobody likes. Ask before saving it to a space, tell me I can share the chart with the others, and offer to re-shuffle it monthly.',
+      "Ask me who lives here and which jobs need doing each week. Make a fair weekly chart, one row per person, that rotates the jobs nobody likes and that I can share with the others. Ask me before saving it to a space, and I'd like it re-shuffled every month.",
     icon: 'broom',
   },
   hard_talk: {
     title: 'A hard conversation about care',
     detail: assistant => `${assistant} helps you find the words`,
     prompt:
-      'Ask me who the conversation is with and what I need from it. Then help me write three or four short lines I can say to open it, honest and kind, and one line for if it goes badly. Keep it under ten lines. Ask if I want to practice it with you first.',
+      'Ask me who the conversation is with and what I need from it. Then help me write three or four short lines I can say to open it, honest and kind, and one line for if it goes badly. Ask if I want to practice it with you first.',
     icon: 'message-square-text',
   },
   subscriptions: {
@@ -294,14 +285,14 @@ export const CARDS = {
     title: 'Explain this bill',
     detail: assistant => `${assistant} says what you owe and why`,
     prompt:
-      'I will paste or describe a bill or statement next. Tell me in plain words what I owe, what it is for, when it is due, and anything that looks wrong or higher than usual. Under eight lines. Ask before drafting any dispute or reply.',
+      'I will paste or describe a bill or statement next. Tell me in plain words what I owe, what it is for, when it is due, and anything that looks wrong or higher than usual. Ask before drafting any dispute or reply.',
     icon: 'file',
   },
   overcharged: {
     title: 'Am I being overcharged?',
     detail: () => 'Compare your price with what others pay',
     prompt:
-      'Ask me what the service is and what I pay. Search for what people typically pay for the same thing, and tell me in three lines whether mine looks high, about right, or low, with one source. If high, offer to draft a short message asking for a better rate. Ask before sending.',
+      "Ask me what the service is and what I pay. Search for what people typically pay for the same thing, and tell me briefly whether mine looks high, about right, or low, with a source. If it looks high, I'd like a short message drafted asking for a better rate. Ask me before sending anything.",
     icon: 'search',
   },
   money_due: {
@@ -316,21 +307,21 @@ export const CARDS = {
     title: 'A simple budget for this month',
     detail: () => 'What comes in, goes out, and is left',
     prompt:
-      "Ask me what comes in this month and the fixed things that must go out, one at a time, rounding is fine. If I'm not sure of a number, use a round guess and say it's a guess. Show me three numbers: in, must-pay, left over. Then ask if I want to set aside anything from what's left, and offer to save the budget and check in mid-month.",
+      "Ask me what comes in this month and the fixed things that must go out, one at a time, rounding is fine. If I'm not sure of a number, use a round guess and say it's a guess. Show me three numbers: in, must-pay, left over. Then ask me if I want to set aside anything from what's left. Ask me before saving the budget, and check in with me mid-month.",
     icon: 'chart',
   },
   sort_out: {
     title: 'What do I need to sort out first?',
     detail: () => 'Papers, bank, health care, housing',
     prompt:
-      "Ask me which country and city I live in, and when I arrived. If I can't give you one of these, carry on with what you have and say which part is missing. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Under fifteen lines. Ask before saving it, and offer to remind me of the next item each Monday.",
+      "Ask me which country and city I live in, and when I arrived. If I can't give you one of these, carry on with what you have and say which part is missing. Then search official government pages and give me a checklist for this month covering papers and registration, bank, health care and housing, with one line on how to do each and a link to the official page, in the order to do them. Say which items you could not confirm. Ask before saving it, and remind me of the next item each Monday.",
     icon: 'list-check',
   },
   letter: {
     title: 'Explain this letter',
     detail: assistant => `${assistant} says what it means and what to do`,
     prompt:
-      'I will paste or describe a letter next. Tell me in plain words what it says, whether I need to act, and by when. Under eight lines. Ask before writing a reply, and offer to translate it line by line if that helps.',
+      'I will paste or describe a letter next. Tell me in plain words what it says, whether I need to act, and by when. Ask before writing a reply. If I need it, translate it for me line by line.',
     icon: 'file',
   },
   doctor: {
@@ -345,21 +336,21 @@ export const CARDS = {
     title: 'Ten minutes of the language',
     detail: () => 'Practice the pharmacy or the school office',
     prompt:
-      'Ask me which language and what I need it for this week, like the pharmacy, the school office or the landlord. Then run a ten-minute practice: one short line from you, one from me, and gently correct my mistakes after each turn. Offer to do ten minutes again tomorrow.',
+      "Ask me which language and what I need it for this week, like the pharmacy, the school office or the landlord. Then run a ten-minute practice: one short line from you, one from me, and gently correct my mistakes after each turn. I'd like to do ten minutes again tomorrow.",
     icon: 'message-square-text',
   },
   locals_know: {
     title: 'What people here just know',
     detail: () => 'The everyday things nobody tells newcomers',
     prompt:
-      "Ask me which country and city. Then search recent advice from people who live there and tell me the five everyday things newcomers most often get wrong or don't know, in one or two lines each, with a link for each. Ask if I want the five for a specific situation next, like renting, schools or getting around.",
+      "Ask me which country and city. Then search recent advice from people who live there and tell me the five everyday things newcomers most often get wrong or don't know, with a link for each. Ask if I want the five for a specific situation next, like renting, schools or getting around.",
     icon: 'lightbulb',
   },
   neighborhood: {
     title: 'Choose a neighborhood',
     detail: () => "Three options compared on rent, commute and what it's like to live there",
     prompt:
-      "Ask me the city, my budget, and where I'll spend most of my days. If I skip one, use what you have and say what you assumed. Search current rents and travel times, and compare three neighborhoods in a short table: rent with a source, commute time, and what living there is like in one line. Ask if I want to see them on a map.",
+      "Ask me the city, my budget, and where I'll spend most of my days. If I skip one, use what you have and say what you assumed. Search current rents and travel times, and compare three neighborhoods for me: the rent, with a source, the commute time, and what living there is like. Ask me if I want to see them on a map.",
     icon: 'search',
   },
 } satisfies Record<string, TourCard>;

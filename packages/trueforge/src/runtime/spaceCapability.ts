@@ -55,6 +55,7 @@ import { evalSources } from '../eval/fixtures';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
+  SPACE_WRITE_GUIDANCE_MAX_LENGTH,
   SPACE_WRITE_MAX_LENGTH,
   SpaceContentSchema,
   SpaceFormatSchema,
@@ -285,7 +286,7 @@ export class SpaceBodyEmptyError extends Error {
  * Thrown when one write call carries more new content than SPACE_WRITE_MAX_LENGTH. A
  * tool-layer policy, not a store error: it never reaches the database. It exists because
  * models stall while writing very long tool arguments, so a space is built in parts: the
- * refusal names the limit and the next step, and nothing is persisted.
+ * refusal names the number the model is told and the next step, and nothing is persisted.
  */
 export class SpaceWriteTooLongError extends Error {
   readonly tool: string;
@@ -299,7 +300,7 @@ export class SpaceWriteTooLongError extends Error {
         : 'Send the first part now, then send the rest in a follow-up edit_space call.';
     super(
       `Refusing ${subject}: this write carries ${input.new_length.toLocaleString('en-US')} characters of new content, ` +
-        `and one write may carry at most ${SPACE_WRITE_MAX_LENGTH.toLocaleString('en-US')}. Nothing was persisted. ${next}`,
+        `and one write may carry at most ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')}. Nothing was persisted. ${next}`,
     );
     this.name = 'SpaceWriteTooLongError';
     this.tool = input.tool;
@@ -363,7 +364,7 @@ const SPACE_INSTRUCTION_SECTION = 'spaces';
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Build a large space in steps, not in one call: one write carries at most about 4,000 characters of new content, and a write past that is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with edit_space: call list_blocks, then insert the new rows after the last block, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
+Build a large space in steps, not in one call: one write carries at most about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters of new content, and a write past the limit is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with edit_space: call list_blocks, then insert the new rows after the last block, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
 
 Pass body as one string with real line breaks: each table row on its own line, and a blank line as an empty line. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
@@ -1344,7 +1345,9 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and edit_space, never by editing files in the sandbox. The name must be one no existing space has: a taken name is refused, so change the existing space with edit_space instead. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks, at most about 4,000 characters; add the rest afterwards with edit_space. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and edit_space, never by editing files in the sandbox. The name must be one no existing space has: a taken name is refused, so change the existing space with edit_space instead. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks, at most about " +
+        SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US') +
+        " characters; add the rest afterwards with edit_space. Mark updatable sections with <!-- @block:name --> markers. The result gives the new space's name and link; mention the space by linking its name, never by an id.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       invalidInput: spaceInvalidInput,
       handler: async input => this.write(() => this.create(input)),
@@ -1358,7 +1361,9 @@ class SpaceTool extends LocalToolMCP {
         "fingerprint is the block's fingerprint as that read showed it: a short code hashed from the block's exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block's anchor. " +
         'Anchors come from list_blocks: the name of a <!-- @block:name --> section, or b1, b2, and so on for the blocks a body without markers is split into. ' +
         'An unknown or duplicate anchor fails the whole edit and nothing is saved: do not retry the same entry. Re-read the space and correct the entry from the fresh read. ' +
-        'The new content across one call may total at most about 4,000 characters; split a bigger change into several calls. ' +
+        'The new content across one call may total at most about ' +
+        SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US') +
+        ' characters; split a bigger change into several calls. ' +
         'A successful edit returns the new revision and the fresh block outline, so the next edit can chain from them without a re-read. ' +
         'new_title renames the space; purpose, status, and format are optional too. ' +
         'A body that would shrink below a tenth of its size needs confirm_shrink: true.',

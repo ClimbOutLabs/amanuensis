@@ -2302,7 +2302,10 @@ async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyC
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
- * name. Only Aman's own Gmail tools check recipients.
+ * name. Only Aman's own Gmail tools check recipients. The one exception is a draft save on Aman's own Email
+ * sidecar: the host knows that call by its first-party mark and the sidecar's own tool list, where the draft
+ * tool is the one tool that saves a message without sending it, so the demo lets it through to the ordinary
+ * checks, which still read its recipients like a send's.
  */
 function demoRefusesConnector(input: {
   action: SentinelAction;
@@ -2312,6 +2315,7 @@ function demoRefusesConnector(input: {
   return (
     input.ctx.services.demoSendAllowlist !== null &&
     input.action.tool_type === 'mcp' &&
+    !isHostMailDraft(input.action) &&
     (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
 }

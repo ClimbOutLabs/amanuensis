@@ -14,6 +14,8 @@ const SEED_REPORT: SeedReport = {
   spaces: { created: 1, updated: 0, unchanged: 0 },
   knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 0 },
   memory: { created: 22, updated: 0, unchanged: 0, removed: 0 },
+  connectors: { email: 'registered', search: 'added' },
+  skills: { tenX: 'enabled' },
 };
 const RESET_REPORT: ResetReport = {
   personas: 2,
