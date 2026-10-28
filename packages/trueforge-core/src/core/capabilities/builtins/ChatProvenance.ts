@@ -2,7 +2,7 @@ import type { LLMUserMessage, RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
-import { recordToolResultProvenance, type WebSearchTurnState } from '../../permissions/webSearch';
+import { isOutsideContentTool, recordToolResultProvenance, type WebSearchTurnState } from '../../permissions/webSearch';
 import { isHostWrappedText, isLLMContextMessage, isUntrustedDocumentText } from '../../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
 import type { AgentCapability } from '../AgentCapability';
@@ -23,6 +23,11 @@ function calledTool(call: RawToolCall): { tool_name: string; argument_values: st
     tool_name: wrapped?.tool_name ?? call.function.name,
     argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
   };
+}
+
+/** Whether a tool call brings in text from outside the chat, whether made directly or through the call_tool wrapper. */
+export function callReadsOutsideContent(call: RawToolCall): boolean {
+  return isOutsideContentTool(calledTool(call).tool_name);
 }
 
 /** Each text of a user message, so the person's own words are told apart from file text and host notes. */

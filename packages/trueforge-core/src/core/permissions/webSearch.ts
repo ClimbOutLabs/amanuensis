@@ -1,7 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
-import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
+import { CALENDAR_READ_TOOL_NAMES, isCalendarReadToolName } from '../calendar/toolContract';
 import { htmlImageLinks } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
@@ -147,6 +147,29 @@ export function pageImageUrls(text: string): string[] {
   return urls;
 }
 
+/** A tool's own name, without the server prefix a connector adds. */
+function baseToolName(toolName: string): string {
+  const separator = toolName.lastIndexOf('__');
+  return separator < 0 ? toolName : toolName.slice(separator + 2);
+}
+
+/**
+ * Whether a tool brings in text written outside the chat: a web search or page, mail, a calendar
+ * event, or a document the person gave. Every other tool, such as spaces, tasks and memory, is the
+ * host's own and returns nothing the person or the world wrote, so it is not listed.
+ */
+export function isOutsideContentTool(toolName: string): boolean {
+  const baseName = baseToolName(toolName);
+  return (
+    isSearchResultTool(baseName) ||
+    isPageReaderTool(baseName) ||
+    isGmailReadToolName(baseName) ||
+    isMailReadToolName(baseName) ||
+    isCalendarReadToolName(baseName) ||
+    baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
+  );
+}
+
 /** The kind of content a tool's result is, so a card can say where an address was read. */
 function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
   if (input.opensPage) {
@@ -170,8 +193,7 @@ export function recordToolResultProvenance(input: {
   texts: readonly string[];
 }): void {
   const { provenance } = input.state;
-  const separator = input.tool_name.lastIndexOf('__');
-  const baseName = separator < 0 ? input.tool_name : input.tool_name.slice(separator + 2);
+  const baseName = baseToolName(input.tool_name);
   const searchTool = isSearchResultTool(baseName);
   if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });

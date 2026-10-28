@@ -520,6 +520,23 @@ export class HindsightClient implements MemoryClient {
     return { ok: true };
   }
 
+  async deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    const sent = await this.send({
+      path: `/documents/${encodeURIComponent(params.documentId)}`,
+      method: 'DELETE',
+      timeoutMs: params.timeoutMs,
+    });
+    if (!sent.ok) {
+      return { ok: false, reason: sent.reason };
+    }
+    // 404 means the document is already gone, which is what the caller wanted.
+    if (!sent.response.ok && sent.response.status !== 404) {
+      const failure = await this.httpFailure({ sent, operation: 'delete document' });
+      return { ok: false, reason: failure.reason };
+    }
+    return { ok: true };
+  }
+
   async getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome> {
     const sent = await this.send({ path: `/operations/${id}`, method: 'GET', timeoutMs });
     if (!sent.ok) {
@@ -745,7 +762,7 @@ export class HindsightClient implements MemoryClient {
    */
   private async send(input: {
     path: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'DELETE';
     timeoutMs: number;
     body?: unknown;
   }): Promise<SentRequest | MemoryFailure> {

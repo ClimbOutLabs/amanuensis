@@ -428,6 +428,7 @@ export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 
 // Sentinel: three-tier permission system for tool execution
+export { callReadsOutsideContent } from './capabilities/builtins/ChatProvenance';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,

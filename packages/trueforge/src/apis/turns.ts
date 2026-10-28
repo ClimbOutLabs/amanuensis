@@ -26,6 +26,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReadsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -1225,20 +1226,31 @@ async function runTurnEventDrain(params: {
   const { input, markArtifactsCaptured } = params;
   const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
     input;
-  // Provenance for the memory the retain below writes. All tool output is untrusted data (the
-  // host says so in the system prompt), and the retained assistant reply is produced after seeing
-  // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
-  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
-  // `user_stated`.
+  // Provenance for the memory the retain below writes. Text from outside the chat (a web page,
+  // mail, a calendar event, a document) is untrusted, and the retained assistant reply is produced
+  // after seeing it, so a turn that read any is stamped `tool_ingested` and held to the recall
+  // screen's stricter posture. Host tools such as spaces and tasks bring in nothing, so they
+  // never mark a turn. Text extracted from an attached file is just as untrusted, so a turn that
+  // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  const outsideContentCalls = new Set<string>();
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
+      if (event.type === EventType.MODEL_MESSAGE) {
+        for (const call of event.tool_calls ?? []) {
+          if (callReadsOutsideContent(call)) {
+            outsideContentCalls.add(call.id);
+          }
+        }
+      }
+      if (
+        (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) &&
+        outsideContentCalls.has(event.tool_call_id)
+      ) {
         ingestedToolOutput = true;
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.

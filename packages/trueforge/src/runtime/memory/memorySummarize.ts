@@ -21,6 +21,7 @@ import { modelIdentity, type TurnModelUsage } from '../modelUsage';
 import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import { localDay } from './localDay';
+import { FACT_STOPWORDS } from './stopWords';
 
 /**
  * Bounds the model calls made through one summarization client, so a slow model cannot hold
@@ -202,7 +203,7 @@ function summarizeSystemPrompt(personName: string | undefined): string {
     '- rules for how the assistant should act, such as a pasted prompt or card, unless the person asks you to remember them',
     '- greetings, thanks, or short answers such as "yes" or "this week"',
     '',
-    'Use the assistant text only to understand what a short reply refers to.',
+    "The exchange holds only what the person wrote. A line marked context only is the assistant's last question; use it to understand a short reply, and never keep anything from it.",
     name === undefined
       ? 'Write each fact as one complete sentence in the third person, about "the person". Never write "User" or "Assistant".'
       : `Write each fact as one complete sentence with ${name} as its subject, the way you would write a note about a friend. Never write "User" or "Assistant", and never use "the person" as the subject of a fact.`,
@@ -229,15 +230,15 @@ function summarizeSystemPrompt(personName: string | undefined): string {
 }
 
 /**
- * Messages for the summarization call. Exported for tests; the exchange is the full
- * turn so the model can tell what a short reply refers to. `turnDate` is an ISO instant, shown
+ * Messages for the summarization call. Exported for tests; the exchange is the person's words,
+ * plus the assistant's last question when a short reply needs it. `turnDate` is an ISO instant, shown
  * as the day in `timeZone`, so relative dates in the person's words can be written as real dates.
  * `textLeftOut` says the middle of a long turn was cut. `personName` is the person's name from
  * their own profile; when it is usable, the facts are written in the name.
  */
 export function buildSummarizationMessages(params: {
   userText: string;
-  assistantText: string;
+  assistantQuestion?: string | undefined;
   turnDate: string;
   timeZone?: string | undefined;
   textLeftOut?: boolean | undefined;
@@ -252,8 +253,9 @@ export function buildSummarizationMessages(params: {
         ...(params.textLeftOut === true ? ['Part of this long turn was left out.'] : []),
         '<exchange>',
         `User: ${params.userText}`,
-        '',
-        `Assistant: ${params.assistantText}`,
+        ...(params.assistantQuestion === undefined
+          ? []
+          : ['', `Context only, never a source of facts. The assistant's last question: ${params.assistantQuestion}`]),
         '</exchange>',
       ].join('\n'),
     },
@@ -268,6 +270,75 @@ function describeTurnDate({ turnDate, timeZone }: { turnDate: string; timeZone: 
   }
   const { date, weekday } = localDay({ instant: parsed, timeZone });
   return `${date} (${weekday})`;
+}
+
+/** A message with fewer words than this may be an answer to the assistant's question. */
+const SHORT_MESSAGE_WORDS = 12;
+
+/** Longest stretch of the assistant's question given to the summarizer as context. */
+const ASSISTANT_QUESTION_MAX_CHARACTERS = 300;
+
+/**
+ * The assistant's last question, when the person's message is short enough to be an answer to it.
+ * Anything else the assistant wrote stays out: it is not a source of facts about the person.
+ */
+export function assistantQuestionFor({
+  userText,
+  assistantText,
+}: {
+  userText: string;
+  assistantText: string;
+}): string | undefined {
+  if (userText.trim().split(/\s+/).length >= SHORT_MESSAGE_WORDS) {
+    return undefined;
+  }
+  const end = assistantText.lastIndexOf('?');
+  if (end === -1) {
+    return undefined;
+  }
+  const head = assistantText.slice(0, end);
+  const start = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('\n')) + 1;
+  const question = assistantText.slice(start, end + 1).trim();
+  return question === '' ? undefined : question.slice(-ASSISTANT_QUESTION_MAX_CHARACTERS);
+}
+
+/** Lower-cased words of three or more characters, with a plural "s" dropped so "wants" meets "want". */
+function contentWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(word => word.length >= 3)
+    .map(word => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word));
+}
+
+/**
+ * Share of a fact's content words that must come from the person's own message. One shared word is
+ * not enough: a narrated step such as "add ranks to the table" shares "table" with "make the dog table".
+ */
+const MIN_SHARED_WORD_SHARE = 0.4;
+
+/**
+ * Keeps a fact only if enough of its content words appear in the person's own message. A model that
+ * ignores the instruction and keeps something from elsewhere writes words the person never used.
+ * Stop words and the person's name do not count, so "maya wants ..." cannot pass on the name.
+ */
+export function keepFactsFromPerson({
+  facts,
+  userText,
+  personName,
+}: {
+  facts: string[];
+  userText: string;
+  personName: string | undefined;
+}): string[] {
+  const ignored = new Set(contentWords(usablePersonName(personName) ?? ''));
+  const isContent = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ignored.has(word);
+  const said = new Set(contentWords(userText).filter(isContent));
+  return facts.filter(fact => {
+    const words = new Set(contentWords(fact).filter(isContent));
+    const shared = [...words].filter(word => said.has(word)).length;
+    return shared > 0 && shared / words.size >= MIN_SHARED_WORD_SHARE;
+  });
 }
 
 const SummaryReplySchema = z.object({ facts: z.array(z.string()) });
@@ -423,11 +494,10 @@ export async function summarizeTurnContent(params: {
   const { tenantId, modelProviderStore, summarizationModelFqn, logger } = params;
   // A long turn keeps its start and its end, and the model is told that the middle is missing.
   const boundedUser = boundedText(params.userText);
-  const boundedAssistant = boundedText(params.assistantText);
   const userText = boundedUser.text;
-  const assistantText = boundedAssistant.text;
-  const textLeftOut = boundedUser.cut || boundedAssistant.cut;
-  if (userText.trim() === '' && assistantText.trim() === '') {
+  const assistantQuestion = assistantQuestionFor({ userText, assistantText: params.assistantText });
+  const textLeftOut = boundedUser.cut;
+  if (userText.trim() === '') {
     return { status: 'skipped', reason: 'empty-exchange' };
   }
   if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
@@ -508,12 +578,13 @@ export async function summarizeTurnContent(params: {
       if (parsed.kind === 'nothing') {
         return { status: 'nothing_to_keep' };
       }
-      return { status: 'summarized', facts: parsed.facts };
+      const facts = keepFactsFromPerson({ facts: parsed.facts, userText, personName: params.personName });
+      return facts.length === 0 ? { status: 'nothing_to_keep' } : { status: 'summarized', facts };
     };
     try {
       const messages = buildSummarizationMessages({
         userText,
-        assistantText,
+        assistantQuestion,
         turnDate: params.turnDate,
         timeZone: params.timeZone,
         textLeftOut,

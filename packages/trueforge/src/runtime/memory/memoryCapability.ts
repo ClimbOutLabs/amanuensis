@@ -32,6 +32,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
+import { LEARNED_PROFILE_CLEARED_CONTENT } from '../profileLearning';
 import type {
   BankProfile,
   EntitySummary,
@@ -57,6 +58,7 @@ import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin }
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
+import { QUERY_STOPWORDS } from './stopWords';
 
 const MEMORY_STATE_KEY = 'aman.memory';
 const MAX_QUERY_CHARS = 2000;
@@ -618,49 +620,6 @@ function formatProfileLine(profile: BankProfile): string | undefined {
 function formatReflectionLine(text: string): string {
   return `[reflection] ${sanitizeMemoryLine(text.trim())}`;
 }
-
-const QUERY_STOPWORDS = new Set([
-  'the',
-  'and',
-  'for',
-  'you',
-  'your',
-  'with',
-  'what',
-  'how',
-  'did',
-  'does',
-  'was',
-  'were',
-  'are',
-  'have',
-  'has',
-  'had',
-  'that',
-  'this',
-  'from',
-  'about',
-  'into',
-  'much',
-  'many',
-  'when',
-  'where',
-  'which',
-  'who',
-  'why',
-  'can',
-  'could',
-  'would',
-  'should',
-  'will',
-  'tell',
-  'give',
-  'show',
-  'again',
-  'try',
-  'now',
-  'please',
-]);
 
 /** Lower-cased tokens of letters and digits, split on everything else. */
 function tokenize(text: string): string[] {
@@ -1591,7 +1550,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       // every entity summary outright (`suppressEntities`) rather than folding into that rank
       // cap, so a normal, non-damped turn is never narrowed by the damping posture.
       const gated = applyRelevanceGate({
-        items: recall.outcome.results,
+        items: recall.outcome.results.filter(item => !item.text.trim().startsWith(LEARNED_PROFILE_CLEARED_CONTENT)),
         entities: recall.outcome.entities,
         minScore: this.config.recallMinScore,
         maxItems: this.config.recallMaxItems,

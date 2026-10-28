@@ -34,6 +34,9 @@ export interface MemoryClient {
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 
+  /** Removes every memory stored under one document id. A document that does not exist is a success. */
+  deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome>;
+
   getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome>;
 
   retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome>;

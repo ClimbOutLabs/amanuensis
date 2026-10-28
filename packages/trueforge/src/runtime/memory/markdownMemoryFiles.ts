@@ -82,6 +82,12 @@ export function dailyLogEntries(input: { safeNamespace: string; file: string; co
   return entries;
 }
 
+/**
+ * Metadata key (value `true`) asking a store that keeps entries as appended text to replace the
+ * item's earlier entries with the same document id, as Hindsight does by itself.
+ */
+export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
+
 /** Metadata key naming the chat an entry came from; stored as a hidden trailer line, never in the fact text. */
 export const SESSION_ID_METADATA_KEY = 'session_id';
 
