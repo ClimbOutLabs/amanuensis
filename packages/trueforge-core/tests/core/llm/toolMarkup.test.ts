@@ -537,3 +537,68 @@ describe('ToolMarkupGuard chat-template and function-name forms', () => {
     expect(guard.finish()).toBe('clean');
   });
 });
+
+describe('ToolMarkupGuard plain parameter fragments', () => {
+  it('holds back a lone plain parameter line, the shape a cut-off call leaves', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Here is what I found.\n<parameter name="query">dog breeds</parameter>\n');
+    expect(shown).toBe('Here is what I found.\n');
+    expect(guard.finish()).toBe('leaked');
+  });
+
+  it('holds back the same parameter line when it streams in pieces, split inside the tag', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Here is what I found.\n<par');
+    expect(guard.inMarkup).toBe(false);
+    shown += guard.push('ameter name="query">dog breeds</parameter>');
+    expect(shown).toBe('Here is what I found.\n');
+    expect(guard.finish()).toBe('leaked');
+  });
+
+  it('holds back a plain parameter line in the bare equals form, opening the reply', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('<parameter=event_id>evt-1</parameter>');
+    expect(shown).toBe('');
+    expect(guard.finish()).toBe('leaked');
+  });
+
+  it('settles the cut-off sub-agent shape with the fragments gone and the prose kept whole', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Almost there. List ra\n<parameter name="breed">Labrador</parameter>\n</parameter>');
+    expect(shown).toBe('Almost there. List ra\n');
+    expect(guard.finish()).toBe('leaked');
+  });
+
+  it('hides an orphan plain parameter closing tag alone on its line', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('The list is ready.\n</parameter>\nAnything else?');
+    expect(shown).toBe('The list is ready.\nAnything else?');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('drops a lone plain parameter closing tag the reply ends on', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('All set.\n</parameter>');
+    expect(guard.finish()).toBe('clean');
+    expect(shown + guard.heldText).toBe('All set.\n');
+  });
+
+  it('keeps a bare parameter mention inside a sentence as text when it streams in split pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Set it with <par');
+    shown += guard.push('ameter name="title"> as the first tag inside the call.');
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe('Set it with <parameter name="title"> as the first tag inside the call.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a plain parameter closing tag named in a sentence as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'End the call with </parameter> and then stop.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+});
