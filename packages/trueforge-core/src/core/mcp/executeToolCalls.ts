@@ -6,6 +6,7 @@ import {
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
+import { isRecipientPolicyDenial } from '../email/mailConnector/recipientRefusal';
 import type { RegisteredPassthroughEvent } from '../events/PassthroughEvents';
 import type {
   ApprovalDecision,
@@ -1603,6 +1604,26 @@ export async function executeToolCalls({
       sentinel,
     });
     if (sentinelVerificationError !== undefined) {
+      // The blocked result below is unchanged; this only leaves a row in the activity log, so a
+      // call stopped at the last check is visible beside the actions that ran.
+      if (sentinel !== undefined && sentinel.services.audit !== null) {
+        try {
+          await sentinel.services.audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: toolCall.tool_info.tier ?? 3,
+            tool_name: toolCall.tool_info.original_tool_name,
+            description: 'This call no longer matched the approval it was given, so it was not run.',
+            outcome: 'auto_denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a stopped call in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       return {
         toolCall,
         toolInfo,
@@ -2216,7 +2237,7 @@ export async function executeToolCalls({
   // relaxed Tier 2 calls record that they ran.
   if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
     const audit = sentinel.services.audit;
-    for (const { toolCall, disposition, admissionProvenance: admitted } of results) {
+    for (const { toolCall, disposition, response, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
@@ -2250,6 +2271,27 @@ export async function executeToolCalls({
         outcome,
         auto_deny_reason: outcome === 'auto_denied' ? APPROVAL_EXPIRED_REASON_CODE : null,
       });
+      // An approved send can still be refused by the mail service itself when a recipient is not
+      // on its list. The row above records the person's decision; this one records that the send
+      // was then refused, so the log does not read as if the message went out.
+      if (outcome === 'approved' && info.mail_send === true && isRecipientPolicyDenial(response)) {
+        try {
+          await audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: info.tier,
+            tool_name: info.original_tool_name,
+            description: 'The mail service refused the recipient after this send was approved, so the message was not sent.',
+            outcome: 'denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a refused send in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
   }
   for (const {
