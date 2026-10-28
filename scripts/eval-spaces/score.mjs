@@ -9,7 +9,11 @@ function isTableLine(line) {
 }
 
 function cellsOf(line) {
-  return line.trim().slice(1, -1).split('|');
+  // An escaped pipe (\\|) belongs to the cell text.
+  return line
+    .trim()
+    .slice(1, -1)
+    .split(/(?<!\\)\|/);
 }
 
 function isSeparatorLine(line) {
@@ -138,11 +142,11 @@ export function replyNamesSpace({ reply, name }) {
 /**
  * Walks revisions in order and reports the first row key that was in the revision before and is gone now.
  * Returns the empty string when no row was lost.
- * @param {{ revisions: ReadonlyArray<{ revision: number, body: string }>, format: string }} options
+ * @param {{ revisions: ReadonlyArray<{ revision: number, body: string, format: string }> }} options
  */
-export function findRowsLost({ revisions, format }) {
+export function findRowsLost({ revisions }) {
   let previous;
-  for (const { revision, body } of revisions) {
+  for (const { revision, body, format } of revisions) {
     const keys = new Set(rowKeys({ body, format }));
     if (previous !== undefined) {
       const gone = [...previous].find(key => !keys.has(key));
@@ -171,4 +175,68 @@ export function failedExpectations({ measures, expect }) {
     }
   }
   return failed;
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The tool's own result inside a stored tool response, unwrapping the versioned envelope. */
+function resultPayload(content) {
+  const parsed = parseJson(content);
+  if (typeof parsed !== 'object' || parsed === null || !('schema_version' in parsed) || !('result' in parsed)) {
+    return parsed;
+  }
+  return typeof parsed.result === 'string' ? (parseJson(parsed.result) ?? parsed.result) : parsed.result;
+}
+
+function responseText(event) {
+  if (typeof event.content === 'string') {
+    return event.content;
+  }
+  return Array.isArray(event.content)
+    ? event.content.map(part => (typeof part?.text === 'string' ? part.text : '')).join('\n')
+    : '';
+}
+
+/**
+ * Ids of the spaces this chat's own successful create_space calls made, read from its stored events.
+ * Only these may be scored or deleted: a space someone else made during the run is never named here.
+ * @param {ReadonlyArray<{ event?: Record<string, unknown> }>} items
+ */
+export function createdSpaceIds(items) {
+  const callNames = new Map();
+  for (const { event } of items) {
+    if (event?.type === 'model.message' && Array.isArray(event.tool_calls)) {
+      for (const call of event.tool_calls) {
+        if (typeof call?.id === 'string' && typeof call.tool_info?.name === 'string') {
+          callNames.set(call.id, call.tool_info.name);
+        }
+      }
+    }
+  }
+  const ids = new Set();
+  for (const { event } of items) {
+    const isV2 = event?.type === 'tool.response.v2';
+    if (!(isV2 || event?.type === 'tool.response')) {
+      continue;
+    }
+    if (isV2 && event.disposition !== 'executed_ok') {
+      continue;
+    }
+    const name = callNames.get(event.tool_call_id);
+    if (name === undefined || !/(^|[._-])create_space$/.test(name)) {
+      continue;
+    }
+    const link = resultPayload(responseText(event))?.space?.link;
+    const match = typeof link === 'string' ? /^\/spaces\/([^/?#]+)$/.exec(link) : null;
+    if (match !== null) {
+      ids.add(decodeURIComponent(match[1]));
+    }
+  }
+  return ids;
 }

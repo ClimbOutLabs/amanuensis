@@ -6,6 +6,7 @@ const TABLE_COLUMNS = Object.freeze([
   'status',
   'create_calls',
   'edit_calls',
+  'new_spaces',
   'refused_or_failed_calls',
   'rows',
   'duplicate_rows',

@@ -9,6 +9,7 @@ import {
   countPictures,
   countRawListMarkers,
   countRows,
+  createdSpaceIds,
   failedExpectations,
   findRowsLost,
   isFormattingChanged,
@@ -140,15 +141,15 @@ test('the closing line must name the space', () => {
 test('the revision walk names the first revision that lost a row', () => {
   const rev = (revision, keys) => ({
     revision,
+    format: 'markdown',
     body: ['| Breed |', '| --- |', ...keys.map(key => `| ${key} |`)].join('\n'),
   });
-  const format = 'markdown';
-  assert.equal(findRowsLost({ revisions: [rev(1, ['a', 'b']), rev(2, ['a', 'b', 'c'])], format }), '');
+  assert.equal(findRowsLost({ revisions: [rev(1, ['a', 'b']), rev(2, ['a', 'b', 'c'])] }), '');
   assert.equal(
-    findRowsLost({ revisions: [rev(1, ['a', 'b']), rev(2, ['a', 'b', 'c']), rev(3, ['c', 'd'])], format }),
+    findRowsLost({ revisions: [rev(1, ['a', 'b']), rev(2, ['a', 'b', 'c']), rev(3, ['c', 'd'])] }),
     'revision 3: a',
   );
-  assert.equal(findRowsLost({ revisions: [], format }), '');
+  assert.equal(findRowsLost({ revisions: [] }), '');
 });
 
 test('expectations report each missed target', () => {
@@ -161,4 +162,40 @@ test('expectations report each missed target', () => {
     ['rows 38 != 40', 'pictures 0 < 1', 'completed unknown != true'],
   );
   assert.deepEqual(failedExpectations({ measures, expect: { rows: 38 } }), []);
+});
+
+test('each revision is read in its own format', () => {
+  const markdown = { revision: 1, format: 'markdown', body: '| Breed |\n| --- |\n| a |\n| b |' };
+  const html = { revision: 2, format: 'html', body: '<table><tr><td>a</td></tr></table>' };
+  assert.equal(findRowsLost({ revisions: [markdown, html] }), 'revision 2: b');
+});
+
+test('an escaped pipe stays inside its cell', () => {
+  const body = '| Breed | Notes |\n| --- | --- |\n| Poodle | a \\| b |';
+  assert.equal(isTableValid({ body, format: 'markdown' }), true);
+  assert.deepEqual(rowKeys({ body, format: 'markdown' }), ['poodle']);
+});
+
+test('created space ids come only from successful create_space results', () => {
+  const call = (id, name) => ({
+    event: { type: 'model.message', tool_calls: [{ id, tool_info: { name } }] },
+  });
+  const ok = (id, spaceId, disposition = 'executed_ok') => ({
+    event: {
+      type: 'tool.response.v2',
+      tool_call_id: id,
+      disposition,
+      content: JSON.stringify({ schema_version: 1, result: JSON.stringify({ space: { link: `/spaces/${spaceId}` } }) }),
+    },
+  });
+  const items = [
+    call('c1', 'create_space'),
+    ok('c1', 'mine'),
+    call('c2', 'create_space'),
+    ok('c2', 'refused-one', 'refused'),
+    call('c3', 'edit_space'),
+    ok('c3', 'edited-one'),
+    ok('c4', 'unnamed-call'),
+  ];
+  assert.deepEqual([...createdSpaceIds(items)], ['mine']);
 });

@@ -217,3 +217,133 @@ test('the command writes the results and accepts --keep', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+function fetchFailing({ nth }) {
+  let listCalls = 0;
+  return async (url, init) => {
+    if (init?.method === 'GET' && /\/api\/v1\/spaces(\?|$)/.test(String(url))) {
+      listCalls += 1;
+      if (listCalls === nth) {
+        return { ok: false, status: 500, text: async () => JSON.stringify({ error: { message: 'Try again.' } }) };
+      }
+    }
+    return await fetch(url, init);
+  };
+}
+
+async function runWith({ fake, dir, prompts, fetchImpl, keep = false }) {
+  const client = createInstanceClient({ baseUrl: fake.baseUrl, token: TOKEN, fetchImpl });
+  return await runEvalSpaces({
+    client,
+    spaceSet: { version: 1, prompts },
+    model: 'fake/model-1',
+    temperature: 0,
+    runs: 1,
+    label: 'fake',
+    outDir: path.join(dir, 'out'),
+    keep,
+    pollIntervalMs: 0,
+  });
+}
+
+async function seedPersonsSpace(client) {
+  const list = await client.listSpaces();
+  await client.createSpace({
+    space: { name: 'Mine to keep', purpose: 'A person made this.', status: 'active', body: 'x', format: 'markdown' },
+    expected_aggregate_revision: list.aggregate_revision,
+  });
+}
+
+test('a failing first listing deletes nothing', async () => {
+  await withFake(async ({ fake, dir, client }) => {
+    await seedPersonsSpace(client);
+    const { rows } = await runWith({
+      fake,
+      dir,
+      fetchImpl: fetchFailing({ nth: 1 }),
+      prompts: [{ id: 'p', prompt: 'MAKES_SPACE:Breeds go', expect: { rows: 3 } }],
+    });
+    assert.equal(rows[0].status, 'request_failed');
+    assert.match(rows[0].error, /nothing was deleted/);
+    assert.equal((await client.listAllSpaces()).length, 1, "the person's space survives");
+    assert.ok(!fake.requests.some(request => request.method === 'DELETE'));
+  });
+});
+
+test('a space someone else makes during the run is neither scored nor deleted', async () => {
+  await withFake(async ({ dir, fake, client }) => {
+    const { rows } = await runWith({
+      fake,
+      dir,
+      prompts: [{ id: 'p', prompt: 'MAKES_SPACE:Mine OTHER_MAKES_SPACE:Theirs go', expect: { rows: 3 } }],
+    });
+    assert.equal(rows[0].new_spaces, 1);
+    assert.equal(rows[0].expectations_met, true, rows[0].failed_expectations);
+    const left = await client.listAllSpaces();
+    assert.deepEqual(
+      left.map(space => space.name),
+      ['Theirs'],
+    );
+  });
+});
+
+test('a chat that fails after its first turn keeps its metrics and still cleans up', async () => {
+  await withFake(async ({ dir, fake, client }) => {
+    const { rows } = await runWith({
+      fake,
+      dir,
+      fetchImpl: fetchFailing({ nth: 2 }),
+      prompts: [
+        { id: 'p', prompt: 'MAKES_SPACE:Mine go', follow_up: 'REFORMATS_SPACE', expect: { formatting_changed: true } },
+      ],
+    });
+    assert.equal(rows[0].status, 'request_failed');
+    assert.equal(rows[0].steps, 3, 'the first turn is kept');
+    assert.equal(rows[0].expectations_met, false);
+    assert.equal(rows[0].formatting_changed, false);
+    assert.equal((await client.listAllSpaces()).length, 0);
+  });
+});
+
+test('a first turn that errors cannot pass formatting_changed', async () => {
+  await withFake(async ({ dir, fake }) => {
+    const { rows } = await runWith({
+      fake,
+      dir,
+      prompts: [
+        {
+          id: 'p',
+          prompt: 'MAKES_SPACE:Mine FAILS_TURN',
+          follow_up: 'REFORMATS_SPACE',
+          expect: { formatting_changed: true, table_valid: true },
+        },
+      ],
+    });
+    assert.equal(rows[0].status, 'error');
+    assert.equal(rows[0].formatting_changed, false);
+    assert.equal(rows[0].expectations_met, false);
+    assert.match(rows[0].failed_expectations, /status error is not done/);
+    assert.match(rows[0].error, /follow-up did not run/);
+  });
+});
+
+test('a follow-up that makes a second space cannot pass formatting_changed', async () => {
+  await withFake(async ({ dir, fake, client }) => {
+    const { rows } = await runWith({
+      fake,
+      dir,
+      prompts: [
+        {
+          id: 'p',
+          prompt: 'MAKES_SPACE:First go',
+          follow_up: 'MAKES_SPACE:Second go',
+          expect: { formatting_changed: true },
+        },
+      ],
+    });
+    assert.equal(rows[0].new_spaces, 2);
+    assert.equal(rows[0].formatting_changed, false);
+    assert.equal(rows[0].expectations_met, false);
+    assert.equal((await client.listAllSpaces()).length, 0, 'both spaces the chat made are removed');
+  });
+});

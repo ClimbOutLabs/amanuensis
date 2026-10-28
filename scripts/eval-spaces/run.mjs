@@ -18,6 +18,7 @@ import {
   countPictures,
   countRawListMarkers,
   countRows,
+  createdSpaceIds,
   failedExpectations,
   findRowsLost,
   isFormattingChanged,
@@ -34,8 +35,10 @@ export const SPACE_CSV_COLUMNS = Object.freeze([
   'model',
   'status',
   'error',
+  'approvals',
   'completed',
   'space_id',
+  'new_spaces',
   'create_calls',
   'edit_calls',
   'refused_or_failed_calls',
@@ -70,14 +73,22 @@ function refusedOrFailed(resultsByKind) {
   return countOf(resultsByKind, 'error') + countOf(resultsByKind, 'unavailable') + countOf(resultsByKind, 'refused');
 }
 
-/** The newest space that was not in the list before the run. */
-function newestNewSpace({ spaces, beforeIds }) {
-  return spaces
-    .filter(space => !beforeIds.has(space.id))
-    .reduce(
-      (newest, space) => (newest === undefined || space.created_at >= newest.created_at ? space : newest),
-      undefined,
-    );
+/** The newest of these spaces, by creation time. */
+function newestOf(spaces) {
+  return spaces.reduce(
+    (newest, space) => (newest === undefined || space.created_at >= newest.created_at ? space : newest),
+    undefined,
+  );
+}
+
+/**
+ * Spaces this chat made: named by its own successful create_space results, and not there before it started.
+ * Spaces another person makes during the run are never in this list.
+ */
+async function spacesMadeByChat({ client, sessionId, beforeIds }) {
+  const created = createdSpaceIds(await client.listSessionEvents(sessionId));
+  const spaces = await client.listAllSpaces();
+  return spaces.filter(space => created.has(space.id) && !beforeIds.has(space.id));
 }
 
 /** Reads each kept revision, oldest first. Revisions the instance no longer keeps are skipped. */
@@ -85,12 +96,12 @@ async function readRevisions({ client, space }) {
   const revisions = [];
   for (let revision = 1; revision <= space.revision; revision += 1) {
     if (revision === space.revision) {
-      revisions.push({ revision, body: space.body });
+      revisions.push({ revision, body: space.body, format: space.format });
       continue;
     }
     try {
       const old = await client.getSpace({ id: space.id, revision });
-      revisions.push({ revision, body: old.body });
+      revisions.push({ revision, body: old.body, format: old.format });
     } catch (error) {
       if (!(error instanceof InstanceHttpError && error.status === 404)) {
         throw error;
@@ -100,11 +111,10 @@ async function readRevisions({ client, space }) {
   return revisions;
 }
 
-/** Deletes every space the run added. A failure names the space so it can be removed by hand. */
-async function removeNewSpaces({ client, beforeIds }) {
+/** Deletes the spaces this chat made. A failure names the space so it can be removed by hand. */
+async function removeChatSpaces({ client, sessionId, beforeIds }) {
   const problems = [];
-  const spaces = await client.listAllSpaces();
-  for (const space of spaces.filter(entry => !beforeIds.has(entry.id))) {
+  for (const space of await spacesMadeByChat({ client, sessionId, beforeIds })) {
     try {
       await client.deleteSpace({ id: space.id, expected_revision: space.revision });
     } catch (error) {
@@ -119,34 +129,37 @@ async function removeNewSpaces({ client, beforeIds }) {
 
 async function runOnePrompt({ client, prompt, model, temperature, run, label, keep, pollIntervalMs, turnTimeoutMs }) {
   const problems = [];
-  const turns = [];
+  const progress = { turns: [], approvals: 0 };
   let status;
   let space;
+  let madeByChat = [];
   let spaceBeforeFollowUp;
-  let beforeIds = new Set();
-  const drive = options => driveTurns({ client, approvalPolicy: 'approve', pollIntervalMs, turnTimeoutMs, ...options });
+  let followUpRan = false;
+  // Unknown until the first listing works. Cleanup never runs without it.
+  let beforeIds;
+  let sessionId;
+  const drive = options =>
+    driveTurns({ client, approvalPolicy: 'approve', pollIntervalMs, turnTimeoutMs, progress, ...options });
   try {
     beforeIds = new Set((await client.listAllSpaces()).map(entry => entry.id));
-    const sessionId = await client.createSession({ model, temperature });
-    const first = await drive({
+    sessionId = await client.createSession({ model, temperature });
+    status = await drive({
       sessionId,
       input: [{ type: 'user.message', content: prompt.prompt }],
       previousTurnId: 'none',
     });
-    turns.push(...first.turns);
-    status = first.status;
     if (prompt.follow_up !== undefined && status === 'done') {
-      spaceBeforeFollowUp = newestNewSpace({ spaces: await client.listAllSpaces(), beforeIds });
-      const second = await drive({
+      spaceBeforeFollowUp = newestOf(await spacesMadeByChat({ client, sessionId, beforeIds }));
+      status = await drive({
         sessionId,
         input: [{ type: 'user.message', content: prompt.follow_up }],
-        previousTurnId: turns.at(-1).id,
+        previousTurnId: progress.turns.at(-1).id,
       });
-      turns.push(...second.turns);
-      status = second.status;
+      followUpRan = true;
     }
-    space = newestNewSpace({ spaces: await client.listAllSpaces(), beforeIds });
-    const terminal = describeTerminalState(turns.at(-1)?.state ?? {});
+    madeByChat = await spacesMadeByChat({ client, sessionId, beforeIds });
+    space = newestOf(madeByChat);
+    const terminal = describeTerminalState(progress.turns.at(-1)?.state ?? {});
     if (terminal !== '') {
       problems.push(terminal);
     }
@@ -158,6 +171,7 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, ke
     problems.push(error instanceof Error ? error.message : 'Unknown request failure.');
   }
 
+  const { turns } = progress;
   const last = turns.at(-1);
   const reply = last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
   const metrics = combineTurnMetrics(turns.map(turn => turn.state.metrics));
@@ -168,7 +182,9 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, ke
     label,
     model,
     status,
+    approvals: progress.approvals,
     space_id: space?.id,
+    new_spaces: madeByChat.length,
     create_calls: toolCalls === undefined ? undefined : countOf(toolCalls, 'create_space'),
     edit_calls: toolCalls === undefined ? undefined : countOf(toolCalls, 'edit_space'),
     refused_or_failed_calls: refusedOrFailed(metrics.results_by_kind),
@@ -179,7 +195,9 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, ke
     reply,
   };
   if (space === undefined) {
-    problems.push('No new space was found after the chat.');
+    if (status !== 'request_failed') {
+      problems.push('No new space was found after the chat.');
+    }
   } else {
     const scored = { body: space.body, format: space.format };
     Object.assign(row, {
@@ -191,11 +209,8 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, ke
       pictures: countPictures(scored),
       closing_line: replyNamesSpace({ reply, name: space.name }),
     });
-    if (prompt.follow_up !== undefined) {
-      row.formatting_changed = isFormattingChanged({ before: spaceBeforeFollowUp?.body ?? '', after: space.body });
-    }
     try {
-      row.rows_lost = findRowsLost({ revisions: await readRevisions({ client, space }), format: space.format });
+      row.rows_lost = findRowsLost({ revisions: await readRevisions({ client, space }) });
     } catch (error) {
       if (isRunStopping(error)) {
         throw error;
@@ -203,19 +218,50 @@ async function runOnePrompt({ client, prompt, model, temperature, run, label, ke
       problems.push('Could not read the earlier versions of the space, so rows_lost is empty.');
     }
   }
+  if (prompt.follow_up !== undefined) {
+    // Only one space, the same before and after the follow-up, can show a formatting pass.
+    const sameSpace =
+      followUpRan &&
+      spaceBeforeFollowUp !== undefined &&
+      madeByChat.length === 1 &&
+      space?.id === spaceBeforeFollowUp.id;
+    if (sameSpace) {
+      row.formatting_changed = isFormattingChanged({ before: spaceBeforeFollowUp.body, after: space.body });
+    } else {
+      row.formatting_changed = false;
+      problems.push(
+        followUpRan
+          ? 'The follow-up did not leave one space to compare, so formatting_changed is false.'
+          : 'The follow-up did not run, so formatting_changed is false.',
+      );
+    }
+  }
   row.completed = status === 'done' && space !== undefined && reply.trim() !== '';
-  const failed = failedExpectations({ measures: row, expect: prompt.expect });
+  // A chat that did not finish meets no target, whatever the stored space looks like.
+  const failed =
+    status === 'done'
+      ? failedExpectations({ measures: row, expect: prompt.expect })
+      : [
+          `status ${String(status)} is not done`,
+          ...Object.keys(prompt.expect).map(name => `${name} not met because the chat did not finish`),
+        ];
   row.expectations_met = failed.length === 0;
   row.failed_expectations = failed.join('; ');
 
   if (!keep) {
-    try {
-      problems.push(...(await removeNewSpaces({ client, beforeIds })));
-    } catch (error) {
-      if (isRunStopping(error)) {
-        throw error;
+    if (beforeIds === undefined || sessionId === undefined) {
+      problems.push(
+        'The spaces list could not be read before the chat, so nothing was deleted. Check the instance for spaces to remove.',
+      );
+    } else {
+      try {
+        problems.push(...(await removeChatSpaces({ client, sessionId, beforeIds })));
+      } catch (error) {
+        if (isRunStopping(error)) {
+          throw error;
+        }
+        problems.push('Could not clean up the spaces this chat made. Delete them by hand in the eval instance.');
       }
-      problems.push('Could not clean up the spaces this chat made. Delete them by hand in the eval instance.');
     }
   }
   row.error = problems.join(' ');

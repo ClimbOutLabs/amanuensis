@@ -1,7 +1,8 @@
 // Minimal stand-in for the chat API the token eval calls. Invented data only.
 // A prompt containing NEEDS_APPROVAL pauses once for one tool approval; NO_METRICS drops the metrics.
 // MAKES_SPACE:<name> makes a space with two stored revisions when its turn finishes (the second drops one row).
-// REFORMATS_SPACE adds a revision to the newest space that changes only its look.
+// OTHER_MAKES_SPACE:<name> makes a space the chat has no record of, as another person would.
+// FAILS_TURN ends the turn with an error. REFORMATS_SPACE adds a revision to the newest space that changes only its look.
 import { Buffer } from 'node:buffer';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -32,6 +33,7 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
   const turns = new Map();
   const spaces = new Map();
   const spaceHistory = new Map();
+  const sessionEvents = new Map();
   let aggregateRevision = 0;
   let counter = 0;
   const nextId = prefix => `${prefix}_fake_${String(++counter)}`;
@@ -55,6 +57,34 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
     aggregateRevision += 1;
   }
 
+  function recordCreate({ sessionId, space }) {
+    const callId = nextId('call');
+    const events = sessionEvents.get(sessionId) ?? [];
+    events.unshift(
+      {
+        turn_id: 'turn_fake',
+        event: {
+          type: 'model.message',
+          content: '',
+          tool_calls: [{ id: callId, tool_info: { name: 'create_space' } }],
+        },
+      },
+      {
+        turn_id: 'turn_fake',
+        event: {
+          type: 'tool.response.v2',
+          tool_call_id: callId,
+          disposition: 'executed_ok',
+          content: JSON.stringify({
+            schema_version: 1,
+            result: JSON.stringify({ space: { name: space.name, link: `/spaces/${space.id}` } }),
+          }),
+        },
+      },
+    );
+    sessionEvents.set(sessionId, events);
+  }
+
   function makeSpace(name) {
     const space = {
       id: nextId('space'),
@@ -69,13 +99,19 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
     spaces.set(space.id, space);
     saveRevision(space, [...SPACE_ROWS, '| Alpha | one |', '| Beta | two |', '| Gamma | three |'].join('\n'));
     saveRevision(space, [...SPACE_ROWS, '| Alpha | one |', '| Beta | two |', '| Delta | four |'].join('\n'));
+    return space;
   }
 
   function applyPromptEffects(turn) {
-    const make = /MAKES_SPACE:(\S+)/.exec(turn.prompt);
+    const make = /(?<!OTHER_)MAKES_SPACE:(\S+)/.exec(turn.prompt);
     if (make !== null && turn.namedSpace === undefined) {
-      makeSpace(make[1]);
+      recordCreate({ sessionId: turn.session_id, space: makeSpace(make[1]) });
       turn.namedSpace = make[1];
+    }
+    const other = /OTHER_MAKES_SPACE:(\S+)/.exec(turn.prompt);
+    if (other !== null && turn.otherMade !== true) {
+      makeSpace(other[1]);
+      turn.otherMade = true;
     }
     if (turn.prompt.includes('REFORMATS_SPACE') && turn.reformatted !== true) {
       const newest = [...spaces.values()].at(-1);
@@ -108,6 +144,9 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
       };
     }
     applyPromptEffects(turn);
+    if (turn.prompt.includes('FAILS_TURN')) {
+      return { status: 'error', message: 'The fake model failed.', completed_at };
+    }
     const decision = turn.approvalDecision;
     const text = decision === undefined ? 'FAKE REPLY' : `FAKE REPLY (${decision})`;
     const state = {
@@ -165,6 +204,12 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
       const id = nextId('sess');
       sessions.set(id, { id });
       send(res, 201, { data: { id, agent: { type: 'inline', spec: body.agent.spec } } });
+      return;
+    }
+
+    const eventsMatch = /^\/api\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
+    if (req.method === 'GET' && eventsMatch !== null) {
+      send(res, 200, { data: sessionEvents.get(eventsMatch[1]) ?? [], pagination: { next_page_token: null } });
       return;
     }
 

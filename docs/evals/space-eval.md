@@ -24,7 +24,7 @@ pnpm eval:spaces -- --instance http://localhost:8800 --model <provider/model> --
 
 The flags are the same as the token eval, plus `--keep`. `--set` picks another prompt file, `--out` picks another output folder, and `--temperature` defaults to 0.
 
-Each run is its own chat. The runner lists the spaces before and after, scores the newest new space, and then deletes every space the chat made. `--keep` skips the delete so you can open the spaces. A space the runner did not see appear is never touched. If a delete fails, the run's `error` names the space so you can remove it by hand.
+Each run is its own chat. The runner lists the spaces before the chat starts. It then reads the chat's own stored tool results and finds the spaces its successful `create_space` calls made. Only those spaces are scored and deleted, and only if they were not in the first list. A space you or anyone else makes during the run is never touched. If the first list cannot be read, nothing is deleted and the run's `error` says so. `--keep` skips the delete so you can open the spaces. If a delete fails, `error` names the space so you can remove it by hand.
 
 The model name decides which provider is used. Run the set once for each model you want to compare, for example Nemotron on Token Factory and DeepSeek on vLLM. Keys stay in the instance and in `.env.eval-tokens`, never in the repo.
 

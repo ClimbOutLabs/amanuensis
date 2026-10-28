@@ -22,6 +22,8 @@ export class InstanceUnreachableError extends Error {
   }
 }
 
+const MAX_EVENT_PAGES = 50;
+
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -137,6 +139,24 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
         throw new Error('The instance did not return its spaces. Is --instance a TrueForge server?');
       }
       return body.data;
+    },
+    /** Every stored event of a chat, newest first, as `{ turn_id, event }` items. */
+    async listSessionEvents(sessionId) {
+      const items = [];
+      let pageToken;
+      for (let page = 0; page < MAX_EVENT_PAGES; page += 1) {
+        const query = pageToken === undefined ? '' : `?page_token=${encodeURIComponent(pageToken)}`;
+        const body = await request('GET', `/api/v1/sessions/${encodeURIComponent(sessionId)}/events${query}`);
+        if (!isRecord(body) || !Array.isArray(body.data)) {
+          throw new Error('The instance did not return the chat events. Is --instance a TrueForge server?');
+        }
+        items.push(...body.data);
+        pageToken = isRecord(body.pagination) ? body.pagination.next_page_token : undefined;
+        if (typeof pageToken !== 'string') {
+          return items;
+        }
+      }
+      throw new Error('The chat has more events than the eval can read. Run a shorter prompt.');
     },
     /** Every space, read page by page. The aggregate revision guards each continuation page. */
     async listAllSpaces() {
