@@ -4,6 +4,7 @@ import {
   Sessions,
   type CreatedBySubject,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
 import {
   LATEST_REMINDER_AT_METADATA_KEY,
   LATEST_REMINDER_METADATA_KEY,
@@ -62,13 +63,46 @@ async function setup() {
     return { run: pendingRun, schedule };
   }
 
+  const auditRecords: AuditRecordInput[] = [];
   const deliver = (item: ScheduleDispatchItem, now: Date) =>
-    deliverReminder({ item, sessions, sessionStore, agentStore, now });
+    deliverReminder({
+      item,
+      sessions,
+      sessionStore,
+      agentStore,
+      now,
+      audit: {
+        record: input => {
+          auditRecords.push(input);
+          return Promise.resolve();
+        },
+      },
+    });
 
-  return { sessionStore, dueReminder, deliver };
+  return { sessionStore, dueReminder, deliver, auditRecords };
 }
 
 describe('deliverReminder', () => {
+  it('records the delivery in the activity log, keyed on the Reminders chat', async () => {
+    const { dueReminder, deliver, auditRecords } = await setup();
+    const item = await dueReminder({ what: 'Take the medicine', runAt: '2026-10-19T18:00:00-04:00', name: 'r-one' });
+
+    const sessionId = await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    expect(auditRecords).toEqual([
+      expect.objectContaining({
+        tenant_id: TENANT,
+        created_by: OWNER.subject_id,
+        conversation_id: sessionId,
+        tier: 1,
+        tool_name: 'set_reminder',
+        description: 'Delivered the reminder: Take the medicine',
+        outcome: 'logged',
+        auto_deny_reason: null,
+      }),
+    ]);
+  });
+
   it('writes a due reminder, with its time, into one chat named Reminders, with no model call', async () => {
     const { sessionStore, dueReminder, deliver } = await setup();
     const item = await dueReminder({ what: 'Take the medicine', runAt: '2026-10-19T18:00:00-04:00', name: 'r-one' });

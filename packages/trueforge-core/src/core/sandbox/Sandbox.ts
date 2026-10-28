@@ -5375,6 +5375,33 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * A command refused before it ran leaves one row in the activity log, so a stopped attempt is
+   * visible beside the actions that ran. The refusal itself is unchanged, and a failed write is
+   * only logged, never a reason to change what the caller is told.
+   */
+  private async recordPreflightRefusal(refusal: string): Promise<void> {
+    const sentinel = this.sentinelContext;
+    const writer = sentinel?.services.audit ?? null;
+    if (sentinel === undefined || writer === null) {
+      return;
+    }
+    try {
+      await writer.record({
+        tenant_id: sentinel.tenant_id,
+        created_by: sentinel.created_by,
+        conversation_id: sentinel.conversation_id,
+        tier: 3,
+        tool_name: SANDBOX_EXEC_TOOL_NAME,
+        description: refusal,
+        outcome: 'auto_denied',
+        auto_deny_reason: null,
+      });
+    } catch (error) {
+      this.logger.warn('Could not record a refused command in the activity log', extractErrorLogFields(error));
+    }
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -5399,6 +5426,7 @@ export class Sandbox extends LocalToolMCP {
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
+      await this.recordPreflightRefusal(preflightFailure);
       return hostRefusalResponse(preflightFailure);
     }
     const effect = sandboxInvocationPolicy({ command: resolvedInput.command, purpose: resolvedInput.purpose }).effect;

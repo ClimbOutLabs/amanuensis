@@ -1,3 +1,4 @@
+import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
 import { mkdtempSync } from 'node:fs';
 import {
   createServer as createTcpServer,
@@ -20,11 +21,12 @@ interface Harness {
   socketPath: string;
   registry: SkillNetworkTokenRegistry;
   dials: { host: string; port: number }[];
+  auditRecords: AuditRecordInput[];
   logLines: () => string;
   close: () => Promise<void>;
 }
 
-async function setup(): Promise<Harness> {
+async function setup(options?: { dialFails: boolean }): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'tfy-skillnet-'));
   const socketPath = join(dir, 'skillnet.sock');
   const registry = new SkillNetworkTokenRegistry();
@@ -51,11 +53,21 @@ async function setup(): Promise<Harness> {
     format: format.json(),
     transports: [new transports.Stream({ stream: logStream })],
   });
+  const auditRecords: AuditRecordInput[] = [];
   const gateway = new SkillNetworkGateway({
     registry,
     logger,
+    audit: {
+      record: input => {
+        auditRecords.push(input);
+        return Promise.resolve();
+      },
+    },
     connectUpstream: ({ host, port }) => {
       dials.push({ host, port });
+      if (options?.dialFails === true) {
+        return Promise.reject(new Error('the stand-in upstream is unreachable'));
+      }
       return new Promise((resolve, reject) => {
         const socket = netConnect(echoAddress.port, '127.0.0.1');
         socket.once('connect', () => {
@@ -70,6 +82,7 @@ async function setup(): Promise<Harness> {
     socketPath,
     registry,
     dials,
+    auditRecords,
     logLines: () => logChunks.join(''),
     close: async () => {
       await gateway.close();
@@ -204,6 +217,75 @@ describe('SkillNetworkGateway', () => {
     const after = await connectVia(harness.socketPath, { authority: 'github.com:443', token });
     expect(after.status).toBe(403);
     expect(harness.dials).toEqual([{ host: 'github.com', port: 443 }]);
+  });
+
+  it('writes a refused site to the activity log under its chat, exactly once', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443', token });
+    expect(reply.status).toBe(403);
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(harness.auditRecords).toEqual([
+      expect.objectContaining({
+        tenant_id: 't',
+        created_by: 'o',
+        conversation_id: 's',
+        tier: 3,
+        tool_name: 'skill_network',
+        outcome: 'auto_denied',
+        auto_deny_reason: null,
+      }),
+    ]);
+    expect(harness.auditRecords[0]?.description).toContain('evil.example.com');
+    expect(harness.auditRecords[0]?.description).toContain('not one of its approved sites');
+  });
+
+  it('writes a granted site reached on another port to the activity log', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'github.com:8443', token });
+    expect(reply.status).toBe(403);
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(harness.auditRecords).toHaveLength(1);
+    expect(harness.auditRecords[0]?.description).toContain('github.com');
+    expect(harness.auditRecords[0]?.description).toContain('without a secure connection');
+  });
+
+  it('writes nothing to the activity log for a connection that opens', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'github.com:443', token });
+    expect(reply.status).toBe(200);
+    reply.socket?.destroy();
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(harness.auditRecords).toEqual([]);
+  });
+
+  it('writes nothing to the activity log when a granted connection simply fails to open', async () => {
+    const failing = await setup({ dialFails: true });
+    try {
+      const token = failing.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+      const reply = await connectVia(failing.socketPath, { authority: 'github.com:443', token });
+      // The answer is the same 502 as ever, and the failure was dialled, not refused by a rule.
+      expect(reply.status).toBe(502);
+      expect(reply.body).toContain('Could not connect to github.com');
+      expect(failing.dials).toEqual([{ host: 'github.com', port: 443 }]);
+
+      await new Promise(resolve => setTimeout(resolve, 25));
+      expect(failing.auditRecords).toEqual([]);
+      expect(failing.logLines()).toContain('Skill network connection could not be opened');
+    } finally {
+      await failing.close();
+    }
+  });
+
+  it('writes nothing to the activity log for a call with no token, since it names no chat', async () => {
+    harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'github.com:443' });
+    expect(reply.status).toBe(403);
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(harness.auditRecords).toEqual([]);
   });
 
   it('answers a plain request with 405: this address carries connections, not pages', async () => {

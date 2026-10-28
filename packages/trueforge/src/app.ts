@@ -501,6 +501,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    audit: deps.sentinelAuditStore,
   };
 
   if (configuration.ACCESS_LOGS) {
