@@ -389,7 +389,8 @@ export function isInsideWorkspace(input: {
 
 /**
  * True when a path lies under a directory, comparing whole path components. A relative directory
- * matches the same relative form (a provider whose staged paths are cwd-relative); an absolute
+ * matches the same relative form (a provider whose staged paths are cwd-relative), with the
+ * candidate's dot segments collapsed first; an absolute
  * directory is compared against the path's canonical identity when it has one, and against its
  * normalized text when it does not, so a path in a remote sandbox still matches.
  */
@@ -405,7 +406,10 @@ export function isPathUnderDir(input: {
     return false;
   }
   if (!path.posix.isAbsolute(dir)) {
-    return p === dir || p.startsWith(`${dir}/`);
+    // Collapse dot segments before the prefix match: uploads/../outside.pdf starts with the
+    // directory's name as raw text but resolves outside it, so it must not count as staged.
+    const collapsed = path.posix.normalize(p);
+    return collapsed === dir || collapsed.startsWith(`${dir}/`);
   }
   const identity =
     canonicalFileIdentity({ p: input.p, cwd: input.cwd, resolution: input.resolution }) ??

@@ -34,8 +34,53 @@ function resultError(response: CallToolResponse): boolean {
   return response.result.isError ?? false;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** The extraction shape the bridge tests read: each document's name, path, issue and page line text. */
+function isDocumentExtraction(value: unknown): value is DocumentExtraction {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const documents: unknown = value['documents'];
+  if (!Array.isArray(documents)) {
+    return false;
+  }
+  return documents.every((document: unknown) => {
+    if (!isRecord(document)) {
+      return false;
+    }
+    const issue: unknown = document['issue'];
+    const pages: unknown = document['pages'];
+    if (typeof document['filename'] !== 'string' || typeof document['path'] !== 'string') {
+      return false;
+    }
+    if (issue !== null && typeof issue !== 'string') {
+      return false;
+    }
+    if (!Array.isArray(pages)) {
+      return false;
+    }
+    return pages.every((page: unknown) => {
+      if (!isRecord(page)) {
+        return false;
+      }
+      const lines: unknown = page['lines'];
+      if (!Array.isArray(lines)) {
+        return false;
+      }
+      return lines.every((line: unknown) => isRecord(line) && typeof line['text'] === 'string');
+    });
+  });
+}
+
 function extractionOf(response: CallToolResponse): DocumentExtraction {
-  return JSON.parse(resultText(response)) as DocumentExtraction;
+  const parsed: unknown = JSON.parse(resultText(response));
+  if (!isDocumentExtraction(parsed)) {
+    throw new Error('expected a document extraction result');
+  }
+  return parsed;
 }
 
 describe('the document staging bridge', () => {
@@ -117,9 +162,13 @@ describe('the document staging bridge', () => {
       arguments: { file_paths: ['/outside/secret.pdf'] },
     });
     expect(resultError(response)).toBe(true);
-    const payload = JSON.parse(resultText(response)) as { error?: string };
-    expect(payload.error).toContain('outside the project folder');
-    expect(payload.error).toContain('approval first');
+    const payload: unknown = JSON.parse(resultText(response));
+    const errorText: unknown = isRecord(payload) ? payload['error'] : null;
+    if (typeof errorText !== 'string') {
+      throw new Error('expected an error result');
+    }
+    expect(errorText).toContain('outside the project folder');
+    expect(errorText).toContain('approval first');
     expect(stagedCopies(files)).toHaveLength(0);
   });
 

@@ -127,6 +127,18 @@ describe('document read classification', () => {
     expect(staged).toMatchObject({ tier: 1, reason: 'document_read' });
   });
 
+  it('asks for a path that climbs out of a relative uploads folder, and still reads a plainly staged name', async () => {
+    const relativeScope: DocumentScope = {
+      staged_uploads_dir: 'uploads',
+      workspace_cwd: null,
+      path_resolution: 'remote',
+    };
+    const escape = await classifyTier(extractAction(['uploads/../outside.pdf'], relativeScope), freshCtx(null));
+    expect(escape).toMatchObject({ tier: 3, reason: 'document_outside_workspace' });
+    const staged = await classifyTier(extractAction(['uploads/report.pdf'], relativeScope), freshCtx(null));
+    expect(staged).toMatchObject({ tier: 1, reason: 'document_read' });
+  });
+
   it('flags a secret-named file inside the project folder as a sensitive read', async () => {
     const decision = await classifyTier(extractAction(['/workspace/id_rsa.pdf']), freshCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'document_read', sensitive_read: true });
