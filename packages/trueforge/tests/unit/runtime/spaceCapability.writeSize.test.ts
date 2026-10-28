@@ -709,13 +709,14 @@ describe('the space write size cap', () => {
     // The model is told one number, 3,600, which leaves headroom under the real cap;
     // the cap itself is never reported to the model.
     expect(rendered).toContain(
-      'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines, and a write past the limit',
+      'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines. A markdown write past the limit saves only the leading lines that fit',
     );
     expect(rendered).toContain('A call whose only entry is an append entry and that changes no title');
     expect(rendered).toContain(
-      'When a result says part of the content was not saved, continue from the line it names, without resending saved lines. ' +
-        'To add rows or sections at the end, use an append entry (no anchor or fingerprint needed). ' +
-        'Send only rows that are not there yet. ' +
+      "an append entry {type: 'append', new_content} adds content at the end with no anchor or fingerprint, which is how you add rows or sections at the end. " +
+        'Send at most one append entry per call, and put it last. ' +
+        'Send only rows that are not there yet: a row the table already holds is skipped, and the result names it. ' +
+        'When a result says part of the content was not saved, continue from the line it names, without resending saved lines. ' +
         'End every reply that changed a space with one line saying what was saved.',
     );
     expect(rendered).not.toContain('4,000');

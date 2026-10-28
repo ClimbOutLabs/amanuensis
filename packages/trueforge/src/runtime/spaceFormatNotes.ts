@@ -1,5 +1,5 @@
-import { duplicateRowKey, rowLabel } from './spaceDuplicateRows';
-import { isTableRow, isTableSeparatorRow, rowCells } from './spaceTableRows';
+import { duplicateRowKey } from './spaceDuplicateRows';
+import { isTableRow, isTableSeparatorRow, rowCells, rowNameCell } from './spaceTableRows';
 
 const MAX_NOTES = 5;
 const MAX_NAMED = 3;
@@ -126,7 +126,7 @@ export function spaceFormatNotes({ body, format }: { body: string; format: strin
         return;
       }
       if (seen.has(key)) {
-        repeated.add(rowLabel(line));
+        repeated.add(rowNameCell(line) ?? line.trim());
       }
       seen.add(key);
     });

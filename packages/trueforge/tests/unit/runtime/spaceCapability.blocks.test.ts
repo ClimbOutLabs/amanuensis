@@ -203,8 +203,9 @@ interface SpaceWireResult {
   blocks?: SpaceWireBlock[];
   revision?: number;
   error?: string;
-  summary?: string;
-  revision_was_stale?: boolean;
+  skipped_rows?: { key: string; row: number }[];
+  continue_after?: { anchor: string; fingerprint: string } | null;
+  unsaved_lines?: number;
 }
 
 function resultText(response: CallToolResponse): string {
@@ -1880,5 +1881,162 @@ describe('nothing-changed refusal and format notes', () => {
     ]);
     await createSpace(callTool, { name: 'Clean', body: TABLE });
     expect(noteOf(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Clean' }))).toEqual([]);
+  });
+});
+
+describe('space writes work together', () => {
+  const TABLE = ['| Breed | Size |', '| --- | --- |', '| Beagle | Small |', '| Poodle | Medium |'].join('\n');
+
+  async function sendEdit(
+    callTool: ReturnType<typeof makeHarness>['callTool'],
+    input: { name: string; expected_revision: number; edits: Record<string, unknown>[] },
+  ) {
+    return callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: input.name,
+      expected_revision: input.expected_revision,
+      edits: input.edits,
+    });
+  }
+
+  it('an append drops rows already in the table and reports them', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const rows = ['| Beagle | Small |', '| Pug | Small |', '| Poodle | Medium |', '| Corgi | Small |'];
+    const response = await sendEdit(callTool, {
+      name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: rows.join('\n') }],
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    expect(resultJson(response).skipped_rows).toEqual([
+      { key: 'Beagle', row: 1 },
+      { key: 'Poodle', row: 3 },
+    ]);
+    expect(await readBody(callTool, 'Breeds')).toBe(`${TABLE}\n| Pug | Small |\n| Corgi | Small |`);
+    const again = await sendEdit(callTool, {
+      name: 'Breeds',
+      expected_revision: 2,
+      edits: [{ type: 'append', new_content: '| Pug | Small |' }],
+    });
+    expect(resultJson(again).error).toContain('Every row in this call is already in the table');
+  });
+
+  it('an over-size append saves what fits and says to append the rest', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const rows = Array.from(
+      { length: 80 },
+      (_, index) => `| Breed ${String(index).padStart(2, '0')} | A note about this breed and its care needs |`,
+    );
+    const response = await sendEdit(callTool, {
+      name: 'Breeds',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: rows.join('\n') }],
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    const parsed = resultJson(response);
+    expect(parsed.summary).toContain('Append them next.');
+    expect(parsed.unsaved_lines).toBeGreaterThan(0);
+    const last = parsed.blocks?.at(-1);
+    expect(parsed.continue_after).toEqual({ anchor: last?.anchor, fingerprint: last?.fingerprint });
+    const body = await readBody(callTool, 'Breeds');
+    expect(body.startsWith(`${TABLE}\n| Breed 00 |`)).toBe(true);
+    expect(body.length).toBeLessThan(TABLE.length + 3_700);
+  });
+
+  it('a stale append checks the end only at a line boundary', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Status', body: 'Intro.' });
+    await sendEdit(callTool, {
+      name: 'Status',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'Status: all done' }],
+    });
+    const response = await sendEdit(callTool, {
+      name: 'Status',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'done' }],
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    expect(resultJson(response).revision_was_stale).toBe(true);
+    expect(await readBody(callTool, 'Status')).toBe('Intro.\n\nStatus: all done\n\ndone');
+  });
+
+  it('a stale call that mixes a block entry and an append applies only when the end has not moved', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Mixed', body: '# Title\n\nAlpha.\n\nBeta.\n\nOmega.' });
+    const read = (await listBlocks(callTool, 'Mixed')).blocks ?? [];
+    const [, alpha, beta] = read;
+    await sendEdit(callTool, {
+      name: 'Mixed',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: beta?.anchor, fingerprint: beta?.fingerprint, new_content: 'Beta, changed.' }],
+    });
+    const applied = await sendEdit(callTool, {
+      name: 'Mixed',
+      expected_revision: 1,
+      edits: [
+        { type: 'block', anchor: alpha?.anchor, fingerprint: alpha?.fingerprint, new_content: 'Alpha, changed.' },
+        { type: 'append', new_content: 'Closing.' },
+      ],
+    });
+    expect(isErrorResponse(applied)).toBe(false);
+    expect(resultJson(applied).revision_was_stale).toBe(true);
+    expect(await readBody(callTool, 'Mixed')).toBe(
+      '# Title\n\nAlpha, changed.\n\nBeta, changed.\n\nOmega.\n\nClosing.',
+    );
+
+    const refused = await sendEdit(callTool, {
+      name: 'Mixed',
+      expected_revision: 2,
+      edits: [
+        { type: 'block', anchor: alpha?.anchor, fingerprint: alpha?.fingerprint, new_content: 'Alpha again.' },
+        { type: 'append', new_content: 'More.' },
+      ],
+    });
+    expect(resultJson(refused).error).toContain('The space is at revision 3, not 2.');
+    expect(resultJson(refused).blocks?.length).toBeGreaterThan(0);
+  });
+
+  it('refuses an over-size call that cannot be cut as too long, before the stale check, without locking', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Big', body: '# Big\n\nAlpha.\n\nOmega.' });
+    const read = (await listBlocks(callTool, 'Big')).blocks ?? [];
+    const half = Array.from({ length: 70 }, (_, index) => `Line ${String(index)} ${'x'.repeat(30)}`).join('\n');
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const refused = await sendEdit(callTool, {
+        name: 'Big',
+        expected_revision: 99,
+        edits: [
+          { type: 'insert', after: read[1]?.anchor, fingerprint: read[1]?.fingerprint, new_content: half },
+          { type: 'insert', after: read[2]?.anchor, fingerprint: read[2]?.fingerprint, new_content: half },
+        ],
+      });
+      expect(resultText(refused)).toContain('space_write_too_long');
+    }
+    const fine = await sendEdit(callTool, {
+      name: 'Big',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'Closing.' }],
+    });
+    expect(isErrorResponse(fine)).toBe(false);
+  });
+
+  it('refuses a stale edit that is proven but changes nothing', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Same', body: '# Same\n\nAlpha.\n\nOmega.' });
+    const read = (await listBlocks(callTool, 'Same')).blocks ?? [];
+    await sendEdit(callTool, {
+      name: 'Same',
+      expected_revision: 1,
+      edits: [{ type: 'append', new_content: 'Later.' }],
+    });
+    const response = await sendEdit(callTool, {
+      name: 'Same',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: read[1]?.anchor, fingerprint: read[1]?.fingerprint, new_content: 'Alpha.' }],
+    });
+    expect(resultJson(response).error).toContain('This edit changes nothing');
+    expect(resultJson(await callTool(GET_SPACE_TOOL_NAME, { space_name: 'Same' })).space?.revision).toBe(2);
   });
 });

@@ -55,6 +55,22 @@ describe('spaceWritesThisTurn', () => {
     expect(writes).toEqual([{ name: 'Dog breeds', link: DOGS_LINK, created: true, changes: 2, last_failed: false }]);
   });
 
+  it('counts an append as a change, but not a resend that was already at the end', () => {
+    const atRevision = (id: string, revision: number): ContextMessage => ({
+      role: 'tool',
+      tool_call_id: id,
+      content: JSON.stringify({ summary: 'Updated.', space: { name: 'Dog breeds', link: DOGS_LINK, revision } }),
+    });
+    const writes = spaceWritesThisTurn([
+      user,
+      call('a1', 'edit_space', { space_name: 'Dog breeds', edits: [{ type: 'append', new_content: '| Pug |' }] }),
+      atRevision('a1', 3),
+      call('a2', 'edit_space', { space_name: 'Dog breeds', edits: [{ type: 'append', new_content: '| Pug |' }] }),
+      atRevision('a2', 3),
+    ]);
+    expect(writes).toEqual([{ name: 'Dog breeds', link: DOGS_LINK, created: false, changes: 1, last_failed: false }]);
+  });
+
   it('marks a space whose last write was refused, and clears it after a later save', () => {
     const failedLast = spaceWritesThisTurn([
       user,
@@ -137,6 +153,15 @@ describe('spaceClosingLine', () => {
       noticeShown: false,
     });
     expect(line).toBe(`I saved 3 changes to the space [Evil\\](https://evil.example/login) \\[x](${DOGS_LINK}).`);
+  });
+
+  it('escapes an angle bracket so a name cannot open a tag', () => {
+    const line = spaceClosingLine({
+      writes: [{ ...edits, name: '<img src=x>' }],
+      unfinished: undefined,
+      noticeShown: false,
+    });
+    expect(line).toBe(`I saved 3 changes to the space [\\<img src=x>](${DOGS_LINK}).`);
   });
 
   it('names the space in the refused wording when several were written', () => {

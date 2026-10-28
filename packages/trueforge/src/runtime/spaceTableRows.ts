@@ -4,8 +4,7 @@ import { maskDocumentationRegions } from './spaceDocumentationMask';
 
 const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
 const MARKUP = /[*_`]/g;
-/** A cell that only numbers the row, such as `3`, `3.` or `#3`. */
-export const RANK_CELL = /^\s*#?\d+\.?\s*$/;
+const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
 /** A row is any line that starts with a pipe; the closing pipe is optional. */
 export function isTableRow(line: string): boolean {
@@ -32,8 +31,8 @@ function separatorCells(line: string): boolean {
   );
 }
 
-/** The cell that identifies a row as written: its first cell, or its second when the first is a rank. */
-function keyCellOf(line: string): string | null {
+/** The cell that names a data row as written: its first cell, or its second when the first is a rank. */
+export function rowNameCell(line: string): string | null {
   if (!isTableRow(line) || isTableSeparatorRow(line)) {
     return null;
   }
@@ -46,8 +45,8 @@ function normalizeKey(cell: string): string {
   return cell.replace(MARKUP, '').trim().toLowerCase();
 }
 
-export function tableRowKey(line: string): string | null {
-  const cell = keyCellOf(line);
+function tableRowKey(line: string): string | null {
+  const cell = rowNameCell(line);
   const key = cell === null ? '' : normalizeKey(cell);
   return key === '' ? null : key;
 }

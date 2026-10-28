@@ -32,6 +32,8 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
   const boundary = turnBoundaryIndex(context);
   const calls = new Map<string, { tool: string; args: string }>();
   const writes = new Map<string, SpaceWrites>();
+  // A result at a revision already counted saved nothing new, such as an append that was already at the end.
+  const revisions = new Map<string, number>();
   for (let i = boundary + 1; i < context.length; i += 1) {
     const message = context[i];
     if (message === undefined || !isLLMContextMessage(message)) {
@@ -62,11 +64,16 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
     const link = isRecord(space) ? space['link'] : undefined;
     if (typeof name === 'string' && typeof link === 'string') {
       const earlier = writes.get(name);
+      const revision = isRecord(space) ? space['revision'] : undefined;
+      const savedNothing = typeof revision === 'number' && revisions.get(name) === revision;
+      if (typeof revision === 'number') {
+        revisions.set(name, revision);
+      }
       writes.set(name, {
         name,
         link,
         created: (earlier?.created ?? false) || call.tool === CREATE_SPACE_TOOL_NAME,
-        changes: (earlier?.changes ?? 0) + 1,
+        changes: (earlier?.changes ?? 0) + (savedNothing ? 0 : 1),
         last_failed: false,
       });
       continue;
@@ -90,7 +97,7 @@ function safeSpaceName(name: string): string {
   return name
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/[\\[\]]/g, match => `\\${match}`);
+    .replace(/[\\[\]<]/g, match => `\\${match}`);
 }
 
 function spaceLinkText(write: SpaceWrites): string {

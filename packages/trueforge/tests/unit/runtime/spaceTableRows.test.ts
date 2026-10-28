@@ -2,8 +2,9 @@ import {
   isTableRow,
   isTableSeparatorRow,
   orphanedRowGroupCount,
+  rowCells,
+  rowNameCell,
   tableRowEntries,
-  tableRowKey,
 } from '../../../src/runtime/spaceTableRows';
 
 const keysOf = (content: string): string[] => tableRowEntries(content).map(entry => entry.key);
@@ -24,12 +25,21 @@ describe('table row parsing', () => {
   });
 
   it('keys a row by its first cell, skipping a rank cell', () => {
-    expect(tableRowKey('| **Papillon** | small |')).toBe('papillon');
-    expect(tableRowKey('| 3. | `Beagle` | hound |')).toBe('beagle');
-    expect(tableRowKey('| #4 | _Poodle_ |')).toBe('poodle');
-    expect(tableRowKey('| --- | --- |')).toBeNull();
-    expect(tableRowKey('plain text')).toBeNull();
-    expect(tableRowKey('|  | x |')).toBeNull();
+    expect(keysOf('| **Papillon** | small |')).toEqual(['papillon']);
+    expect(keysOf('| 3. | `Beagle` | hound |')).toEqual(['beagle']);
+    expect(keysOf('| #4 | _Poodle_ |')).toEqual(['poodle']);
+    expect(keysOf('| --- | --- |')).toEqual([]);
+    expect(keysOf('plain text')).toEqual([]);
+    expect(keysOf('|  | x |')).toEqual([]);
+  });
+
+  it('splits trimmed cells and names a row by its first cell, or its second after a rank', () => {
+    expect(rowCells('| a | b \\| c |')).toEqual(['a', 'b \\| c']);
+    expect(rowCells('| a | b')).toEqual(['a', 'b']);
+    expect(rowNameCell('| 3. | **Beagle** | hound |')).toBe('**Beagle**');
+    expect(rowNameCell('| Poodle | toy |')).toBe('Poodle');
+    expect(rowNameCell('| --- | --- |')).toBeNull();
+    expect(rowNameCell('plain text')).toBeNull();
   });
 
   it('lists data row keys without the header', () => {

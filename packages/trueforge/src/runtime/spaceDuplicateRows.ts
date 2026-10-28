@@ -1,4 +1,4 @@
-import { isTableRow, isTableSeparatorRow, RANK_CELL, rowCells } from './spaceTableRows';
+import { isTableRow, isTableSeparatorRow, rowCells, rowNameCell } from './spaceTableRows';
 
 export interface SkippedRow {
   /** The row's name cell as written. */
@@ -24,13 +24,6 @@ export function duplicateRowKey(line: string): string | null {
     return collapsed.replace(WHOLE_CELL_EMPHASIS, '$2');
   });
   return cells.every(cell => cell === '') ? null : JSON.stringify(cells);
-}
-
-/** The cell that names a row, as written: the first cell, or the second when the first is a rank. */
-export function rowLabel(line: string): string {
-  const cells = rowCells(line);
-  const first = cells[0] ?? '';
-  return RANK_CELL.test(first) ? (cells[1] ?? first) : first;
 }
 
 /** True when `text` ends inside an unclosed code fence. */
@@ -108,7 +101,7 @@ export function dropDuplicateRows({ content, existingKeys }: { content: string; 
     row += 1;
     const key = duplicateRowKey(line);
     if (key !== null && seen.has(key)) {
-      skipped.push({ key: rowLabel(line), row });
+      skipped.push({ key: rowNameCell(line) ?? line.trim(), row });
       continue;
     }
     if (key !== null) {
