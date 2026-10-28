@@ -148,6 +148,17 @@ function usageCostText(row: UsageGroupRow): string {
 }
 
 /**
+ * A chat title is free text and can hold anything, line breaks included: collapse it to a single
+ * clean line so a title can never start a line of its own or dress itself up as a figure.
+ */
+function oneLineTitle(title: string): string {
+  return title
+    .replace(/\p{Cc}+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * The tool result as written lines, every figure the summary's own, so the model answers from
  * words a person could read as-is instead of a JSON dump it may paste back unchanged.
  */
@@ -173,7 +184,7 @@ function renderUsageSummaryText(summary: UsageSummary): string {
     }
     lines.push('Top chats:');
     for (const chat of summary.top_chats) {
-      lines.push(`- ${chat.title}: ${String(chat.total_tokens)} tokens; cost ${usageCostText(chat)}.`);
+      lines.push(`- ${oneLineTitle(chat.title)}: ${String(chat.total_tokens)} tokens; cost ${usageCostText(chat)}.`);
     }
   }
   lines.push(
@@ -185,7 +196,7 @@ function renderUsageSummaryText(summary: UsageSummary): string {
 }
 
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is null when any of its tokens lack a price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;
