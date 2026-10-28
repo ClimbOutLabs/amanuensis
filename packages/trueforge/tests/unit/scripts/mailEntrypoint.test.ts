@@ -186,3 +186,145 @@ describe('mail-email entrypoint wrapper', () => {
     expect(child.exitCode).toBe(0);
   }, 20_000);
 });
+
+describe('mail-email entrypoint bounded stop', () => {
+  let dir: string;
+  let policy: string;
+  let status: string;
+  let starts: string;
+  let pidsFile: string;
+  let accountFile: string;
+  let wrapper: ChildProcess | undefined;
+  let output: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mail-entrypoint-stop-'));
+    policy = join(dir, 'allowed_recipients.toml');
+    status = join(dir, 'status', 'loaded.sha256');
+    starts = join(dir, 'starts.log');
+    pidsFile = join(dir, 'pids.log');
+    accountFile = join(dir, '.env.mail-email');
+    output = '';
+    wrapper = undefined;
+    await writeFile(policy, LIST_V1);
+    await writeFile(accountFile, '');
+    await mkdir(join(dir, 'status'));
+  });
+
+  afterEach(async () => {
+    if (wrapper !== undefined && wrapper.exitCode === null) {
+      const exited = new Promise(resolve => wrapper?.once('exit', resolve));
+      wrapper.kill('SIGTERM');
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 8_000))]);
+      if (wrapper.exitCode === null) {
+        wrapper.kill('SIGKILL');
+      }
+    }
+    // No stand-in server outlives its test, whichever way the wrapper went down.
+    for (const line of (await readOrEmpty(pidsFile)).split('\n')) {
+      const pid = Number.parseInt(line, 10);
+      if (Number.isFinite(pid)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Writes the stand-in server. A stubborn one ignores the stop signal; only a forced stop ends it. */
+  async function writeStub(stubborn: boolean): Promise<void> {
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    const body = stubborn
+      ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap '' TERM\nwhile :; do sleep 1; done\n`
+      : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec sleep 1000\n`;
+    await writeFile(join(bin, 'mcp-email-server'), body);
+    await chmod(join(bin, 'mcp-email-server'), 0o755);
+  }
+
+  function startWrapperCaptured(extraEnv: Record<string, string> = {}): ChildProcess {
+    const child = spawn('sh', [ENTRYPOINT, 'streamable-http', '--port', '9557'], {
+      env: {
+        PATH: `${join(dir, 'bin')}:${process.env['PATH'] ?? ''}`,
+        MCP_EMAIL_SERVER_CONFIG_PATH: policy,
+        AMAN_MAIL_STATUS_FILE: status,
+        AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
+        AMAN_MAIL_ACCOUNT_PORT: '19759',
+        AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
+        ...extraEnv,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    wrapper = child;
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+    });
+    return child;
+  }
+
+  async function startCount(): Promise<number> {
+    return (await readOrEmpty(starts)).split('\n').filter(line => line === 'start').length;
+  }
+
+  async function serverPids(): Promise<number[]> {
+    return (await readOrEmpty(pidsFile))
+      .split('\n')
+      .map(line => Number.parseInt(line, 10))
+      .filter(pid => Number.isFinite(pid));
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function changeList(): Promise<void> {
+    const replacement = join(dir, 'next.toml');
+    await writeFile(replacement, LIST_V2);
+    await rename(replacement, policy);
+  }
+
+  it('forces down a server that ignores the stop signal, restarts it, and records the new list', async () => {
+    await writeStub(true);
+    startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    const firstPid = (await serverPids())[0];
+    if (firstPid === undefined) throw new Error('the stand-in server never recorded its pid');
+
+    await changeList();
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
+
+    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    expect(isAlive(firstPid)).toBe(false);
+    // The stop, the forcing, and the start are all in the log, with the hashes that caused them.
+    expect(output).toContain('the send list changed');
+    expect(output).toContain(allowedRecipientsFileHash(LIST_V1));
+    expect(output).toContain('did not stop within 2 seconds; forcing it down');
+    expect(output).toContain(`mail server started (send list ${allowedRecipientsFileHash(LIST_V2)}`);
+  }, 40_000);
+
+  it('restarts a server that stops on the signal promptly, without forcing it down', async () => {
+    await writeStub(false);
+    startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '30' });
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+
+    await changeList();
+    // Well inside the 30 second grace: a stop that waited out the grace would miss this.
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 15_000);
+
+    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    expect(output).toContain('the send list changed');
+    expect(output).not.toContain('forcing it down');
+  }, 30_000);
+});

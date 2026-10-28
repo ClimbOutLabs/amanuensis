@@ -148,6 +148,24 @@ function createArgs(body: string) {
   return { name: 'Dog breeds', purpose: 'Dog breeds with pictures.', status: 'active', format: 'markdown', body };
 }
 
+/** The fingerprint the get_space outline shows for one anchor, read the way a model reads it. */
+async function fingerprintOf(
+  call: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+  input: { spaceName: string; anchor: string },
+): Promise<string> {
+  const read = parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: input.spaceName })));
+  const blocks = read['blocks'];
+  if (!Array.isArray(blocks)) {
+    throw new Error('expected a blocks list in the get_space result');
+  }
+  for (const block of blocks) {
+    if (isRecord(block) && block['anchor'] === input.anchor) {
+      return stringField(block, 'fingerprint');
+    }
+  }
+  throw new Error(`expected block ${input.anchor} in the get_space result for ${input.spaceName}`);
+}
+
 function isErrorResponse(response: CallToolResponse): boolean {
   return 'result' in response && response.result.isError === true;
 }
@@ -264,9 +282,18 @@ describe('space pictures and links come only from this chat', () => {
     });
     expect(isErrorResponse(createdResponse)).toBe(false);
     // Turn two: no search ran, so the old picture is not in this turn's results. A text edit still goes through.
-    const updated = await setup(createWebSearchTurnState(), store)(EDIT_SPACE_TOOL_NAME, {
+    const turnTwo = setup(createWebSearchTurnState(), store);
+    const updated = await turnTwo(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      edits: [{ type: 'block', anchor: 'two', new_content: 'Border Collie, rank 1.' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'two',
+          fingerprint: await fingerprintOf(turnTwo, { spaceName: 'Dog breeds', anchor: 'two' }),
+          new_content: 'Border Collie, rank 1.',
+        },
+      ],
     });
     expect(textOf(updated)).toContain('Updated space \\"Dog breeds\\"');
   });
@@ -280,7 +307,15 @@ describe('space pictures and links come only from this chat', () => {
     expect(isErrorResponse(createdResponse)).toBe(false);
     const response = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      edits: [{ type: 'block', anchor: 'one', new_content: '![Collie](https://cdn.example.net/collie.jpg)' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'one',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'one' }),
+          new_content: '![Collie](https://cdn.example.net/collie.jpg)',
+        },
+      ],
     });
     expect(await errorOf(response)).toContain('placeholder domain');
   });
@@ -394,9 +429,25 @@ describe('page reads, scripts, and empty bodies', () => {
     const call = setup(createWebSearchTurnState(), store);
     const createdResponse = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\nSome content here.') });
     expect(isErrorResponse(createdResponse)).toBe(false);
+    // The body is the heading (b1) and one line (b2): deleting both is the wipe the
+    // empty-body refusal exists to stop.
     const response = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      edits: [{ type: 'block', anchor: 'auto-body', new_content: '' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b1' }),
+          new_content: '',
+        },
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'b2' }),
+          new_content: '',
+        },
+      ],
     });
     expect(await errorOf(response)).toContain('The space body is empty');
     const read = fieldObject(

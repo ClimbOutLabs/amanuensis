@@ -327,6 +327,10 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
   'The model stopped answering, so this reply stopped. Send your message again to retry.';
 
+/** Shown when a turn stops at its step limit; the steps already done stay done. */
+export const ITERATION_LIMIT_MESSAGE =
+  'This reply stopped because it took too many steps. Nothing further was done. Ask again, or split your request into smaller parts.';
+
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
  * failing the turn visibly. Five minutes: generous for compaction on large contexts,
@@ -506,6 +510,88 @@ function mechanicalHandoffEvidence(): AbnormalHandoffEvidence {
       state_sha256: null,
     },
   };
+}
+
+/** Longest error text kept on a tool call log line: enough to hold a refusal, short enough to scan. */
+export const TOOL_CALL_LOG_ERROR_MAX_LENGTH = 300;
+
+/**
+ * The error text for a failed tool call's log line: what the tool answered, or the guidance
+ * recorded with the result when the answer carries no error text of its own. Argument and
+ * result bodies are never logged; only this error text, cut to
+ * {@link TOOL_CALL_LOG_ERROR_MAX_LENGTH}. When a screen or an output transform replaced what
+ * the model saw, the model-facing text is used, never the original provider bytes.
+ */
+export function toolCallOutcomeErrorText(result: ToolCallResult): string | undefined {
+  if (result.disposition === 'executed_ok') {
+    return undefined;
+  }
+  const content =
+    result.screen === undefined && result.outputTransform === undefined ? result.rawContent : result.message.content;
+  const text = errorTextFromToolContent(content) ?? result.remediation?.message;
+  return text === undefined ? undefined : text.slice(0, TOOL_CALL_LOG_ERROR_MAX_LENGTH);
+}
+
+function errorTextFromToolContent(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+  if (typeof parsed === 'string') {
+    return parsed;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return undefined;
+  }
+  const error: unknown = Reflect.get(parsed, 'error');
+  if (typeof error === 'string' && error.length > 0) {
+    return error;
+  }
+  const message: unknown = Reflect.get(parsed, 'message');
+  if (typeof message === 'string' && message.length > 0) {
+    return message;
+  }
+  return undefined;
+}
+
+/**
+ * One log line per completed tool call, so a turn's tool story can be found in the app log by
+ * tool name, by the word error, or by the session and turn ids the logger already carries.
+ * Successes log at info, the level the app keeps; anything else logs at warn with its error
+ * text. Names, the outcome, and error text only: never argument or result bodies. The one
+ * exception is a call to a tool that is not in the mapping: that case already drew the
+ * canonical unknown-tool warning where the call was first seen, so its outcome line logs at
+ * info, keeping the call's ids, outcome and error text while the case carries exactly one
+ * warning in total.
+ */
+export function logToolCallOutcome(logger: Logger, input: { toolName: string; result: ToolCallResult }): void {
+  const { result } = input;
+  const fields = {
+    toolCallId: result.message.tool_call_id,
+    toolName: input.toolName,
+    disposition: result.disposition,
+    ...(result.memoized ? { memoized: true } : {}),
+  };
+  if (result.disposition === 'executed_ok') {
+    logger.info(`Tool call ${input.toolName}: ${result.disposition}`, fields);
+    return;
+  }
+  const error = toolCallOutcomeErrorText(result);
+  const failureFields = {
+    ...fields,
+    ...(error === undefined ? {} : { error }),
+  };
+  if (result.remediation?.reason_code === 'unknown_tool') {
+    logger.info(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
+    return;
+  }
+  logger.warn(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
 }
 
 /** The single runtime boundary that turns an executed host result into its public v2 event. */
@@ -4564,6 +4650,7 @@ export class AgentThread {
         disposition: result.disposition,
         reasonCode: result.remediation?.reason_code ?? null,
       });
+      logToolCallOutcome(this.logger, { toolName: toolCall?.function.name ?? 'unknown_tool', result });
       // Calls with no metadata count as writes, as isReadOnlyCall treats them.
       const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
       if (result.disposition === 'executed_ok' && !result.failure) {
@@ -5416,11 +5503,18 @@ export class AgentThread {
               return;
             }
             if (this.metrics.iterations >= iterationLimit) {
-              yield this.generateErrorEvent(
-                `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
-                undefined,
-                'iteration_limit',
-              );
+              // The person reads the plain stop message. A sub-agent's parent model reads the
+              // original instruction instead, so its next step is unchanged.
+              const done = this.generateErrorEvent(ITERATION_LIMIT_MESSAGE, undefined, 'iteration_limit');
+              yield done.send_to_parent === undefined
+                ? done
+                : {
+                    ...done,
+                    send_to_parent: {
+                      ...done.send_to_parent,
+                      content: `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
+                    },
+                  };
               return;
             }
             this.metrics.iterations++;

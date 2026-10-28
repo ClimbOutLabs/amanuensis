@@ -232,7 +232,7 @@ function verifyTier2Containment(input: {
 }
 
 /** File-write tools whose sandbox writes can run without a card, so they are re-checked at dispatch. */
-const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
+export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
 
 /**
  * Returns an error message when the call must not execute, or undefined when
