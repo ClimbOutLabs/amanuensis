@@ -191,7 +191,7 @@ class InMemorySpaceStore implements SpaceToolStore {
 interface SpaceWireResult {
   space?: { id: string; body: string; revision?: number };
   spaces?: { id: string }[];
-  blocks?: { anchor: string; fingerprint: string }[];
+  blocks?: { anchor: string; fingerprint: string; preview?: string }[];
   error?: string;
   error_code?: string;
   summary?: string;
@@ -479,6 +479,151 @@ describe('the space write size cap', () => {
       });
       expect(isErrorResponse(refused)).toBe(true);
       expect(resultJson(refused).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+    });
+
+    it('says where to insert when the saved rows end mid-body, not after the last block', async () => {
+      const store = new InMemorySpaceStore();
+      const body = `${tablePart(1, 5)}\n\n## Notes\n\nClosing paragraph.`;
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body));
+      const outline =
+        resultJson(await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Dog breeds' })).blocks ?? [];
+      const table = outline[1];
+      const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        expected_revision: 1,
+        edits: [
+          { type: 'insert', after: table?.anchor, fingerprint: table?.fingerprint, new_content: rowRange(6, 60) },
+        ],
+      });
+      expect(isErrorResponse(response)).toBe(false);
+      const parsed = resultJson(response);
+      const blocks = parsed.blocks ?? [];
+      const index = blocks.findIndex(block => block.anchor === parsed.continue_after?.anchor);
+      expect(index).toBeGreaterThan(0);
+      expect(blocks[index]?.fingerprint).toBe(parsed.continue_after?.fingerprint);
+      expect(blocks[index]?.preview).toMatch(/^\| Breed/);
+      expect(blocks[index + 1]?.preview).toBe('## Notes');
+      expect(parsed.summary).toContain(`Insert them after block ${parsed.continue_after?.anchor ?? ''} next.`);
+      expect(parsed.summary).not.toContain('Append them next.');
+    });
+
+    it('says to append when the saved rows end the body', async () => {
+      const store = new InMemorySpaceStore();
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(tablePart(1, 5)));
+      const last = await lastBlockOf((name, args) => callTool(store, name, args), 'Dog breeds');
+      const parsed = resultJson(
+        await callTool(store, EDIT_SPACE_TOOL_NAME, {
+          space_name: 'Dog breeds',
+          expected_revision: 1,
+          edits: [{ type: 'insert', after: last.anchor, fingerprint: last.fingerprint, new_content: rowRange(6, 60) }],
+        }),
+      );
+      expect(parsed.summary).toContain('Append them next.');
+    });
+
+    it('points at the placeholder block that was filled when it is not the last block', async () => {
+      const store = new InMemorySpaceStore();
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput('# Title\n\nplaceholder\n\n## End\n\nClosing.'));
+      const outline =
+        resultJson(await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Dog breeds' })).blocks ?? [];
+      const placeholder = outline[1];
+      const parsed = resultJson(
+        await callTool(store, EDIT_SPACE_TOOL_NAME, {
+          space_name: 'Dog breeds',
+          expected_revision: 1,
+          edits: [
+            {
+              type: 'block',
+              anchor: placeholder?.anchor,
+              fingerprint: placeholder?.fingerprint,
+              new_content: rowRange(1, 60),
+            },
+          ],
+        }),
+      );
+      const blocks = parsed.blocks ?? [];
+      const index = blocks.findIndex(block => block.anchor === parsed.continue_after?.anchor);
+      expect(blocks[index]?.preview).toMatch(/^\| Breed/);
+      expect(blocks[index + 1]?.preview).toBe('## End');
+      expect(parsed.summary).toContain('Insert them after block');
+    });
+
+    it('refuses a call that cannot be cut for its size before the revision check, leaving the breaker alone', async () => {
+      const store = new InMemorySpaceStore();
+      const capability = spaceCapability({
+        store,
+        authority: { tenantId: 'default', userRef: 'user-a' },
+        tracing: NOOP_TRACING,
+        webSearch: createWebSearchTurnState(),
+      });
+      const toolSet = capability.systemToolSets?.[0];
+      if (toolSet === undefined) {
+        throw new Error('expected space tool set');
+      }
+      const call = (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
+      await call(CREATE_SPACE_TOOL_NAME, createInput(tablePart(1, 5)));
+      const table = (resultJson(await call(LIST_BLOCKS_TOOL_NAME, { space_name: 'Dog breeds' })).blocks ?? [])[1];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const refused = await call(EDIT_SPACE_TOOL_NAME, {
+          space_name: 'Dog breeds',
+          expected_revision: 99,
+          edits: [
+            { type: 'block', anchor: table?.anchor, fingerprint: table?.fingerprint, new_content: rowRange(1, 60) },
+          ],
+        });
+        expect(resultJson(refused).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+      }
+      const html = await call(CREATE_SPACE_TOOL_NAME, { ...createInput('<p>a</p>', 'html'), name: 'Page' });
+      const htmlBlock = (resultJson(await call(LIST_BLOCKS_TOOL_NAME, { space_name: 'Page' })).blocks ?? [])[0];
+      expect(isErrorResponse(html)).toBe(false);
+      const htmlRefused = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Page',
+        expected_revision: 99,
+        edits: [
+          {
+            type: 'insert',
+            after: htmlBlock?.anchor,
+            fingerprint: htmlBlock?.fingerprint,
+            new_content: rowRange(1, 60),
+          },
+        ],
+      });
+      expect(resultJson(htmlRefused).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
+      const fine = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        expected_revision: 1,
+        edits: [
+          { type: 'block', anchor: table?.anchor, fingerprint: table?.fingerprint, new_content: tablePart(2, 3) },
+        ],
+      });
+      expect(isErrorResponse(fine)).toBe(false);
+    });
+
+    it('refuses an over-size edit with two insert entries', async () => {
+      const store = new InMemorySpaceStore();
+      await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(tablePart(1, 5)));
+      const outline =
+        resultJson(await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Dog breeds' })).blocks ?? [];
+      const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Dog breeds',
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'insert',
+            after: outline[0]?.anchor,
+            fingerprint: outline[0]?.fingerprint,
+            new_content: rowRange(6, 30),
+          },
+          {
+            type: 'insert',
+            after: outline[1]?.anchor,
+            fingerprint: outline[1]?.fingerprint,
+            new_content: rowRange(31, 60),
+          },
+        ],
+      });
+      expect(isErrorResponse(response)).toBe(true);
+      expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
     });
 
     it('still refuses an over-size html create', async () => {

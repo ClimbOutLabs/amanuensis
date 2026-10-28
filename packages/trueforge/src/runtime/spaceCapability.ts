@@ -603,7 +603,11 @@ interface WriteOutcome {
    */
   blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
   /** Set when an over-size write saved only its leading lines; says where to continue. */
-  partial?: WritePrefix & { continue_after: { anchor: string; fingerprint: string } | null };
+  partial?: WritePrefix & {
+    continue_after: { anchor: string; fingerprint: string } | null;
+    /** True when the saved text ends in the body's last block, so the rest can simply be appended. */
+    at_end: boolean;
+  };
 }
 
 /**
@@ -630,7 +634,11 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
       ? `${lead}.`
       : outcome.action === 'Created'
         ? `${lead} with the first ${String(partial.saved_lines)} lines of the content. One write holds about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters, so the ${String(partial.unsaved_lines)} lines from "${partial.unsaved_from}" on were not saved. Add them with an append entry, starting at that line. Do not resend the saved lines.`
-        : `${lead} with the first ${String(partial.saved_lines)} lines of the new content; the ${String(partial.unsaved_lines)} lines from "${partial.unsaved_from}" on were not saved. Append them next. Do not resend the saved lines.`;
+        : `${lead} with the first ${String(partial.saved_lines)} lines of the new content; the ${String(partial.unsaved_lines)} lines from "${partial.unsaved_from}" on were not saved. ${
+            partial.at_end || partial.continue_after === null
+              ? 'Append them next.'
+              : `Insert them after block ${partial.continue_after.anchor} next.`
+          } Do not resend the saved lines.`;
   return JSON.stringify({
     summary,
     space: {
@@ -1303,6 +1311,39 @@ function salvageableEditContent(input: {
   return prefixWithinCap({ content: entry.new_content, cap: SPACE_WRITE_GUIDANCE_MAX_LENGTH });
 }
 
+/**
+ * The block of the new body that holds the last saved character of a lone entry, so the
+ * model continues right after the saved text and not after the body's last block. The
+ * text after the entry's block is kept as it was, so the saved text ends that far from
+ * the end of the new body.
+ */
+function savedTextEndBlock(input: { before: string; after: string; entry: SpaceEditEntry }): {
+  ref: { anchor: string; fingerprint: string };
+  at_end: boolean;
+} | null {
+  const { before, after, entry } = input;
+  const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
+  const target = segmentSpaceBody(before).segments.find(segment => segment.anchor === anchor);
+  if (target === undefined) {
+    return null;
+  }
+  const keptFrom = !target.marked
+    ? target.coreEnd
+    : entry.type === 'block'
+      ? target.end
+      : target.end - segmentTrailingSeparator(before, target).length;
+  const lastSavedChar = Math.max(0, after.length - (before.length - keptFrom) - 1);
+  const { segments } = segmentSpaceBody(after);
+  const holder = segments.find(segment => lastSavedChar >= segment.start && lastSavedChar < segment.end);
+  if (holder === undefined) {
+    return null;
+  }
+  return {
+    ref: { anchor: holder.anchor, fingerprint: blockFingerprint(after.slice(holder.coreStart, holder.coreEnd)) },
+    at_end: holder === segments[segments.length - 1],
+  };
+}
+
 function lastBlockRef(blocks: readonly { anchor: string; fingerprint: string }[]): {
   anchor: string;
   fingerprint: string;
@@ -1535,7 +1576,7 @@ class SpaceTool extends LocalToolMCP {
       mutation,
       action: 'Created',
       blocks,
-      ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks) } }),
+      ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks), at_end: true } }),
     };
   }
 
@@ -1569,6 +1610,15 @@ class SpaceTool extends LocalToolMCP {
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       this.requireCurrentSpace(input.space_id),
     ]);
+    // A call that cannot be cut is refused for its size before any revision check, as it
+    // always was, so it never counts toward the delta breaker.
+    let cut: WritePrefix | null = null;
+    if (over_cap && lone !== undefined) {
+      cut = salvageableEditContent({ entry: lone, current, format: input.format ?? current.format });
+      if (cut === null) {
+        throw refuseTooLong();
+      }
+    }
     // The entries address blocks of the revision the call names, so a space that has
     // moved since the model's read refuses here, before any anchor is resolved against
     // a body the model has not seen. The refusal names the current revision, and it
@@ -1589,13 +1639,6 @@ class SpaceTool extends LocalToolMCP {
         except_space_id: input.space_id,
         next_step: 'Pick a different new_title, or leave the name unchanged.',
       });
-    }
-    let cut: WritePrefix | null = null;
-    if (over_cap && lone !== undefined) {
-      cut = salvageableEditContent({ entry: lone, current, format: input.format ?? current.format });
-      if (cut === null) {
-        throw refuseTooLong();
-      }
     }
     let body: string;
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
@@ -1650,7 +1693,12 @@ class SpaceTool extends LocalToolMCP {
     // from these anchors instead of paying a re-read first.
     outcome.blocks = blockOutline(mutation.record.body).blocks;
     if (cut !== null) {
-      outcome.partial = { ...cut, continue_after: lastBlockRef(outcome.blocks) };
+      const end = lone === undefined ? null : savedTextEndBlock({ before: current.body, after: body, entry: lone });
+      outcome.partial = {
+        ...cut,
+        continue_after: end?.ref ?? lastBlockRef(outcome.blocks),
+        at_end: end?.at_end ?? true,
+      };
     }
     // Reset only after the durable write succeeds. Resetting earlier (e.g. right after the
     // local delta application) would clear the counter even when shrink validation or the

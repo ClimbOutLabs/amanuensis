@@ -45,6 +45,32 @@ describe('prefixWithinCap', () => {
     expect(cut?.kept).toBe('intro\nmore intro');
   });
 
+  it('never keeps a header and a short-dash separator without a data row', () => {
+    const content = 'intro\nmore intro\n| A | B |\n|-|-|\n| 1 | 2 |';
+    const cut = prefixWithinCap({ content, cap: 'intro\nmore intro\n| A | B |\n|-|-|'.length });
+    expect(cut?.kept).toBe('intro\nmore intro');
+    expect(cut?.unsaved_from).toBe('| A | B |');
+  });
+
+  it('steps back to before a code fence the cut would leave open', () => {
+    const content = 'intro\nmore intro\n```\ncode one\ncode two\n```\nafter';
+    const cut = prefixWithinCap({ content, cap: 'intro\nmore intro\n```\ncode one'.length });
+    expect(cut?.kept).toBe('intro\nmore intro');
+    expect(cut?.unsaved_from).toBe('```');
+  });
+
+  it('keeps a code fence that the cut leaves closed', () => {
+    const content = 'intro\n```\ncode\n```\nafter one\nafter two';
+    const cut = prefixWithinCap({ content, cap: 'intro\n```\ncode\n```\nafter one'.length });
+    expect(cut?.kept).toBe('intro\n```\ncode\n```\nafter one');
+  });
+
+  it('steps back to before an html block the cut would leave open', () => {
+    const content = 'intro\nmore intro\n<div>\ninside\n</div>\nafter';
+    const cut = prefixWithinCap({ content, cap: 'intro\nmore intro\n<div>\ninside'.length });
+    expect(cut?.kept).toBe('intro\nmore intro');
+  });
+
   it('returns null when fewer than two lines fit', () => {
     expect(prefixWithinCap({ content: `${'a'.repeat(50)}\nb`, cap: 55 })).toBeNull();
   });

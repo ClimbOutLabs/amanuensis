@@ -1,10 +1,9 @@
-const SEPARATOR_CELL = /^\s*:?-{3,}:?\s*$/;
+const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
 const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
-/** A markdown table row: the trimmed line starts and ends with a pipe. */
+/** A markdown table row: the trimmed line starts with a pipe; the closing pipe is optional. */
 export function isTableRow(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed.length >= 2 && trimmed.startsWith('|') && trimmed.endsWith('|');
+  return line.trim().startsWith('|');
 }
 
 /** The row under a header that holds only dashes, with optional colons for alignment. */
@@ -13,7 +12,8 @@ export function isTableSeparatorRow(line: string): boolean {
 }
 
 function tableCells(line: string): string[] {
-  return line.trim().slice(1, -1).split('|');
+  const inner = line.trim().slice(1);
+  return (inner.endsWith('|') ? inner.slice(0, -1) : inner).split('|');
 }
 
 /**

@@ -10,6 +10,40 @@ export interface WritePrefix {
   unsaved_from: string;
 }
 
+const FENCE_LINE = /^\s*(```|~~~)/;
+const HTML_BLOCK_TAG = /<(\/?)(div|table|details|pre|ul|ol|section|blockquote)\b[^>]*>/gi;
+
+/**
+ * The line where a fence or an html block opened and was not closed by the end of the
+ * first `count` lines, or null when the lines end outside any. Cutting there would hand
+ * the page an unclosed block, so the cut steps back to before it.
+ */
+function openBlockStart(lines: readonly string[], count: number): number | null {
+  let fenceStart: number | null = null;
+  let htmlStart: number | null = null;
+  let htmlDepth = 0;
+  for (let index = 0; index < count; index += 1) {
+    const line = lines[index] ?? '';
+    if (FENCE_LINE.test(line)) {
+      fenceStart = fenceStart === null ? index : null;
+      continue;
+    }
+    if (fenceStart !== null) {
+      continue;
+    }
+    for (const match of line.matchAll(HTML_BLOCK_TAG)) {
+      if (match[1] === '/') {
+        htmlDepth = Math.max(0, htmlDepth - 1);
+      } else {
+        htmlStart = htmlDepth === 0 ? index : htmlStart;
+        htmlDepth += 1;
+      }
+    }
+  }
+  const starts = [fenceStart, htmlDepth > 0 ? htmlStart : null].filter(start => start !== null);
+  return starts.length === 0 ? null : Math.min(...starts);
+}
+
 function countNonBlank(lines: readonly string[]): number {
   return lines.filter(line => line.trim() !== '').length;
 }
@@ -35,6 +69,7 @@ export function prefixWithinCap({ content, cap }: { content: string; cap: number
     length = next;
     keepCount = index + 1;
   }
+  keepCount = openBlockStart(lines, keepCount) ?? keepCount;
   const lastKept = lines[keepCount - 1] ?? '';
   if (isTableSeparatorRow(lastKept)) {
     keepCount -= 2;
