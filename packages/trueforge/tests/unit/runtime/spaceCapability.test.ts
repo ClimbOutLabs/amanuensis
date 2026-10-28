@@ -153,7 +153,7 @@ describe('space capability', () => {
     expect(createSpace?.description).toContain('never by editing files in the sandbox');
   });
 
-  it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {
+  it('tells the model to use only picture links a search or an opened page returned, and never to make one up', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -167,9 +167,9 @@ describe('space capability', () => {
     const rendered = builder.build();
 
     const expectedSubstrings: string[] = [
-      'use only picture links that a search or page result in this chat returned',
-      'never one you made up',
-      'The host refuses any other link.',
+      'use only a picture link a search result or a page you opened in this chat returned',
+      'a plain link only from a search result',
+      'Never make one up; if you have none, leave pictures out and say so.',
     ];
     expectedSubstrings.forEach(substring => expect(rendered).toContain(substring));
   });
