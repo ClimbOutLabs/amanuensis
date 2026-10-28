@@ -120,6 +120,14 @@ ${connector} is connected only in Settings, under Connectors, ${connector}, with
 
 export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
 
+/**
+ * A demo instance refuses to send mail but lets a draft be saved. The model is told so, or it answers "send it"
+ * with a pointer to Settings and prints a draft instead of saving one.
+ */
+export const DEMO_EMAIL_PROMPT = dedent`
+This demo cannot send email. When the person asks you to send or draft an email, save it as a draft with save_draft; that asks the person first. Use the address they gave, and fill in names you know instead of placeholders.
+`;
+
 export const CALENDAR_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Calendar', owner: 'their calendar' });
 
 /**
