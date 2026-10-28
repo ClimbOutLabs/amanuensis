@@ -1,5 +1,5 @@
 const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
-const RANK_CELL = /^\s*#?\d+\.?\s*$/;
+export const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
 /** The cells of a table row: split on unescaped pipes, empty edge cells dropped, each trimmed. */
 export function rowCells(line: string): string[] {

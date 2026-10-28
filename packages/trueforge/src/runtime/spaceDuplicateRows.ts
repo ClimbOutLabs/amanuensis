@@ -1,4 +1,4 @@
-import { isTableRow, isTableSeparatorRow, rowCells } from './spaceTableRows';
+import { isTableRow, isTableSeparatorRow, RANK_CELL, rowCells } from './spaceTableRows';
 
 export interface SkippedRow {
   /** The row's name cell as written. */
@@ -7,7 +7,6 @@ export interface SkippedRow {
   row: number;
 }
 
-const RANK_CELL = /^#?\d+\.?$/;
 const WHOLE_CELL_EMPHASIS = /^(\*\*|__|\*|_)(.+)\1$/;
 const FENCE = /^\s*(```|~~~)/;
 

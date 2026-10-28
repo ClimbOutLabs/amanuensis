@@ -1552,12 +1552,11 @@ class SpaceTool extends LocalToolMCP {
     // Insert entries can shrink once saved rows are dropped, so a call with one is measured
     // after that; any other call is refused here, before the reads.
     const requested_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
-    if (requested_length > SPACE_WRITE_MAX_LENGTH && input.edits.every(edit => edit.type !== 'insert')) {
-      throw new SpaceWriteTooLongError({
-        tool: EDIT_SPACE_TOOL_NAME,
-        space_id: input.space_id,
-        new_length: requested_length,
-      });
+    const over_cap_raw = requested_length > SPACE_WRITE_MAX_LENGTH;
+    const tooLong = (new_length: number): SpaceWriteTooLongError =>
+      new SpaceWriteTooLongError({ tool: EDIT_SPACE_TOOL_NAME, space_id: input.space_id, new_length });
+    if (over_cap_raw && input.edits.every(edit => edit.type !== 'insert')) {
+      throw tooLong(requested_length);
     }
     // Refuse a locked delta before the expensive reads: the burn loop this guards against
     // would otherwise keep paying an aggregate-revision resolve plus a full-body read per
@@ -1571,7 +1570,12 @@ class SpaceTool extends LocalToolMCP {
     // moved since the model's read refuses here, before any anchor is resolved against
     // a body the model has not seen. The refusal names the current revision, and it
     // counts as a failed delta like any other: the model's copy diverged.
+    // A call over the cap as sent is refused as too long, uncounted, for any failure that
+    // would count against the breaker: the model must shorten it, not fix a copy it cannot trust.
     if (input.expected_revision !== current.revision) {
+      if (over_cap_raw) {
+        throw tooLong(requested_length);
+      }
       this.recordDeltaFailure(input.space_id);
       throw new SpaceRevisionConflictError({
         id: input.space_id,
@@ -1602,14 +1606,13 @@ class SpaceTool extends LocalToolMCP {
       block_results = applied.block_results;
       skipped_rows = applied.skipped_rows;
       if (applied.new_content_length > SPACE_WRITE_MAX_LENGTH) {
-        throw new SpaceWriteTooLongError({
-          tool: EDIT_SPACE_TOOL_NAME,
-          space_id: input.space_id,
-          new_length: applied.new_content_length,
-        });
+        throw tooLong(applied.new_content_length);
       }
     } catch (error) {
       if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
+        if (over_cap_raw) {
+          throw tooLong(requested_length);
+        }
         this.recordDeltaFailure(input.space_id);
       }
       throw error;

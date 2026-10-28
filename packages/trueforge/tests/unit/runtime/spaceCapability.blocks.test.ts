@@ -1075,4 +1075,42 @@ describe('duplicate table rows are dropped and reported', () => {
     expect(isErrorResponse(result)).toBe(false);
     expect(await readBody(callTool, 'Big')).toBe(`${body}\n${fresh.join('\n')}`);
   });
+
+  describe('an over-cap insert never counts toward the breaker', () => {
+    const bigRows = Array.from({ length: 330 }, (_, i) => `| Row ${String(i)} | ${'y'.repeat(14)} |`).join('\n');
+
+    async function threeBigRefusalsThenValidEdit(input: { anchor: string; expected_revision: number }) {
+      const { callTool } = makeHarness();
+      await createSpace(callTool, { name: 'Guarded', body: tableBody });
+      const blocks = (await listBlocks(callTool, 'Guarded')).blocks ?? [];
+      const last = blocks[blocks.length - 1];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+          space_name: 'Guarded',
+          expected_revision: input.expected_revision,
+          edits: [
+            {
+              type: 'insert',
+              after: input.anchor || (last?.anchor ?? ''),
+              fingerprint: last?.fingerprint ?? '',
+              new_content: bigRows,
+            },
+          ],
+        });
+        expect(isErrorResponse(refused)).toBe(true);
+        expect(resultText(refused)).toContain('space_write_too_long');
+      }
+      const landed = await insertAfterLastBlock({ callTool, name: 'Guarded', rows: ['| Fresh | note |'] });
+      expect(isErrorResponse(landed)).toBe(false);
+      expect(await readBody(callTool, 'Guarded')).toBe(`${tableBody}\n| Fresh | note |`);
+    }
+
+    it('three stale over-cap inserts do not lock the space', async () => {
+      await threeBigRefusalsThenValidEdit({ anchor: '', expected_revision: 99 });
+    });
+
+    it('three over-cap inserts with a bad anchor do not lock the space', async () => {
+      await threeBigRefusalsThenValidEdit({ anchor: 'b99', expected_revision: 1 });
+    });
+  });
 });
