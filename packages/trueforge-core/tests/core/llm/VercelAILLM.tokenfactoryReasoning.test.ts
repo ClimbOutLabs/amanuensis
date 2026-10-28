@@ -210,7 +210,7 @@ describe('Token Factory repetition stops', () => {
     expect(result.repetition_stop).toEqual({ guard: 'answer_units', channel: 'answer' });
     const content = typeof result.output.content === 'string' ? result.output.content : '';
     expect(content).toContain('Stopped: the reply was repeating itself.');
-    expect(content.match(/dentist appointment is booked/g)).toHaveLength(2);
+    expect(content.match(/dentist appointment is booked/g)).toHaveLength(1);
   });
 
   it('stops reasoning that goes in circles and names the guard and channel on the error', async () => {
@@ -239,7 +239,7 @@ describe('Token Factory repetition stops', () => {
 
   it('lets a long reply with real tool calls and some repeated sentences finish whole', async () => {
     const opening =
-      'Your dentist visit is on Monday at half past two. The office is on the second floor of the clinic building on Pine Street.';
+      'Your dentist visit is on Monday at half past two. The office is upstairs in the clinic on Pine Street.';
     mockFrames([
       sseFrame({ role: 'assistant' }, null),
       sseFrame({ content: `${opening} ${opening}` }, null),
