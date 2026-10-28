@@ -6,7 +6,6 @@ import { Markdown } from '../atoms/Markdown.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { Switch } from '../atoms/primitives/Switch.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
-import { HelpAreaChoices } from './HelpAreaChoices.js';
 import {
   EMPTY_PERSONALIZATION_PROFILE,
   PersonalizationProvider,
@@ -172,14 +171,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     A first name, a title, or your pronouns. Leave it empty to be called by your name.
                   </p>
                 </div>
-              </div>
-
-              <div className="mt-4">
-                <HelpAreaChoices
-                  idPrefix="personalization-help"
-                  value={draft.help_areas}
-                  onChange={helpAreas => setDraft(current => ({ ...current, help_areas: helpAreas }))}
-                />
               </div>
 
               <div className="mt-4">
