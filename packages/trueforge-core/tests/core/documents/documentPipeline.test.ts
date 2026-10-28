@@ -183,6 +183,154 @@ describe('local document pipeline', () => {
     });
   });
 
+  it('reports a file that cannot be found as not found, never as an OCR problem', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'lease.pdf', path: 'uploads/lease.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error('error: uploads/lease.pdf: No such file or directory');
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe('Could not read lease.pdf: the file could not be found.');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('keeps the OCR tools sentence for a read file whose OCR tools are missing from the image', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([[]]),
+      runNativePdfText: async () => ({ total_pages: 1, pages: [{ page_number: 1, text: '' }] }),
+      runOcr: async () => {
+        throw new Error('sh: pdftoppm: not found');
+      },
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      'No extractable text in scan.pdf; local OCR requires pdftoppm and tesseract in the sandbox image.',
+    );
+  });
+
+  it('reports a damaged PDF with the reader detail, not as missing and not as an OCR problem', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'damaged.pdf', path: 'uploads/damaged.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error("(exit code 2): Syntax Error: Couldn't read xref table");
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      "Could not extract damaged.pdf: (exit code 2): Syntax Error: Couldn't read xref table",
+    );
+    expect(result.documents[0]?.issue).not.toContain('could not be found');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('does not read a damaged trailer message as a missing file', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'broken.pdf', path: 'uploads/broken.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error("(exit code 2): Syntax Error: Couldn't find trailer dictionary");
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      "Could not extract broken.pdf: (exit code 2): Syntax Error: Couldn't find trailer dictionary",
+    );
+    expect(result.documents[0]?.issue).not.toContain('could not be found');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('reports a file it cannot open for permission with the reader detail, not as missing', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'sealed.pdf', path: 'uploads/sealed.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error("(exit code 1): I/O Error: Couldn't open file 'uploads/sealed.pdf': Permission denied");
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      "Could not extract sealed.pdf: (exit code 1): I/O Error: Couldn't open file 'uploads/sealed.pdf': Permission denied",
+    );
+    expect(result.documents[0]?.issue).not.toContain('could not be found');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('reports a node-style missing file error as not found', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'gone.pdf', path: 'uploads/gone.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([['Rent: $10.00']]),
+      runNativePdfText: async () => {
+        throw new Error("ENOENT: no such file or directory, open 'uploads/gone.pdf'");
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe('Could not read gone.pdf: the file could not be found.');
+    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+  });
+
+  it('keeps the OCR tools sentence when pdfinfo is missing from the image', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([[]]),
+      runNativePdfText: async () => {
+        throw new Error('(exit code 127): sh: pdfinfo: not found');
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      'No extractable text in scan.pdf; local OCR requires pdftoppm and tesseract in the sandbox image.',
+    );
+  });
+
+  it('keeps the OCR tools sentence when pdftotext is missing from the image', async () => {
+    const result = await extractDocumentText({
+      files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => makePdf([[]]),
+      runNativePdfText: async () => {
+        throw new Error('(exit code 127): sh: pdftotext: not found');
+      },
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      'No extractable text in scan.pdf; local OCR requires pdftoppm and tesseract in the sandbox image.',
+    );
+  });
+
   it('bounds file count and extracted characters before returning evidence', async () => {
     const files = Array.from({ length: MAX_DOCUMENT_FILES + 1 }, (_, index) => ({
       filename: `image-${String(index)}.png`,
