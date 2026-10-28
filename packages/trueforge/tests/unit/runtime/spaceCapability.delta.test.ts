@@ -672,27 +672,20 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    // Advance to revision 2 with an edit that changes the board's one block.
+    // Advance to revision 2 with an edit that appends a line after the board's one block.
     const boardFingerprint = await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' });
     const moved = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       expected_revision: 1,
-      edits: [
-        {
-          type: 'block',
-          anchor: 'b1',
-          fingerprint: boardFingerprint,
-          new_content: `${MADRID_BOARD}\n<p>Extra line.</p>`,
-        },
-      ],
+      edits: [{ type: 'insert', after: 'b1', fingerprint: boardFingerprint, new_content: '<p>Extra line.</p>' }],
     });
     expect(isErrorResponse(moved)).toBe(false);
 
-    // The block changed since the read, so a delta edit fenced at the now-stale revision 1 fails before persisting.
+    // The same insert sent again at the now-stale revision 1 would add a second copy: refused before persisting.
     const stale = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: boardFingerprint, new_content: 'x' }],
+      edits: [{ type: 'insert', after: 'b1', fingerprint: boardFingerprint, new_content: '<p>Extra line.</p>' }],
     });
     const parsed = resultJson(stale);
     expect(isErrorResponse(stale)).toBe(true);

@@ -590,7 +590,7 @@ describe('the dog-table flow: build a 40-row table in parts by block edits', () 
 });
 
 describe('block edits carry the revision they were read at', () => {
-  it('a stale expected_revision over a changed block refuses, names the current revision, and persists nothing', async () => {
+  it('a stale expected_revision over a changed block above refuses, names the current revision, and persists nothing', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Stale', body: 'First paragraph.\n\nSecond paragraph.' });
     const outline = (await listBlocks(callTool, 'Stale')).blocks ?? [];
@@ -601,9 +601,9 @@ describe('block edits carry the revision they were read at', () => {
       edits: [
         {
           type: 'block',
-          anchor: 'b2',
-          fingerprint: outline[1]?.fingerprint ?? '',
-          new_content: 'Second paragraph, moved.',
+          anchor: 'b1',
+          fingerprint: outline[0]?.fingerprint ?? '',
+          new_content: 'First paragraph, updated.',
         },
       ],
     });
@@ -741,7 +741,7 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     expect(await readBody(callTool, 'Bulletin')).toBe('First line, fixed.\n\nSecond line of the notice.');
   });
 
-  it('a stale revision over a changed block counts toward the breaker like any other failed block edit', async () => {
+  it('a stale revision refusal hands back the outline and does not count toward the breaker', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Counting', body: 'Alpha.\n\nBeta.' });
     const outline = (await listBlocks(callTool, 'Counting')).blocks ?? [];
@@ -749,11 +749,13 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, moved.' }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, updated.' },
+      ],
     });
     expect(isErrorResponse(moved)).toBe(false);
 
-    // Failure 1: a stale revision. Failures 2 and 3: unknown anchors at the current revision.
+    // The stale refusal hands back the outline and does not count: three unknown anchors lock.
     const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 1,
@@ -762,7 +764,7 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
       ],
     });
     expect(isErrorResponse(stale)).toBe(true);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
         space_name: 'Counting',
         expected_revision: 2,
@@ -923,15 +925,21 @@ describe('a stale revision or a bad fingerprint does not cost a step', () => {
     return outline;
   }
 
-  it('applies a stale call when every named block still holds what the model read', async () => {
+  it('applies a stale call when the change was below the block it names', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Proven', body: 'Alpha.\n\nBeta.' });
-    const outline = await moveFirstBlock(callTool, 'Proven');
+    const outline = (await listBlocks(callTool, 'Proven')).blocks ?? [];
+    const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Proven',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, moved.' }],
+    });
+    expect(isErrorResponse(moved)).toBe(false);
 
     const applied = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Proven',
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, done.' }],
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, done.' }],
     });
     expect(isErrorResponse(applied)).toBe(false);
     const parsed = resultJson(applied);
@@ -940,7 +948,61 @@ describe('a stale revision or a bad fingerprint does not cost a step', () => {
     expect(parsed.summary).toContain(
       'Your expected_revision was 1 but the space was at 2; every block you named still held what you read, so the change was applied to revision 2.',
     );
-    expect(await readBody(callTool, 'Proven')).toBe('Alpha, moved.\n\nBeta, done.');
+    expect(await readBody(callTool, 'Proven')).toBe('Alpha, done.\n\nBeta, moved.');
+  });
+
+  it('refuses a repeated insert sent at the same stale revision', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Repeat', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Repeat')).blocks ?? [];
+    const insert = { type: 'insert', after: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Gamma.' };
+    const first = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: 'Repeat', expected_revision: 1, edits: [insert] });
+    expect(isErrorResponse(first)).toBe(false);
+    const again = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: 'Repeat', expected_revision: 1, edits: [insert] });
+    expect(isErrorResponse(again)).toBe(true);
+    expect(resultJson(again).blocks).toHaveLength(3);
+    expect(await readBody(callTool, 'Repeat')).toBe('Alpha.\n\nBeta.\n\nGamma.');
+  });
+
+  it('refuses a second insert after the same block, so the two cannot land in reverse order', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Order', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Order')).blocks ?? [];
+    const after = (content: string) => ({
+      space_name: 'Order',
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: content }],
+    });
+    expect(isErrorResponse(await callTool(EDIT_SPACE_TOOL_NAME, after('First.')))).toBe(false);
+    expect(isErrorResponse(await callTool(EDIT_SPACE_TOOL_NAME, after('Second.')))).toBe(true);
+    expect(await readBody(callTool, 'Order')).toBe('Alpha.\n\nBeta.\n\nFirst.');
+  });
+
+  it('refuses a stale call that would hit the wrong copy of an identical block', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Copies', body: 'One.\n\nTwo.\n\nSame.\n\nFour.\n\nSame.' });
+    const outline = (await listBlocks(callTool, 'Copies')).blocks ?? [];
+    const deleted = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b5', fingerprint: outline[4]?.fingerprint ?? '', new_content: '' }],
+    });
+    expect(isErrorResponse(deleted)).toBe(false);
+    const added = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 2,
+      edits: [{ type: 'insert', after: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Top.' }],
+    });
+    expect(isErrorResponse(added)).toBe(false);
+    const before = await readBody(callTool, 'Copies');
+
+    const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b5', fingerprint: outline[4]?.fingerprint ?? '', new_content: 'Changed.' }],
+    });
+    expect(isErrorResponse(stale)).toBe(true);
+    expect(await readBody(callTool, 'Copies')).toBe(before);
   });
 
   it('refuses with the current outline and leaves the breaker alone when the fingerprint is shared', async () => {

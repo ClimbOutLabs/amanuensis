@@ -245,19 +245,26 @@ export class SpaceFingerprintFormatError extends Error {
 }
 
 /**
- * The call named an older revision and could not prove its blocks are still what the
- * model read. Nothing is saved. The current outline rides along so the retry needs no
- * re-read. The store's own revision check stays the guard against concurrent writers.
+ * The call named a revision the space is no longer at, and the edit could not be shown
+ * to land where the model meant. Nothing is saved. The current outline rides along so
+ * the retry needs no re-read. Also raised when the store's own revision check loses a
+ * race with another writer after the read.
  */
 export class SpaceStaleRevisionError extends Error {
   readonly revision: number;
   readonly blocks: BlockOutlineEntry[];
 
-  constructor(input: { expected_revision: number; actual_revision: number; blocks: BlockOutlineEntry[] }) {
+  constructor(input: {
+    expected_revision: number;
+    actual_revision: number;
+    blocks: BlockOutlineEntry[];
+    cause?: unknown;
+  }) {
     super(
       `The space is at revision ${String(input.actual_revision)}, not ${String(input.expected_revision)}. ` +
         `The anchors and fingerprints below are current: send the edit again with expected_revision ` +
         `${String(input.actual_revision)} and these fingerprints.`,
+      input.cause === undefined ? undefined : { cause: input.cause },
     );
     this.name = 'SpaceStaleRevisionError';
     this.revision = input.actual_revision;
@@ -645,7 +652,7 @@ interface WriteOutcome {
    */
   blocks?: BlockOutlineEntry[];
   /** Set when the call named an older revision and was applied to the current one. */
-  stale_from_revision?: number;
+  stale?: { sent_revision: number; current_revision: number };
 }
 
 /**
@@ -666,13 +673,13 @@ function spaceLink(space_id: string): string {
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
   const { name, revision } = result.record;
   const staleNote =
-    outcome.stale_from_revision === undefined
+    outcome.stale === undefined
       ? ''
-      : ` Your expected_revision was ${String(outcome.stale_from_revision)} but the space was at ${String(revision - 1)}; ` +
-        `every block you named still held what you read, so the change was applied to revision ${String(revision - 1)}.`;
+      : ` Your expected_revision was ${String(outcome.stale.sent_revision)} but the space was at ${String(outcome.stale.current_revision)}; ` +
+        `every block you named still held what you read, so the change was applied to revision ${String(outcome.stale.current_revision)}.`;
   return JSON.stringify({
     summary: `${outcome.action} space "${name}" (revision ${String(revision)}).${staleNote}`,
-    ...(outcome.stale_from_revision === undefined ? {} : { revision_was_stale: true }),
+    ...(outcome.stale === undefined ? {} : { revision_was_stale: true }),
     space: {
       name,
       link: spaceLink(result.record.id),
@@ -1157,12 +1164,6 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
   const { space_id, body, edits } = input;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
-  const byAnchor = new Map<string, SpaceSegment[]>();
-  for (const segment of segments) {
-    const matches = byAnchor.get(segment.anchor) ?? [];
-    matches.push(segment);
-    byAnchor.set(segment.anchor, matches);
-  }
   const replacements = new Map<SpaceSegment, string>();
   const deletions = new Set<SpaceSegment>();
   const inserts = new Map<SpaceSegment, string>();
@@ -1175,7 +1176,7 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
       throw new SpaceBlockAnchorRepeatedError({ space_id, anchor, index, firstIndex: firstNamedAt, validAnchors });
     }
     namedAt.set(anchor, index);
-    const matches = byAnchor.get(anchor) ?? [];
+    const matches = anchorMatches(segments, anchor);
     const target = matches[0];
     if (target === undefined) {
       throw new SpaceBlockAnchorNotFoundError({ space_id, anchor, index, validAnchors });
@@ -1193,14 +1194,10 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
     // verifies what is there. A block whose content is not the content the model read
     // refuses, and the refusal looks for that content's fingerprint in the other
     // blocks of this same revision, so a block that moved gets its new anchor named.
-    const targetFingerprint = blockFingerprint(body.slice(target.coreStart, target.coreEnd));
+    const targetFingerprint = segmentFingerprint(body, target);
     if (entry.fingerprint !== targetFingerprint) {
       const matchAnchors = segments
-        .filter(
-          segment =>
-            segment !== target &&
-            blockFingerprint(body.slice(segment.coreStart, segment.coreEnd)) === entry.fingerprint,
-        )
+        .filter(segment => segment !== target && segmentFingerprint(body, segment) === entry.fingerprint)
         .map(segment => segment.anchor);
       throw new SpaceBlockFingerprintMismatchError({
         space_id,
@@ -1309,31 +1306,64 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
   return { body: parts.join(''), block_results };
 }
 
+/** The blocks an anchor names in one segmentation: one for a usable anchor, none or several otherwise. */
+function anchorMatches(segments: readonly SpaceSegment[], anchor: string): SpaceSegment[] {
+  return segments.filter(segment => segment.anchor === anchor);
+}
+
+function segmentFingerprint(body: string, segment: SpaceSegment): string {
+  return blockFingerprint(body.slice(segment.coreStart, segment.coreEnd));
+}
+
 /**
- * Whether a call that names an older revision can still be applied to the current body:
- * 'proven' when every entry's anchor is unique, its block holds the named fingerprint,
- * and no other block carries it; 'shared' when only a shared fingerprint stops the proof
- * (an ordinal anchor could point at the wrong copy); 'diverged' when a block differs.
+ * Whether a call written against `readBody` (the revision it named) can be applied to
+ * `currentBody` without landing somewhere else. Per entry: the anchor resolves in the
+ * read body and its block carries the named fingerprint there; every block from the
+ * start through the anchor is the same in both bodies, so an ordinal anchor and a
+ * repeated fingerprint mean the same block; and the block after the anchor is the same
+ * too when the entry inserts or the anchor is a marker, so an insert lands in the same
+ * place and a repeated insert is caught.
  */
-function staleRevisionVerdict(input: {
-  body: string;
+function staleEditStillApplies(input: {
+  readBody: string;
+  currentBody: string;
   edits: readonly SpaceEditEntry[];
-}): 'proven' | 'shared' | 'diverged' {
-  const { segments } = segmentSpaceBody(input.body);
-  const fingerprints = segments.map(segment => blockFingerprint(input.body.slice(segment.coreStart, segment.coreEnd)));
-  let shared = false;
-  for (const entry of input.edits) {
-    const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
-    const at = segments.flatMap((segment, index) => (segment.anchor === anchor ? [index] : []));
-    const [only] = at;
-    if (only === undefined || at.length > 1 || fingerprints[only] !== entry.fingerprint) {
-      return 'diverged';
-    }
-    if (fingerprints.filter(fingerprint => fingerprint === entry.fingerprint).length > 1) {
-      shared = true;
-    }
+}): boolean {
+  const read = segmentSpaceBody(input.readBody);
+  const current = segmentSpaceBody(input.currentBody);
+  if (read.preamble !== current.preamble) {
+    return false;
   }
-  return shared ? 'shared' : 'proven';
+  const sameBlock = (index: number): boolean => {
+    const before = read.segments[index];
+    const now = current.segments[index];
+    if (before === undefined || now === undefined) {
+      return before === undefined && now === undefined;
+    }
+    return (
+      before.anchor === now.anchor &&
+      segmentFingerprint(input.readBody, before) === segmentFingerprint(input.currentBody, now)
+    );
+  };
+  return input.edits.every(entry => {
+    const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
+    const matches = anchorMatches(read.segments, anchor);
+    const [target] = matches;
+    if (
+      target === undefined ||
+      matches.length > 1 ||
+      segmentFingerprint(input.readBody, target) !== entry.fingerprint
+    ) {
+      return false;
+    }
+    const at = read.segments.indexOf(target);
+    for (let index = 0; index <= at; index += 1) {
+      if (!sameBlock(index)) {
+        return false;
+      }
+    }
+    return entry.type === 'block' && !target.marked ? true : sameBlock(at + 1);
+  });
 }
 
 interface BlockOutlineEntry {
@@ -1589,29 +1619,32 @@ class SpaceTool extends LocalToolMCP {
         });
       }
     }
-    // A space that moved since the model's read is still safe to edit when every entry
-    // proves its copy: the anchor resolves, the block holds the named fingerprint, and
-    // no other block shares it. Otherwise the refusal hands back the current outline. Only
-    // a block that really changed counts as a failed delta; a shared fingerprint is not
-    // the model's mistake. The store still fences the write at the revision read here.
-    let stale_from_revision: number | undefined;
+    // A space that moved since the model's read is still safe to edit when the read
+    // revision shows every entry would land on the same block now. Anything else gets the
+    // current outline back. A revision past the current one is a made-up number. The store
+    // still fences the write at the revision read here.
+    let stale: WriteOutcome['stale'];
     if (input.expected_revision !== current.revision) {
-      // A revision past the current one is a made-up number, never a stale read.
-      const verdict =
+      const read =
         input.expected_revision < current.revision
-          ? staleRevisionVerdict({ body: current.body, edits: input.edits })
-          : 'diverged';
-      if (verdict !== 'proven') {
-        if (verdict === 'diverged') {
-          this.recordDeltaFailure(input.space_id);
-        }
+          ? await this.options.store.getSpaceRevision({
+              tenant_id: this.options.authority.tenantId,
+              created_by: this.options.authority.userRef,
+              space_id: input.space_id,
+              revision: input.expected_revision,
+            })
+          : undefined;
+      if (
+        read === undefined ||
+        !staleEditStillApplies({ readBody: read.body, currentBody: current.body, edits: input.edits })
+      ) {
         throw new SpaceStaleRevisionError({
           expected_revision: input.expected_revision,
           actual_revision: current.revision,
           blocks: blockOutline(current.body).blocks,
         });
       }
-      stale_from_revision = input.expected_revision;
+      stale = { sent_revision: input.expected_revision, current_revision: current.revision };
     }
     // A rename takes a name of its own: refuse a new_title another space already has,
     // so the rename cannot recreate the two-spaces-one-name ambiguity create refuses.
@@ -1644,22 +1677,37 @@ class SpaceTool extends LocalToolMCP {
     if (body.length === 0) {
       throw new SpaceBodyEmptyError({ space_id: input.space_id });
     }
-    const mutation = await this.options.store.updateSpace({
-      tenant_id: this.options.authority.tenantId,
-      created_by: this.options.authority.userRef,
-      space_id: input.space_id,
-      // On the edit path, omitted metadata means "unchanged": fall back to current values.
-      name: input.new_title ?? current.name,
-      purpose: input.purpose ?? current.purpose,
-      status: input.status ?? current.status,
-      body,
-      format: input.format ?? current.format,
-      expected_revision: current.revision,
-      expected_aggregate_revision,
-    });
+    let mutation: SpaceMutationResult;
+    try {
+      mutation = await this.options.store.updateSpace({
+        tenant_id: this.options.authority.tenantId,
+        created_by: this.options.authority.userRef,
+        space_id: input.space_id,
+        // On the edit path, omitted metadata means "unchanged": fall back to current values.
+        name: input.new_title ?? current.name,
+        purpose: input.purpose ?? current.purpose,
+        status: input.status ?? current.status,
+        body,
+        format: input.format ?? current.format,
+        expected_revision: current.revision,
+        expected_aggregate_revision,
+      });
+    } catch (error) {
+      if (!(error instanceof SpaceRevisionConflictError)) {
+        throw error;
+      }
+      // Another writer got in after the read: hand back what is there now, not a bare refusal.
+      const latest = await this.requireCurrentSpace(input.space_id);
+      throw new SpaceStaleRevisionError({
+        expected_revision: input.expected_revision,
+        actual_revision: latest.revision,
+        blocks: blockOutline(latest.body).blocks,
+        cause: error,
+      });
+    }
     const outcome: WriteOutcome = { mutation, action: 'Updated' };
-    if (stale_from_revision !== undefined) {
-      outcome.stale_from_revision = stale_from_revision;
+    if (stale !== undefined) {
+      outcome.stale = stale;
     }
     if (block_results.length > 0) {
       outcome.block_results = block_results;
