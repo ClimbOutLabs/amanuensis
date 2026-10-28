@@ -271,7 +271,7 @@ describe('toolCallParsing', () => {
 
   it('reads the plain note for a space write refused for its size, from its code alone', () => {
     const refusalText =
-      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 4,000. ' +
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
       'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
     const envelope = (result: unknown) =>
       JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result });

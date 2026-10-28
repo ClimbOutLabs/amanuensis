@@ -348,7 +348,7 @@ describe('ToolCallContainer', () => {
   it('shows a plain note, not a failure, for a space write refused for its size', () => {
     const ToolCallCard = createToolCallCardProbe();
     const refusalText =
-      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 4,000. ' +
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
       'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
     // Shape produced end-to-end: the space tool's JSON result (the refusal text plus its stable
     // code) rides in a text content item, which the generic isError path wraps under `error` in
