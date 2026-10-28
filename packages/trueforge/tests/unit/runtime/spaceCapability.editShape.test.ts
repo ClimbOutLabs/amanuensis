@@ -63,9 +63,11 @@ describe('the edit tool when an edit entry has the wrong shape', () => {
     const message = toolArgumentProblemMessage({ toolName: EDIT_SPACE_TOOL_NAME, problems: outcome.problems });
 
     expect(message).toContain(
-      'edits[0] must be either an object with type set to "search", search (text) and replace (text)',
+      'edits[0] must be either an object with type set to "block", anchor (text), fingerprint (text) and new_content (text)',
     );
-    expect(message).toContain('or an object with type set to "block", anchor (text) and new_content (text)');
+    expect(message).toContain(
+      'or an object with type set to "insert", after (text), fingerprint (text) and new_content (text)',
+    );
     expect(message).not.toContain('named fields');
   });
 
@@ -73,7 +75,11 @@ describe('the edit tool when an edit entry has the wrong shape', () => {
     const schema = await editSpaceSchema();
     const outcome = checkToolArguments({
       schema,
-      args: { space_name: 'Lantern Workshop Notes', edits: [{ type: 'block', anchor: 'intro' }] },
+      args: {
+        space_name: 'Lantern Workshop Notes',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: 'intro', fingerprint: '0123abcd' }],
+      },
       readOnly: false,
     });
     expect(outcome.problems.map(problem => problem.path)).toEqual(['edits[0].new_content']);

@@ -275,6 +275,7 @@ import {
   type ToolResultKind,
   type UnfinishedKind,
 } from './replyBudget';
+import { messageAsksForJson, repairToolResultDump, turnToolResultShapes } from './replyToolDumpRepair';
 import {
   admitToolCallsForBudget,
   cloneTaskState,
@@ -326,6 +327,10 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 /** Shown when a model call goes silent; the steps done so far are kept. */
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
   'The model stopped answering, so this reply stopped. Send your message again to retry.';
+
+/** Shown when a turn stops at its step limit; the steps already done stay done. */
+export const ITERATION_LIMIT_MESSAGE =
+  'This reply stopped because it took too many steps. Nothing further was done. Ask again, or split your request into smaller parts.';
 
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
@@ -3920,6 +3925,21 @@ export class AgentThread {
           content: withNotice,
         };
       }
+      // A reply can carry one of this turn's tool results pasted as raw data instead of words.
+      // The reply has already streamed, so this repairs only what is saved: the dump is swapped
+      // for the result's own written line when it has one, and taken out when it has none.
+      const dumpRepair = repairToolResultDump({
+        text: assistantMessageContentToStringForSubAgent(result.value.output.content),
+        results: turnToolResultShapes(this.context),
+        personAskedForJson: messageAsksForJson(lastUserMessageText(this.context) ?? ''),
+      });
+      if (dumpRepair !== undefined) {
+        result.value.output.content = dumpRepair.text;
+        this.logger.info('Repaired a saved reply that carried a tool result as raw data', {
+          threadId: this.threadId,
+          tool: dumpRepair.toolName,
+        });
+      }
     }
 
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
@@ -5499,11 +5519,18 @@ export class AgentThread {
               return;
             }
             if (this.metrics.iterations >= iterationLimit) {
-              yield this.generateErrorEvent(
-                `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
-                undefined,
-                'iteration_limit',
-              );
+              // The person reads the plain stop message. A sub-agent's parent model reads the
+              // original instruction instead, so its next step is unchanged.
+              const done = this.generateErrorEvent(ITERATION_LIMIT_MESSAGE, undefined, 'iteration_limit');
+              yield done.send_to_parent === undefined
+                ? done
+                : {
+                    ...done,
+                    send_to_parent: {
+                      ...done.send_to_parent,
+                      content: `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
+                    },
+                  };
               return;
             }
             this.metrics.iterations++;

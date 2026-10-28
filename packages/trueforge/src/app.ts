@@ -680,6 +680,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+        mcpCatalog: deps.mcpCatalog,
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
@@ -795,6 +796,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createInternalSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -1039,6 +1041,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,

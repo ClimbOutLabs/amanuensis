@@ -9,6 +9,14 @@
  */
 import { apiPath, UI_BASE_PATH } from './publicPath';
 
+/**
+ * How long a 401 response is held back while the sign-in redirect takes the page away. If the page
+ * is still here after this, the redirect is not coming (the page was restored from the browser's
+ * back-forward cache, or sign-in bounced back to an app that still cannot read), so the caller gets
+ * the real response instead of a load that hangs forever.
+ */
+const AUTH_REDIRECT_SETTLE_MS = 5_000;
+
 /** Browser entry for login (not available as an SDK method). */
 export const AUTH_LOGIN_HREF = apiPath('/api/v1/auth/login');
 
@@ -43,8 +51,12 @@ export function createAuthAwareFetch(baseFetch: typeof fetch = globalThis.fetch.
     }
 
     // Do not surface 401 to callers — boot would flash a config error before navigation.
+    // The hold is bounded: if the redirect has not taken the page away within a few seconds, hand
+    // back the real response so the caller's load settles on an error instead of spinning forever.
     return new Promise<Response>(resolve => {
-      void resolve;
+      setTimeout(() => {
+        resolve(response);
+      }, AUTH_REDIRECT_SETTLE_MS);
     });
   };
 }
