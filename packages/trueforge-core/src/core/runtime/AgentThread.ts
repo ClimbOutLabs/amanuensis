@@ -275,6 +275,7 @@ import {
   type ToolResultKind,
   type UnfinishedKind,
 } from './replyBudget';
+import { messageAsksForJson, repairToolResultDump, turnToolResultShapes } from './replyToolDumpRepair';
 import {
   admitToolCallsForBudget,
   cloneTaskState,
@@ -3923,6 +3924,21 @@ export class AgentThread {
           thread_id: this.threadId,
           content: withNotice,
         };
+      }
+      // A reply can carry one of this turn's tool results pasted as raw data instead of words.
+      // The reply has already streamed, so this repairs only what is saved: the dump is swapped
+      // for the result's own written line when it has one, and taken out when it has none.
+      const dumpRepair = repairToolResultDump({
+        text: assistantMessageContentToStringForSubAgent(result.value.output.content),
+        results: turnToolResultShapes(this.context),
+        personAskedForJson: messageAsksForJson(lastUserMessageText(this.context) ?? ''),
+      });
+      if (dumpRepair !== undefined) {
+        result.value.output.content = dumpRepair.text;
+        this.logger.info('Repaired a saved reply that carried a tool result as raw data', {
+          threadId: this.threadId,
+          tool: dumpRepair.toolName,
+        });
       }
     }
 
