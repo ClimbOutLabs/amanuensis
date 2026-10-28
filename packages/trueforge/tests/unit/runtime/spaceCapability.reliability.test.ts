@@ -1208,7 +1208,7 @@ describe('fix-pass: reliability hardening', () => {
       edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>racy</p>' }],
     });
     expect(isErrorResponse(stale)).toBe(true);
-    expect(resultJson(stale).error).toContain('Stale space revision');
+    expect(resultJson(stale).error).toContain('The space is at revision 1, not 999');
     expect(await readBody(callTool, spaceName)).toBe(ANCHORED_BOARD);
 
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {

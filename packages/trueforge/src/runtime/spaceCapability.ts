@@ -223,6 +223,49 @@ export class SpaceBlockFingerprintMismatchError extends SpaceBlockAnchorError {
 }
 
 /**
+ * An edit entry named something that is not the 8-character fingerprint a read shows.
+ * The refusal hands the current outline back (the read the model would make next) so the
+ * retry costs no extra step. It is not a delta failure: the space and the model's copy
+ * are fine, only the code was missing or miscopied.
+ */
+export class SpaceFingerprintFormatError extends Error {
+  readonly revision: number;
+  readonly blocks: BlockOutlineEntry[];
+
+  constructor(input: { index: number; fingerprint: string; revision: number; blocks: BlockOutlineEntry[] }) {
+    super(
+      `Entry #${String(input.index + 1)} names fingerprint "${input.fingerprint}" but a fingerprint is the ` +
+        `8-character code a read shows next to each block. The current blocks are below: send the edit again ` +
+        `with the anchor and fingerprint of the block you mean, or use an append entry to add content at the end.`,
+    );
+    this.name = 'SpaceFingerprintFormatError';
+    this.revision = input.revision;
+    this.blocks = input.blocks;
+  }
+}
+
+/**
+ * The call named an older revision and could not prove its blocks are still what the
+ * model read. Nothing is saved. The current outline rides along so the retry needs no
+ * re-read. The store's own revision check stays the guard against concurrent writers.
+ */
+export class SpaceStaleRevisionError extends Error {
+  readonly revision: number;
+  readonly blocks: BlockOutlineEntry[];
+
+  constructor(input: { expected_revision: number; actual_revision: number; blocks: BlockOutlineEntry[] }) {
+    super(
+      `The space is at revision ${String(input.actual_revision)}, not ${String(input.expected_revision)}. ` +
+        `The anchors and fingerprints below are current: send the edit again with expected_revision ` +
+        `${String(input.actual_revision)} and these fingerprints.`,
+    );
+    this.name = 'SpaceStaleRevisionError';
+    this.revision = input.actual_revision;
+    this.blocks = input.blocks;
+  }
+}
+
+/**
  * Thrown when edit_space is called on a space whose delta mode the server locked after
  * consecutive failed delta updates. Terminal for edit_space until a revert unlocks it:
  * restoring the space's current revision with revert_space unlocks it without changing
@@ -374,7 +417,7 @@ Pictures: use only picture links that a search or page result in this chat retur
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
-There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, all entries in the call apply to the blocks of that one revision, and a call naming an older revision is refused with the current revision named, so re-read and send the change again. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
+There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, all entries in the call apply to the blocks of that one revision, and a call naming an older revision is applied when every block you named still holds what you read, and otherwise refused with the current revision and blocks, so send the change again from those. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -440,13 +483,13 @@ const CREATE_SPACE_INPUT_SCHEMA = SpaceContentSchema.extend({
 }).strict();
 /**
  * The fingerprint an edit entry names: the eight hex characters a read (list_blocks,
- * get_space, or a successful edit's result) showed for the block as read. The shape is
- * enforced here so a miscopied fingerprint is a guided validation error; a well-formed
- * fingerprint that names different content is the mismatch refusal in applyEditEntries.
+ * get_space, or a successful edit's result) showed for the block as read. Only the length
+ * is bounded here: the 8-hex shape is checked in edit(), where a bad one can be refused
+ * with the current outline instead of a bare validation error. A well-formed fingerprint
+ * that names different content is the mismatch refusal in applyEditEntries.
  */
-const SPACE_FINGERPRINT_FIELD = z
-  .string()
-  .regex(/^[0-9a-f]{8}$/, 'must be the 8-character fingerprint a read returned for the block');
+const SPACE_FINGERPRINT_FIELD = z.string().max(64);
+const SPACE_FINGERPRINT_SHAPE = /^[0-9a-f]{8}$/;
 /**
  * One anchor-addressed entry of an edit_space call: `anchor` names one block of the body
  * at the revision the call names (a `<!-- @block:name -->` marker's name, or the ordinal
@@ -600,7 +643,9 @@ interface WriteOutcome {
    * path. The model's next edit chains from these anchors and fingerprints instead of
    * a re-read.
    */
-  blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+  blocks?: BlockOutlineEntry[];
+  /** Set when the call named an older revision and was applied to the current one. */
+  stale_from_revision?: number;
 }
 
 /**
@@ -620,8 +665,14 @@ function spaceLink(space_id: string): string {
  */
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
   const { name, revision } = result.record;
+  const staleNote =
+    outcome.stale_from_revision === undefined
+      ? ''
+      : ` Your expected_revision was ${String(outcome.stale_from_revision)} but the space was at ${String(revision - 1)}; ` +
+        `every block you named still held what you read, so the change was applied to revision ${String(revision - 1)}.`;
   return JSON.stringify({
-    summary: `${outcome.action} space "${name}" (revision ${String(revision)}).`,
+    summary: `${outcome.action} space "${name}" (revision ${String(revision)}).${staleNote}`,
+    ...(outcome.stale_from_revision === undefined ? {} : { revision_was_stale: true }),
     space: {
       name,
       link: spaceLink(result.record.id),
@@ -1259,6 +1310,40 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
 }
 
 /**
+ * Whether a call that names an older revision can still be applied to the current body:
+ * 'proven' when every entry's anchor is unique, its block holds the named fingerprint,
+ * and no other block carries it; 'shared' when only a shared fingerprint stops the proof
+ * (an ordinal anchor could point at the wrong copy); 'diverged' when a block differs.
+ */
+function staleRevisionVerdict(input: {
+  body: string;
+  edits: readonly SpaceEditEntry[];
+}): 'proven' | 'shared' | 'diverged' {
+  const { segments } = segmentSpaceBody(input.body);
+  const fingerprints = segments.map(segment => blockFingerprint(input.body.slice(segment.coreStart, segment.coreEnd)));
+  let shared = false;
+  for (const entry of input.edits) {
+    const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
+    const at = segments.flatMap((segment, index) => (segment.anchor === anchor ? [index] : []));
+    const [only] = at;
+    if (only === undefined || at.length > 1 || fingerprints[only] !== entry.fingerprint) {
+      return 'diverged';
+    }
+    if (fingerprints.filter(fingerprint => fingerprint === entry.fingerprint).length > 1) {
+      shared = true;
+    }
+  }
+  return shared ? 'shared' : 'proven';
+}
+
+interface BlockOutlineEntry {
+  anchor: string;
+  fingerprint: string;
+  preview: string;
+  occurrences: number;
+}
+
+/**
  * The block outline of one body at one revision: every block's anchor, fingerprint,
  * and a preview of its first line, in order, plus the preamble of a marked body. list_blocks returns
  * it on its own; a successful edit_space returns it too (see WriteOutcome), so the
@@ -1267,7 +1352,7 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
  */
 function blockOutline(body: string): {
   preamble: { preview: string; char_count: number } | null;
-  blocks: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+  blocks: BlockOutlineEntry[];
 } {
   const { preamble, segments } = segmentSpaceBody(body);
   const marked = segments[0]?.marked === true;
@@ -1494,17 +1579,39 @@ class SpaceTool extends LocalToolMCP {
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       this.requireCurrentSpace(input.space_id),
     ]);
-    // The entries address blocks of the revision the call names, so a space that has
-    // moved since the model's read refuses here, before any anchor is resolved against
-    // a body the model has not seen. The refusal names the current revision, and it
-    // counts as a failed delta like any other: the model's copy diverged.
+    for (const [index, entry] of input.edits.entries()) {
+      if (!SPACE_FINGERPRINT_SHAPE.test(entry.fingerprint)) {
+        throw new SpaceFingerprintFormatError({
+          index,
+          fingerprint: entry.fingerprint,
+          revision: current.revision,
+          blocks: blockOutline(current.body).blocks,
+        });
+      }
+    }
+    // A space that moved since the model's read is still safe to edit when every entry
+    // proves its copy: the anchor resolves, the block holds the named fingerprint, and
+    // no other block shares it. Otherwise the refusal hands back the current outline. Only
+    // a block that really changed counts as a failed delta; a shared fingerprint is not
+    // the model's mistake. The store still fences the write at the revision read here.
+    let stale_from_revision: number | undefined;
     if (input.expected_revision !== current.revision) {
-      this.recordDeltaFailure(input.space_id);
-      throw new SpaceRevisionConflictError({
-        id: input.space_id,
-        expected_revision: input.expected_revision,
-        actual_revision: current.revision,
-      });
+      // A revision past the current one is a made-up number, never a stale read.
+      const verdict =
+        input.expected_revision < current.revision
+          ? staleRevisionVerdict({ body: current.body, edits: input.edits })
+          : 'diverged';
+      if (verdict !== 'proven') {
+        if (verdict === 'diverged') {
+          this.recordDeltaFailure(input.space_id);
+        }
+        throw new SpaceStaleRevisionError({
+          expected_revision: input.expected_revision,
+          actual_revision: current.revision,
+          blocks: blockOutline(current.body).blocks,
+        });
+      }
+      stale_from_revision = input.expected_revision;
     }
     // A rename takes a name of its own: refuse a new_title another space already has,
     // so the rename cannot recreate the two-spaces-one-name ambiguity create refuses.
@@ -1547,10 +1654,13 @@ class SpaceTool extends LocalToolMCP {
       status: input.status ?? current.status,
       body,
       format: input.format ?? current.format,
-      expected_revision: input.expected_revision,
+      expected_revision: current.revision,
       expected_aggregate_revision,
     });
     const outcome: WriteOutcome = { mutation, action: 'Updated' };
+    if (stale_from_revision !== undefined) {
+      outcome.stale_from_revision = stale_from_revision;
+    }
     if (block_results.length > 0) {
       outcome.block_results = block_results;
     }
@@ -1901,6 +2011,12 @@ class SpaceTool extends LocalToolMCP {
       }
       if (error instanceof SpaceBlockAnchorError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceFingerprintFormatError || error instanceof SpaceStaleRevisionError) {
+        return toolResultResponse({
+          text: JSON.stringify({ error: error.message, revision: error.revision, blocks: error.blocks }),
+          isError: true,
+        });
       }
       if (error instanceof SpaceDeltaLockedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
