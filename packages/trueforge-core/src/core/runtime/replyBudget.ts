@@ -10,6 +10,7 @@
  */
 import { z } from 'zod';
 import type { ToolResultDisposition } from '../events/schema';
+import { isSpaceWriteToolName } from '../spaces/toolContract';
 
 export const ToolResultKindSchema = z.enum([
   'ok',
@@ -40,8 +41,14 @@ export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 /** Why a step is answered with no tools. */
 export type ForcedAnswer = 'budget' | 'removed_streak';
 
+/** Steps one thread may get back in a reply for landing space writes. With the base budget this bounds a reply at 8 + 12 steps. */
+export const MAX_PROGRESS_STEP_REFUNDS = 12;
+
 export const STEP_BUDGET_SPENT_MESSAGE =
   'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and that they can ask you to continue.';
+
+/** Added when the budget runs out after space writes landed. */
+export const STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE = `${STEP_BUDGET_SPENT_MESSAGE} Say which space you changed and what is still missing, and that they can ask you to continue.`;
 
 export const REMOVED_TOOL_STREAK_MESSAGE =
   'Tools that were declined or are not available keep being called. Answer with what you have.';
@@ -52,6 +59,24 @@ export const REMOVED_TOOL_RESULT =
 
 export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; budget: ReplyStepBudget }): number {
   return isSubAgent ? budget.sub : budget.main;
+}
+
+/**
+ * Steps to hand back after one tool batch: one when a space write in it landed cleanly, so a build
+ * done in parts is not cut off by its own progress. Refused or failed writes earn nothing, and the
+ * total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
+ */
+export function progressRefundFor({
+  results,
+  refundsSoFar,
+}: {
+  results: readonly { toolName: string; disposition: ToolResultDisposition; failure: boolean }[];
+  refundsSoFar: number;
+}): number {
+  const landedWrite = results.some(
+    result => isSpaceWriteToolName(result.toolName) && result.disposition === 'executed_ok' && !result.failure,
+  );
+  return landedWrite && refundsSoFar < MAX_PROGRESS_STEP_REFUNDS ? 1 : 0;
 }
 
 /** Tool names are snake_case; the person and the model read them as plain words. */

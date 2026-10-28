@@ -109,6 +109,7 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     tool_markup_leaks_this_turn: 0,
     tool_markup_retries_this_turn: 0,
     steps_by_thread: [],
+    progress_refunds_by_thread: [],
     removed_tools: [],
     removed_tool_rejection_streaks: [],
     unfinished_by_thread: [],

@@ -2,6 +2,8 @@ import { createTurnToolCallLedger, mergeTurnToolCallLedgers } from '../../../src
 import {
   clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  MAX_PROGRESS_STEP_REFUNDS,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   removedToolMessage,
@@ -190,5 +192,34 @@ describe('ledger', () => {
     expect(merged.removedToolRejectionStreaks.get('sub-1')).toBe(2);
     expect(merged.unfinishedByThread.get('main')).toBe('failed');
     expect(merged.unfinishedByThread.get('sub-1')).toBe('blocked');
+  });
+});
+
+describe('progressRefundFor', () => {
+  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false } as const;
+
+  it('refunds one step when a space write landed', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: 0 })).toBe(1);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'lookup' }, landed], refundsSoFar: 3 })).toBe(1);
+  });
+
+  it('refunds nothing for a refused or failed write, or a batch with no space write', () => {
+    expect(progressRefundFor({ results: [{ ...landed, failure: true }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, disposition: 'policy_blocked' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'get_space' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('stops at the cap', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS - 1 })).toBe(1);
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS })).toBe(0);
+  });
+
+  it('keeps the largest refund count per thread when ledgers merge', () => {
+    const root = createTurnToolCallLedger();
+    root.progressRefundsByThread.set('main', 2);
+    const child = createTurnToolCallLedger();
+    child.progressRefundsByThread.set('main', 5);
+    expect(mergeTurnToolCallLedgers([root, child]).progressRefundsByThread.get('main')).toBe(5);
   });
 });
