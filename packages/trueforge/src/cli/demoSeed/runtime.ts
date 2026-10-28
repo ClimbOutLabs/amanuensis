@@ -1,5 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { createLogger } from 'winston';
+import { McpCatalog } from '../../catalog/McpCatalog';
+import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
 import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
 import { createKnowledgeLibrary } from './knowledgeLibrary';
@@ -45,6 +48,13 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
       models: flattenProviderModels(providers).map(model => model.name),
+      connectors: {
+        mailUrl: configuration.MAIL_EMAIL_MCP_URL,
+        catalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
+        skillCatalog: SkillCatalog.load(),
+        // The seed reports connector outcomes itself; the boot steps' own log lines would only repeat them.
+        logger: createLogger({ silent: true }),
+      },
       knowledge: createKnowledgeLibrary({
         knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
         tenantId: TENANT_ID,

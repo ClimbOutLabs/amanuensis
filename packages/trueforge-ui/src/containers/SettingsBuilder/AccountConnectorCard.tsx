@@ -56,7 +56,7 @@ export default function AccountConnectorCard({
         ? 'Not working right now'
         : connected
           ? 'Connected'
-          : 'Not connected';
+          : 'Available';
   const line =
     connected && connectedLine !== null
       ? connectedLine

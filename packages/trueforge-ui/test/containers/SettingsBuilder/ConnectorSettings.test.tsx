@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectorSettings from '@/containers/SettingsBuilder/ConnectorSettings.js';
 import type { ConnectorWithMemoryProvider } from '@/containers/SettingsBuilder/memoryProvider.js';
+import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
 import type { ConnectorChecks, ConnectorConnectionTest } from '@/server/connectorChecks.js';
+import type { EmailAccountStatus, EmailSetupPort } from '@/server/emailSetup.js';
 import type { GoogleConnectionStatus, GoogleSetupPort } from '@/server/googleSetup.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentSpec, CatalogServer, ConnectorBase } from '@/server/types.js';
@@ -99,7 +101,11 @@ vi.mock('@/server/ShellModeContext.js', () => ({
  * Neither check is on the runtime's connector port: the Harness adapter adds both, and the
  * component reads them through the same optional widening.
  */
-type MockConnectorCatalog = CatalogServer['connectorCatalog'] & Partial<ConnectorChecks> & Partial<GoogleSetupPort>;
+type MockConnectorCatalog = CatalogServer['connectorCatalog'] &
+  Partial<ConnectorChecks> &
+  Partial<GoogleSetupPort> &
+  Partial<EmailSetupPort> &
+  Partial<CalendarSetupPort>;
 
 function renderSettings(
   connectors: ConnectorBase[] = configuredConnectors,
@@ -675,7 +681,7 @@ describe('ConnectorSettings Google row', () => {
     expect(
       await screen.findByText(/Uses a Google app you set up once, in your own Google account\./),
     ).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.getByText('Available')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
   });
 
@@ -704,7 +710,7 @@ describe('ConnectorSettings Google row', () => {
 
   it('uses a neutral G tile for Google, not a generic server icon', async () => {
     renderSettings([parallelWeb], googlePort(googleStatus()));
-    await screen.findByText('Not connected');
+    await screen.findByText('Available');
     const tile = screen.getByText('G');
     expect(tile).toHaveAttribute('aria-hidden', 'true');
     expect(tile.querySelector('svg')).toBeNull();
@@ -723,5 +729,131 @@ describe('ConnectorSettings Google row', () => {
       }
       unmount();
     }
+  });
+});
+
+// The page leads with what is already set up. The account cards and the catalog sit below it as
+// one group of things that can still be connected, and an account that is not connected yet
+// reads "Available" there instead of "Not connected".
+describe('ConnectorSettings page order and vocabulary', () => {
+  const emailInstance: ConnectorBase = {
+    id: 'email',
+    name: 'Email',
+    description: 'The mailbox connector',
+    url: 'https://mail.example.com/mcp',
+    authenticated: true,
+    requiresAuth: false,
+    auth: { type: 'none' },
+  };
+
+  const tavilyEntry = {
+    id: 'tavily',
+    name: 'tavily',
+    description: 'Research the web',
+    url: 'https://mcp.tavily.com/mcp',
+    auth: { type: 'header' as const, headerName: 'Authorization' },
+  };
+
+  function emailStatus(overrides: Partial<EmailAccountStatus> = {}): EmailAccountStatus {
+    return {
+      available: true,
+      state: 'not_connected',
+      address: null,
+      providerKey: 'custom',
+      providers: [],
+      ...overrides,
+    };
+  }
+
+  function calendarStatus(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccountStatus {
+    return {
+      available: true,
+      state: 'not_connected',
+      email: null,
+      username: null,
+      calendarUrl: null,
+      providerKey: 'custom',
+      providers: [],
+      ...overrides,
+    };
+  }
+
+  function accountPorts(overrides: {
+    email?: Partial<EmailAccountStatus>;
+    calendar?: Partial<CalendarAccountStatus>;
+    googleState?: GoogleConnectionStatus['state'];
+  }): Partial<MockConnectorCatalog> {
+    const google: GoogleConnectionStatus = {
+      state: overrides.googleState ?? 'not_connected',
+      accountEmail: null,
+      features: [],
+      hasSavedClient: false,
+      locked: false,
+      setup: { mode: 'paste', clientType: 'desktop', redirectUri: 'http://127.0.0.1:53682/callback' },
+    };
+    return {
+      getEmailStatus: async () => emailStatus(overrides.email),
+      getCalendarStatus: async () => calendarStatus(overrides.calendar),
+      getGoogleStatus: async () => google,
+      checkGoogleClient: async () => ({ ok: true, problems: [] }),
+      beginGoogleConsent: async () => ({ authorizationUrl: 'https://accounts.example.test', setup: google.setup }),
+      completeGoogleConsent: async () => google,
+      testGoogleConnection: async () => ({ result: 'ok', accountEmail: null }),
+      disconnectGoogle: async () => ({ revocationConfirmed: true }),
+      getConnectorCatalog: async () => [tavilyEntry],
+    };
+  }
+
+  beforeEach(() => {
+    mutableChat = true;
+    agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
+    updateAgentSpec.mockReset();
+  });
+
+  function headingFollows(first: HTMLElement, second: HTMLElement): boolean {
+    return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  }
+
+  it('renders Configured first, then the account cards, then the Available catalog rows', async () => {
+    renderSettings([parallelWeb, github], accountPorts({}));
+
+    const configured = await screen.findByRole('heading', { name: /Configured/ });
+    const email = screen.getByRole('heading', { name: 'Email', level: 4 });
+    const calendar = screen.getByRole('heading', { name: 'Calendar', level: 4 });
+    const google = screen.getByRole('heading', { name: 'Google', level: 4 });
+    const available = screen.getByRole('heading', { name: /Available/ });
+
+    expect(headingFollows(configured, email)).toBe(true);
+    expect(headingFollows(email, calendar)).toBe(true);
+    expect(headingFollows(calendar, google)).toBe(true);
+    expect(headingFollows(google, available)).toBe(true);
+  });
+
+  it('shows Available on each unconnected account card instead of Not connected', async () => {
+    renderSettings([parallelWeb], accountPorts({}));
+
+    await screen.findByRole('heading', { name: /Available/ });
+    expect(screen.getAllByText('Available')).toHaveLength(3);
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
+  });
+
+  it('keeps the Email account card reachable below its configured instance', async () => {
+    renderSettings(
+      [emailInstance, parallelWeb],
+      accountPorts({ email: { state: 'connected', address: 'maya@example.com' } }),
+    );
+
+    const configured = await screen.findByRole('heading', { name: /Configured · 2/ });
+    expect(await screen.findByText('Connected as maya@example.com.')).toBeInTheDocument();
+    const emailCardHeading = screen.getByRole('heading', { name: 'Email', level: 4 });
+    expect(headingFollows(configured, emailCardHeading)).toBe(true);
+    expect(screen.getByText('The mailbox connector')).toBeInTheDocument();
+  });
+
+  it('never renders the word the owner struck from this page', async () => {
+    renderSettings([emailInstance, parallelWeb], accountPorts({}));
+
+    await screen.findByRole('heading', { name: /Available/ });
+    expect(document.body.textContent ?? '').not.toMatch(/template/i);
   });
 });
