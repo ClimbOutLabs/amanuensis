@@ -329,7 +329,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             {onOpenAudits !== undefined && (
               <button
                 type="button"
-                className="text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
+                className="justify-self-start text-left text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
                 onClick={onOpenAudits}
               >
                 Audits
