@@ -2400,13 +2400,18 @@ export class Sandbox extends LocalToolMCP {
     // approval-required=false with their existing pre-dispatch failure.
     const sentinelHost = this.sentinelContext;
     let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    let classificationWorkspaceCwd: string | null = null;
     if (sentinelHost !== undefined) {
+      // The workspace classification judges this call against: the bound repository, else the
+      // session's, else the provider's default. Recorded on the call below so pre-dispatch
+      // verification re-checks containment against this same root.
+      classificationWorkspaceCwd =
+        this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
-        workspace_cwd:
-          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        workspace_cwd: classificationWorkspaceCwd,
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
@@ -2520,6 +2525,9 @@ export class Sandbox extends LocalToolMCP {
       mint_tool_name: params.name,
       mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
       ...(this.provider.filesystem === undefined ? {} : { path_resolution: this.provider.filesystem }),
+      // The workspace classification judged against, so the pre-dispatch recheck uses the
+      // same root even when the session itself has no workspace bound.
+      ...(sentinelStamp === undefined ? {} : { workspace_cwd: classificationWorkspaceCwd }),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
