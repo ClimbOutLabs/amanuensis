@@ -20,6 +20,7 @@ import {
   CREATE_SPACE_TOOL_NAME,
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
@@ -209,8 +210,10 @@ interface SpaceWireResult {
   space?: SpaceWireSpace;
   spaces?: { name: string; link: string }[];
   aggregate_revision?: number;
-  /** Per-edit replacement counts, reported by the edit_space path. */
-  edit_replacements?: number[];
+  /** Per-entry block outcomes, reported by the edit_space path. */
+  block_results?: { anchor: string; new_length: number; deleted: boolean }[];
+  /** The block outline, reported by list_blocks and by get_space. */
+  blocks?: { anchor: string; fingerprint: string }[];
   error?: string;
   revision?: number;
   details?: unknown;
@@ -308,6 +311,16 @@ async function createBoard(store: SpaceToolStore): Promise<string> {
   return expectSpaceId(store, created);
 }
 
+/** The fingerprint list_blocks shows for one anchor of the named space, read the way a model reads it. */
+async function fingerprintOf(store: SpaceToolStore, input: { spaceName: string; anchor: string }): Promise<string> {
+  const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: input.spaceName });
+  const block = (resultJson(listed).blocks ?? []).find(candidate => candidate.anchor === input.anchor);
+  if (block === undefined) {
+    throw new Error(`expected block ${input.anchor} in the list_blocks result for ${input.spaceName}`);
+  }
+  return block.fingerprint;
+}
+
 async function readBody(store: SpaceToolStore, spaceId: string): Promise<string> {
   const listed = await store.listSpacesWithAggregate({
     tenant_id: 'default',
@@ -329,10 +342,19 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const spaceId = await createBoard(store);
 
     // The hotel confirms a lower rate: update just that cell via edits,
-    // without resending the whole board.
+    // without resending the whole board. The board has no markers and no blank
+    // lines, so it is one structural block, b1.
     const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: MADRID_BOARD.replace('€1,646.91', '€1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
 
@@ -345,18 +367,19 @@ describe('edit_space delta edits: Madrid board journey', () => {
     expect(body).toContain('Confirm Sep 23-24 extra night.');
   });
 
-  it('a typo in the search text fails cleanly and the board is unchanged', async () => {
+  it('an unknown block anchor fails cleanly and the board is unchanged', async () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
     const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: '€1,646.92', replace: '€1,590.00' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b9', fingerprint: '00000000', new_content: '€1,590.00' }],
     });
     const parsed = resultJson(failed);
     expect(isErrorResponse(failed)).toBe(true);
-    expect(parsed.error).toContain('Edit #1');
-    expect(parsed.error).toContain('not found');
+    expect(parsed.error).toContain('entry #1');
+    expect(parsed.error).toContain('Unknown block anchor');
 
     // The board is untouched: the failed edit persisted nothing.
     const body = await readBody(store, spaceId);
@@ -373,16 +396,22 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const beforeRevision = beforeSpace.revision;
     const beforeBody = beforeSpace.body;
 
-    // Edit #1 would succeed; edit #2 misses. Nothing may persist.
+    // Edit #1 would succeed; edit #2 names a block that does not exist. Nothing may persist.
     const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
+      expected_revision: 1,
       edits: [
-        { type: 'search', search: '€1,646.91', replace: '€1,590.00' },
-        { type: 'search', search: '€9,999.99', replace: '€0.00' },
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: MADRID_BOARD.replace('€1,646.91', '€1,590.00'),
+        },
+        { type: 'block', anchor: 'b9', fingerprint: '00000000', new_content: '€0.00' },
       ],
     });
     expect(isErrorResponse(failed)).toBe(true);
-    expect(resultJson(failed).error).toContain('Edit #2');
+    expect(resultJson(failed).error).toContain('entry #2');
 
     // Body byte-identical, and neither the revision nor the aggregate revision bumped.
     const after = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: BOARD_META.name });
@@ -392,44 +421,40 @@ describe('edit_space delta edits: Madrid board journey', () => {
     expect(afterJson.aggregate_revision).toBe(beforeJson.aggregate_revision);
   });
 
-  it('edits apply in order, so later edits see earlier results', async () => {
-    const store = new InMemorySpaceStore();
-    const spaceId = await createBoard(store);
-
-    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
-      space_name: BOARD_META.name,
-      edits: [
-        { type: 'search', search: '€1,646.91', replace: 'PRICE_PLACEHOLDER' },
-        { type: 'search', search: 'PRICE_PLACEHOLDER', replace: '€1,590.00' },
-      ],
-    });
-    expect(isErrorResponse(updated)).toBe(false);
-
-    const body = await readBody(store, spaceId);
-    expect(body).toContain('€1,590.00');
-    expect(body).not.toContain('PRICE_PLACEHOLDER');
-  });
-
-  it('each search replaces every occurrence in the body', async () => {
+  it('entries in one call all apply against the blocks of the one revision the call names', async () => {
     const store = new InMemorySpaceStore();
     const created = await callTool(store, CREATE_SPACE_TOOL_NAME, {
-      name: 'Fruit',
-      purpose: 'Track fruit.',
+      name: 'Notes',
+      purpose: 'Two paragraphs.',
       status: 'active',
       format: 'markdown',
-      body: 'apples and apples',
+      body: 'First paragraph.\n\nSecond paragraph.',
     });
     const spaceId = await expectSpaceId(store, created);
 
+    // Both entries resolve against revision 1's blocks, in one call, one revision bump.
     const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
-      space_name: 'Fruit',
-      edits: [{ type: 'search', search: 'apples', replace: 'oranges' }],
+      space_name: 'Notes',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b1' }),
+          new_content: 'First paragraph, updated.',
+        },
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(store, { spaceName: 'Notes', anchor: 'b2' }),
+          new_content: 'Second paragraph, updated.',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
-    const parsed = resultJson(updated);
-    // Both occurrences were replaced, and the result says so.
-    expect(parsed.edit_replacements).toEqual([2]);
-    expect(await readBody(store, spaceId)).toBe('oranges and oranges');
+    expect(await readBody(store, spaceId)).toBe('First paragraph, updated.\n\nSecond paragraph, updated.');
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Notes' });
+    expect(expectSpace(read).revision).toBe(2);
   });
 
   it('edits without metadata leave name/purpose/status/format unchanged', async () => {
@@ -439,7 +464,15 @@ describe('edit_space delta edits: Madrid board journey', () => {
     // No metadata fields: the edit applies and metadata is preserved from the current record.
     const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: MADRID_BOARD.replace('€1,646.91', '€1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: BOARD_META.name });
@@ -458,7 +491,15 @@ describe('edit_space delta edits: Madrid board journey', () => {
     // applies to delta-computed bodies too.
     const wiped = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: MADRID_BOARD, replace: '<p>oops</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: '<p>oops</p>',
+        },
+      ],
     });
     const parsed = resultJson(wiped);
     expect(isErrorResponse(wiped)).toBe(true);
@@ -475,8 +516,16 @@ describe('edit_space delta edits: Madrid board journey', () => {
     // Same destructive edit, but the caller explicitly confirms the shrink.
     const wiped = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
+      expected_revision: 1,
       confirm_shrink: true,
-      edits: [{ type: 'search', search: MADRID_BOARD, replace: '<p>oops</p>' }],
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: '<p>oops</p>',
+        },
+      ],
     });
     expect(isErrorResponse(wiped)).toBe(false);
     expect(await readBody(store, spaceId)).toBe('<p>oops</p>');
@@ -490,7 +539,8 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const editCall = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       body: MADRID_BOARD,
-      edits: [{ type: 'search', search: 'a', replace: 'b' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'b' }],
     });
     // Schema validation rejects the call before the handler runs, naming the bad field.
     const editError = resultJson(editCall);
@@ -515,9 +565,15 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const store = new InMemorySpaceStore();
     await createBoard(store);
 
-    const edits = Array.from({ length: 51 }, () => ({ type: 'search', search: 'a', replace: 'b' }));
+    const edits = Array.from({ length: 51 }, () => ({
+      type: 'block',
+      anchor: 'b1',
+      fingerprint: '00000000',
+      new_content: 'b',
+    }));
     const rejected = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
+      expected_revision: 1,
       edits,
     });
     const parsed = resultJson(rejected);
@@ -525,28 +581,36 @@ describe('edit_space delta edits: Madrid board journey', () => {
     expect(parsed.error).toContain('edits: is too long');
   });
 
-  it('exactly 50 edits are accepted, and the result reports per-edit counts', async () => {
+  it('exactly 50 edits are accepted, and the result reports per-entry outcomes', async () => {
     const store = new InMemorySpaceStore();
-    // Fixed-width tokens: no token is a substring of another, so each edit
-    // matches exactly its own token.
+    // Fifty paragraphs: fifty structural blocks, one per edit entry.
     const tokens = Array.from({ length: 50 }, (_, i) => `w${String(i).padStart(2, '0')}`);
     const created = await callTool(store, CREATE_SPACE_TOOL_NAME, {
       name: 'Tokens',
       purpose: 'Boundary probe.',
       status: 'active',
       format: 'markdown',
-      body: tokens.join(' '),
+      body: tokens.join('\n\n'),
     });
     const spaceId = await expectSpaceId(store, created);
 
-    const edits = tokens.map(t => ({ type: 'search', search: t, replace: `u${t.slice(1)}` }));
+    const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Tokens' });
+    const fingerprints = new Map((resultJson(listed).blocks ?? []).map(b => [b.anchor, b.fingerprint]));
+    const edits = tokens.map((t, i) => ({
+      type: 'block',
+      anchor: `b${String(i + 1)}`,
+      fingerprint: fingerprints.get(`b${String(i + 1)}`) ?? '',
+      new_content: `u${t.slice(1)}`,
+    }));
     const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Tokens',
+      expected_revision: 1,
       edits,
     });
     expect(isErrorResponse(updated)).toBe(false);
     const parsed = resultJson(updated);
-    expect(parsed.edit_replacements).toEqual(new Array(50).fill(1));
+    expect(parsed.block_results).toHaveLength(50);
+    expect(parsed.block_results?.[0]).toEqual({ anchor: 'b1', new_length: 3, deleted: false });
 
     const body = await readBody(store, spaceId);
     for (const t of tokens) {
@@ -571,7 +635,7 @@ describe('edit_space delta edits: Madrid board journey', () => {
 
   it('a delta edit that would exceed the body size limit fails as a clean terminal error', async () => {
     const store = new InMemorySpaceStore();
-    // Seeded directly in the store: one write may no longer carry 60,000 characters (a
+    // Seeded directly in the store: one write may no longer carry 62,000 characters (a
     // space this size is built in parts now), and this test's subject is the delta whose
     // computed body crosses the stored limit, not the write that first made the space.
     const seeded = await store.createSpace({
@@ -582,33 +646,38 @@ describe('edit_space delta edits: Madrid board journey', () => {
       purpose: 'Size-limit probe.',
       status: 'active',
       format: 'markdown',
-      body: 'a'.repeat(60_000),
+      body: 'a'.repeat(62_000),
       expected_aggregate_revision: 0,
     });
     const spaceId = seeded.record.id;
 
-    // One edit doubles every character, pushing the computed body (120,000
-    // chars) past the 65,536 cap the body path enforces at the boundary.
+    // The body is one structural block. An insert of 4,000 more characters (the most
+    // one write may carry) pushes the computed body past the 65,536 cap.
+    const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: 'Big' });
+    const fingerprint = (resultJson(listed).blocks ?? [])[0]?.fingerprint ?? '';
     const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Big',
-      edits: [{ type: 'search', search: 'a', replace: 'aa' }],
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b1', fingerprint, new_content: 'a'.repeat(4_000) }],
     });
     const parsed = resultJson(failed);
     expect(isErrorResponse(failed)).toBe(true);
     expect(parsed.error).toContain('65,536');
 
     // The refused edit persisted nothing.
-    expect(await readBody(store, spaceId)).toBe('a'.repeat(60_000));
+    expect(await readBody(store, spaceId)).toBe('a'.repeat(62_000));
   });
 
   it('a delta edit with a stale expected_revision is rejected', async () => {
     const store = new InMemorySpaceStore();
     const spaceId = await createBoard(store);
 
-    // Advance to revision 2 with an edit that appends a line.
+    // Advance to revision 2 with an edit that appends a line after the board's one block.
+    const boardFingerprint = await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' });
     const moved = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: '</details>', replace: '</details>\n<p>Extra line.</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b1', fingerprint: boardFingerprint, new_content: '<p>Extra line.</p>' }],
     });
     expect(isErrorResponse(moved)).toBe(false);
 
@@ -616,7 +685,7 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const stale = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       expected_revision: 1,
-      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: boardFingerprint, new_content: 'x' }],
     });
     const parsed = resultJson(stale);
     expect(isErrorResponse(stale)).toBe(true);
@@ -632,7 +701,15 @@ describe('edit_space delta edits: Madrid board journey', () => {
 
     const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'search', search: '€1,646.91', replace: '€1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: MADRID_BOARD.replace('€1,646.91', '€1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
 
@@ -651,7 +728,15 @@ describe('edit_space delta edits: Madrid board journey', () => {
     // A bad edit replaces the whole board with a stub (the wipe the shrink guard exists for).
     const broken = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
-      edits: [{ type: 'block', anchor: 'auto-body', new_content: '<p>truncated</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'b1' }),
+          new_content: '<p>truncated</p>',
+        },
+      ],
       confirm_shrink: true,
     });
     expect(isErrorResponse(broken)).toBe(false);
