@@ -262,7 +262,6 @@ describe('scheduled run memory wiring', () => {
         type: 'inline',
         spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } }),
       } as const,
-      helperFqn: undefined,
     };
 
     // The state a scheduled run was in before the wiring: no client, no context, the
