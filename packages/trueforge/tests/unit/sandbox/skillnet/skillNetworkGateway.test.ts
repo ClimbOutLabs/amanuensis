@@ -26,7 +26,7 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function setup(): Promise<Harness> {
+async function setup(options?: { dialFails: boolean }): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'tfy-skillnet-'));
   const socketPath = join(dir, 'skillnet.sock');
   const registry = new SkillNetworkTokenRegistry();
@@ -65,6 +65,9 @@ async function setup(): Promise<Harness> {
     },
     connectUpstream: ({ host, port }) => {
       dials.push({ host, port });
+      if (options?.dialFails === true) {
+        return Promise.reject(new Error('the stand-in upstream is unreachable'));
+      }
       return new Promise((resolve, reject) => {
         const socket = netConnect(echoAddress.port, '127.0.0.1');
         socket.once('connect', () => {
@@ -256,6 +259,24 @@ describe('SkillNetworkGateway', () => {
 
     await new Promise(resolve => setTimeout(resolve, 25));
     expect(harness.auditRecords).toEqual([]);
+  });
+
+  it('writes nothing to the activity log when a granted connection simply fails to open', async () => {
+    const failing = await setup({ dialFails: true });
+    try {
+      const token = failing.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+      const reply = await connectVia(failing.socketPath, { authority: 'github.com:443', token });
+      // The answer is the same 502 as ever, and the failure was dialled, not refused by a rule.
+      expect(reply.status).toBe(502);
+      expect(reply.body).toContain('Could not connect to github.com');
+      expect(failing.dials).toEqual([{ host: 'github.com', port: 443 }]);
+
+      await new Promise(resolve => setTimeout(resolve, 25));
+      expect(failing.auditRecords).toEqual([]);
+      expect(failing.logLines()).toContain('Skill network connection could not be opened');
+    } finally {
+      await failing.close();
+    }
   });
 
   it('writes nothing to the activity log for a call with no token, since it names no chat', async () => {

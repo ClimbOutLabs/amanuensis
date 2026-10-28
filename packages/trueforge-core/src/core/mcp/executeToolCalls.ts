@@ -6,6 +6,7 @@ import {
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
+import { isRecipientPolicyDenial } from '../email/mailConnector/recipientRefusal';
 import type { RegisteredPassthroughEvent } from '../events/PassthroughEvents';
 import type {
   ApprovalDecision,
@@ -970,21 +971,6 @@ export function isReadOnlyCall(
     return true;
   }
   return isSearchProviderRead(info);
-}
-
-/** The ways the Email sidecar words its refusal when a recipient is not on the Email list. */
-const MAIL_RECIPIENT_REFUSAL_WORDS = ['recipient policy denied', 'not in allowlist'];
-
-/** Whether a finished call's result is the Email sidecar refusing a recipient on policy grounds. */
-function isMailRecipientPolicyDenial(response: CallToolResponse): boolean {
-  if (!isCallToolResponseResult(response) || response.result.isError !== true) {
-    return false;
-  }
-  const said = response.result.content
-    .map(block => (block.type === 'text' ? block.text : ''))
-    .join('\n')
-    .toLowerCase();
-  return MAIL_RECIPIENT_REFUSAL_WORDS.some(words => said.includes(words));
 }
 
 function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
@@ -2288,17 +2274,23 @@ export async function executeToolCalls({
       // An approved send can still be refused by the mail service itself when a recipient is not
       // on its list. The row above records the person's decision; this one records that the send
       // was then refused, so the log does not read as if the message went out.
-      if (outcome === 'approved' && info.mail_send === true && isMailRecipientPolicyDenial(response)) {
-        await audit.record({
-          tenant_id: sentinel.identity.tenant_id,
-          created_by: sentinel.identity.created_by,
-          conversation_id: sentinel.identity.conversation_id,
-          tier: info.tier,
-          tool_name: info.original_tool_name,
-          description: 'The mail service refused the recipient after this send was approved, so the message was not sent.',
-          outcome: 'denied',
-          auto_deny_reason: null,
-        });
+      if (outcome === 'approved' && info.mail_send === true && isRecipientPolicyDenial(response)) {
+        try {
+          await audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: info.tier,
+            tool_name: info.original_tool_name,
+            description: 'The mail service refused the recipient after this send was approved, so the message was not sent.',
+            outcome: 'denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a refused send in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
   }

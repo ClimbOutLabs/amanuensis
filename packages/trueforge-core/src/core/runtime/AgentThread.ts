@@ -2341,10 +2341,15 @@ export class AgentThread {
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
       const added = call?.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (call === undefined) {
+        // No call behind the approval: the check below would skip it too (no send, no new
+        // addresses), so leaving here changes nothing and keeps the call in hand below.
+        continue;
+      }
       // Only a send the host itself judged to go through its own Email sidecar, or a card carrying new
       // addresses for one, touches the Email list, however the card was later reworded. A send's addresses
       // still come only from its own card.
-      if (call?.tool_info.mail_send !== true && added.length === 0) {
+      if (call.tool_info.mail_send !== true && added.length === 0) {
         continue;
       }
       if (added.length > 0) {

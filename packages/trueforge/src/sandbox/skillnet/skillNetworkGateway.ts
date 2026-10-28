@@ -172,7 +172,9 @@ export class SkillNetworkGateway {
         host: target.host,
         grant,
         log: false,
-        auditDescription: `A skill's connection to ${target.host} could not be opened.`,
+        // A connection that simply fails to open was stopped by no rule, so it leaves
+        // no activity log row; the warn line above is its record.
+        auditDescription: undefined,
       });
       return;
     }
