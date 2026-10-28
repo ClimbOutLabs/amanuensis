@@ -27,7 +27,7 @@ export function duplicateRowKey(line: string): string | null {
 }
 
 /** The cell that names a row, as written: the first cell, or the second when the first is a rank. */
-function rowLabel(line: string): string {
+export function rowLabel(line: string): string {
   const cells = rowCells(line);
   const first = cells[0] ?? '';
   return RANK_CELL.test(first) ? (cells[1] ?? first) : first;

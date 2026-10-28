@@ -530,6 +530,7 @@ describe('space capability', () => {
       },
       aggregate_revision: 1,
       blocks: [{ anchor: 'b1', fingerprint: blockFingerprint('Body text.'), preview: 'Body text.', occurrences: 1 }],
+      format_notes: [],
     });
   });
 
@@ -611,6 +612,7 @@ describe('space capability', () => {
         },
       ],
       aggregate_revision: 4,
+      format_notes: [],
     });
   });
 
@@ -861,6 +863,7 @@ describe('space capability', () => {
         },
       ],
       aggregate_revision: 4,
+      format_notes: [],
     });
   });
 

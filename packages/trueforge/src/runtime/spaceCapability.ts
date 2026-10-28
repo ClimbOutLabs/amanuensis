@@ -71,6 +71,7 @@ import { personaCapability, type PersonaTurnContext } from './personaCapability'
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
 import { dropDuplicateRows, keysOfTableEndingAt, skippedRowsSentence, type SkippedRow } from './spaceDuplicateRows';
+import { spaceFormatNotes } from './spaceFormatNotes';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
 import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
@@ -336,6 +337,17 @@ export class SpaceBodyEmptyError extends Error {
   }
 }
 
+/** Thrown when an edit_space call would leave the space exactly as it is. Nothing is saved. */
+export class SpaceEditUnchangedError extends Error {
+  constructor() {
+    super(
+      'This edit changes nothing: the blocks already hold exactly that content, so nothing was saved. ' +
+        'Change the content, or tell the person the space already reads this way.',
+    );
+    this.name = 'SpaceEditUnchangedError';
+  }
+}
+
 /**
  * Thrown when every table row a call adds is already in the table. Nothing is persisted,
  * and it is not a delta failure: the model's copy of the table is only out of date.
@@ -434,7 +446,7 @@ const SPACE_WRITE_SIZE_TEXT = `about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleS
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Build a large space in steps, not in one call: one write carries at most ${SPACE_WRITE_SIZE_TEXT}, and a write past the limit is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with append entries in edit_space, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
+Build a large space in steps, not in one call: one write carries at most ${SPACE_WRITE_SIZE_TEXT}, and a write past the limit is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with append entries in edit_space, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space. A result may carry format_notes: plain sentences about how the body renders. Fix what they name if you can, then finish; do not resend an edit that changes nothing.
 
 Pass body as one string with real line breaks: each table row on its own line, and a blank line as an empty line. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
@@ -861,6 +873,7 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
           unsaved_from: partial.unsaved_from,
           continue_after: partial.continue_after,
         }),
+    format_notes: spaceFormatNotes({ body: result.record.body, format: result.record.format }),
   });
 }
 
@@ -972,6 +985,8 @@ export interface ListBlocksResult {
    */
   preamble: { preview: string; char_count: number } | null;
   blocks: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+  /** Plain sentences about how the body renders; empty when it is clean. */
+  format_notes: string[];
 }
 
 /**
@@ -2056,6 +2071,17 @@ class SpaceTool extends LocalToolMCP {
       });
     }
     const { body, block_results, starts_new_table, skipped_rows } = applied;
+    // Judged on the final body, after any append and on the stale-but-proven path too. Not a
+    // delta failure: the model's copy is fine, the call just does nothing.
+    if (
+      body === current.body &&
+      (input.new_title ?? current.name) === current.name &&
+      (input.purpose ?? current.purpose) === current.purpose &&
+      (input.status ?? current.status) === current.status &&
+      format === current.format
+    ) {
+      throw new SpaceEditUnchangedError();
+    }
     this.checkShrink(input.space_id, current, body, input.confirm_shrink, EDIT_SPACE_TOOL_NAME);
     if (body.length === 0) {
       throw new SpaceBodyEmptyError({ space_id: input.space_id });
@@ -2194,6 +2220,7 @@ class SpaceTool extends LocalToolMCP {
       revision: current.revision,
       preamble: outline.preamble,
       blocks: outline.blocks,
+      format_notes: spaceFormatNotes({ body: current.body, format: current.format }),
     };
   }
 
@@ -2403,6 +2430,7 @@ class SpaceTool extends LocalToolMCP {
       // fingerprints are what an edit names, and they are cheap without the body.
       blocks: blockOutline(result.space.body).blocks,
       aggregate_revision: result.aggregate_revision,
+      format_notes: spaceFormatNotes({ body: result.space.body, format: parsed.format }),
     };
   }
 
@@ -2447,6 +2475,9 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyEmptyError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceEditUnchangedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceWriteTooLongError) {
