@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
@@ -33,7 +34,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { MapsHosts } from '../llm/LLMTypes';
+import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -155,6 +156,7 @@ import {
   extractExecutedFileOperand,
   isInsideWorkspace,
   isNewWriteTarget,
+  isPathUnderDir,
   isUnderRoot,
   lexicalPath,
   sha256FileContent,
@@ -214,6 +216,12 @@ export interface SentinelAction {
    * server-owned maps tool from server config, never from model params.
    */
   maps_hosts?: MapsHosts | undefined;
+  /**
+   * Host-derived folders the document reader may read without asking: the staged uploads
+   * directory and the bound project folder. Set by the documents tool set from the sandbox
+   * and the session binding, never from model params.
+   */
+  document_scope?: DocumentScope | undefined;
   /**
    * The message a Gmail write would send or save, as the host holds it. Set by the Gmail tool set from a live
    * read and the validated call, so the card shows what would really go out.
@@ -2778,6 +2786,94 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
 
+/** The paths a document read names, or null when they are not a non-empty list of names. */
+function documentFilePaths(action: SentinelAction): string[] | null {
+  const raw = action.canonical_params['file_paths'];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+  const paths: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry === '') {
+      return null;
+    }
+    paths.push(entry);
+  }
+  return paths;
+}
+
+/** True when a document path reads without asking: a staged upload, or a file inside the project folder. */
+function documentPathReadsWithoutAsking(input: {
+  p: string;
+  scope: DocumentScope | undefined;
+  workspaceRoot: string | null;
+  resolution: PathResolution | undefined;
+}): boolean {
+  const uploadsDir = input.scope?.staged_uploads_dir;
+  if (
+    uploadsDir !== null &&
+    uploadsDir !== undefined &&
+    isPathUnderDir({ p: input.p, dir: uploadsDir, cwd: '/', resolution: input.resolution })
+  ) {
+    return true;
+  }
+  const root = input.workspaceRoot;
+  if (root === null || root === '') {
+    return false;
+  }
+  return isInsideWorkspace({ p: input.p, cwd: root, workspace_root: root, resolution: input.resolution });
+}
+
+/**
+ * Document reads are the host's own, named by server. A staged upload, and a file inside the
+ * project folder, read without asking as today. Any other path asks first, with the approval
+ * bound to the exact paths in this call, so an approval for one set of files never covers
+ * another set. With no project folder bound, a path that is not a staged upload asks too.
+ */
+async function classifyDocumentTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const paths = documentFilePaths(action);
+  if (paths === null) {
+    return failClosedDecision({ reason_detail: 'The document paths could not be checked.' });
+  }
+  const scope = action.document_scope;
+  const resolution = scope?.path_resolution ?? ctx.path_resolution ?? undefined;
+  const workspaceRoot = scope?.workspace_cwd ?? ctx.workspace_cwd;
+  const outside = paths.filter(p => !documentPathReadsWithoutAsking({ p, scope, workspaceRoot, resolution }));
+  if (outside.length === 0) {
+    return tier1Decision({
+      reason: 'document_read',
+      reason_detail: 'Read a document you provided or one in the project folder.',
+      sensitive_read: containsSecretPath(action.canonical_params),
+    });
+  }
+  const named =
+    outside.length === 1 ? `the file ${mapsCardLabel(outside[0])}` : `these files: ${joinedLabels(outside)}`;
+  return tier3Decision({
+    card: {
+      plain_what: `Read ${named} outside the project folder?`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'document_outside_workspace',
+    reason_detail: 'A document outside the project folder asks before it is read.',
+    sensitive_read: containsSecretPath(action.canonical_params),
+    secret_path_read: true,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
+  });
+}
+
 /** Most characters of a name or note the line in the chat shows. */
 const LINE_TEXT_MAX_CHARS = 80;
 
@@ -3296,6 +3392,13 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (
+    action.tool_type === 'truefoundry-system' &&
+    action.mcp_server_name === DOCUMENTS_SERVER_ID &&
+    name === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
+  ) {
+    return steeringChecked({ decision: await classifyDocumentTool(action, ctx), ctx, guests: [] });
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
