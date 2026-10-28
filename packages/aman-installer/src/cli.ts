@@ -1,4 +1,5 @@
 import { runStatus } from './commands/status.ts';
+import { runVerify } from './commands/verify.ts';
 import { checkDocker } from './doctor/dockerDoctor.ts';
 import { runDoctor, type DoctorDeps } from './doctor/doctor.ts';
 import type { Host } from './host/host.ts';
@@ -14,6 +15,9 @@ export interface CliDeps extends DoctorDeps {
   runner: ProcessRunner;
   store: StateStore;
   print: (line: string) => void;
+  // Only a test sets this; the shipped command checks downloads
+  // against the release key compiled into the executable.
+  releasePublicKey?: string;
 }
 
 export async function runCli(args: readonly string[], deps: CliDeps): Promise<number> {
@@ -43,6 +47,9 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
   }
   if (first === 'status') {
     return runStatus(deps);
+  }
+  if (first === 'verify') {
+    return runVerify(deps, { file: second });
   }
   deps.print(problemText(unknownCommandProblem(first)));
   return 1;

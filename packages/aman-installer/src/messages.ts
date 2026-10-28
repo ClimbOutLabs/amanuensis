@@ -24,6 +24,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
+  'Run aman verify and name a downloaded file to check it against its signed release record.',
 ];
 
 export const DOCKER_NOT_INSTALLED: Record<SystemKind, Problem> = {
@@ -200,6 +201,59 @@ export function statusInstanceLine(name: string, state: InstanceState, address: 
 
 export const NO_INSTANCES_LINE = 'No instance has been made yet.';
 
+export const VERIFY_USAGE: Problem = {
+  happened: 'aman verify needs the name of the downloaded file to check.',
+  fix: 'Run aman verify again and name the file you downloaded from the release page.',
+};
+
+export const VERIFY_MANIFEST_MISSING: Problem = {
+  happened: 'The release record that goes with this download is missing.',
+  fix: 'Download manifest.json from the same release page into the same folder, then run aman verify again.',
+};
+
+export const VERIFY_SIGNATURE_MISSING: Problem = {
+  happened: 'The signature that goes with this release record is missing.',
+  fix: 'Download manifest.json.minisig from the same release page into the same folder, then run aman verify again.',
+};
+
+export const VERIFY_MANIFEST_UNREADABLE: Problem = {
+  happened: 'The release record could not be read.',
+  fix: 'Download manifest.json again from the Aman release page, then run aman verify again.',
+};
+
+export const VERIFY_SIGNATURE_BAD: Problem = {
+  happened: 'The signature on this release record does not check out.',
+  fix: 'Download the release files again from the Aman release page, then run aman verify again.',
+};
+
+export const VERIFY_DOWNLOAD_UNREADABLE: Problem = {
+  happened: 'The downloaded file could not be read.',
+  fix: 'Download it again from the Aman release page, then run aman verify again.',
+};
+
+export function verifyNotListedProblem(fileName: string): Problem {
+  return {
+    happened: `The download ${printable(fileName)} is not in the release record.`,
+    fix: 'Check the name against the files on the Aman release page, then run aman verify again.',
+  };
+}
+
+export function verifyChangedProblem(fileName: string): Problem {
+  return {
+    happened: `The download ${printable(fileName)} does not match the release record.`,
+    fix: 'Download it again from the Aman release page, then run aman verify again.',
+  };
+}
+
+export const VERIFY_SOURCE_IDS_MISMATCH: Problem = {
+  happened: 'The image names in the release record do not match this copy of the Aman code.',
+  fix: 'Make the release record again from a clean copy of the release, then check it again.',
+};
+
+export function verifyOkLine(fileName: string): string {
+  return `${printable(fileName)} matches the signed release record.`;
+}
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -230,5 +284,15 @@ export function allMessageLines(): string[] {
   lines.push(statusInstanceLine('main', 'stopped', null));
   lines.push(statusInstanceLine('main', 'unknown', null));
   lines.push(NO_INSTANCES_LINE);
+  lines.push(problemText(VERIFY_USAGE));
+  lines.push(problemText(VERIFY_MANIFEST_MISSING));
+  lines.push(problemText(VERIFY_SIGNATURE_MISSING));
+  lines.push(problemText(VERIFY_MANIFEST_UNREADABLE));
+  lines.push(problemText(VERIFY_SIGNATURE_BAD));
+  lines.push(problemText(VERIFY_DOWNLOAD_UNREADABLE));
+  lines.push(problemText(verifyNotListedProblem('aman-linux-x64')));
+  lines.push(problemText(verifyChangedProblem('aman-linux-x64')));
+  lines.push(problemText(VERIFY_SOURCE_IDS_MISMATCH));
+  lines.push(verifyOkLine('aman-linux-x64'));
   return lines;
 }
