@@ -124,7 +124,7 @@ export function approvalDecisions(actions, policy) {
 }
 
 /** Errors that mean every later call would fail too, so the run stops instead of writing empty rows. */
-function isRunStopping(error) {
+export function isRunStopping(error) {
   if (error instanceof InstanceUnreachableError) {
     return true;
   }
@@ -145,7 +145,7 @@ async function waitForFinish({ client, sessionId, turnId, pollIntervalMs, turnTi
   }
 }
 
-function describeTerminalState(state) {
+export function describeTerminalState(state) {
   if (state.status === 'error' && typeof state.message === 'string') {
     return state.message;
   }
@@ -155,47 +155,66 @@ function describeTerminalState(state) {
   return '';
 }
 
-async function runOnePrompt({ client, prompt, model, temperature, run, label, pollIntervalMs, turnTimeoutMs }) {
+/**
+ * Sends one input and follows the chat until it settles, answering approval cards with the policy.
+ * `status` is the last turn's status, or a runner status when the chat could not be followed.
+ */
+export async function driveTurns({
+  client,
+  sessionId,
+  input,
+  previousTurnId,
+  approvalPolicy,
+  pollIntervalMs,
+  turnTimeoutMs,
+}) {
   const turns = [];
+  let approvals = 0;
+  let status;
+  let pending = await client.createTurn(sessionId, { input, previous_turn_id: previousTurnId });
+  for (let round = 0; ; round += 1) {
+    const finished = await waitForFinish({ client, sessionId, turnId: pending.id, pollIntervalMs, turnTimeoutMs });
+    if (finished === undefined) {
+      status = 'timeout';
+      break;
+    }
+    turns.push(finished);
+    const { state } = finished;
+    status = state.status;
+    if (state.status !== 'done' || !Array.isArray(state.required_actions) || state.required_actions.length === 0) {
+      break;
+    }
+    const decisions = approvalDecisions(state.required_actions, approvalPolicy);
+    if (decisions === undefined) {
+      status = 'needs_action';
+      break;
+    }
+    if (round >= MAX_APPROVAL_ROUNDS) {
+      status = 'too_many_approvals';
+      break;
+    }
+    approvals += decisions.length;
+    pending = await client.createTurn(sessionId, { input: decisions, previous_turn_id: finished.id });
+  }
+  return { turns, approvals, status };
+}
+
+async function runOnePrompt({ client, prompt, model, temperature, run, label, pollIntervalMs, turnTimeoutMs }) {
+  let turns = [];
   let approvals = 0;
   let status;
   let errorText;
   try {
     const sessionId = await client.createSession({ model, temperature });
-    let pending = await client.createTurn(sessionId, {
+    ({ turns, approvals, status } = await driveTurns({
+      client,
+      sessionId,
       input: [{ type: 'user.message', content: prompt.prompt }],
-      previous_turn_id: 'none',
-    });
-    for (let round = 0; ; round += 1) {
-      const finished = await waitForFinish({
-        client,
-        sessionId,
-        turnId: pending.id,
-        pollIntervalMs,
-        turnTimeoutMs,
-      });
-      if (finished === undefined) {
-        status = 'timeout';
-        break;
-      }
-      turns.push(finished);
-      const { state } = finished;
-      status = state.status;
-      if (state.status !== 'done' || !Array.isArray(state.required_actions) || state.required_actions.length === 0) {
-        break;
-      }
-      const decisions = approvalDecisions(state.required_actions, prompt.approval_policy);
-      if (decisions === undefined) {
-        status = 'needs_action';
-        break;
-      }
-      if (round >= MAX_APPROVAL_ROUNDS) {
-        status = 'too_many_approvals';
-        break;
-      }
-      approvals += decisions.length;
-      pending = await client.createTurn(sessionId, { input: decisions, previous_turn_id: finished.id });
-    }
+      previousTurnId: 'none',
+      approvalPolicy: prompt.approval_policy,
+      pollIntervalMs,
+      turnTimeoutMs,
+    }));
     errorText = describeTerminalState(turns.at(-1)?.state ?? {});
   } catch (error) {
     if (isRunStopping(error)) {

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "prompts": [
+    {
+      "id": "dogs-40",
+      "prompt": "Make a space with the top 40 smartest dog breeds. For each breed give its temperament, exercise needs, and apartment friendliness, as a table.",
+      "follow_up": "Redo the formatting of that space so it reads well.",
+      "expect": { "rows": 40, "duplicate_rows": 0, "table_valid": true, "formatting_changed": true }
+    },
+    {
+      "id": "nlv-dashboard",
+      "prompt": "Make a space for my NLV visa application: the documents needed, the process step by step, and the timelines. Make it a dashboard.",
+      "follow_up": "Redo the formatting.",
+      "expect": { "completed": true, "refused_or_failed_calls": 0 }
+    },
+    {
+      "id": "apartment-dogs-10",
+      "prompt": "Create a space with top 10 apartment friendly dog breeds. I want to know intelligence, demeanor, exercise needs, weight and any other details. Put pics",
+      "expect": { "rows": 10, "duplicate_rows": 0, "pictures_min": 1 }
+    }
+  ]
+}

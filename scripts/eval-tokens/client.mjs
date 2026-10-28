@@ -138,6 +138,38 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       }
       return body.data;
     },
+    /** Every space, read page by page. The aggregate revision guards each continuation page. */
+    async listAllSpaces() {
+      const spaces = [];
+      let offset = 0;
+      let guard;
+      for (;;) {
+        const query = offset === 0 ? '' : `?offset=${String(offset)}&expected_aggregate_revision=${String(guard)}`;
+        const body = await request('GET', `/api/v1/spaces${query}`);
+        if (!isRecord(body) || !isRecord(body.data) || !Array.isArray(body.data.spaces)) {
+          throw new Error('The instance did not return its spaces. Is --instance a TrueForge server?');
+        }
+        guard = body.data.aggregate_revision;
+        spaces.push(...body.data.spaces);
+        const next = isRecord(body.pagination) ? body.pagination.next_offset : null;
+        if (typeof next !== 'number') {
+          return spaces;
+        }
+        offset = next;
+      }
+    },
+    /**
+     * Reads one space, or one older revision of it. A revision past the kept history answers 404.
+     * @param {{ id: string, revision?: number }} options
+     */
+    async getSpace({ id, revision }) {
+      const query = revision === undefined ? '' : `?revision=${encodeURIComponent(String(revision))}`;
+      const body = await request('GET', `/api/v1/spaces/${encodeURIComponent(id)}${query}`);
+      if (!isRecord(body) || !isRecord(body.data) || typeof body.data.body !== 'string') {
+        throw new Error('The instance did not return the space. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
     /**
      * @param {{ space: Record<string, string>, expected_aggregate_revision: number }} options
      * @returns {Promise<{ space: { id: string, revision: number } }>}
