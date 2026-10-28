@@ -168,8 +168,27 @@ function makeStore(): SpaceToolStore {
   };
 }
 
+/** The fingerprints the get_space outline shows, by anchor: what a model's edits name back. */
+async function outlineFingerprints(
+  call: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+  spaceName: string,
+): Promise<Map<string, string>> {
+  const read = parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: spaceName })));
+  const blocks = read['blocks'];
+  if (!Array.isArray(blocks)) {
+    throw new Error('expected a blocks list in the get_space result');
+  }
+  const fingerprints = new Map<string, string>();
+  for (const block of blocks) {
+    if (isRecord(block)) {
+      fingerprints.set(stringField(block, 'anchor'), stringField(block, 'fingerprint'));
+    }
+  }
+  return fingerprints;
+}
+
 describe('scripted run: top ten dog breeds', () => {
-  it('creates a skeleton, fills each block first try, reads it back, then replaces it with a full table first try', async () => {
+  it('creates a skeleton, fills each block first try, reads it back, then turns it into a full table first try', async () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: AUTHORITY,
@@ -205,15 +224,21 @@ describe('scripted run: top ten dog breeds', () => {
     expect(createdText).not.toContain('"id"');
     expect(createdText).not.toContain('(id:');
 
-    // Step 3: one block per edit_space call, all addressed by the exact name, each succeeding first try.
+    // Step 3: one block per edit_space call, all addressed by the exact name, each
+    // succeeding first try. The outline from the create revision supplies every
+    // block's fingerprint; each call names the revision its read showed.
+    const skeletonFingerprints = await outlineFingerprints(call, 'Dog breeds');
     for (const [index, breed] of BREEDS.entries()) {
       const revision = index + 2;
+      const anchor = `breed-${String(index + 1)}`;
       const updateResponse = await call(EDIT_SPACE_TOOL_NAME, {
         space_name: 'Dog breeds',
+        expected_revision: index + 1,
         edits: [
           {
             type: 'block',
-            anchor: `breed-${String(index + 1)}`,
+            anchor,
+            fingerprint: skeletonFingerprints.get(anchor) ?? '',
             new_content: [`## ${String(index + 1)}. ${breed}`, `- Intelligence rank: ${String(index + 1)} of 10`].join(
               '\n',
             ),
@@ -236,22 +261,29 @@ describe('scripted run: top ten dog breeds', () => {
     });
     expect(stringField(read, 'body')).not.toContain('(to fill)');
 
-    // Step 5: read the space, then replace it wholesale with a full table, first try:
-    // no refusal, no retry. There is no whole-body tool: one edit_space call replaces
-    // the whole body it just read, verbatim, with the table.
-    const tableBody = [
-      '# Dog breeds',
-      '',
-      'Top ten by working and obedience intelligence.',
-      '',
+    // Step 5: turn the filled sections into a summary table in ONE edit_space call at
+    // the revision the read showed: the first section's block becomes the table and
+    // the other nine are deleted in the same call, first try, no refusal, no retry.
+    // There is no whole-body tool and no search entry: blocks are the only way in.
+    const tableText = [
       '| Rank | Breed |',
       '| --- | --- |',
       ...BREEDS.map((breed, index) => `| ${String(index + 1)} | ${breed} |`),
     ].join('\n');
+    const filledFingerprints = await outlineFingerprints(call, 'Dog breeds');
     const replacedResponse = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
       purpose: 'Top ten dog breeds by intelligence, with other traits.',
-      edits: [{ type: 'search', search: stringField(read, 'body'), replace: tableBody }],
+      expected_revision: BREEDS.length + 1,
+      edits: BREEDS.map((_breed, index) => {
+        const anchor = `breed-${String(index + 1)}`;
+        return {
+          type: 'block',
+          anchor,
+          fingerprint: filledFingerprints.get(anchor) ?? '',
+          new_content: index === 0 ? tableText : '',
+        };
+      }),
     });
     expect(isErrorResponse(replacedResponse)).toBe(false);
     const replacedText = textOf(replacedResponse);
@@ -260,18 +292,22 @@ describe('scripted run: top ten dog breeds', () => {
     expect(replacedText).not.toContain('"id"');
     expect(replacedText).not.toContain('(id:');
 
-    // Step 6: read it back again: the table is the whole body now.
+    // Step 6: read it back again: the preamble and the one remaining marker frame the
+    // table; every filled section is gone.
     const reread = fieldObject(
       parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
       'space',
     );
     expect(numberField(reread, 'revision')).toBe(BREEDS.length + 2);
-    expect(stringField(reread, 'body')).toBe(tableBody);
+    const finalBody = stringField(reread, 'body');
+    expect(finalBody.startsWith('# Dog breeds\n\nTop ten by working and obedience intelligence.')).toBe(true);
     BREEDS.forEach((breed, index) => {
-      expect(stringField(reread, 'body')).toContain(`| ${String(index + 1)} | ${breed} |`);
+      expect(finalBody).toContain(`| ${String(index + 1)} | ${breed} |`);
     });
-    expect(stringField(reread, 'body')).not.toContain('(to fill)');
-    expect(stringField(reread, 'body')).not.toContain('<!-- @block:');
+    expect(finalBody).not.toContain('(to fill)');
+    expect(finalBody).not.toContain('Intelligence rank:');
+    expect(finalBody).toContain('<!-- @block:breed-1 -->');
+    expect(finalBody).not.toContain('@block:breed-2');
 
     // Step 7: the final reply is plain prose with no markup in it.
     const finalReply = `I made "Dog breeds" with the top ten by intelligence. The Border Collie ranks first.`;

@@ -34,6 +34,14 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'gmail_draft',
   ]),
   ...words({ doing: 'Sending an email', done: 'Sent an email', thing: 'An email' }, ['send_draft', 'gmail_send']),
+  ...words(
+    {
+      doing: 'Checking your Google connection',
+      done: 'Checked your Google connection',
+      thing: 'Your Google connection',
+    },
+    ['google_setup_status', 'google_setup_read'],
+  ),
   ...words({ doing: 'Checking your calendar', done: 'Read your calendar', thing: 'Your calendar' }, [
     'list_events',
     'get_event',
