@@ -138,6 +138,23 @@ function makeToolSet(store: SpaceToolStore) {
   return toolSet;
 }
 
+/** The fingerprint the get_space outline shows for one anchor, read the way a model reads it. */
+async function fingerprintOf(
+  toolSet: ReturnType<typeof makeToolSet>,
+  input: { spaceName: string; anchor: string },
+): Promise<string> {
+  const response = await toolSet.callTool({
+    name: GET_SPACE_TOOL_NAME,
+    arguments: { space_name: input.spaceName },
+  });
+  const parsed: { blocks?: { anchor: string; fingerprint: string }[] } = JSON.parse(resultText(response));
+  const block = (parsed.blocks ?? []).find(candidate => candidate.anchor === input.anchor);
+  if (block === undefined) {
+    throw new Error(`expected block ${input.anchor} in the get_space result for ${input.spaceName}`);
+  }
+  return block.fingerprint;
+}
+
 describe('space results lead with the name and link, not an id', () => {
   it('create_space names the new space and link first, and never an id', async () => {
     const toolSet = makeToolSet(makeMemoryStore());
@@ -161,7 +178,15 @@ describe('space results lead with the name and link, not an id', () => {
       name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Dog breeds',
-        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds\nUpdated' }],
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'block',
+            anchor: 'b1',
+            fingerprint: await fingerprintOf(toolSet, { spaceName: 'Dog breeds', anchor: 'b1' }),
+            new_content: '# Dog breeds\nUpdated',
+          },
+        ],
       },
     });
     expect(resultText(edited)).toContain('Updated space \\"Dog breeds\\" (revision 2).');
@@ -224,7 +249,15 @@ describe('spaces found by exact name', () => {
       name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Dog breeds',
-        edits: [{ type: 'block', anchor: 'auto-body', new_content: '# Dog breeds\nTop ten by intelligence.' }],
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'block',
+            anchor: 'b1',
+            fingerprint: await fingerprintOf(toolSet, { spaceName: 'Dog breeds', anchor: 'b1' }),
+            new_content: '# Dog breeds\nTop ten by intelligence.',
+          },
+        ],
       },
     });
     expect(isErrorResponse(response)).toBe(false);
@@ -242,7 +275,7 @@ describe('spaces found by exact name', () => {
     });
   });
 
-  it('an ambiguous name refuses to pick one and says to rename one in the Spaces view', async () => {
+  it('an ambiguous name refuses to pick one and says to delete one in the Spaces view', async () => {
     const store = makeMemoryStore([
       dogBreeds,
       makeRecord({ id: 'sp-other', name: 'Dog breeds', revision: 4, updated_at: '2026-10-20T00:00:00.000Z' }),
@@ -252,7 +285,7 @@ describe('spaces found by exact name', () => {
     expect(isErrorResponse(response)).toBe(true);
     const { error } = JSON.parse(resultText(response)) as { error: string };
     expect(error).toContain('More than one space is named "Dog breeds"');
-    expect(error).toContain('rename one of them in the Spaces view');
+    expect(error).toContain('delete one of them in the Spaces view');
     expect(error).not.toContain('sp-dogs');
     expect(error).not.toContain('sp-other');
   });
@@ -275,7 +308,8 @@ describe('spaces found by exact name', () => {
         arguments: {
           space_id: 'sp-dogs',
           space_name: 'Dog breeds',
-          edits: [{ type: 'search', search: 'breeds', replace: 'breeds' }],
+          expected_revision: 1,
+          edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'x' }],
         },
       },
       { name: REVERT_SPACE_TOOL_NAME, arguments: { space_id: 'sp-dogs', space_name: 'Dog breeds', revision: 1 } },
@@ -302,7 +336,15 @@ describe('spaces found by exact name', () => {
       arguments: {
         space_name: 'Dog breeds',
         new_title: 'Dog breeds, ranked',
-        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Dog breeds, ranked' }],
+        expected_revision: 1,
+        edits: [
+          {
+            type: 'block',
+            anchor: 'b1',
+            fingerprint: await fingerprintOf(toolSet, { spaceName: 'Dog breeds', anchor: 'b1' }),
+            new_content: '# Dog breeds, ranked',
+          },
+        ],
       },
     });
     expect(isErrorResponse(renamed)).toBe(false);
@@ -312,7 +354,8 @@ describe('spaces found by exact name', () => {
       arguments: {
         space_name: 'Dog breeds, ranked',
         name: 'Dogs',
-        edits: [{ type: 'search', search: 'ranked', replace: 'ranked' }],
+        expected_revision: 2,
+        edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'ranked' }],
       },
     });
     expect(isErrorResponse(refused)).toBe(true);
@@ -327,7 +370,8 @@ describe('spaces found by exact name', () => {
       arguments: {
         space_name: 'Cat breeds',
         new_title: 'Dog breeds',
-        edits: [{ type: 'search', search: '# Dog breeds', replace: '# Cat breeds' }],
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: '# Cat breeds' }],
       },
     });
     expect(isErrorResponse(response)).toBe(true);

@@ -22,7 +22,11 @@ import {
   type ISpaceStore,
   type SpaceRecord,
 } from '../../../src/db/spaceStore';
-import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { blockFingerprint, spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+
+/** The default record body: one table, so one block (b1) whose content is the whole body. */
+const TABLE_BODY = '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |';
+const TABLE_BODY_EDITED = '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 240000 |';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -326,7 +330,9 @@ describe('space capability', () => {
       arguments: {
         space_name: 'Spain houses',
         new_title: 'Spain houses (shortlist)',
-        edits: [{ type: 'search', search: '250000', replace: '240000' }],
+        edits: [
+          { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+        ],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -450,7 +456,9 @@ describe('space capability', () => {
       name: EDIT_SPACE_TOOL_NAME,
       arguments: {
         space_name: 'Spain houses',
-        edits: [{ type: 'search', search: '250000', replace: '240000' }],
+        edits: [
+          { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+        ],
         expected_revision: 1,
         expected_aggregate_revision: 1,
       },
@@ -593,6 +601,14 @@ describe('space capability', () => {
         created_at: '2026-09-13T00:00:00.000Z',
         updated_at: '2026-09-13T00:00:00.000Z',
       },
+      blocks: [
+        {
+          anchor: 'b1',
+          fingerprint: blockFingerprint(TABLE_BODY),
+          preview: '| Address | Price | | --- | --- | | Calle Mayor 1 | 250000 |',
+          occurrences: 1,
+        },
+      ],
       aggregate_revision: 4,
     });
   });
@@ -627,7 +643,7 @@ describe('space capability', () => {
     expect(createSpace).toHaveBeenCalledWith(expect.objectContaining({ expected_aggregate_revision: 2 }));
   });
 
-  it('edit_space omits both revisions: the host reads the current space and aggregate revisions', async () => {
+  it('edit_space refuses a call without expected_revision, naming the field: entries address one named revision', async () => {
     const updateSpace = jest
       .fn()
       .mockResolvedValue({ record: makeSpaceRecord({ revision: 2 }), aggregate_revision: 3 });
@@ -640,15 +656,20 @@ describe('space capability', () => {
     });
     const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
 
-    await callTool(store, EDIT_SPACE_TOOL_NAME, {
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'search', search: '250000', replace: '240000' }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+      ],
     });
 
-    expect(getSpace).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'user-a', space_id: 'space-1' });
-    expect(updateSpace).toHaveBeenCalledWith(
-      expect.objectContaining({ expected_revision: 1, expected_aggregate_revision: 2 }),
-    );
+    if (!('result' in response)) {
+      throw new Error('expected space tool result');
+    }
+    expect(response.result.isError).toBe(true);
+    expect(resultText(response)).toContain('Invalid space call');
+    expect(resultText(response)).toContain('expected_revision');
+    expect(updateSpace).not.toHaveBeenCalled();
   });
 
   it('a supplied stale aggregate revision returns the current aggregate_revision in the error', async () => {
@@ -692,7 +713,9 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'search', search: '250000', replace: '240000' }],
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+      ],
       expected_revision: 1,
       expected_aggregate_revision: 1,
     });
@@ -714,7 +737,8 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Missing',
-      edits: [{ type: 'search', search: 'a', replace: 'b' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'b' }],
     });
 
     if (!('result' in response)) {
@@ -783,6 +807,16 @@ describe('space capability', () => {
         created_at: '2026-09-13T00:00:00.000Z',
         updated_at: '2026-09-13T00:00:00.000Z',
       },
+      // The outline rides along without the body: anchors and fingerprints are what an
+      // edit names, and the default record is one table, so one block.
+      blocks: [
+        {
+          anchor: 'b1',
+          fingerprint: blockFingerprint(TABLE_BODY),
+          preview: '| Address | Price | | --- | --- | | Calle Mayor 1 | 250000 |',
+          occurrences: 1,
+        },
+      ],
       aggregate_revision: 4,
     });
   });
@@ -909,7 +943,8 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'block', anchor: 'auto-body', new_content: 'a' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint('x'.repeat(1000)), new_content: 'a' }],
     });
 
     if (!('result' in response)) {
@@ -935,7 +970,8 @@ describe('space capability', () => {
 
     const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: 'Spain houses',
-      edits: [{ type: 'block', anchor: 'auto-body', new_content: 'a' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: blockFingerprint('x'.repeat(1000)), new_content: 'a' }],
       confirm_shrink: true,
     });
 
@@ -977,7 +1013,7 @@ describe('space tool model-facing schemas', () => {
     [LIST_SPACES_TOOL_NAME, []],
     [GET_SPACE_TOOL_NAME, ['space_name']],
     [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [EDIT_SPACE_TOOL_NAME, ['edits', 'space_name']],
+    [EDIT_SPACE_TOOL_NAME, ['edits', 'expected_revision', 'space_name']],
     [REVERT_SPACE_TOOL_NAME, ['revision', 'space_name']],
     [LIST_BLOCKS_TOOL_NAME, ['space_name']],
   ])('%s keeps the required fields the model must send', async (name, required) => {

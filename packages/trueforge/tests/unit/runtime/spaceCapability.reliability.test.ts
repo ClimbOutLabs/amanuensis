@@ -38,7 +38,7 @@ import {
   type SpaceRecord,
   type UpdateSpaceInput,
 } from '../../../src/db/spaceStore';
-import { AUTO_BLOCK_ANCHOR, spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -203,6 +203,7 @@ interface SpaceWireSpace {
 
 interface SpaceWireBlock {
   anchor: string;
+  fingerprint: string;
   preview: string;
   occurrences: number;
 }
@@ -356,10 +357,12 @@ async function readBody(
 async function failedEdits(
   callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
   spaceName: string,
+  revision = 1,
 ): Promise<SpaceWireResult> {
   const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
     space_name: spaceName,
-    edits: [{ type: 'search', search: 'this text is nowhere in the body', replace: 'x' }],
+    expected_revision: revision,
+    edits: [{ type: 'block', anchor: 'no-such-block', fingerprint: '00000000', new_content: 'x' }],
   });
   expect(isErrorResponse(failed)).toBe(true);
   const parsed = resultJson(failed);
@@ -367,23 +370,35 @@ async function failedEdits(
   return parsed;
 }
 
+/** The fingerprint list_blocks shows for one anchor, read the way a model reads it. */
+async function fingerprintOf(
+  callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+  input: { spaceName: string; anchor: string },
+): Promise<string> {
+  const blocks = expectBlocks(await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: input.spaceName }));
+  const block = blocks.find(candidate => candidate.anchor === input.anchor);
+  if (block === undefined) {
+    throw new Error(`expected block ${input.anchor} in the list_blocks result for ${input.spaceName}`);
+  }
+  return block.fingerprint;
+}
+
 describe('Phase 1: consecutive-failure circuit breaker', () => {
-  it('the miss error steers to re-reading and re-applying in parts, never to a full-body resend', async () => {
+  it('the unknown-anchor error steers to the valid anchors and a fresh read, never to reproducing text', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
 
     const parsed = await failedEdits(callTool, spaceName);
-    expect(parsed.error).toContain('Do not retry this search');
-    expect(parsed.error).toContain('Re-read the space with get_space');
+    expect(parsed.error).toContain('Retry edit_space with one of the valid anchors');
     expect(parsed.error).toContain('make the change with edit_space in parts');
+    expect(parsed.error).not.toContain('search');
     expect(parsed.error).not.toContain('full updated body');
-    expect(parsed.error).not.toContain('copy the search text verbatim');
-    expect(parsed.error).not.toContain('Re-read the body with get_space and copy');
   });
 
   it('trips after 3 consecutive failures; the 4th delta call gets the terminal lock error', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
+    const boardFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' });
 
     await failedEdits(callTool, spaceName);
     await failedEdits(callTool, spaceName);
@@ -392,7 +407,15 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     // Delta mode is now locked: even a would-be-good edit is refused.
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: '\u20ac1,646.91', replace: '\u20ac1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: boardFingerprint,
+          new_content: PLAIN_BOARD.replace('\u20ac1,646.91', '\u20ac1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(locked)).toBe(true);
     const parsed = resultJson(locked);
@@ -401,13 +424,14 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     expect(parsed.error).toContain('keeps the body exactly');
     expect(parsed.error).not.toContain('Send the full updated body');
 
-    // edit_space block edits are delta mode too: locked as well.
-    const lockedBlocks = await callTool(EDIT_SPACE_TOOL_NAME, {
+    // An insert entry is delta mode too: locked as well.
+    const lockedInsert = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: AUTO_BLOCK_ANCHOR, new_content: 'x' }],
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b1', fingerprint: boardFingerprint, new_content: 'x' }],
     });
-    expect(isErrorResponse(lockedBlocks)).toBe(true);
-    expect(resultJson(lockedBlocks).error).toContain('locked');
+    expect(isErrorResponse(lockedInsert)).toBe(true);
+    expect(resultJson(lockedInsert).error).toContain('locked');
 
     // The refused calls persisted nothing.
     expect(await readBody(callTool, spaceName)).toBe(PLAIN_BOARD);
@@ -422,16 +446,34 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     // A successful delta resets the count.
     const good = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: '\u20ac1,646.91', replace: '\u20ac1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' }),
+          new_content: PLAIN_BOARD.replace('\u20ac1,646.91', '\u20ac1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(good)).toBe(false);
+    // The fresh fingerprint for the changed board, chained from the edit's own result.
+    const freshFingerprint = (resultJson(good).blocks ?? [])[0]?.fingerprint ?? '';
 
     // Two more failures are not enough to trip the breaker.
-    await failedEdits(callTool, spaceName);
-    await failedEdits(callTool, spaceName);
+    await failedEdits(callTool, spaceName, 2);
+    await failedEdits(callTool, spaceName, 2);
     const stillOpen = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: '\u20ac1,590.00', replace: '\u20ac1,500.00' }],
+      expected_revision: 2,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: freshFingerprint,
+          new_content: PLAIN_BOARD.replace('\u20ac1,646.91', '\u20ac1,500.00'),
+        },
+      ],
     });
     expect(isErrorResponse(stillOpen)).toBe(false);
     expect(await readBody(callTool, spaceName)).toContain('\u20ac1,500.00');
@@ -440,6 +482,7 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
   it('no other write unlocks delta mode: creating another space leaves the lock in place', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
+    const boardFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' });
 
     await failedEdits(callTool, spaceName);
     await failedEdits(callTool, spaceName);
@@ -447,7 +490,8 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     // Locked: sanity check.
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: 'a', replace: 'b' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: boardFingerprint, new_content: 'b' }],
     });
     expect(resultJson(locked).error).toContain('locked');
 
@@ -462,7 +506,8 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
 
     const stillLocked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: 'Extra line.', replace: 'Another line.' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: boardFingerprint, new_content: 'Another line.' }],
     });
     expect(isErrorResponse(stillLocked)).toBe(true);
     expect(resultJson(stillLocked).error).toContain('locked');
@@ -471,6 +516,7 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
   it('revert_space unlocks delta mode', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
+    const boardFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' });
 
     await failedEdits(callTool, spaceName);
     await failedEdits(callTool, spaceName);
@@ -479,9 +525,18 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     const reverted = await callTool(REVERT_SPACE_TOOL_NAME, { space_name: spaceName, revision: 1 });
     expect(isErrorResponse(reverted)).toBe(false);
 
+    // The revert made revision 2; the body (and so the fingerprint) is unchanged.
     const editsAgain = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: '\u20ac1,646.91', replace: '\u20ac1,590.00' }],
+      expected_revision: 2,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: boardFingerprint,
+          new_content: PLAIN_BOARD.replace('\u20ac1,646.91', '\u20ac1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(editsAgain)).toBe(false);
   });
@@ -499,7 +554,15 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
     const spaceName2 = await createPlainBoard(second.callTool);
     const good = await second.callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName2,
-      edits: [{ type: 'search', search: '\u20ac1,646.91', replace: '\u20ac1,590.00' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(second.callTool, { spaceName: spaceName2, anchor: 'b1' }),
+          new_content: PLAIN_BOARD.replace('\u20ac1,646.91', '\u20ac1,590.00'),
+        },
+      ],
     });
     expect(isErrorResponse(good)).toBe(false);
   });
@@ -576,7 +639,15 @@ describe('Phase 2: semantic block anchors', () => {
     const newStats = '<div class="grid-2"><div class="card"><h3>Outbound</h3><p>MOVED to Sep 23</p></div></div>';
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'stats', new_content: newStats }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'stats',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'stats' }),
+          new_content: newStats,
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const parsed = resultJson(updated);
@@ -602,7 +673,8 @@ describe('Phase 2: semantic block anchors', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'pricing', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'pricing', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     const parsed = resultJson(failed);
@@ -624,7 +696,8 @@ describe('Phase 2: semantic block anchors', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'dup', new_content: '<p>winner</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'dup', fingerprint: '00000000', new_content: '<p>winner</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     const parsed = resultJson(failed);
@@ -633,33 +706,46 @@ describe('Phase 2: semantic block anchors', () => {
 
     // list_blocks reports the duplication honestly.
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
-    expect(expectBlocks(listed)).toEqual([{ anchor: 'dup', preview: '<p>first</p>', occurrences: 2 }]);
+    expect(expectBlocks(listed)).toEqual([
+      expect.objectContaining({ anchor: 'dup', preview: '<p>first</p>', occurrences: 2 }),
+    ]);
   });
 
-  it('an anchorless space gets the stable auto-body block', async () => {
+  it('a space with no markers gets structural blocks, stable for the body they segment', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
 
     const first = expectBlocks(await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName }));
     expect(first).toHaveLength(1);
-    expect(first[0]?.anchor).toBe(AUTO_BLOCK_ANCHOR);
+    expect(first[0]?.anchor).toBe('b1');
     expect(first[0]?.occurrences).toBe(1);
+    expect(first[0]?.fingerprint).toMatch(/^[0-9a-f]{8}$/);
 
-    // The id is stable across edits and revisions: no persistence needed.
+    // The board is one run of lines with no blanks, so it stays one block, b1, after
+    // the edit too: anchors are recomputed from the body each revision.
     await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: AUTO_BLOCK_ANCHOR, new_content: `${PLAIN_BOARD}\n<p>More.</p>` }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: first[0]?.fingerprint ?? '',
+          new_content: `${PLAIN_BOARD}\n<p>More.</p>`,
+        },
+      ],
     });
     const second = expectBlocks(await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName }));
-    expect(second[0]?.anchor).toBe(AUTO_BLOCK_ANCHOR);
+    expect(second[0]?.anchor).toBe('b1');
 
-    // A non-auto anchor on an anchorless space fails closed.
+    // An unknown anchor on the space fails closed and names the real one.
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'nope', new_content: 'x' }],
+      expected_revision: 2,
+      edits: [{ type: 'block', anchor: 'nope', fingerprint: '00000000', new_content: 'x' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
-    expect(resultJson(failed).error).toContain(`"${AUTO_BLOCK_ANCHOR}"`);
+    expect(resultJson(failed).error).toContain('"b1"');
   });
 
   it('empty new_content deletes the block, marker included', async () => {
@@ -668,7 +754,15 @@ describe('Phase 2: semantic block anchors', () => {
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'notes',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' }),
+          new_content: '',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     expect(resultJson(updated).block_results).toEqual([{ anchor: 'notes', new_length: 0, deleted: true }]);
@@ -689,17 +783,27 @@ describe('Phase 2: semantic block anchors', () => {
     const split = '<p>Before split.</p><!-- @block:stats-extra --><p>After split.</p>';
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'stats', new_content: split }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'stats',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'stats' }),
+          new_content: split,
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
 
     const blocks = expectBlocks(await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName }));
     expect(blocks.map(b => b.anchor)).toEqual(['header', 'stats', 'stats-extra', 'table', 'notes']);
+    const extraFingerprint = blocks.find(b => b.anchor === 'stats-extra')?.fingerprint ?? '';
 
     // The new anchor is immediately addressable.
     const followUp = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'stats-extra', new_content: '<p>Edited.</p>' }],
+      expected_revision: 2,
+      edits: [{ type: 'block', anchor: 'stats-extra', fingerprint: extraFingerprint, new_content: '<p>Edited.</p>' }],
     });
     expect(isErrorResponse(followUp)).toBe(false);
     expect(await readBody(callTool, spaceName)).toContain('<p>Edited.</p>');
@@ -709,14 +813,26 @@ describe('Phase 2: semantic block anchors', () => {
     const { callTool } = makeHarness();
     const spaceName = await createAnchoredBoard(callTool);
 
-    const badAnchor = { type: 'block', anchor: 'nope', new_content: 'x' };
+    const badAnchor = { type: 'block', anchor: 'nope', fingerprint: '00000000', new_content: 'x' };
     for (let i = 0; i < 3; i += 1) {
-      const failed = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: spaceName, edits: [badAnchor] });
+      const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: spaceName,
+        expected_revision: 1,
+        edits: [badAnchor],
+      });
       expect(isErrorResponse(failed)).toBe(true);
     }
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'notes',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' }),
+          new_content: '<p>x</p>',
+        },
+      ],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -728,20 +844,36 @@ describe('Phase 2: semantic block anchors', () => {
 
     const wiped = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: AUTO_BLOCK_ANCHOR, new_content: '' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' }),
+          new_content: '',
+        },
+      ],
     });
     expect(isErrorResponse(wiped)).toBe(true);
     expect(resultJson(wiped).error).toContain('confirm_shrink');
     expect(await readBody(callTool, spaceName)).toBe(PLAIN_BOARD);
   });
 
-  it('the shrink guard still refuses a tiny whole-body replacement edit', async () => {
+  it('the shrink guard still refuses a tiny replacement of the only block', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createPlainBoard(callTool);
 
     const wiped = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: PLAIN_BOARD, replace: '<p>oops</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' }),
+          new_content: '<p>oops</p>',
+        },
+      ],
     });
     expect(isErrorResponse(wiped)).toBe(true);
     expect(resultJson(wiped).error).toContain('confirm_shrink');
@@ -754,8 +886,9 @@ describe('Phase 2: semantic block anchors', () => {
 
     const editRejected = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
+      expected_revision: 1,
       body: ANCHORED_BOARD,
-      edits: [{ type: 'block', anchor: 'notes', new_content: 'x' }],
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: '00000000', new_content: 'x' }],
     });
     const editParsed = resultJson(editRejected);
     expect(isErrorResponse(editRejected)).toBe(true);
@@ -773,21 +906,32 @@ describe('Phase 2: semantic block anchors', () => {
     expect(resultText(retiredCall)).toContain('Unknown tool: update_space');
   });
 
-  it('edit_space accepts search and block entries together in one list, applied in order', async () => {
+  it('edit_space accepts block and insert entries together in one list, against the one revision', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createAnchoredBoard(callTool);
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
+      expected_revision: 1,
       edits: [
-        { type: 'search', search: 'Sep 22', replace: 'Sep 23' },
-        { type: 'block', anchor: 'notes', new_content: '<p>Updated notes.</p>' },
+        {
+          type: 'block',
+          anchor: 'notes',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' }),
+          new_content: '<p>Updated notes.</p>',
+        },
+        {
+          type: 'insert',
+          after: 'table',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'table' }),
+          new_content: '<p>Inserted.</p>',
+        },
       ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const body = await readBody(callTool, spaceName);
-    expect(body).toContain('Sep 23');
     expect(body).toContain('Updated notes.');
+    expect(body).toContain('Inserted.');
   });
 
   it('a reverted block edit restores the previous body', async () => {
@@ -796,7 +940,15 @@ describe('Phase 2: semantic block anchors', () => {
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>wrong notes</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'notes',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' }),
+          new_content: '<p>wrong notes</p>',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     expect(await readBody(callTool, spaceName)).toContain('wrong notes');
@@ -814,7 +966,8 @@ async function failedBlockEdits(
 ): Promise<SpaceWireResult> {
   const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
     space_name: spaceName,
-    edits: [{ type: 'block', anchor: 'no-such-block', new_content: '<p>x</p>' }],
+    expected_revision: 1,
+    edits: [{ type: 'block', anchor: 'no-such-block', fingerprint: '00000000', new_content: '<p>x</p>' }],
   });
   expect(isErrorResponse(failed)).toBe(true);
   return resultJson(failed);
@@ -847,7 +1000,8 @@ describe('fix-pass: reliability hardening', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'prices', new_content: '<p>hacked</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'prices', fingerprint: '00000000', new_content: '<p>hacked</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     expect(resultJson(failed).error).toContain('Unknown block anchor "prices"');
@@ -856,7 +1010,15 @@ describe('fix-pass: reliability hardening', () => {
     // destruction of everything after a documentation marker.
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'real', new_content: '<p>Edited.</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'real',
+          fingerprint: expectBlocks(listed).find(b => b.anchor === 'real')?.fingerprint ?? '',
+          new_content: '<p>Edited.</p>',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     const finalBody = await readBody(callTool, spaceName);
@@ -877,14 +1039,15 @@ describe('fix-pass: reliability hardening', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'fake', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'fake', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     expect(resultJson(failed).error).toContain('Unknown block anchor "fake"');
     expect(await readBody(callTool, spaceName)).toBe(body);
   });
 
-  it('list_blocks surfaces the preamble; it is not anchor-addressable but a search edit changes it', async () => {
+  it('list_blocks surfaces the preamble; it is not anchor-addressable and block edits leave it untouched', async () => {
     const { callTool } = makeHarness();
     const preambleText = '<p>Intro paragraph before any marker.</p>\n';
     const body = `${preambleText}<!-- @block:main -->\n<p>Body</p>`;
@@ -903,21 +1066,29 @@ describe('fix-pass: reliability hardening', () => {
     // No anchor addresses the preamble — not even a "preamble" anchor.
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'preamble', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'preamble', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     expect(resultJson(failed).error).toContain('Unknown block anchor "preamble"');
 
-    // The journey is complete anyway: a search edit copied from get_space changes the
-    // preamble in place, which works whatever the body's size.
+    // A block edit touches only its block: the preamble survives byte-identical. It is
+    // model-authored fixed framing; changing it means rebuilding the space's head,
+    // which is deliberate, and the instruction says to keep it short and stable.
     const edited = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: '<p>Intro paragraph before any marker.</p>', replace: '<p>New intro.</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'main',
+          fingerprint: expectBlocks(listed).find(b => b.anchor === 'main')?.fingerprint ?? '',
+          new_content: '<p>Body, updated.</p>',
+        },
+      ],
     });
     expect(isErrorResponse(edited)).toBe(false);
-    const finalBody = await readBody(callTool, spaceName);
-    expect(finalBody).toContain('<p>New intro.</p>');
-    expect(finalBody).not.toContain('Intro paragraph before any marker.');
+    expect(await readBody(callTool, spaceName)).toBe(`${preambleText}<!-- @block:main -->\n<p>Body, updated.</p>`);
   });
 
   it('an unclosed marker with a near-limit whitespace run parses in linear time (no ReDoS)', async () => {
@@ -961,7 +1132,15 @@ describe('fix-pass: reliability hardening', () => {
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'my block', new_content: '<p>y</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'my block',
+          fingerprint: expectBlocks(listed).find(b => b.anchor === 'my block')?.fingerprint ?? '',
+          new_content: '<p>y</p>',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     expect(await readBody(callTool, spaceName)).toBe('<!-- @block:my block -->\n<p>y</p>');
@@ -986,16 +1165,24 @@ describe('fix-pass: reliability hardening', () => {
     });
     const spaceName = BOARD_META.name;
 
-    const tooLong = { type: 'search', search: 'TAIL', replace: `TAIL${'y'.repeat(3_900)}` };
+    // The seeded body is one run of lines, so one block, b1. An insert after it stays
+    // under the per-write cap but computes a body over the stored limit.
+    const wholeBodyFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'b1' });
+    const tooLong = { type: 'insert', after: 'b1', fingerprint: wholeBodyFingerprint, new_content: 'y'.repeat(3_900) };
     for (let i = 0; i < 3; i += 1) {
-      const failed = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: spaceName, edits: [tooLong] });
+      const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: spaceName,
+        expected_revision: 1,
+        edits: [tooLong],
+      });
       expect(isErrorResponse(failed)).toBe(true);
       expect(resultJson(failed).error).toContain('exceeds the');
     }
     // Three over-limit deltas trip the lock like any other model-side delta failure.
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'auto-body', new_content: '<p>small</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: wholeBodyFingerprint, new_content: '<p>small</p>' }],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -1003,33 +1190,80 @@ describe('fix-pass: reliability hardening', () => {
     expect(await readBody(callTool, spaceName)).toBe(seededBody);
   });
 
-  it('a revision conflict neither feeds nor resets the breaker', async () => {
+  it('a stale expected_revision feeds the breaker, as the brief settled: a named revision is the copy the model read', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createAnchoredBoard(callTool);
+    const notesFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' });
 
     // Two genuine delta failures: counter at 2, not locked.
     await failedBlockEdits(callTool, spaceName);
     await failedBlockEdits(callTool, spaceName);
 
-    // A delta that applies cleanly but loses the revision race: the store throws, and the
-    // breaker must not move — a conflict is concurrency, not a divergent mental copy.
-    const conflicted = await callTool(EDIT_SPACE_TOOL_NAME, {
+    // A call naming a revision the space has moved past: refused with the current one,
+    // and it counts as the third failure: the model's copy diverged, which is exactly
+    // what the breaker exists to stop a loop on.
+    const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
       expected_revision: 999,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>racy</p>' }],
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>racy</p>' }],
+    });
+    expect(isErrorResponse(stale)).toBe(true);
+    expect(resultJson(stale).error).toContain('Stale space revision');
+    expect(await readBody(callTool, spaceName)).toBe(ANCHORED_BOARD);
+
+    const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: spaceName,
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>x</p>' }],
+    });
+    expect(isErrorResponse(locked)).toBe(true);
+    expect(resultJson(locked).error).toContain('locked');
+  });
+
+  it('a store-level revision race neither feeds nor resets the breaker', async () => {
+    const { store, callTool } = makeHarness();
+    const spaceName = await createAnchoredBoard(callTool);
+    const notesFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' });
+
+    // Two genuine delta failures: counter at 2, not locked.
+    await failedBlockEdits(callTool, spaceName);
+    await failedBlockEdits(callTool, spaceName);
+
+    // Another writer lands between this edit's read at the CURRENT revision and its
+    // fenced update: the store throws the conflict, and the breaker must not move,
+    // that race is concurrency, not a divergent mental copy (unlike the stale named
+    // revision above, which the model itself sent).
+    const originalUpdate = store.updateSpace.bind(store);
+    let armed = true;
+    store.updateSpace = async input => {
+      if (armed) {
+        armed = false;
+        throw new SpaceRevisionConflictError({
+          id: input.space_id,
+          expected_revision: input.expected_revision,
+          actual_revision: 999,
+        });
+      }
+      return originalUpdate(input);
+    };
+    const conflicted = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: spaceName,
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>racy</p>' }],
     });
     expect(isErrorResponse(conflicted)).toBe(true);
     expect(resultJson(conflicted).error).toContain('Stale space revision');
     expect(await readBody(callTool, spaceName)).toBe(ANCHORED_BOARD);
 
-    // If the conflict had fed the breaker, this would already be refused as locked; if it
-    // had reset the breaker, the call after this would not lock. Exactly one more genuine
-    // failure trips the lock, proving the counter sat untouched at 2 through the conflict.
+    // If the race had fed the breaker, this failure would be refused as locked; if it
+    // had reset the breaker, the call after it would not lock. Exactly one more genuine
+    // failure trips the lock, proving the counter sat untouched at 2 through the race.
     const third = await failedBlockEdits(callTool, spaceName);
     expect(third.error).not.toContain('locked');
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -1060,7 +1294,8 @@ describe('fix-pass: reliability hardening', () => {
     // aggregate resolve and no body read before the refusal.
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -1083,14 +1318,23 @@ describe('fix-pass: reliability hardening', () => {
     // Tenant A's space is locked…
     const lockedA = await harnessA.callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceA,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(resultJson(lockedA).error).toContain('locked');
 
     // …but tenant B's space in the same session is unaffected.
     const okB = await harnessB.callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceB,
-      edits: [{ type: 'block', anchor: 'notes', new_content: '<p>tenant B edit</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'notes',
+          fingerprint: await fingerprintOf(harnessB.callTool, { spaceName: spaceB, anchor: 'notes' }),
+          new_content: '<p>tenant B edit</p>',
+        },
+      ],
     });
     expect(isErrorResponse(okB)).toBe(false);
     expect(await readBody(harnessB.callTool, spaceB)).toContain('tenant B edit');
@@ -1105,7 +1349,8 @@ describe('fix-pass: reliability hardening', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'beta', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'beta', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     const error = resultJson(failed).error ?? '';
@@ -1121,7 +1366,8 @@ describe('fix-pass: reliability hardening', () => {
 
     const rejected = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: `a${'x'.repeat(300)}`, new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: `a${'x'.repeat(300)}`, fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(rejected)).toBe(true);
     expect(resultJson(rejected).error).toBe(
@@ -1141,7 +1387,8 @@ describe('fix-pass: reliability hardening', () => {
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'ghost', new_content: '<p>x</p>' }],
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'ghost', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
     expect(resultJson(failed).error).toContain('Unknown block anchor "ghost"');
@@ -1171,7 +1418,15 @@ describe('fix-pass: documentation masking edge cases', () => {
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'real', new_content: '<p>edited</p>' }],
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'real',
+          fingerprint: expectBlocks(listed).find(b => b.anchor === 'real')?.fingerprint ?? '',
+          new_content: '<p>edited</p>',
+        },
+      ],
     });
     expect(isErrorResponse(updated)).toBe(false);
     expect(await readBody(callTool, spaceName)).toContain('<!-- @block:real -->\n<p>edited</p>');
@@ -1238,10 +1493,17 @@ describe('fix-pass: large-body end-to-end journey', () => {
 
     // Surgical block edit: every byte outside the edited block is preserved.
     const before = await readBody(callTool, spaceName);
+    const sec5Fingerprint = parsed.find(b => b.anchor === 'sec-5')?.fingerprint ?? '';
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
+      expected_revision: 1,
       edits: [
-        { type: 'block', anchor: 'sec-5', new_content: '<div class="card"><h3>Section 5</h3><p>UPDATED</p></div>' },
+        {
+          type: 'block',
+          anchor: 'sec-5',
+          fingerprint: sec5Fingerprint,
+          new_content: '<div class="card"><h3>Section 5</h3><p>UPDATED</p></div>',
+        },
       ],
     });
     expect(isErrorResponse(updated)).toBe(false);
@@ -1260,7 +1522,8 @@ describe('fix-pass: large-body end-to-end journey', () => {
     const failing = () =>
       callTool(EDIT_SPACE_TOOL_NAME, {
         space_name: spaceName,
-        edits: [{ type: 'search', search: 'zz-no-such-text', replace: 'x' }],
+        expected_revision: 2,
+        edits: [{ type: 'block', anchor: 'no-such-block', fingerprint: '00000000', new_content: 'x' }],
       });
     expect(isErrorResponse(await failing())).toBe(true);
     expect(isErrorResponse(await failing())).toBe(true);
@@ -1278,7 +1541,8 @@ describe('fix-pass: large-body end-to-end journey', () => {
     };
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'search', search: 'zz-no-such-text', replace: 'x' }],
+      expected_revision: 2,
+      edits: [{ type: 'block', anchor: 'no-such-block', fingerprint: '00000000', new_content: 'x' }],
     });
     expect(isErrorResponse(locked)).toBe(true);
     expect(resultJson(locked).error).toContain('locked');
@@ -1297,10 +1561,19 @@ describe('fix-pass: large-body end-to-end journey', () => {
     expect(await readBody(callTool, spaceName)).toBe(bodyBeforeRecovery);
     expect(sha256(await readBody(callTool, spaceName))).toBe(sha256(bodyBeforeRecovery));
 
-    // Unlocked: a block edit works again, on the whole board, nothing lost.
+    // Unlocked: a block edit works again, on the whole board, nothing lost. The revert
+    // made revision 3; sec-5's fingerprint is read fresh from the restored outline.
     const again = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
-      edits: [{ type: 'block', anchor: 'sec-5', new_content: '<p>again</p>' }],
+      expected_revision: 3,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'sec-5',
+          fingerprint: await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'sec-5' }),
+          new_content: '<p>again</p>',
+        },
+      ],
     });
     expect(isErrorResponse(again)).toBe(false);
     const recovered = await readBody(callTool, spaceName);

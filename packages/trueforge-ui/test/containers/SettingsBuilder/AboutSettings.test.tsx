@@ -13,10 +13,6 @@ vi.mock('@/server/ServerContext.js', () => ({
   useServerCapabilities: () => capabilitiesMock.current,
 }));
 
-vi.mock('@/components/PersonalizationContext.js', () => ({
-  useAssistantDisplayName: () => 'Test Assistant',
-}));
-
 const FULL_REF = '2b0c78362b09f5e2388fcfed7c95d63f4228c9cb';
 
 describe('AboutSettings', () => {
@@ -26,7 +22,7 @@ describe('AboutSettings', () => {
     render(<AboutSettings />);
 
     expect(screen.getByRole('heading', { name: 'About' })).toBeInTheDocument();
-    expect(screen.getByText('The version of Test Assistant running on this computer.')).toBeInTheDocument();
+    expect(screen.queryByText(/running on this computer/)).not.toBeInTheDocument();
     expect(screen.getByText('Version')).toBeInTheDocument();
     expect(screen.getByText('0.2.0-rc.8')).toBeInTheDocument();
     expect(screen.getByText('Build')).toBeInTheDocument();

@@ -10,7 +10,7 @@
  * small semaphore so overlapping turn drains cannot stampede the model.
  */
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import { VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import { ModelOutputRepetitionError, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
@@ -24,8 +24,9 @@ import { localDay } from './localDay';
 
 /**
  * Bounds the model calls made through one summarization client, so a slow model cannot hold
- * up the drain. A timed-out attempt is retried once through a fresh client with the same
- * bound, so the worst case is two of these in a row and no more.
+ * up the drain. An attempt that times out, or that the repetition guard stops, is retried
+ * once through a fresh client with the same bound, so the worst case is two of these in a
+ * row and no more.
  */
 const SUMMARIZE_TIMEOUT_MS = 60_000;
 
@@ -102,6 +103,11 @@ export type SummaryFallbackReason =
 /** A summarization call that ran out of its time budget, as surfaced by the LLM client. */
 function isTimeoutError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'TimeoutError' || /timed? ?out/i.test(error.message));
+}
+
+/** A summarization call the repetition guard stopped, because the model's reasoning stopped making progress. */
+function isRepetitionError(error: unknown): boolean {
+  return error instanceof ModelOutputRepetitionError;
 }
 
 /** Max concurrent summarization LLM calls across all turns/sessions. Bounds the
@@ -516,15 +522,22 @@ export async function summarizeTurnContent(params: {
       try {
         return await runAttempt(llm, messages);
       } catch (error) {
-        if (!isTimeoutError(error)) {
+        if (!isTimeoutError(error) && !isRepetitionError(error)) {
           throw error;
         }
-        // A timeout gets one retry, as a cut-off reply does: the model may only have been
-        // crowded out by other turns that have since finished. The timed-out client cannot
-        // serve the retry, because its time budget is spent and its abort signal has
-        // fired, so the retry resolves a fresh client. It asks for the same output as the
-        // first attempt: a longer reply would take more time, not arrive any likelier.
-        logger.debug('Memory summarization timed out; retrying once');
+        // A timeout or a repetition stop gets one retry, as a cut-off reply does. Either
+        // failure sits in the attempt, not in the request: the model may only have been
+        // crowded out by other turns that have since finished, or its reasoning may have
+        // looped this once. The retry resolves a fresh client, because the timed-out
+        // client cannot serve it (its time budget is spent and its abort signal has
+        // fired), and one shape for both keeps the retry honest. It asks for the same
+        // output as the first attempt: a longer reply would take more time, not arrive
+        // any likelier.
+        logger.debug(
+          isTimeoutError(error)
+            ? 'Memory summarization timed out; retrying once'
+            : 'Memory summarization stopped on repeated reasoning; retrying once',
+        );
         let retryLlm: ILLM;
         try {
           retryLlm = await resolveLlm(summarizationModelFqn);

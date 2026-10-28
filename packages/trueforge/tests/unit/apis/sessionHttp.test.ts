@@ -212,6 +212,16 @@ describe('sessions HTTP agent binding', () => {
     expect(listJson.data.some(row => row.id === json.data.id)).toBe(true);
   });
 
+  it('refuses a list page size past the API limit and serves the largest allowed one', async () => {
+    // The reminders poller's exact ask: 50 per page, newest first. The API
+    // caps a page at 25, so this is refused before any store work.
+    const refused = await app.request('/?limit=50&order=desc');
+    expect(refused.status).toBe(400);
+
+    const served = await app.request('/?limit=25&order=desc');
+    expect(served.status).toBe(200);
+  });
+
   it('returns caller-scoped metrics for a named agent', async () => {
     const agent = await agentStore.createAgent({
       host_managed: false,
