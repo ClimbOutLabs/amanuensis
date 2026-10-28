@@ -4,17 +4,19 @@ import { maskDocumentationRegions } from './spaceDocumentationMask';
 
 const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
 const MARKUP = /[*_`]/g;
-const RANK_CELL = /^\s*#?\d+\.?\s*$/;
+/** A cell that only numbers the row, such as `3`, `3.` or `#3`. */
+export const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
 /** A row is any line that starts with a pipe; the closing pipe is optional. */
 export function isTableRow(line: string): boolean {
   return line.trim().startsWith('|');
 }
 
-function rowCells(line: string): string[] {
+/** The trimmed cells of a row: split on unescaped pipes, without the edge pipes. */
+export function rowCells(line: string): string[] {
   const trimmed = line.trim().slice(1);
   const inner = trimmed.endsWith('|') ? trimmed.slice(0, -1) : trimmed;
-  return inner.split(/(?<!\\)\|/);
+  return inner.split(/(?<!\\)\|/).map(cell => cell.trim());
 }
 
 export function isTableSeparatorRow(line: string): boolean {

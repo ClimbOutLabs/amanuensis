@@ -70,6 +70,7 @@ import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
+import { dropDuplicateRows, keysOfTableEndingAt, skippedRowsSentence, type SkippedRow } from './spaceDuplicateRows';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
 import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
@@ -332,6 +333,20 @@ export class SpaceBodyEmptyError extends Error {
     super('The space body is empty. Send the page content again.');
     this.name = 'SpaceBodyEmptyError';
     this.space_id = input.space_id;
+  }
+}
+
+/**
+ * Thrown when every table row a call adds is already in the table. Nothing is persisted,
+ * and it is not a delta failure: the model's copy of the table is only out of date.
+ */
+export class SpaceDuplicateRowsError extends Error {
+  constructor() {
+    super(
+      'Every row in this call is already in the table, so nothing was saved. ' +
+        'Send only rows that are not there yet, or tell the person the table is complete.',
+    );
+    this.name = 'SpaceDuplicateRowsError';
   }
 }
 
@@ -769,6 +784,8 @@ interface WriteOutcome {
   starts_new_table?: true;
   /** Set when an append that named an older revision was already at the end: nothing was written. */
   already_at_end?: true;
+  /** Table rows the write left out because the table already held them; set only when some were. */
+  skipped_rows?: SkippedRow[];
 }
 
 /**
@@ -816,7 +833,8 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
       staleNote(outcome.stale) +
       (outcome.starts_new_table === true
         ? ' The appended rows start a new table without a header row; add a header if they belong to a new table.'
-        : '');
+        : '') +
+      (outcome.skipped_rows === undefined ? '' : ` ${skippedRowsSentence(outcome.skipped_rows)}`);
   return JSON.stringify({
     summary,
     ...(outcome.stale === undefined ? {} : { revision_was_stale: true }),
@@ -834,6 +852,7 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
     aggregate_revision: result.aggregate_revision,
     ...(outcome.block_results === undefined ? {} : { block_results: outcome.block_results }),
     ...(outcome.blocks === undefined ? {} : { blocks: outcome.blocks }),
+    ...(outcome.skipped_rows === undefined ? {} : { skipped_rows: outcome.skipped_rows }),
     ...(partial === undefined
       ? {}
       : {
@@ -1258,7 +1277,24 @@ function joinGap(input: { before: string; content: string; existing: string; mar
 /** True when the content opens with a table row and a separator row: it brings its own header. */
 function opensWithTableHeader(content: string): boolean {
   const lines = content.split('\n').filter(line => line.trim() !== '');
-  return isTableRow(lines[0] ?? '') && /^\s*\|?[\s|:-]*-{3,}[\s|:-]*$/.test(lines[1] ?? '');
+  return isTableRow(lines[0] ?? '') && isTableSeparatorRow(lines[1] ?? '');
+}
+
+/**
+ * Drops the rows of `content` that the table ending `before` already holds, so a model
+ * resending saved rows does not duplicate them. Null when the content does not continue a
+ * table, or the table sits in a code fence.
+ */
+function dropRowsAlreadyInTable(input: { before: string; content: string }): {
+  content: string;
+  skipped: SkippedRow[];
+} | null {
+  const before = input.before.trimEnd();
+  if (!isTableRow(lastLineOf(before)) || !isTableRow(firstLineOf(input.content))) {
+    return null;
+  }
+  const existingKeys = keysOfTableEndingAt(before);
+  return existingKeys === null ? null : dropDuplicateRows({ content: input.content, existingKeys });
 }
 
 /**
@@ -1272,6 +1308,7 @@ function opensWithTableHeader(content: string): boolean {
 function applyEditEntries(input: {
   space_id: string;
   body: string;
+  format: SpaceRecord['format'];
   edits: readonly SpaceEditEntry[];
   confirm_shrink: boolean | undefined;
 }): {
@@ -1279,8 +1316,14 @@ function applyEditEntries(input: {
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
   /** An appended table row followed text that is not a table and brought no header row. */
   starts_new_table: boolean;
+  skipped_rows: SkippedRow[];
+  /** New content the call writes, counted after duplicate rows are dropped. */
+  new_content_length: number;
 } {
-  const { space_id, body, edits, confirm_shrink } = input;
+  const { space_id, body, format, edits, confirm_shrink } = input;
+  // Markdown only: an html body has no pipe tables to compare.
+  const dropSavedRows = (before: string, content: string): { content: string; skipped: SkippedRow[] } =>
+    (format === 'markdown' ? dropRowsAlreadyInTable({ before, content }) : null) ?? { content, skipped: [] };
   let appended: string | undefined;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
@@ -1289,6 +1332,8 @@ function applyEditEntries(input: {
   const inserts = new Map<SpaceSegment, string>();
   const namedAt = new Map<string, number>();
   const block_results: { anchor: string; new_length: number; deleted: boolean }[] = [];
+  const skipped_rows: SkippedRow[] = [];
+  let new_content_length = 0;
   for (const [index, entry] of edits.entries()) {
     if (entry.type === 'append') {
       appended = entry.new_content;
@@ -1333,6 +1378,7 @@ function applyEditEntries(input: {
       });
     }
     if (entry.type === 'block') {
+      new_content_length += entry.new_content.length;
       if (entry.new_content === '') {
         deletions.add(target);
         block_results.push({ anchor, new_length: 0, deleted: true });
@@ -1342,8 +1388,14 @@ function applyEditEntries(input: {
         block_results.push({ anchor, new_length: leadLength + entry.new_content.length, deleted: false });
       }
     } else {
-      inserts.set(target, entry.new_content);
-      block_results.push({ anchor, new_length: entry.new_content.length, deleted: false });
+      const added = dropSavedRows(body.slice(0, target.coreEnd), entry.new_content);
+      skipped_rows.push(...added.skipped);
+      new_content_length += added.content.length;
+      // An insert whose rows were all saved already adds nothing; the call may still carry other entries.
+      if (added.content.trim() !== '') {
+        inserts.set(target, added.content);
+        block_results.push({ anchor, new_length: added.content.length, deleted: false });
+      }
     }
   }
 
@@ -1407,6 +1459,10 @@ function applyEditEntries(input: {
     checkSavedRowsKept({ old_body: body, new_body: result, confirm_shrink });
   }
   let starts_new_table = false;
+  const added = appended === undefined ? undefined : dropSavedRows(result, appended);
+  skipped_rows.push(...(added?.skipped ?? []));
+  appended = added?.content.trim() === '' ? undefined : added?.content;
+  new_content_length += appended?.length ?? 0;
   if (appended !== undefined) {
     const joined = appendAfterBody({ body: result, content: appended, marked: segments[0]?.marked === true });
     result = joined.body;
@@ -1423,7 +1479,10 @@ function applyEditEntries(input: {
       block_results.push({ anchor: landed.anchor, new_length: appended.length, deleted: false });
     }
   }
-  return { body: result, block_results, starts_new_table };
+  if (skipped_rows.length > 0 && block_results.length === 0) {
+    throw new SpaceDuplicateRowsError();
+  }
+  return { body: result, block_results, starts_new_table, skipped_rows, new_content_length };
 }
 
 /** Adds content after the end of a body, keeping any longer gap the body already ends with. */
@@ -1790,19 +1849,22 @@ class SpaceTool extends LocalToolMCP {
       format: input.format,
       web_search: this.options.webSearch,
     });
-    // Markdown only: a cut html page would be left with unclosed tags.
-    let body = input.body;
+    // Dropping repeated rows first lets a call that only overshoots because of them still fit.
+    const deduped =
+      input.format === 'markdown'
+        ? dropDuplicateRows({ content: input.body, existingKeys: [] })
+        : { content: input.body, skipped: [] };
+    let body = deduped.content;
     let cut: WritePrefix | null = null;
-    if (input.body.length > SPACE_WRITE_MAX_LENGTH) {
+    if (body.length > SPACE_WRITE_MAX_LENGTH) {
+      // Markdown only: a cut html page would be left with unclosed tags.
       cut =
-        input.format === 'markdown'
-          ? prefixWithinCap({ content: input.body, cap: SPACE_WRITE_GUIDANCE_MAX_LENGTH })
-          : null;
+        input.format === 'markdown' ? prefixWithinCap({ content: body, cap: SPACE_WRITE_GUIDANCE_MAX_LENGTH }) : null;
       if (cut === null) {
         throw new SpaceWriteTooLongError({
           tool: CREATE_SPACE_TOOL_NAME,
           space_id: null,
-          new_length: input.body.length,
+          new_length: body.length,
         });
       }
       body = cut.kept;
@@ -1830,6 +1892,7 @@ class SpaceTool extends LocalToolMCP {
       action: 'Created',
       blocks,
       ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks), at_end: true } }),
+      ...(deduped.skipped.length === 0 ? {} : { skipped_rows: deduped.skipped }),
     };
   }
 
@@ -1842,18 +1905,16 @@ class SpaceTool extends LocalToolMCP {
   private async edit(request: z.infer<typeof EDIT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const input = { ...request, space_id: await this.resolveSpaceId(request.space_name) };
     // The write cap counts only new content: every entry's new_content, and nothing else.
-    const new_content_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
-    // Only a single entry can be cut to a prefix; anything else is refused whole.
+    const requested_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
+    const over_cap = requested_length > SPACE_WRITE_MAX_LENGTH;
+    // Only a single entry can be cut to a prefix, and only insert and append entries can
+    // shrink once saved rows are dropped; any other over-size call is refused here, before the reads.
     const lone = input.edits.length === 1 ? input.edits[0] : undefined;
-    const over_cap = new_content_length > SPACE_WRITE_MAX_LENGTH;
-    const refuseTooLong = (): SpaceWriteTooLongError =>
-      new SpaceWriteTooLongError({
-        tool: EDIT_SPACE_TOOL_NAME,
-        space_id: input.space_id,
-        new_length: new_content_length,
-      });
-    if (over_cap && lone === undefined) {
-      throw refuseTooLong();
+    const mayShrink = input.edits.some(edit => edit.type !== 'block');
+    const tooLong = (new_length: number): SpaceWriteTooLongError =>
+      new SpaceWriteTooLongError({ tool: EDIT_SPACE_TOOL_NAME, space_id: input.space_id, new_length });
+    if (over_cap && lone === undefined && !mayShrink) {
+      throw tooLong(requested_length);
     }
     // Refuse a locked delta before the expensive reads: the burn loop this guards against
     // would otherwise keep paying an aggregate-revision resolve plus a full-body read per
@@ -1863,17 +1924,22 @@ class SpaceTool extends LocalToolMCP {
       resolveAggregateRevision(this.options.store, this.options.authority, input.expected_aggregate_revision),
       this.requireCurrentSpace(input.space_id),
     ]);
-    // A call that cannot be cut is refused for its size before any revision check, as it
-    // always was, so it never counts toward the delta breaker.
-    let cut: WritePrefix | null = null;
-    if (over_cap && lone !== undefined) {
-      cut = salvageableEditContent({ entry: lone, current, format: input.format ?? current.format });
-      if (cut === null) {
-        throw refuseTooLong();
-      }
+    // An over-size call never counts toward the delta breaker. One that cannot be cut and
+    // could fit only after the duplicate drop is refused for its size when anything else is
+    // wrong with it too: the model must shorten it, not fix a copy it cannot trust.
+    let cut =
+      over_cap && lone !== undefined
+        ? salvageableEditContent({ entry: lone, current, format: input.format ?? current.format })
+        : null;
+    const refuseForSize = over_cap && cut === null;
+    if (refuseForSize && !mayShrink) {
+      throw tooLong(requested_length);
     }
     for (const [index, entry] of input.edits.entries()) {
       if (entry.type !== 'append' && !SPACE_FINGERPRINT_SHAPE.test(entry.fingerprint)) {
+        if (refuseForSize) {
+          throw tooLong(requested_length);
+        }
         throw new SpaceFingerprintFormatError({
           index,
           fingerprint: entry.fingerprint,
@@ -1911,6 +1977,9 @@ class SpaceTool extends LocalToolMCP {
           read === undefined ||
           !staleEditStillApplies({ readBody: read.body, currentBody: current.body, edits: input.edits })
         ) {
+          if (refuseForSize) {
+            throw tooLong(requested_length);
+          }
           throw new SpaceStaleRevisionError({
             expected_revision: input.expected_revision,
             actual_revision: current.revision,
@@ -1943,43 +2012,50 @@ class SpaceTool extends LocalToolMCP {
         next_step: 'Pick a different new_title, or leave the name unchanged.',
       });
     }
-    let body: string;
-    let block_results: { anchor: string; new_length: number; deleted: boolean }[];
-    let starts_new_table: boolean;
+    const format = input.format ?? current.format;
+    let applied: ReturnType<typeof applyEditEntries>;
     try {
-      const applied = applyEditEntries({
+      applied = applyEditEntries({
         space_id: input.space_id,
         body: current.body,
+        format,
         edits: input.edits,
         confirm_shrink: input.confirm_shrink,
       });
-      body = applied.body;
-      block_results = applied.block_results;
-      starts_new_table = applied.starts_new_table;
     } catch (error) {
       if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
-        this.recordDeltaFailure(input.space_id);
+        if (refuseForSize) {
+          throw tooLong(requested_length);
+        }
+        if (!over_cap) {
+          this.recordDeltaFailure(input.space_id);
+        }
       }
       throw error;
     }
+    if (applied.new_content_length <= SPACE_WRITE_MAX_LENGTH) {
+      // The duplicate drop brought the call under the cap: nothing needs cutting.
+      cut = null;
+    } else if (cut === null) {
+      throw tooLong(applied.new_content_length);
+    }
     refuseNewSpaceLinks({
-      body,
+      body: applied.body,
       previousBody: current.body,
-      format: input.format ?? current.format,
+      format,
       web_search: this.options.webSearch,
     });
     if (cut !== null && lone !== undefined) {
       // The links were checked on the full content above; now save only the part that fits.
-      const salvaged = applyEditEntries({
+      applied = applyEditEntries({
         space_id: input.space_id,
         body: current.body,
+        format,
         edits: [{ ...lone, new_content: cut.kept }],
         confirm_shrink: input.confirm_shrink,
       });
-      body = salvaged.body;
-      block_results = salvaged.block_results;
-      starts_new_table = salvaged.starts_new_table;
     }
+    const { body, block_results, starts_new_table, skipped_rows } = applied;
     this.checkShrink(input.space_id, current, body, input.confirm_shrink, EDIT_SPACE_TOOL_NAME);
     if (body.length === 0) {
       throw new SpaceBodyEmptyError({ space_id: input.space_id });
@@ -2021,6 +2097,9 @@ class SpaceTool extends LocalToolMCP {
     }
     if (block_results.length > 0) {
       outcome.block_results = block_results;
+    }
+    if (skipped_rows.length > 0) {
+      outcome.skipped_rows = skipped_rows;
     }
     // The fresh outline of the new body, at the new revision: the next edit chains
     // from these anchors instead of paying a re-read first.
@@ -2362,6 +2441,9 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyTooLongError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceDuplicateRowsError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyEmptyError) {

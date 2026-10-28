@@ -1593,3 +1593,211 @@ describe('saved rows are compared across the whole body', () => {
     expect(resultJson(refused).error).not.toContain('confirm_shrink');
   });
 });
+
+describe('duplicate table rows are dropped and reported', () => {
+  type CallTool = (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>;
+  const rowsOf = (names: string[]): string[] => names.map(name => `| ${name} | note |`);
+  const tableBody = ['| Breed | Note |', '| --- | --- |', ...rowsOf(['Beagle', 'Papillon', 'Rottweiler'])].join('\n');
+
+  async function insertAfterLastBlock(input: { callTool: CallTool; name: string; rows: string[] }) {
+    const blocks = (await listBlocks(input.callTool, input.name)).blocks ?? [];
+    const last = blocks[blocks.length - 1];
+    return input.callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: input.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'insert',
+          after: last?.anchor ?? '',
+          fingerprint: last?.fingerprint ?? '',
+          new_content: input.rows.join('\n'),
+        },
+      ],
+    });
+  }
+
+  /** Creates a space from `body`, then checks the saved body equals `expected`. */
+  async function createAndRead(input: { name: string; body: string }) {
+    const { callTool } = makeHarness();
+    const created = await callTool(CREATE_SPACE_TOOL_NAME, {
+      name: input.name,
+      purpose: `${input.name} purpose.`,
+      status: 'active',
+      format: 'markdown',
+      body: input.body,
+    });
+    expect(isErrorResponse(created)).toBe(false);
+    return { created, saved: await readBody(callTool, input.name) };
+  }
+
+  it('an insert of 5 rows where 2 exist saves 3 and reports the 2', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: tableBody });
+    const result = await insertAfterLastBlock({
+      callTool,
+      name: 'Dogs',
+      rows: rowsOf(['Papillon', 'Poodle', 'Rottweiler', 'Collie', 'Pug']),
+    });
+    expect(isErrorResponse(result)).toBe(false);
+    const wire: { summary: string; skipped_rows: { key: string; row: number }[] } = JSON.parse(resultText(result));
+    expect(wire.skipped_rows).toEqual([
+      { key: 'Papillon', row: 1 },
+      { key: 'Rottweiler', row: 3 },
+    ]);
+    expect(wire.summary).toContain(
+      'Skipped 2 rows that were already in the table: "Papillon" (row 1 of this call), "Rottweiler" (row 3 of this call).',
+    );
+    expect(await readBody(callTool, 'Dogs')).toBe([tableBody, ...rowsOf(['Poodle', 'Collie', 'Pug'])].join('\n'));
+  });
+
+  it('an insert where every row is already saved exactly is refused and saves nothing', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: tableBody });
+    const result = await insertAfterLastBlock({ callTool, name: 'Dogs', rows: rowsOf(['Beagle', 'Papillon']) });
+    expect(isErrorResponse(result)).toBe(true);
+    expect(resultJson(result).error).toContain('Every row in this call is already in the table, so nothing was saved.');
+    expect(await readBody(callTool, 'Dogs')).toBe(tableBody);
+  });
+
+  it('a distinct row that shares its first cell with a saved row is kept on insert', async () => {
+    const { callTool } = makeHarness();
+    const body = ['| Day | Time | Item |', '| --- | --- | --- |', '| Monday | 9am | Gym |'].join('\n');
+    await createSpace(callTool, { name: 'Week', body });
+    const result = await insertAfterLastBlock({ callTool, name: 'Week', rows: ['| Monday | 2pm | Dentist |'] });
+    expect(isErrorResponse(result)).toBe(false);
+    expect(await readBody(callTool, 'Week')).toBe(`${body}\n| Monday | 2pm | Dentist |`);
+  });
+
+  it('a create with an identical row sent twice saves it once, and whole-cell emphasis does not hide it', async () => {
+    const body = [
+      '| Breed | Note |',
+      '| --- | --- |',
+      '| Beagle | note |',
+      '| Pug | note |',
+      '| **Beagle** |  note |',
+    ].join('\n');
+    const { created, saved } = await createAndRead({ name: 'Twice', body });
+    expect(resultText(created)).toContain(
+      'Skipped 1 row that was already in the table: \\"**Beagle**\\" (row 3 of this call).',
+    );
+    expect(saved).toBe(['| Breed | Note |', '| --- | --- |', '| Beagle | note |', '| Pug | note |'].join('\n'));
+  });
+
+  it('a resent ranked row is dropped, and rows differing only in rank are kept', async () => {
+    const body = [
+      '| Rank | Breed | Year |',
+      '| --- | --- | --- |',
+      '| 1 | Beagle | 2020 |',
+      '| 2 | Beagle | 2021 |',
+      '| 2 | Pug | 2021 |',
+      '| 1 | Beagle | 2020 |',
+    ].join('\n');
+    const { saved } = await createAndRead({ name: 'Ranked', body });
+    expect(saved).toBe(body.split('\n').slice(0, 5).join('\n'));
+  });
+
+  it.each([
+    ['same first cell, other cells differ', ['| Monday | 9am | Gym |', '| Monday | 2pm | Dentist |']],
+    ['a category repeated', ['| Fruit | Apple |', '| Fruit | Pear |']],
+    ['rank in the second cell', ['| 1 | Beagle | 2020 |', '| 2 | Beagle | 2021 |']],
+    ['names that differ only in case', ['| Ab | one |', '| AB | two |']],
+    ['emphasis around a word with other cells', ['| run | to move fast |', '| **run** | to operate |']],
+    ['underscores inside a word', ['| my_var | a |', '| myvar | b |']],
+  ])('distinct rows are all kept: %s', async (_label, rows) => {
+    const body = ['| A | B | C |', '| --- | --- | --- |', ...rows].join('\n');
+    const { saved } = await createAndRead({ name: 'Distinct', body });
+    expect(saved).toBe(body);
+  });
+
+  it('a table with no header keeps distinct rows, and rows in a code fence are never compared', async () => {
+    const body = ['| a | 1 |', '| a | 2 |', '', '```', '| x | 1 |', '| x | 1 |', '```'].join('\n');
+    const { saved } = await createAndRead({ name: 'Headerless', body });
+    expect(saved).toBe(body);
+  });
+
+  it('the same row in two separate tables is not a duplicate', async () => {
+    const body = [
+      '| Breed |',
+      '| --- |',
+      '| Beagle |',
+      '',
+      'Other list:',
+      '',
+      '| Breed |',
+      '| --- |',
+      '| Beagle |',
+    ].join('\n');
+    const { saved } = await createAndRead({ name: 'Two tables', body });
+    expect(saved).toBe(body);
+  });
+
+  it('an insert is measured against the write cap after saved rows are dropped', async () => {
+    const { callTool } = makeHarness();
+    const wide = 'x'.repeat(90);
+    const many = Array.from({ length: 50 }, (_, i) => `| Breed number ${String(i)} | ${wide} |`);
+    await createSpace(callTool, {
+      name: 'Big',
+      body: ['| Breed | Note |', '| --- | --- |', ...many.slice(0, 30)].join('\n'),
+    });
+    const grown = await insertAfterLastBlock({ callTool, name: 'Big', rows: many.slice(30) });
+    expect(isErrorResponse(grown)).toBe(false);
+    const body = await readBody(callTool, 'Big');
+    // Resending all 50 saved rows plus 3 new is over the cap as sent, and 3 rows as new content.
+    const fresh = Array.from({ length: 3 }, (_, i) => `| Fresh ${String(i)} | new |`);
+    const blocks = (await listBlocks(callTool, 'Big')).blocks ?? [];
+    const last = blocks[blocks.length - 1];
+    const result = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Big',
+      expected_revision: 2,
+      edits: [
+        {
+          type: 'insert',
+          after: last?.anchor ?? '',
+          fingerprint: last?.fingerprint ?? '',
+          new_content: [...many, ...fresh].join('\n'),
+        },
+      ],
+    });
+    expect(isErrorResponse(result)).toBe(false);
+    expect(await readBody(callTool, 'Big')).toBe(`${body}\n${fresh.join('\n')}`);
+  });
+
+  describe('an over-cap insert never counts toward the breaker', () => {
+    const bigRows = Array.from({ length: 330 }, (_, i) => `| Row ${String(i)} | ${'y'.repeat(14)} |`).join('\n');
+
+    async function threeBigRefusalsThenValidEdit(input: { anchor: string; expected_revision: number }) {
+      const { callTool } = makeHarness();
+      await createSpace(callTool, { name: 'Guarded', body: tableBody });
+      const blocks = (await listBlocks(callTool, 'Guarded')).blocks ?? [];
+      const last = blocks[blocks.length - 1];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+          space_name: 'Guarded',
+          expected_revision: input.expected_revision,
+          edits: [
+            {
+              type: 'insert',
+              after: input.anchor || (last?.anchor ?? ''),
+              fingerprint: last?.fingerprint ?? '',
+              new_content: bigRows,
+            },
+          ],
+        });
+        expect(isErrorResponse(refused)).toBe(true);
+        // A lone over-cap insert could be cut to what fits, so it gets the real refusal, uncounted.
+        expect(resultText(refused)).toMatch(/not 99|Unknown block anchor/);
+      }
+      const landed = await insertAfterLastBlock({ callTool, name: 'Guarded', rows: ['| Fresh | note |'] });
+      expect(isErrorResponse(landed)).toBe(false);
+      expect(await readBody(callTool, 'Guarded')).toBe(`${tableBody}\n| Fresh | note |`);
+    }
+
+    it('three stale over-cap inserts do not lock the space', async () => {
+      await threeBigRefusalsThenValidEdit({ anchor: '', expected_revision: 99 });
+    });
+
+    it('three over-cap inserts with a bad anchor do not lock the space', async () => {
+      await threeBigRefusalsThenValidEdit({ anchor: 'b99', expected_revision: 1 });
+    });
+  });
+});
