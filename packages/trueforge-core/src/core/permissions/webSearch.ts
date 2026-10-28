@@ -1,12 +1,24 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
-import { CALENDAR_READ_TOOL_NAMES, isCalendarReadToolName } from '../calendar/toolContract';
+import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
 import { htmlImageLinks } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
+import {
+  CANCEL_REMINDER_TOOL_NAME,
+  CREATE_SCHEDULE_TOOL_NAME,
+  DELETE_SCHEDULE_TOOL_NAME,
+  LIST_REMINDERS_TOOL_NAME,
+  LIST_SCHEDULES_TOOL_NAME,
+  PAUSE_SCHEDULE_TOOL_NAME,
+  RESUME_SCHEDULE_TOOL_NAME,
+  SET_REMINDER_TOOL_NAME,
+} from '../schedules/toolContract';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
+import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '../spaces/toolContract';
 import {
   emptyChatProvenance,
   namesUrl,
@@ -154,20 +166,28 @@ function baseToolName(toolName: string): string {
 }
 
 /**
- * Whether a tool brings in text written outside the chat: a web search or page, mail, a calendar
- * event, or a document the person gave. Every other tool, such as spaces, tasks and memory, is the
- * host's own and returns nothing the person or the world wrote, so it is not listed.
+ * Host tools whose results hold nothing written outside the chat: spaces, task state, schedules and
+ * reminders. This is the only list; any tool not on it, including every connector, shell tool and
+ * unknown name, counts as bringing in outside content.
  */
-export function isOutsideContentTool(toolName: string): boolean {
-  const baseName = baseToolName(toolName);
-  return (
-    isSearchResultTool(baseName) ||
-    isPageReaderTool(baseName) ||
-    isGmailReadToolName(baseName) ||
-    isMailReadToolName(baseName) ||
-    isCalendarReadToolName(baseName) ||
-    baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
-  );
+const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...SPACE_READ_TOOL_NAMES,
+  ...SPACE_WRITE_TOOL_NAMES,
+  CREATE_SCHEDULE_TOOL_NAME,
+  LIST_SCHEDULES_TOOL_NAME,
+  PAUSE_SCHEDULE_TOOL_NAME,
+  RESUME_SCHEDULE_TOOL_NAME,
+  DELETE_SCHEDULE_TOOL_NAME,
+  SET_REMINDER_TOOL_NAME,
+  LIST_REMINDERS_TOOL_NAME,
+  CANCEL_REMINDER_TOOL_NAME,
+  TASK_STATE_TOOL_NAME,
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+]);
+
+/** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
+export function toolReturnsOutsideContent(toolName: string): boolean {
+  return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));
 }
 
 /** The kind of content a tool's result is, so a card can say where an address was read. */

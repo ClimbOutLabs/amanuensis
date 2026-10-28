@@ -311,6 +311,8 @@ export async function mirrorLearnedProfile(params: {
           });
     if (!outcome.ok) {
       logger.warn('Learned profile mirror submission failed', { reason: outcome.reason });
+    } else if (outcome.reason !== undefined) {
+      logger.debug('Learned profile mirror was already gone', { reason: outcome.reason });
     }
   } catch (error) {
     logger.warn('Learned profile mirror threw unexpectedly', {

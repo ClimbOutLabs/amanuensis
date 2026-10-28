@@ -2371,3 +2371,40 @@ describe('recall query with an attached document', () => {
     ).toBe('first question');
   });
 });
+
+describe('extractPreviousExchange origin', () => {
+  function exchangeWithTool(name: string): ContextMessage[] {
+    return [
+      { role: 'user', content: 'first question' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name, arguments: '{}' },
+            tool_info: {
+              type: 'truefoundry-system',
+              mcp_server_id: '',
+              mcp_server_name: '',
+              original_tool_name: name,
+            },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'result' },
+      { role: 'assistant', content: 'answer' },
+      { role: 'user', content: 'current question' },
+    ];
+  }
+
+  it('marks the exchange as read content for a tool that is not a known host tool', () => {
+    expect(extractPreviousExchange(exchangeWithTool('Notion__search_pages'))?.origin).toBe('tool_ingested');
+    expect(extractPreviousExchange(exchangeWithTool('exec'))?.origin).toBe('tool_ingested');
+  });
+
+  it('leaves the exchange as the person own when only a space tool ran', () => {
+    expect(extractPreviousExchange(exchangeWithTool('edit_space'))?.origin).toBe('user_stated');
+  });
+});

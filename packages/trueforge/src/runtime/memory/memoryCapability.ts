@@ -22,6 +22,7 @@ import type {
   PreLLMEphemeralAgentContextProcessor,
 } from '@truefoundry/trueforge-core/core';
 import {
+  contextHasOutsideToolResult,
   HOST_SUMMARY_PREFACE,
   InternalEventType,
   isHostWrappedText,
@@ -442,14 +443,13 @@ export function extractPreviousExchange(
   }
   // The same rule the live retain applies: a tool result or extracted file text in the exchange
   // means the reply was written after reading untrusted content.
-  const readUntrusted = context.slice(userIndex + 1, lastUserIndex).some(message => {
-    if (!hasRole(message)) {
-      return false;
-    }
-    return (
-      message.role === 'tool' || (message.role === 'user' && textParts(message.content).some(isUntrustedDocumentText))
+  const between = context.slice(userIndex + 1, lastUserIndex);
+  const readUntrusted =
+    contextHasOutsideToolResult(between) ||
+    between.some(
+      message =>
+        hasRole(message) && message.role === 'user' && textParts(message.content).some(isUntrustedDocumentText),
     );
-  });
   return { userText, assistantText, origin: readUntrusted ? 'tool_ingested' : USER_STATED_ORIGIN };
 }
 

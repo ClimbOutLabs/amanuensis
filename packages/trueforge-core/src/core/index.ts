@@ -104,11 +104,7 @@ export {
   largeToolResponse,
 } from './capabilities/builtins/LargeToolResponse';
 export { openUI } from './capabilities/builtins/OpenUI';
-export {
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-  TASK_CHECKLIST_SERVER_ID,
-  taskChecklist,
-} from './capabilities/builtins/TaskChecklist';
+export { TASK_CHECKLIST_SERVER_ID, taskChecklist } from './capabilities/builtins/TaskChecklist';
 export type { TaskChecklistAccess } from './capabilities/builtins/TaskChecklist';
 export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export { toolOutputScreen } from './capabilities/builtins/ToolOutputScreen';
@@ -257,7 +253,12 @@ export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread
 export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
-export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
+export {
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+  TaskFindingSchema,
+  TaskPhaseSchema,
+  TaskStateSchema,
+} from './runtime/taskState';
 export type { TaskFinding, TaskPhase, TaskState, TaskStateSnapshot } from './runtime/taskState';
 
 // Tracing
@@ -428,7 +429,7 @@ export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 
 // Sentinel: three-tier permission system for tool execution
-export { callReadsOutsideContent } from './capabilities/builtins/ChatProvenance';
+export { callReturnsOutsideContent, contextHasOutsideToolResult } from './capabilities/builtins/ChatProvenance';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,

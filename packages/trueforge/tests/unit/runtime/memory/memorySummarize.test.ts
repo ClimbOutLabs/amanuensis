@@ -1089,7 +1089,7 @@ describe('what the summary keeps', () => {
 
   it('drops facts that only come from what the assistant narrated', async () => {
     const { llm, prompts } = recordingSummarizer(
-      '{"facts": ["Maya wants to insert ranks 18-20 after rank 17.", "Maya needs to add ranks 31-40 to the table."]}',
+      '{"facts": ["Maya wants to insert ranks 18-20 after rank 17.", "Maya needs to perform the inserts in separate chunks due to character limit."]}',
     );
 
     const result = await summarizeTurnContent({
@@ -1132,17 +1132,42 @@ describe('what the summary keeps', () => {
     expect(result).toEqual({ status: 'summarized', facts: ["Maya's locker code is 4821."] });
   });
 
-  it('does not let the name alone keep a fact', async () => {
+  it('does not let the name alone, or a generic task verb, keep a fact', async () => {
     const { llm } = recordingSummarizer('{"facts": ["Maya wants to continue the cleanup."]}');
 
     const result = await summarizeTurnContent({
       ...base,
-      userText: 'Maya here, what is on my bill?',
-      assistantText: '',
+      userText: 'continue',
+      assistantText: 'Shall I continue?',
       resolveLlm: async () => llm,
     });
 
     expect(result).toEqual({ status: 'nothing_to_keep' });
+  });
+
+  it.each([
+    [
+      'one-word answer to the assistant question',
+      'Lily',
+      'What is your daughter called?',
+      "Maya's daughter is named Lily.",
+    ],
+    ['a short name', 'call me Mo', '', 'Maya goes by Mo.'],
+    ['a condition said another way', "I'm diabetic", '', 'Maya has diabetes.'],
+    ['accented words', 'Mon café préféré est le Café Müller', '', "Maya's favourite cafe is Cafe Muller."],
+    ['a Chinese message', '我的女儿叫小明', '', '玛雅的女儿叫小明。'],
+    ['a fact in another script than the message', '我的医生是李博士', '', "Maya's doctor is Dr Li."],
+  ])('keeps a real fact: %s', async (_label, userText, question, fact) => {
+    const { llm } = recordingSummarizer(JSON.stringify({ facts: [fact] }));
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText,
+      assistantText: question,
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({ status: 'summarized', facts: [fact] });
   });
 });
 

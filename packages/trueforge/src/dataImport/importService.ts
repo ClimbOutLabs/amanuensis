@@ -52,6 +52,7 @@ import {
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
+  DOCUMENT_ID_METADATA_KEY,
   entryMetadata,
   latestTombstonesByEntry,
   parseVaultTombstones,
@@ -61,7 +62,7 @@ import {
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
-  withoutSessionMarker,
+  withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -941,8 +942,9 @@ function buildRetainItems(
         const newline = body.indexOf('\n');
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
-      const sessionId = entryMetadata(body)?.[SESSION_ID_METADATA_KEY];
-      body = withoutSessionMarker(body);
+      const trailers = entryMetadata(body);
+      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
@@ -955,7 +957,8 @@ function buildRetainItems(
       items.push({
         content: body,
         timestamp: entry.timestamp,
-        document_id: documentIdFor(entry.id),
+        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
+        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
         ...(sessionId === undefined ? {} : { metadata: { [SESSION_ID_METADATA_KEY]: sessionId } }),
       });

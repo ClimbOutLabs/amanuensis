@@ -302,43 +302,118 @@ export function assistantQuestionFor({
   return question === '' ? undefined : question.slice(-ASSISTANT_QUESTION_MAX_CHARACTERS);
 }
 
-/** Lower-cased words of three or more characters, with a plural "s" dropped so "wants" meets "want". */
-function contentWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(word => word.length >= 3)
-    .map(word => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word));
+/** Lower-case text with accents removed, so "Café" and "cafe" are the same word. */
+function foldText(text: string): string {
+  return text.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'word' });
+
+/** Words of a text as the language writes them, so Chinese and Japanese split into words too. */
+function wordsOf(text: string): string[] {
+  return [...WORD_SEGMENTER.segment(text)]
+    .filter(part => part.isWordLike === true)
+    .map(part => part.segment.replace(/['\u2019]s$/i, '').replace(/['\u2019]/g, ''));
+}
+
+/** Scripts told apart for the same-language check; Latin is the default. */
+const SCRIPT_PATTERNS: readonly (readonly [string, RegExp])[] = [
+  ['han', /\p{Script=Han}/gu],
+  ['kana', /[\p{Script=Hiragana}\p{Script=Katakana}]/gu],
+  ['hangul', /\p{Script=Hangul}/gu],
+  ['cyrillic', /\p{Script=Cyrillic}/gu],
+  ['arabic', /\p{Script=Arabic}/gu],
+  ['hebrew', /\p{Script=Hebrew}/gu],
+  ['devanagari', /\p{Script=Devanagari}/gu],
+  ['thai', /\p{Script=Thai}/gu],
+  ['greek', /\p{Script=Greek}/gu],
+  ['latin', /\p{Script=Latin}/gu],
+];
+
+function dominantScript(text: string): string | undefined {
+  let best: { script: string; count: number } | undefined;
+  for (const [script, pattern] of SCRIPT_PATTERNS) {
+    const count = text.match(pattern)?.length ?? 0;
+    if (count > 0 && (best === undefined || count > best.count)) {
+      best = { script, count };
+    }
+  }
+  return best?.script;
+}
+
+/** A Chinese, Japanese or Korean word can be one character; other words must have three. */
+const SINGLE_CHARACTER_WORD = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/** Share of a fact's content words that must appear in what the person said when its names and numbers do not all match. */
+const MIN_SHARED_WORD_SHARE = 0.25;
+
+/** Two words match when equal, or when both are long and start the same way ("diabetic", "diabetes"). */
+const SHARED_PREFIX_LENGTH = 5;
+
+function sameWord({ a, b }: { a: string; b: string }): boolean {
+  return (
+    a === b ||
+    (Math.min(a.length, b.length) >= SHARED_PREFIX_LENGTH &&
+      a.slice(0, SHARED_PREFIX_LENGTH) === b.slice(0, SHARED_PREFIX_LENGTH))
+  );
 }
 
 /**
- * Share of a fact's content words that must come from the person's own message. One shared word is
- * not enough: a narrated step such as "add ranks to the table" shares "table" with "make the dog table".
- */
-const MIN_SHARED_WORD_SHARE = 0.4;
-
-/**
- * Keeps a fact only if enough of its content words appear in the person's own message. A model that
- * ignores the instruction and keeps something from elsewhere writes words the person never used.
- * Stop words and the person's name do not count, so "maya wants ..." cannot pass on the name.
+ * Keeps a fact only when it comes from the person's own words (or from the assistant's last question,
+ * given only for a short reply). A fact whose every name and number appears there is kept. Otherwise
+ * it is kept when enough of its content words appear there. Stop words, task verbs and the person's
+ * own name do not count. A fact in another script than the message is kept: the words cannot be compared.
  */
 export function keepFactsFromPerson({
   facts,
   userText,
+  assistantQuestion,
   personName,
 }: {
   facts: string[];
   userText: string;
+  assistantQuestion?: string | undefined;
   personName: string | undefined;
 }): string[] {
-  const ignored = new Set(contentWords(usablePersonName(personName) ?? ''));
-  const isContent = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ignored.has(word);
-  const said = new Set(contentWords(userText).filter(isContent));
+  const said = [userText, assistantQuestion ?? ''].join('\n');
+  const saidScript = dominantScript(said);
+  const ownName = new Set(wordsOf(foldText(usablePersonName(personName) ?? '')));
+  const saidWords = wordsOf(foldText(said)).map(stem);
+  const isSaid = (word: string): boolean => saidWords.some(candidate => sameWord({ a: word, b: candidate }));
+  const isCounted = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ownName.has(word);
+  const isContent = (word: string): boolean =>
+    isCounted(word) && (word.length >= 3 || SINGLE_CHARACTER_WORD.test(word) || /^\d+$/.test(word));
   return facts.filter(fact => {
-    const words = new Set(contentWords(fact).filter(isContent));
-    const shared = [...words].filter(word => said.has(word)).length;
-    return shared > 0 && shared / words.size >= MIN_SHARED_WORD_SHARE;
+    const factScript = dominantScript(fact);
+    if (saidScript !== undefined && factScript !== undefined && saidScript !== factScript) {
+      return true;
+    }
+    const anchors = anchorsOf({ fact, isCounted });
+    if (anchors.length > 0 && anchors.every(isSaid)) {
+      return true;
+    }
+    const words = [...new Set(wordsOf(foldText(fact)).map(stem).filter(isContent))];
+    return words.length > 0 && words.filter(isSaid).length / words.length >= MIN_SHARED_WORD_SHARE;
   });
+}
+
+/** Drops a plural "s" so "wants" meets "want". */
+function stem(word: string): string {
+  return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;
+}
+
+/** The names (capitalised words) and numbers (two or more digits) a fact states, folded, without stop words or the person's name. */
+function anchorsOf({ fact, isCounted }: { fact: string; isCounted: (word: string) => boolean }): string[] {
+  const anchors: string[] = [];
+  for (const word of wordsOf(fact.normalize('NFKD').replace(/\p{M}/gu, ''))) {
+    const folded = stem(word.toLowerCase());
+    const isNumber = /^\d{2,}$/.test(word);
+    const isName = /^\p{Lu}/u.test(word) && !/^\d/.test(word);
+    if ((isNumber || isName) && isCounted(folded)) {
+      anchors.push(folded);
+    }
+  }
+  return anchors;
 }
 
 const SummaryReplySchema = z.object({ facts: z.array(z.string()) });
@@ -578,7 +653,12 @@ export async function summarizeTurnContent(params: {
       if (parsed.kind === 'nothing') {
         return { status: 'nothing_to_keep' };
       }
-      const facts = keepFactsFromPerson({ facts: parsed.facts, userText, personName: params.personName });
+      const facts = keepFactsFromPerson({
+        facts: parsed.facts,
+        userText,
+        assistantQuestion,
+        personName: params.personName,
+      });
       return facts.length === 0 ? { status: 'nothing_to_keep' } : { status: 'summarized', facts };
     };
     try {

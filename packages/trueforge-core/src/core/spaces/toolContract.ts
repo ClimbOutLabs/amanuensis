@@ -56,6 +56,9 @@ const SPACE_READ_TOOLS: readonly SpaceToolContract[] = [
 
 export const SPACE_READ_TOOL_NAMES = SPACE_READ_TOOLS.map(tool => tool.name);
 
+/** Every call that writes a space, including the older whole-body update. */
+export const SPACE_WRITE_TOOL_NAMES = [...SPACE_WRITE_TOOLS.map(tool => tool.name), UPDATE_SPACE_TOOL_NAME];
+
 /** Calls that create, change or restore a space. */
 export function isSpaceWriteToolName(tool_name: string): boolean {
   return SPACE_WRITE_TOOLS.some(tool => tool.name === tool_name);

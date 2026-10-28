@@ -11,7 +11,7 @@ import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadlin
 const NOW = '2026-09-01T12:00:00.000Z';
 
 /** The model asks for one tool and the tool answers, as the turn stream carries them. */
-function toolRound({ id, name }: { id: string; name: string }): TurnStreamingEvent[] {
+function toolRound({ id, name, args = '{}' }: { id: string; name: string; args?: string }): TurnStreamingEvent[] {
   return [
     {
       type: EventType.MODEL_MESSAGE,
@@ -20,7 +20,7 @@ function toolRound({ id, name }: { id: string; name: string }): TurnStreamingEve
       created_at: NOW,
       content: null,
       tool_calls: [
-        { id, type: 'function', function: { name, arguments: '{}' }, tool_info: { type: 'truefoundry-system', name } },
+        { id, type: 'function', function: { name, arguments: args }, tool_info: { type: 'truefoundry-system', name } },
       ],
     },
     {
@@ -100,16 +100,41 @@ describe('drainTurnEvents memory origin', () => {
     const earlier = [
       ...toolRound({ id: 'c1', name: 'space__create_space' }),
       ...toolRound({ id: 'c2', name: 'edit_space' }),
-      ...toolRound({ id: 'c3', name: 'update_plan' }),
+      ...toolRound({ id: 'c3', name: 'create_schedule' }),
+      ...toolRound({ id: 'c4', name: 'record_finding' }),
     ];
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
   });
 
-  it.each(['web_fetch', 'web_search', 'Email__get_emails_content', 'gmail__read_email', 'list_events'])(
-    'marks a turn that read outside content with %s',
-    async name => {
-      const earlier = [...toolRound({ id: 'c1', name: 'edit_space' }), ...toolRound({ id: 'c2', name })];
-      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
-    },
-  );
+  it.each([
+    'web_fetch',
+    'web_search',
+    'Email__get_emails_content',
+    'gmail__read_email',
+    'list_events',
+    'Notion__search_pages',
+    'exec',
+    'run_code',
+    'get_weather',
+  ])('marks a turn that read outside content with %s', async name => {
+    const earlier = [...toolRound({ id: 'c1', name: 'edit_space' }), ...toolRound({ id: 'c2', name })];
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  it('marks a turn whose tool call went through the call_tool wrapper to an unknown tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'Notion', tool_name: 'search_pages', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  it('does not mark a turn when the wrapper reaches a host space tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'space', tool_name: 'edit_space', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+  });
+
+  it('marks a turn whose tool response has no matching call', async () => {
+    const earlier = toolRound({ id: 'c1', name: 'edit_space' }).slice(1);
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
 });

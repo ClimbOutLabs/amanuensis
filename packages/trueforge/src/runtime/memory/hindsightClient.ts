@@ -529,8 +529,11 @@ export class HindsightClient implements MemoryClient {
     if (!sent.ok) {
       return { ok: false, reason: sent.reason };
     }
-    // 404 means the document is already gone, which is what the caller wanted.
-    if (!sent.response.ok && sent.response.status !== 404) {
+    // 404 means the document is already gone, which is what the caller wanted; the reason lets it log that.
+    if (sent.response.status === 404) {
+      return { ok: true, reason: 'document not found' };
+    }
+    if (!sent.response.ok) {
       const failure = await this.httpFailure({ sent, operation: 'delete document' });
       return { ok: false, reason: failure.reason };
     }

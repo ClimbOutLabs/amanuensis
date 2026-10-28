@@ -1,12 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
+import { VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
-async function withClient(run: (client: MarkdownMemoryClient) => Promise<void>): Promise<void> {
+async function withClient(run: (client: MarkdownMemoryClient, dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-doc-'));
   try {
-    await run(new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' }));
+    await run(new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' }), dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -72,6 +73,33 @@ describe('MarkdownMemoryClient documents', () => {
       await client.retain({ items: [turn('profile tea two')], operationId: 'op-2', timeoutMs: 1000 });
 
       expect(await recalledTexts(client)).toHaveLength(2);
+    });
+  });
+
+  it('leaves one entry when a replace is retried after the first try failed part way', async () => {
+    await withClient(async (client, dir) => {
+      await client.retain({ items: [profileItem('Profile: likes tea')], operationId: 'op-1', timeoutMs: 1000 });
+      // A directory where the hide marker file goes makes the hide step fail after the new entry is written.
+      const markers = path.join(dir, 'tenant-1', VAULT_TOMBSTONES_FILE);
+      await mkdir(markers, { recursive: true });
+      const failed = await client.retain({
+        items: [profileItem('Profile: likes coffee')],
+        operationId: 'op-2',
+        timeoutMs: 1000,
+      });
+      expect(failed.ok).toBe(false);
+      await rm(markers, { recursive: true });
+
+      const retried = await client.retain({
+        items: [profileItem('Profile: likes coffee')],
+        operationId: 'op-2',
+        timeoutMs: 1000,
+      });
+
+      expect(retried).toEqual({ ok: true });
+      const texts = await recalledTexts(client);
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toContain('likes coffee');
     });
   });
 });
