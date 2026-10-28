@@ -197,7 +197,7 @@ describe('ledger', () => {
 });
 
 describe('progressRefundFor', () => {
-  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false } as const;
+  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false, savedNothing: false } as const;
 
   it('refunds one step when a space write landed', () => {
     expect(progressRefundFor({ results: [landed], refundsSoFar: 0 })).toBe(1);
@@ -209,6 +209,10 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [{ ...landed, disposition: 'policy_blocked' }], refundsSoFar: 0 })).toBe(0);
     expect(progressRefundFor({ results: [{ ...landed, toolName: 'get_space' }], refundsSoFar: 0 })).toBe(0);
     expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {
+    expect(progressRefundFor({ results: [{ ...landed, savedNothing: true }], refundsSoFar: 0 })).toBe(0);
   });
 
   it('stops at the cap', () => {

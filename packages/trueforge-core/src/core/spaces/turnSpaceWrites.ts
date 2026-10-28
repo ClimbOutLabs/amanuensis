@@ -3,7 +3,7 @@ import { isLLMContextMessage } from '../runtime/contextUtils';
 import type { UnfinishedKind } from '../runtime/replyBudget';
 import { envelopedResult, turnBoundaryIndex } from '../runtime/replyToolDumpRepair';
 import { isRecord } from '../util/records';
-import { CREATE_SPACE_TOOL_NAME, isSpaceWriteToolName } from './toolContract';
+import { CREATE_SPACE_TOOL_NAME, isSpaceWriteToolName, SPACE_WRITE_NOTHING_SAVED_FIELD } from './toolContract';
 
 /** What this turn's space writes did to one space. `changes` counts the saved writes, a creation included. */
 export interface SpaceWrites {
@@ -27,13 +27,27 @@ function argumentSpaceName(args: string): string | undefined {
   }
 }
 
+/** A space write's result object, inside the tool response envelope or bare; undefined when it is not JSON. */
+function spaceWriteResult(content: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  return isRecord(parsed) ? (envelopedResult(parsed) ?? parsed) : undefined;
+}
+
+/** True when a space write succeeded but saved nothing new, so it is neither a change nor progress. */
+export function spaceWriteSavedNothing(content: string): boolean {
+  return spaceWriteResult(content)?.[SPACE_WRITE_NOTHING_SAVED_FIELD] === true;
+}
+
 /** The spaces this turn's create, edit and restore calls reached, in the order they were first written. */
 export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWrites[] {
   const boundary = turnBoundaryIndex(context);
   const calls = new Map<string, { tool: string; args: string }>();
   const writes = new Map<string, SpaceWrites>();
-  // A result at a revision already counted saved nothing new, such as an append that was already at the end.
-  const revisions = new Map<string, number>();
   for (let i = boundary + 1; i < context.length; i += 1) {
     const message = context[i];
     if (message === undefined || !isLLMContextMessage(message)) {
@@ -52,23 +66,13 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
     if (call === undefined || !isSpaceWriteToolName(call.tool)) {
       continue;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(message.content);
-    } catch {
-      parsed = undefined;
-    }
-    const result = isRecord(parsed) ? (envelopedResult(parsed) ?? parsed) : undefined;
+    const result = spaceWriteResult(message.content);
     const space = result === undefined ? undefined : result['space'];
     const name = isRecord(space) ? space['name'] : undefined;
     const link = isRecord(space) ? space['link'] : undefined;
     if (typeof name === 'string' && typeof link === 'string') {
       const earlier = writes.get(name);
-      const revision = isRecord(space) ? space['revision'] : undefined;
-      const savedNothing = typeof revision === 'number' && revisions.get(name) === revision;
-      if (typeof revision === 'number') {
-        revisions.set(name, revision);
-      }
+      const savedNothing = result?.[SPACE_WRITE_NOTHING_SAVED_FIELD] === true;
       writes.set(name, {
         name,
         link,
@@ -85,7 +89,8 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
       writes.set(earlier.name, { ...earlier, last_failed: true });
     }
   }
-  return [...writes.values()];
+  // A space whose writes all saved nothing new has nothing to report.
+  return [...writes.values()].filter(write => write.changes > 0);
 }
 
 function plural(count: number): string {

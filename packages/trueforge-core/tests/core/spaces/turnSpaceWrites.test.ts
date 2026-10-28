@@ -1,5 +1,9 @@
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
-import { spaceClosingLine, spaceWritesThisTurn } from '../../../src/core/spaces/turnSpaceWrites';
+import {
+  spaceClosingLine,
+  spaceWriteSavedNothing,
+  spaceWritesThisTurn,
+} from '../../../src/core/spaces/turnSpaceWrites';
 
 const DOGS_LINK = '/spaces/space_dogs';
 
@@ -56,19 +60,33 @@ describe('spaceWritesThisTurn', () => {
   });
 
   it('counts an append as a change, but not a resend that was already at the end', () => {
-    const atRevision = (id: string, revision: number): ContextMessage => ({
+    const appended = (id: string, extra: Record<string, unknown>): ContextMessage => ({
       role: 'tool',
       tool_call_id: id,
-      content: JSON.stringify({ summary: 'Updated.', space: { name: 'Dog breeds', link: DOGS_LINK, revision } }),
+      content: JSON.stringify({ summary: 'Updated.', space: { name: 'Dog breeds', link: DOGS_LINK }, ...extra }),
     });
     const writes = spaceWritesThisTurn([
       user,
       call('a1', 'edit_space', { space_name: 'Dog breeds', edits: [{ type: 'append', new_content: '| Pug |' }] }),
-      atRevision('a1', 3),
+      appended('a1', {}),
       call('a2', 'edit_space', { space_name: 'Dog breeds', edits: [{ type: 'append', new_content: '| Pug |' }] }),
-      atRevision('a2', 3),
+      appended('a2', { nothing_saved: true }),
     ]);
     expect(writes).toEqual([{ name: 'Dog breeds', link: DOGS_LINK, created: false, changes: 1, last_failed: false }]);
+  });
+
+  it('does not count an already-at-end result that is the only write of the turn', () => {
+    const content = JSON.stringify({ space: { name: 'Dog breeds', link: DOGS_LINK }, nothing_saved: true });
+    expect(spaceWriteSavedNothing(content)).toBe(true);
+    expect(spaceWriteSavedNothing(JSON.stringify({ space: { name: 'Dog breeds', link: DOGS_LINK } }))).toBe(false);
+    expect(spaceWriteSavedNothing('not json')).toBe(false);
+    const writes = spaceWritesThisTurn([
+      user,
+      call('a1', 'edit_space', { space_name: 'Dog breeds' }),
+      { role: 'tool', tool_call_id: 'a1', content },
+    ]);
+    expect(writes).toEqual([]);
+    expect(spaceClosingLine({ writes, unfinished: undefined, noticeShown: false })).toBe('');
   });
 
   it('marks a space whose last write was refused, and clears it after a later save', () => {

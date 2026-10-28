@@ -147,7 +147,7 @@ import {
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
-import { spaceClosingLine, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
+import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { resolveLocalTime } from '../util/clientTimezone';
@@ -5111,7 +5111,14 @@ export class AgentThread {
         // A call held for the owner has not run, so it earns no refund.
         return call === undefined || call.tool_info.held_for_owner !== undefined
           ? []
-          : [{ toolName: call.tool_info.original_tool_name, disposition: result.disposition, failure: result.failure }];
+          : [
+              {
+                toolName: call.tool_info.original_tool_name,
+                disposition: result.disposition,
+                failure: result.failure,
+                savedNothing: spaceWriteSavedNothing(result.message.content),
+              },
+            ];
       }),
     });
     if (refund > 0) {

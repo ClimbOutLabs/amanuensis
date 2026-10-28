@@ -1160,7 +1160,7 @@ describe('a stale revision or a bad fingerprint does not cost a step', () => {
     expect(parsed.revision_was_stale).toBe(true);
     expect(parsed.space?.revision).toBe(3);
     expect(parsed.summary).toContain(
-      'Your expected_revision was 1 but the space was at 2; every block you named still held what you read, so the change was applied to revision 2.',
+      'Your expected_revision was 1 but the space was at 2; every block you named still held what you read, so the change was applied to revision 2 and saved as revision 3.',
     );
     expect(await readBody(callTool, 'Proven')).toBe('Alpha, done.\n\nBeta, moved.');
   });
@@ -1430,7 +1430,7 @@ describe('saved rows are compared across the whole body', () => {
     return block;
   }
 
-  it('applies a row moved from the second row block to the first', async () => {
+  it('lets a row move between row blocks past the rows check; the body reads the same, so nothing changes', async () => {
     const { callTool, blocks } = await seedBig(names);
     const first = pick(blocks, 1);
     const second = pick(blocks, 2);
@@ -1960,6 +1960,31 @@ describe('space writes work together', () => {
     expect(isErrorResponse(response)).toBe(false);
     expect(resultJson(response).revision_was_stale).toBe(true);
     expect(await readBody(callTool, 'Status')).toBe('Intro.\n\nStatus: all done\n\ndone');
+  });
+
+  it('refuses an append that names a revision the space has not reached', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const response = await sendEdit(callTool, {
+      name: 'Breeds',
+      expected_revision: 5,
+      edits: [{ type: 'append', new_content: '| Pug | Small |' }],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(resultJson(response).error).toContain('The space is at revision 1, not 5.');
+    expect(resultJson(response).summary).toBeUndefined();
+    expect(await readBody(callTool, 'Breeds')).toBe(TABLE);
+  });
+
+  it('marks a resent append that was already at the end as saving nothing', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Breeds', body: TABLE });
+    const append = { type: 'append', new_content: '| Pug | Small |' };
+    const first = await sendEdit(callTool, { name: 'Breeds', expected_revision: 1, edits: [append] });
+    expect(JSON.parse(resultText(first)).nothing_saved).toBeUndefined();
+    const again = await sendEdit(callTool, { name: 'Breeds', expected_revision: 1, edits: [append] });
+    expect(isErrorResponse(again)).toBe(false);
+    expect(JSON.parse(resultText(again)).nothing_saved).toBe(true);
   });
 
   it('a stale call that mixes a block entry and an append applies only when the end has not moved', async () => {

@@ -737,7 +737,9 @@ describe('the space write size cap', () => {
     // The model is told one number, 3,600, which leaves headroom under the real cap;
     // the cap itself is never reported to the model.
     expect(rendered).toContain(
-      'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines. A markdown write past the limit saves only the leading lines that fit',
+      'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines. ' +
+        'A create, or an edit whose one entry adds rows or fills a short placeholder, saves only the leading lines that fit when it runs past the limit; ' +
+        'any other write past it is refused with nothing saved.',
     );
     expect(rendered).toContain('A call whose only entry is an append entry and that changes no title');
     expect(rendered).toContain(

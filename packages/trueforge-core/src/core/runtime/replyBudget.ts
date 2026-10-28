@@ -64,18 +64,22 @@ export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; bud
 
 /**
  * Steps to hand back after one tool batch: one when a space write in it landed cleanly, so a build
- * done in parts is not cut off by its own progress. Refused or failed writes earn nothing, and the
- * total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
+ * done in parts is not cut off by its own progress. Refused or failed writes, and writes that saved
+ * nothing new, earn nothing, and the total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
  */
 export function progressRefundFor({
   results,
   refundsSoFar,
 }: {
-  results: readonly { toolName: string; disposition: ToolResultDisposition; failure: boolean }[];
+  results: readonly { toolName: string; disposition: ToolResultDisposition; failure: boolean; savedNothing: boolean }[];
   refundsSoFar: number;
 }): number {
   const landedWrite = results.some(
-    result => isSpaceWriteToolName(result.toolName) && result.disposition === 'executed_ok' && !result.failure,
+    result =>
+      isSpaceWriteToolName(result.toolName) &&
+      result.disposition === 'executed_ok' &&
+      !result.failure &&
+      !result.savedNothing,
   );
   return landedWrite && refundsSoFar < MAX_PROGRESS_STEP_REFUNDS ? 1 : 0;
 }
