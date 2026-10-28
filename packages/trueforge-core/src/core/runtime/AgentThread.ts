@@ -327,6 +327,10 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
   'The model stopped answering, so this reply stopped. Send your message again to retry.';
 
+/** Shown when a turn stops at its step limit; the steps already done stay done. */
+export const ITERATION_LIMIT_MESSAGE =
+  'This reply stopped because it took too many steps. Nothing further was done. Ask again, or split your request into smaller parts.';
+
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
  * failing the turn visibly. Five minutes: generous for compaction on large contexts,
@@ -5499,11 +5503,18 @@ export class AgentThread {
               return;
             }
             if (this.metrics.iterations >= iterationLimit) {
-              yield this.generateErrorEvent(
-                `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
-                undefined,
-                'iteration_limit',
-              );
+              // The person reads the plain stop message. A sub-agent's parent model reads the
+              // original instruction instead, so its next step is unchanged.
+              const done = this.generateErrorEvent(ITERATION_LIMIT_MESSAGE, undefined, 'iteration_limit');
+              yield done.send_to_parent === undefined
+                ? done
+                : {
+                    ...done,
+                    send_to_parent: {
+                      ...done.send_to_parent,
+                      content: `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
+                    },
+                  };
               return;
             }
             this.metrics.iterations++;
