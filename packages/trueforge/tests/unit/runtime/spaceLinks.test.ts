@@ -1,5 +1,5 @@
 import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
-import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { recordPageImageUrls, recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
 
 const SEEN = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
@@ -141,6 +141,36 @@ const MARKDOWN_SPELLINGS: Spelling[] = [
     body: url => `<img src="${entityEncoded(url)}" alt="Fox">`,
   },
 ];
+
+describe('link refusal words', () => {
+  it('tells the model what a refused plain link means and what to do', () => {
+    const refusal = refusalOf({ body: `<a href="${UNSEEN}">Fox</a>`, format: 'html' });
+    expect(refusal).toContain('does not come from a search result in this chat');
+    expect(refusal).toContain('leave the link out');
+    expect(refusal).not.toContain("link's link");
+  });
+
+  it('tells the model a refused picture needs a page it opened', () => {
+    const refusal = refusalOf({ body: `<img src="${UNSEEN}" alt="Fox">`, format: 'html' });
+    expect(refusal).toContain('a page you opened');
+    expect(refusal).toContain('leave the picture out');
+  });
+
+  it("still lets a picture from a page the chat opened stay, and refuses that page's other links", () => {
+    const state = createWebSearchTurnState();
+    recordPageImageUrls({ provenance: state.provenance, urls: [SEEN] });
+    const attempt = (body: string) => {
+      try {
+        refuseNewSpaceLinks({ body, previousBody: '', format: 'html', web_search: state });
+        return undefined;
+      } catch (error) {
+        return error instanceof SpaceLinkRefusedError ? error.message : undefined;
+      }
+    };
+    expect(attempt(`<img src="${SEEN}" alt="Fox">`)).toBeUndefined();
+    expect(attempt(`<a href="${UNSEEN}">Fox</a>`)).toContain('leave the link out');
+  });
+});
 
 describe('space links are checked from a real parse of the body', () => {
   describe.each([...HTML_SPELLINGS, ...MARKDOWN_SPELLINGS])('$name', ({ format, body }) => {
