@@ -713,7 +713,7 @@ describe('the space write size cap', () => {
     expect(rendered).toContain(
       'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines, and a write past the limit',
     );
-    expect(rendered).toContain('The one exception is a call whose only entry is an append entry');
+    expect(rendered).toContain('A call whose only entry is an append entry and that changes no title');
     expect(rendered).toContain(
       'When a result says part of the content was not saved, continue from the line it names, without resending saved lines. ' +
         'To add rows or sections at the end, use an append entry (no anchor or fingerprint needed). ' +

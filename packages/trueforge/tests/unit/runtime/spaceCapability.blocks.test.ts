@@ -203,6 +203,8 @@ interface SpaceWireResult {
   blocks?: SpaceWireBlock[];
   revision?: number;
   error?: string;
+  summary?: string;
+  revision_was_stale?: boolean;
 }
 
 function resultText(response: CallToolResponse): string {
@@ -591,7 +593,7 @@ describe('the dog-table flow: build a 40-row table in parts by block edits', () 
 });
 
 describe('block edits carry the revision they were read at', () => {
-  it('a stale expected_revision refuses, names the current revision, and persists nothing', async () => {
+  it('a stale expected_revision over a changed block above refuses, names the current revision, and persists nothing', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Stale', body: 'First paragraph.\n\nSecond paragraph.' });
     const outline = (await listBlocks(callTool, 'Stale')).blocks ?? [];
@@ -627,7 +629,8 @@ describe('block edits carry the revision they were read at', () => {
     expect(isErrorResponse(stale)).toBe(true);
     const parsed = resultJson(stale);
     expect(parsed.revision).toBe(2);
-    expect(parsed.error).toContain('Call get_space to read the current revision');
+    expect(parsed.error).toContain('The space is at revision 2, not 1');
+    expect(parsed.blocks?.map(block => block.anchor)).toEqual(['b1', 'b2']);
     expect(await readBody(callTool, 'Stale')).toBe(bodyAfterMove);
   });
 
@@ -741,7 +744,7 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     expect(await readBody(callTool, 'Bulletin')).toBe('First line, fixed.\n\nSecond line of the notice.');
   });
 
-  it('a stale revision counts toward the breaker like any other failed block edit', async () => {
+  it('a stale revision refusal hands back the outline and does not count toward the breaker', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Counting', body: 'Alpha.\n\nBeta.' });
     const outline = (await listBlocks(callTool, 'Counting')).blocks ?? [];
@@ -755,7 +758,7 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
     });
     expect(isErrorResponse(moved)).toBe(false);
 
-    // Failure 1: a stale revision. Failures 2 and 3: unknown anchors at the current revision.
+    // The stale refusal hands back the outline and does not count: three unknown anchors lock.
     const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Counting',
       expected_revision: 1,
@@ -764,7 +767,7 @@ describe("Wendy's flow: bad anchors lock the space, a revert to the current revi
       ],
     });
     expect(isErrorResponse(stale)).toBe(true);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
         space_name: 'Counting',
         expected_revision: 2,
@@ -1118,5 +1121,196 @@ describe('append entries add content at the end with no anchor or fingerprint', 
     expect(isErrorResponse(response)).toBe(true);
     expect(resultJson(response).error).toContain('must have some text');
     expect(await readBody(callTool, 'Breeds')).toBe(TABLE);
+  });
+});
+
+describe('a stale revision or a bad fingerprint does not cost a step', () => {
+  async function moveFirstBlock(callTool: ReturnType<typeof makeHarness>['callTool'], name: string) {
+    const outline = (await listBlocks(callTool, name)).blocks ?? [];
+    const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: name,
+      expected_revision: 1,
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, moved.' },
+      ],
+    });
+    expect(isErrorResponse(moved)).toBe(false);
+    return outline;
+  }
+
+  it('applies a stale call when the change was below the block it names', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Proven', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Proven')).blocks ?? [];
+    const moved = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Proven',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Beta, moved.' }],
+    });
+    expect(isErrorResponse(moved)).toBe(false);
+
+    const applied = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Proven',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, done.' }],
+    });
+    expect(isErrorResponse(applied)).toBe(false);
+    const parsed = resultJson(applied);
+    expect(parsed.revision_was_stale).toBe(true);
+    expect(parsed.space?.revision).toBe(3);
+    expect(parsed.summary).toContain(
+      'Your expected_revision was 1 but the space was at 2; every block you named still held what you read, so the change was applied to revision 2.',
+    );
+    expect(await readBody(callTool, 'Proven')).toBe('Alpha, done.\n\nBeta, moved.');
+  });
+
+  it('refuses a repeated insert sent at the same stale revision', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Repeat', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Repeat')).blocks ?? [];
+    const insert = { type: 'insert', after: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: 'Gamma.' };
+    const first = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: 'Repeat', expected_revision: 1, edits: [insert] });
+    expect(isErrorResponse(first)).toBe(false);
+    const again = await callTool(EDIT_SPACE_TOOL_NAME, { space_name: 'Repeat', expected_revision: 1, edits: [insert] });
+    expect(isErrorResponse(again)).toBe(true);
+    expect(resultJson(again).blocks).toHaveLength(3);
+    expect(await readBody(callTool, 'Repeat')).toBe('Alpha.\n\nBeta.\n\nGamma.');
+  });
+
+  it('refuses a second insert after the same block, so the two cannot land in reverse order', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Order', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Order')).blocks ?? [];
+    const after = (content: string) => ({
+      space_name: 'Order',
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b2', fingerprint: outline[1]?.fingerprint ?? '', new_content: content }],
+    });
+    expect(isErrorResponse(await callTool(EDIT_SPACE_TOOL_NAME, after('First.')))).toBe(false);
+    expect(isErrorResponse(await callTool(EDIT_SPACE_TOOL_NAME, after('Second.')))).toBe(true);
+    expect(await readBody(callTool, 'Order')).toBe('Alpha.\n\nBeta.\n\nFirst.');
+  });
+
+  it('refuses a stale call that would hit the wrong copy of an identical block', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Copies', body: 'One.\n\nTwo.\n\nSame.\n\nFour.\n\nSame.' });
+    const outline = (await listBlocks(callTool, 'Copies')).blocks ?? [];
+    const deleted = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b5', fingerprint: outline[4]?.fingerprint ?? '', new_content: '' }],
+    });
+    expect(isErrorResponse(deleted)).toBe(false);
+    const added = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 2,
+      edits: [{ type: 'insert', after: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Top.' }],
+    });
+    expect(isErrorResponse(added)).toBe(false);
+    const before = await readBody(callTool, 'Copies');
+
+    const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Copies',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b5', fingerprint: outline[4]?.fingerprint ?? '', new_content: 'Changed.' }],
+    });
+    expect(isErrorResponse(stale)).toBe(true);
+    expect(await readBody(callTool, 'Copies')).toBe(before);
+  });
+
+  it('refuses with the current outline and leaves the breaker alone when the fingerprint is shared', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Twins', body: 'Alpha.\n\nSame.\n\nSame.' });
+    const outline = (await listBlocks(callTool, 'Twins')).blocks ?? [];
+    await moveFirstBlock(callTool, 'Twins');
+    const before = await readBody(callTool, 'Twins');
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Twins',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: 'b3', fingerprint: outline[2]?.fingerprint ?? '', new_content: 'Last.' }],
+      });
+      expect(isErrorResponse(refused)).toBe(true);
+      const parsed = resultJson(refused);
+      expect(parsed.revision).toBe(2);
+      expect(parsed.error).toContain('The space is at revision 2, not 1.');
+      expect(parsed.blocks?.map(block => block.anchor)).toEqual(['b1', 'b2', 'b3']);
+      expect(parsed.blocks?.[0]?.preview).toBe('Alpha, moved.');
+    }
+    expect(await readBody(callTool, 'Twins')).toBe(before);
+
+    // Four refusals did not lock the space: the retry from the outline lands.
+    const current = (await listBlocks(callTool, 'Twins')).blocks ?? [];
+    const retried = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Twins',
+      expected_revision: 2,
+      edits: [{ type: 'block', anchor: 'b3', fingerprint: current[2]?.fingerprint ?? '', new_content: 'Last.' }],
+    });
+    expect(isErrorResponse(retried)).toBe(false);
+  });
+
+  it('a call at the current revision is unchanged and not marked stale', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Current', body: 'Alpha.\n\nBeta.' });
+    const outline = (await listBlocks(callTool, 'Current')).blocks ?? [];
+    const applied = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Current',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'Alpha, new.' }],
+    });
+    expect(isErrorResponse(applied)).toBe(false);
+    expect(resultJson(applied).revision_was_stale).toBeUndefined();
+    expect(resultJson(applied).summary).not.toContain('expected_revision');
+  });
+
+  it('an empty fingerprint reaches the handler and the refusal carries the outline', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Empty', body: 'Alpha.\n\nBeta.' });
+    const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Empty',
+      expected_revision: 1,
+      edits: [{ type: 'insert', after: 'b2', fingerprint: '', new_content: 'Gamma.' }],
+    });
+    expect(isErrorResponse(refused)).toBe(true);
+    const parsed = resultJson(refused);
+    expect(parsed.error).toContain('Entry #1 names fingerprint ""');
+    expect(parsed.error).toContain('use an append entry to add content at the end');
+    expect(parsed.revision).toBe(1);
+    expect(parsed.blocks?.map(block => block.anchor)).toEqual(['b1', 'b2']);
+    expect(await readBody(callTool, 'Empty')).toBe('Alpha.\n\nBeta.');
+  });
+
+  it('a malformed fingerprint does not count toward the breaker', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Format', body: 'Alpha.' });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Format',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: 'b1', fingerprint: 'ABC', new_content: 'x' }],
+      });
+      expect(resultJson(refused).blocks).toHaveLength(1);
+    }
+    const outline = (await listBlocks(callTool, 'Format')).blocks ?? [];
+    const applied = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Format',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: outline[0]?.fingerprint ?? '', new_content: 'x' }],
+    });
+    expect(isErrorResponse(applied)).toBe(false);
+  });
+
+  it('a well-formed fingerprint over changed content still refuses without handing fingerprints back', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Changed', body: 'Alpha.' });
+    const refused = await callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Changed',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'x' }],
+    });
+    expect(isErrorResponse(refused)).toBe(true);
+    expect(resultJson(refused).error).toContain('does not hold the content fingerprint');
+    expect(resultJson(refused).blocks).toBeUndefined();
   });
 });

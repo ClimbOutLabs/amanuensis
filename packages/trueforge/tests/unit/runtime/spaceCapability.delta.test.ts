@@ -681,11 +681,11 @@ describe('edit_space delta edits: Madrid board journey', () => {
     });
     expect(isErrorResponse(moved)).toBe(false);
 
-    // A delta edit fenced at the now-stale revision 1 fails before persisting.
+    // The same insert sent again at the now-stale revision 1 would add a second copy: refused before persisting.
     const stale = await callTool(store, EDIT_SPACE_TOOL_NAME, {
       space_name: BOARD_META.name,
       expected_revision: 1,
-      edits: [{ type: 'block', anchor: 'b1', fingerprint: boardFingerprint, new_content: 'x' }],
+      edits: [{ type: 'insert', after: 'b1', fingerprint: boardFingerprint, new_content: '<p>Extra line.</p>' }],
     });
     const parsed = resultJson(stale);
     expect(isErrorResponse(stale)).toBe(true);
