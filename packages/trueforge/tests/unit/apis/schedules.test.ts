@@ -5,6 +5,7 @@ import {
   Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import winston from 'winston';
 import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../src/apis/schedules';
@@ -20,6 +21,7 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { CHAT_ASSISTANT_DESCRIPTION, getOrCreateChatAssistantAgent } from '../../../src/runtime/chatAssistant';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
@@ -946,5 +948,136 @@ describe('what a schedule runs with', () => {
     expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id: second.schedule.id }))?.agent_id).toBe(
       second.agent.id,
     );
+  });
+});
+
+describe('audit rows for schedule firings', () => {
+  const ALICE_SUBJECT = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+
+  function auditRecorder() {
+    const records: AuditRecordInput[] = [];
+    return {
+      records,
+      audit: {
+        record: (input: AuditRecordInput) => {
+          records.push(input);
+          return Promise.resolve();
+        },
+      },
+    };
+  }
+
+  it('writes one logged row for a schedule firing, keyed on the run chat', async () => {
+    const built = await setup();
+    const { schedule } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: (await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' }))?.id ?? '',
+      agent_name: 'reporter',
+      name: 'daily-report',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({ task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC' }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date(),
+    });
+    const run = await built.scheduleStore.createRun({
+      tenant_id: 'default',
+      schedule_id: schedule.id,
+      name: 'manual-test',
+      scheduled_for: new Date(),
+      status: 'triggered',
+      created_by_subject: ALICE_SUBJECT,
+      triggered_at: new Date(),
+    });
+    const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
+      '../../../src/controller/scheduleDispatch',
+    );
+    mockedStartScheduleRun.mockImplementation(actual.startScheduleRun);
+    mockedStartTurnInProcess.mockReset();
+    const { records, audit } = auditRecorder();
+    const deps = { ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db), audit };
+    const execution = createScheduleExecutionRouter(deps);
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: run.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const runSession = await deps.sessions.getByExternalId({ tenant_id: 'default', external_id: run.id });
+    expect(runSession).toBeDefined();
+    expect(records).toEqual([
+      expect.objectContaining({
+        tenant_id: 'default',
+        created_by: 'alice',
+        conversation_id: runSession?.session_id,
+        tier: 1,
+        tool_name: 'create_schedule',
+        description: 'The schedule "daily-report" ran.',
+        outcome: 'logged',
+        auto_deny_reason: null,
+      }),
+    ]);
+  });
+
+  it('writes the firing row and the delivery row for a reminder, both keyed on the Reminders chat', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const { schedule, pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    expect(schedule.manifest.kind).toBe('reminder');
+    const sessionStore = new SqliteSessionStore(built.db);
+    const { records, audit } = auditRecorder();
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
+      sessionStore,
+      audit,
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      tenant_id: 'default',
+      created_by: 'alice',
+      tier: 1,
+      tool_name: 'set_reminder',
+      description: 'Delivered the reminder: Take the medicine',
+      outcome: 'logged',
+    });
+    expect(records[1]).toMatchObject({
+      tenant_id: 'default',
+      created_by: 'alice',
+      tier: 1,
+      tool_name: 'set_reminder',
+      description: 'The reminder ran: Take the medicine',
+      outcome: 'logged',
+    });
+    expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
   });
 });
