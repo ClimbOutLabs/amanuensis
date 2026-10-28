@@ -2,7 +2,7 @@
 
 /** The kind of Google client this install needs. */
 export const GoogleSetupInfoClientType = {
-        Desktop: "desktop",
-        Web: "web"
-    } as const;
-export type GoogleSetupInfoClientType = typeof GoogleSetupInfoClientType[keyof typeof GoogleSetupInfoClientType];
+    Desktop: "desktop",
+    Web: "web",
+} as const;
+export type GoogleSetupInfoClientType = (typeof GoogleSetupInfoClientType)[keyof typeof GoogleSetupInfoClientType];

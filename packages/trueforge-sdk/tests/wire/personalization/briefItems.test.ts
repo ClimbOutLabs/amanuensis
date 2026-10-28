@@ -5,229 +5,239 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("BriefItemsClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : [ { "completed_at" : "completed_at" , "item_key" : "item_key" , "section" : "check_first" , "title" : "title" } ] };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: [{ completed_at: "completed_at", item_key: "item_key", section: "check_first", title: "title" }],
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/user/brief-items/completions").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/user/brief-items/completions")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.personalization.briefItems.list();
-                                expect(response).toEqual({
-    data: [{
-            completedAt: "completed_at",
-            itemKey: "item_key",
-            section: "check_first",
-            title: "title"
-        }]
-});
-                              
-                    
+        const response = await client.personalization.briefItems.list();
+        expect(response).toEqual({
+            data: [
+                {
+                    completedAt: "completed_at",
+                    itemKey: "item_key",
+                    section: "check_first",
+                    title: "title",
+                },
+            ],
+        });
     });
-          
+
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/user/brief-items/completions").respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/user/brief-items/completions")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.list()
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.personalization.briefItems.list();
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("list (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/user/brief-items/completions").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/user/brief-items/completions")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.list()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.personalization.briefItems.list();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("markDone (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "item_key" : "item_key" , "section" : "check_first" , "session_id" : "session_id" , "title" : "title" };
-        const rawResponseBody = { "data" : { "completed_at" : "completed_at" , "item_key" : "item_key" , "section" : "check_first" , "title" : "title" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            item_key: "item_key",
+            section: "check_first",
+            session_id: "session_id",
+            title: "title",
+        };
+        const rawResponseBody = {
+            data: { completed_at: "completed_at", item_key: "item_key", section: "check_first", title: "title" },
+        };
+
         server
             .mockEndpoint()
-            .post("/api/v1/user/brief-items/completions").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/user/brief-items/completions")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.personalization.briefItems.markDone({
-    itemKey: "item_key",
-    section: "check_first",
-    sessionId: "session_id",
-    title: "title"
-});
-                                expect(response).toEqual({
-    data: {
-        completedAt: "completed_at",
-        itemKey: "item_key",
-        section: "check_first",
-        title: "title"
-    }
-});
-                              
-                    
+        const response = await client.personalization.briefItems.markDone({
+            itemKey: "item_key",
+            section: "check_first",
+            sessionId: "session_id",
+            title: "title",
+        });
+        expect(response).toEqual({
+            data: {
+                completedAt: "completed_at",
+                itemKey: "item_key",
+                section: "check_first",
+                title: "title",
+            },
+        });
     });
-          
+
     test("markDone (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "item_key" : "x" , "section" : "check_first" , "session_id" : "x" , "title" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { item_key: "x", section: "check_first", session_id: "x", title: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/user/brief-items/completions").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/user/brief-items/completions")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.markDone({
-    itemKey: "x",
-    section: "check_first",
-    sessionId: "x",
-    title: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.personalization.briefItems.markDone({
+                itemKey: "x",
+                section: "check_first",
+                sessionId: "x",
+                title: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("markDone (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "item_key" : "x" , "section" : "check_first" , "session_id" : "x" , "title" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { item_key: "x", section: "check_first", session_id: "x", title: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/user/brief-items/completions").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/user/brief-items/completions")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.markDone({
-    itemKey: "x",
-    section: "check_first",
-    sessionId: "x",
-    title: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.personalization.briefItems.markDone({
+                itemKey: "x",
+                section: "check_first",
+                sessionId: "x",
+                title: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("markDone (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "item_key" : "x" , "section" : "check_first" , "session_id" : "x" , "title" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { item_key: "x", section: "check_first", session_id: "x", title: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/user/brief-items/completions").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/user/brief-items/completions")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.markDone({
-    itemKey: "x",
-    section: "check_first",
-    sessionId: "x",
-    title: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.personalization.briefItems.markDone({
+                itemKey: "x",
+                section: "check_first",
+                sessionId: "x",
+                title: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("undo (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
         server
             .mockEndpoint()
-            .delete("/api/v1/user/brief-items/completions/item_key").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/user/brief-items/completions/item_key")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.personalization.briefItems.undo("item_key");
-                                expect(response).toEqual({});
-                              
-                    
+        const response = await client.personalization.briefItems.undo("item_key");
+        expect(response).toEqual({});
     });
-          
+
     test("undo (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/user/brief-items/completions/item_key").respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/user/brief-items/completions/item_key")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.undo("item_key")
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.personalization.briefItems.undo("item_key");
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("undo (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/user/brief-items/completions/item_key").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/user/brief-items/completions/item_key")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.personalization.briefItems.undo("item_key")
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.personalization.briefItems.undo("item_key");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });
