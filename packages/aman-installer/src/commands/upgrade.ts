@@ -7,8 +7,8 @@ import { doctorStoreProblem, runDoctorChecks, type DoctorChecks, type DoctorDeps
 import type { Host } from '../host/host.ts';
 import {
   NOT_INSTALLED,
-  STATE_BUSY,
   STATE_UNREADABLE,
+  UPGRADE_BUSY,
   UPGRADE_CONTAINER_FAILED,
   UPGRADE_DECLINED_LINE,
   UPGRADE_DOCKER_NOT_ANSWERING,
@@ -272,7 +272,7 @@ async function runContainerUpgrade(deps: UpgradeDeps, manifest: ReleaseManifest)
     return 0;
   }
   if (combined.includes('Another install is running right now')) {
-    print(problemText(STATE_BUSY));
+    print(problemText(UPGRADE_BUSY));
     return 1;
   }
   if (combined.includes('The previous version is back')) {

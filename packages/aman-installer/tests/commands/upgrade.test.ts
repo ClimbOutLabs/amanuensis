@@ -11,7 +11,7 @@ import { FakeHost } from '../../src/host/fakeHost.ts';
 import {
   NOT_INSTALLED,
   problemText,
-  STATE_BUSY,
+  UPGRADE_BUSY,
   UPGRADE_DECLINED_LINE,
   UPGRADE_DOCKER_NOT_ANSWERING,
   UPGRADE_DOWNLOAD_FAILED,
@@ -514,7 +514,7 @@ test('a busy state lock inside the container upgrade is the busy problem', async
   const world = await makeWorld({ answers, byteAnswers });
   const exitCode = await runUpgrade(world.deps);
   assert.equal(exitCode, 1);
-  assert.equal(world.printed[world.printed.length - 1], problemText(STATE_BUSY));
+  assert.equal(world.printed[world.printed.length - 1], problemText(UPGRADE_BUSY));
 });
 
 test('a container that will not start for the upgrade is the docker problem', async () => {

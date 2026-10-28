@@ -305,6 +305,13 @@ export const UPGRADE_DOCKER_NOT_ANSWERING: Problem = {
   fix: 'Open Docker Desktop from the Start menu, then run Update Aman again.',
 };
 
+// The same wait the state lock asks for, with this command's own next
+// step: the lock's dead limit, as in STATE_BUSY.
+export const UPGRADE_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run Update Aman from the Start menu again.`,
+};
+
 export const UPGRADE_ROLLED_BACK: Problem = {
   happened: 'The update did not work, so the previous version of Aman was put back.',
   fix: 'Run Check Aman from the Start menu to see what needs fixing.',
@@ -383,6 +390,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(UPGRADE_REPLACE_FAILED));
   lines.push(problemText(UPGRADE_SOURCE_FAILED));
   lines.push(problemText(UPGRADE_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(UPGRADE_BUSY));
   lines.push(problemText(UPGRADE_ROLLED_BACK));
   lines.push(problemText(UPGRADE_NOT_PUT_BACK));
   lines.push(problemText(UPGRADE_CONTAINER_FAILED));

@@ -61,6 +61,7 @@ The new version of Aman did not start, so the update was stopped and your Aman i
 The new Aman program could not be put in place. Close any Aman window that is open, then run Update Aman from the Start menu again.
 The new Aman program is in place, but the update itself did not finish. Run Update Aman from the Start menu again to finish the update.
 Docker is not answering, so the update cannot go ahead. Open Docker Desktop from the Start menu, then run Update Aman again.
+Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run Update Aman from the Start menu again.
 The update did not work, so the previous version of Aman was put back. Run Check Aman from the Start menu to see what needs fixing.
 The update did not work, and the previous version could not be fully put back. Run Check Aman from the Start menu to see how things stand.
 The update stopped before it finished. Run Check Aman from the Start menu to see how things stand.
