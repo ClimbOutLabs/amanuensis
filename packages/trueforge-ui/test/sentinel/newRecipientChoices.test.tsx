@@ -29,6 +29,9 @@ function baseCard(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprov
 
 const newRecipientCard = (): SentinelApprovalCard => baseCard({ mail_new_recipients: ['stranger@example.net'] });
 
+const newRecipientDraftCard = (): SentinelApprovalCard =>
+  baseCard({ mail_new_recipients: ['stranger@example.net'], mail_draft: true });
+
 describe('PermissionApprovalCard without a new recipient', () => {
   it('keeps the ordinary labels and the chat button on a card with no new recipient', () => {
     render(
@@ -45,6 +48,39 @@ describe('PermissionApprovalCard without a new recipient', () => {
     expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add and send' })).not.toBeInTheDocument();
+  });
+});
+
+describe('PermissionApprovalCard for a new-recipient draft', () => {
+  it("labels the card Add and save draft and Don't save, and offers no chat-wide answer", () => {
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-1"
+        othersWaiting={0}
+        card={newRecipientDraftCard()}
+        onApprove={vi.fn()}
+        onApproveForChat={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Add and save draft' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: "Don't save" })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add and send' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this here' })).not.toBeInTheDocument();
+  });
+
+  it('offers Change it on a new-recipient card when the surface passes the handler', () => {
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-1"
+        othersWaiting={0}
+        card={newRecipientCard()}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Change it' })).toBeInTheDocument();
   });
 });
 
@@ -67,6 +103,28 @@ describe('HeldActionCard for a new recipient', () => {
     expect(screen.getByRole('button', { name: 'Change it' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add and send' }));
     fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels the held draft card Add and save draft and Don't save, and offers no Always allow", () => {
+    const onApprove = vi.fn();
+    const onDeny = vi.fn();
+    render(
+      <HeldActionCard
+        card={newRecipientDraftCard()}
+        status={{ kind: 'waiting' }}
+        alwaysAllowOffered
+        onApprove={onApprove}
+        onAlwaysAllow={vi.fn()}
+        onDeny={onDeny}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change it' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add and save draft' }));
+    fireEvent.click(screen.getByRole('button', { name: "Don't save" }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
   });

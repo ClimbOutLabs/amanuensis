@@ -70,6 +70,20 @@ const SIDECAR_TOOLS = [
     },
   },
   {
+    name: 'save_draft',
+    description: 'Save a draft email.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_name: accountProperty,
+        recipients: { type: 'array' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['account_name', 'recipients', 'subject'],
+    },
+  },
+  {
     name: 'list_available_accounts',
     description: 'List accounts.',
     inputSchema: { type: 'object' as const, properties: {} },
@@ -88,9 +102,11 @@ function text(value: unknown, isError = false): CallToolResult {
 function scriptedSidecar({
   accountList,
   known = () => ['default'],
+  draftResult = () => text({ ok: true, draft_id: 'draft-1' }),
 }: {
   accountList: () => CallToolResult;
   known?: () => readonly string[];
+  draftResult?: () => CallToolResult;
 }) {
   const calls: Record<string, unknown>[] = [];
   const callTool = (params: CallToolRequest['params']): Promise<CallToolResult> => {
@@ -107,6 +123,9 @@ function scriptedSidecar({
     }
     if (params.name === 'send_email') {
       return Promise.resolve(text({ sent: true }));
+    }
+    if (params.name === 'save_draft') {
+      return Promise.resolve(draftResult());
     }
     const since = args['since'];
     if (since === undefined || since === null) {
@@ -154,7 +173,10 @@ function makeSpec(): AgentSpec {
     model: { name: 'test-provider/test-model' },
     instructions: 'test',
     mcp_servers: [
-      { name: MAIL_CONNECTOR_NAME, enable_tools: ['list_emails_metadata', 'list_mailboxes', 'send_email'] },
+      {
+        name: MAIL_CONNECTOR_NAME,
+        enable_tools: ['list_emails_metadata', 'list_mailboxes', 'send_email', 'save_draft'],
+      },
     ],
     config: {
       ask_user_questions: { enabled: false },
@@ -343,6 +365,62 @@ describe('Email connector account name', () => {
     for (const tool of first.result.tools) {
       expect(tool.inputSchema.required ?? []).not.toContain('account_name');
     }
+  });
+});
+
+describe('Email connector drafts', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('tells the model a draft keeps the recipients the person named', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const draft = listed.result.tools.find(tool => tool.name === 'save_draft');
+    expect(draft?.description).toContain('Recipients the person named must stay on the call');
+    expect(draft?.description).toContain('an approval card shown to the person');
+    expect(draft?.description).toContain('a draft with no recipient is refused');
+    expect(draft?.description ?? '').not.toContain('allowlist');
+  });
+
+  it('answers the sidecar recipient refusal in plain words, naming the card as the route', async () => {
+    scriptedSidecar({
+      accountList: oneAccount,
+      draftResult: () => text('Error executing tool save_draft: recipient policy denied one or more addresses', true),
+    });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'save_draft', arguments: { recipients: ['new@example.com'], subject: 'Hi', body: 'Hello' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).not.toContain('recipient policy denied');
+    expect(said).toContain('Nothing was saved or sent');
+    expect(said).toContain('so the person can be asked on a card');
+  });
+
+  it('passes a saved draft result through as it came', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'save_draft', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(false);
+    expect(JSON.parse(said)).toEqual({ ok: true, draft_id: 'draft-1' });
   });
 });
 

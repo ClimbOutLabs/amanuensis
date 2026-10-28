@@ -76,6 +76,26 @@ describe('extractSentinelFromEvent', () => {
     expect(other?.card.mail_new_recipients).toBeNull();
   });
 
+  it('reads the draft mark on a new-recipient card, and no mark on a send card', () => {
+    const [draft, send] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-draft',
+          tier: 3,
+          tier3_card: { plain_what: 'Save.', mail_new_recipients: ['stranger@example.net'], mail_draft: true },
+        },
+        {
+          tool_call_id: 'call-send',
+          tier: 3,
+          tier3_card: { plain_what: 'Send.', mail_new_recipients: ['stranger@example.net'] },
+        },
+      ],
+    });
+    expect(draft?.card.mail_draft).toBe(true);
+    expect(send?.card.mail_draft).toBe(false);
+  });
+
   it('parses per-tool-call approval cards with the backend field names', () => {
     const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);
