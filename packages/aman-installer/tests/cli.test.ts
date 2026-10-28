@@ -27,15 +27,20 @@ let homeCounter = 0;
 function makeCli(answers: Map<string, ProcessResult>) {
   const printed: string[] = [];
   homeCounter += 1;
+  const home = join(tmpdir(), `aman-cli-empty-${String(process.pid)}-${String(homeCounter)}`);
   const deps = {
     host: new FakeHost({ kind: 'linux', memoryBytes: 16 * GIB }),
     runner: new RecordingProcessRunner(new StubProcessRunner(answers)),
-    store: createStateStore(
-      folderBackend(join(tmpdir(), `aman-cli-empty-${String(process.pid)}-${String(homeCounter)}`)),
-    ),
+    store: createStateStore(folderBackend(home)),
     print: (line: string) => {
       printed.push(line);
     },
+    now: () => 1791633600,
+    homeDir: home,
+    stateHome: home,
+    osReleasePath: join(home, 'os-release'),
+    dockerConfigDir: join(home, '.docker'),
+    appService: 'app',
   };
   return { deps, printed };
 }
@@ -65,6 +70,50 @@ test('doctor docker passes on a ready computer', async () => {
   const exitCode = await runCli(['doctor', 'docker'], deps);
   assert.equal(exitCode, 0);
   assert.equal(printed[printed.length - 1], 'Docker is ready for Aman on this computer.');
+});
+
+test('doctor on an empty home with no Docker prints the plain report', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['doctor'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [
+    '',
+    'Checking this computer',
+    'Docker is not installed.',
+    'Next: Install Docker Desktop (macOS, Windows) or Docker Engine with Compose 2 (Linux), then run aman doctor.',
+    'Skipped: Docker is not reachable. (runtime)',
+    'Skipped: Docker is not reachable. (images, disk, docker_memory, clock)',
+    'No instances yet; nothing to back up.',
+    '',
+    '1 problem.',
+    'Run the Next command for each, then run aman doctor again.',
+  ]);
+});
+
+test('doctor --json on an empty home prints the checks as data', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['doctor', '--json'], deps);
+  assert.equal(exitCode, 1);
+  assert.equal(printed.length, 1);
+  const skipped = { state: 'off', detail: 'Skipped: Docker is not reachable.', fix: '' };
+  assert.deepEqual(JSON.parse(printed[0] ?? ''), {
+    machine: [
+      {
+        id: 'docker',
+        state: 'fail',
+        detail: 'Docker is not installed.',
+        fix: 'Install Docker Desktop (macOS, Windows) or Docker Engine with Compose 2 (Linux), then run aman doctor.',
+      },
+      { id: 'runtime', ...skipped },
+      { id: 'credentials', state: 'ok', detail: 'No Docker settings file, so no credential store is in use.', fix: '' },
+      { id: 'images', ...skipped },
+      { id: 'disk', ...skipped },
+      { id: 'docker_memory', ...skipped },
+      { id: 'clock', ...skipped },
+      { id: 'backup', state: 'ok', detail: 'No instances yet; nothing to back up.', fix: '' },
+    ],
+    instances: {},
+  });
 });
 
 test('an unknown doctor check gets one plain line', async () => {

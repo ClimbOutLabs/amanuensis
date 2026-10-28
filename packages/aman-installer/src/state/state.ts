@@ -22,6 +22,9 @@ export const BACKUPS_DIR = 'backups';
 export const BACKUPS_MODE_FILE = 'state/backups';
 export const SOURCE_FILE = 'state/source';
 export const INSTALLED_FILE = 'state/installed';
+export const CA_CERT_FILE = 'tls/ca/root.crt';
+export const CA_KEY_FILE = 'tls/ca/root.key';
+export const CA_FINGERPRINT_FILE = 'tls/ca/root.fingerprint';
 const INSTANCE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 // One line of a registry file. A line with no key is kept as it is, the way
@@ -166,15 +169,47 @@ export function releaseIsReadable(record: ReleaseRecord): boolean {
   return record.appImage !== null && record.sttImage !== null && record.dexImage !== null;
 }
 
+// When a backup was made, as the backend can know it: a folder home reads
+// the backup folder's own time, the volume reads the time in the backup's
+// name (the installer names each backup by the time it was made). Null
+// when the backend cannot say.
+export interface BackupEntry {
+  name: string;
+  timeSeconds: number | null;
+}
+
+// The certificate authority's facts, as the backend can read them. The
+// key's mode is the octal text the shell's file_mode prints, or null when
+// there is no key file. On the volume the store does not read the tls
+// folder in this stage, so every fact is absent there.
+export interface CertificateAuthorityFacts {
+  certPresent: boolean;
+  keyMode: string | null;
+  fingerprint: string | null;
+  fingerprintHasContent: boolean;
+}
+
 export interface StateSummary {
   release: ReleaseRecord | null;
   releaseUnreadable: boolean;
   previousRelease: ReleaseRecord | null;
   instances: readonly InstanceRecord[];
   backups: readonly string[];
+  backupEntries: readonly BackupEntry[];
   backupsMode: string | null;
+  backupsModeTimeSeconds: number | null;
+  certificateAuthority: CertificateAuthorityFacts;
   sourceCheckout: string | null;
   installedAppImage: string | null;
+}
+
+// The facts about one state path that a text read cannot give: when it
+// last changed, its mode and size, and whether it is a folder.
+export interface StatePathStat {
+  mtimeSeconds: number;
+  mode: number;
+  size: number;
+  isDirectory: boolean;
 }
 
 // The low-level shape both backends provide: state files as text, folder
@@ -184,6 +219,11 @@ export interface StateBackend {
   listNames: (dir: string) => Promise<readonly string[]>;
   writeChangedFiles: (files: readonly { path: string; text: string }[]) => Promise<void>;
   removeFile: (path: string) => Promise<void>;
+  // The stat facts the summary needs, or null when the path is not there
+  // or the backend cannot say. A backend answers from what it already
+  // holds where it can: the volume answers for a backup from the time in
+  // its name, and for nothing else in this stage.
+  statPath?: (path: string) => Promise<StatePathStat | null>;
 }
 
 export interface StateStore {
@@ -209,11 +249,41 @@ async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
       instances.push({ name, entries: parseRegistry(text) });
     }
   }
+  // The doctor's probes answer null on any error, as the shell's [ -f ]
+  // and stat probes do, so the facts below are read the same way: a path
+  // that cannot be judged is a path that is not there.
+  const statOrNull = async (path: string): Promise<StatePathStat | null> => {
+    if (backend.statPath === undefined) {
+      return null;
+    }
+    try {
+      return await backend.statPath(path);
+    } catch {
+      return null;
+    }
+  };
+  const readTextOrNull = async (path: string): Promise<string | null> => {
+    try {
+      return await backend.readText(path);
+    } catch {
+      return null;
+    }
+  };
   const releaseText = await backend.readText(RELEASE_FILE);
   const release = releaseText === null ? null : parseRelease(releaseText);
   const previousText = await backend.readText(PREVIOUS_RELEASE_FILE);
   const backups = [...(await backend.listNames(BACKUPS_DIR))].sort();
+  const backupEntries: BackupEntry[] = [];
+  for (const name of backups) {
+    const stat = await statOrNull(`${BACKUPS_DIR}/${name}`);
+    backupEntries.push({ name, timeSeconds: stat?.isDirectory === true ? stat.mtimeSeconds : null });
+  }
   const modeText = await backend.readText(BACKUPS_MODE_FILE);
+  const modeStat = await statOrNull(BACKUPS_MODE_FILE);
+  const certStat = await statOrNull(CA_CERT_FILE);
+  const keyStat = await statOrNull(CA_KEY_FILE);
+  const fingerprintText = await readTextOrNull(CA_FINGERPRINT_FILE);
+  const fingerprintStat = await statOrNull(CA_FINGERPRINT_FILE);
   const sourceText = await backend.readText(SOURCE_FILE);
   const installedText = await backend.readText(INSTALLED_FILE);
   const installedParts = installedText === null ? [] : installedText.trim().split(/\s+/);
@@ -223,7 +293,15 @@ async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
     previousRelease: previousText === null ? null : parseRelease(previousText),
     instances,
     backups,
+    backupEntries,
     backupsMode: modeText === null ? null : modeText.trim(),
+    backupsModeTimeSeconds: modeStat === null ? null : modeStat.mtimeSeconds,
+    certificateAuthority: {
+      certPresent: certStat !== null,
+      keyMode: keyStat === null ? null : (keyStat.mode & 0o7777).toString(8),
+      fingerprint: fingerprintText === null ? null : (fingerprintText.split('\n')[0] ?? ''),
+      fingerprintHasContent: fingerprintStat !== null && fingerprintStat.size > 0,
+    },
     sourceCheckout: sourceText === null ? null : (sourceText.split('\n')[0] ?? '').trim() || null,
     installedAppImage: installedParts.length >= 2 ? (installedParts[1] ?? null) : null,
   };

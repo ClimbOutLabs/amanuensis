@@ -1,6 +1,5 @@
 'use client';
 
-import { useAssistantDisplayName } from '@/components/PersonalizationContext.js';
 import { readBuildIdentity } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import { useServerCapabilities } from '@/server/ServerContext.js';
 
@@ -9,7 +8,6 @@ import { useServerCapabilities } from '@/server/ServerContext.js';
 const SHORT_REF_LENGTH = 8;
 
 const AboutSettings = () => {
-  const assistantName = useAssistantDisplayName();
   const build = readBuildIdentity(useServerCapabilities());
   const version = build?.version ?? null;
   const ref = build?.ref ?? null;
@@ -18,7 +16,6 @@ const AboutSettings = () => {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-base font-semibold text-text-primary">About</h2>
-        <p className="mt-1 text-sm text-text-secondary">The version of {assistantName} running on this computer.</p>
       </div>
 
       <div className="rounded-lg border border-border bg-card-bg p-4">
