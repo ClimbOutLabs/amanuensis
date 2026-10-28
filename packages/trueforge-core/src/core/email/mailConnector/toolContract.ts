@@ -24,7 +24,21 @@ export function isMailSendToolName(tool_name: string): boolean {
   return MAIL_SEND_TOOL_NAMES.some(name => name === tool_name);
 }
 
-export const MAIL_WRITE_TOOL_NAMES = ['save_draft', ...MAIL_SEND_TOOL_NAMES, 'archive_emails'] as const;
+/** Saves a message as a draft. It sends nothing, but its recipients are checked against the Email list like a send's. */
+export const MAIL_DRAFT_TOOL_NAME = 'save_draft';
+
+export function isMailDraftToolName(tool_name: string): boolean {
+  return tool_name === MAIL_DRAFT_TOOL_NAME;
+}
+
+/** Tools that put a message together for recipients: the sidecar checks each named recipient against the Email list. */
+export const MAIL_COMPOSE_TOOL_NAMES = [MAIL_DRAFT_TOOL_NAME, ...MAIL_SEND_TOOL_NAMES] as const;
+
+export function isMailComposeToolName(tool_name: string): boolean {
+  return MAIL_COMPOSE_TOOL_NAMES.some(name => name === tool_name);
+}
+
+export const MAIL_WRITE_TOOL_NAMES = [MAIL_DRAFT_TOOL_NAME, ...MAIL_SEND_TOOL_NAMES, 'archive_emails'] as const;
 
 /** Every tool the model is offered on the Email connector, reads first. */
 export const MAIL_CONNECTOR_TOOL_NAMES = [...MAIL_READ_TOOL_NAMES, ...MAIL_WRITE_TOOL_NAMES] as const;

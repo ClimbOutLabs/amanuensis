@@ -76,6 +76,12 @@ describe('approval copy', () => {
     expect(declineVerb(card)).toBe("Don't send");
   });
 
+  it('says "Add and save draft" for a draft to a new address, since approving adds it and saves', () => {
+    const card = cardWith({ mail_new_recipients: ['a@x.com'], mail_draft: true });
+    expect(approveVerb(card)).toBe('Add and save draft');
+    expect(declineVerb(card)).toBe("Don't save");
+  });
+
   it('asks "Save this draft?" with Allow, and Not now to decline', () => {
     const card = cardWith({ email: { ...reply, action: 'save' } });
     expect(approvalQuestion(card)).toBe('Save this draft?');

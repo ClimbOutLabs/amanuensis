@@ -27,6 +27,7 @@ import {
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
 import {
+  isMailDraftToolName,
   isMailReadToolName,
   isMailSendToolName,
   MAIL_CONNECTOR_NAME,
@@ -2278,10 +2279,10 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
-/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+/** The addresses a mail send or draft would reach that are not on the Email list; empty for any other call. */
 async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
-  if (!isHostMailSend(action)) {
+  if (!isHostMailSend(action) && !isHostMailDraft(action)) {
     return [];
   }
   return mailRecipientsNotListed({
@@ -2847,7 +2848,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
     read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    host_mail_draft: isHostMailDraft(action),
   });
+  // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
+  const hostMailCall = isHostMailCall(action);
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
@@ -2917,33 +2921,44 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  // A draft naming a new address asks with the same card in draft words: approving adds the addresses and
+  // saves the draft, and nothing is sent.
   const newMailRecipients = await mailNewRecipients({ action, ctx });
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
+    const draft = isHostMailDraft(action);
     const sentence = externalServiceWhat({
       tool_name: action.tool_name,
       destination: fields.destination,
       recipient: fields.recipient,
       amount: fields.amount,
     });
+    const newRecipientLine = newMailRecipients
+      .map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`)
+      .join(' ');
     return tier3Decision({
       card: {
-        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_what: draft
+          ? `${newRecipientLine} Approving adds them to your send list and saves this draft. ${extraction.connector_what ?? sentence}`
+          : `${newRecipientLine} Approving adds them to your send list and sends. ${sentence}`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        cannot_be_undone: draft ? null : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: null,
         outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
+        ...(draft ? { mail_draft: true } : {}),
       },
-      mail_send: true,
+      mail_send: !draft,
       reason: MAIL_NEW_RECIPIENT_REASON,
-      reason_detail: 'A mail send to an address that is not on the Email list.',
+      reason_detail: draft
+        ? 'A mail draft to an address that is not on the Email list.'
+        : 'A mail send to an address that is not on the Email list.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -2974,7 +2989,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: null,
         outbound_truncated: fields.outbound_truncated,
       },
       mail_send: true,
@@ -3012,16 +3027,19 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               : 'Run this action, even though it reaches outside this machine?'
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
+        // A call that only saves a draft sends nothing, so it carries no send warning.
         cannot_be_undone: destructiveHint
           ? 'This might change or delete something for good.'
-          : "Once this is sent, it can't be unsent.",
+          : extraction.staged_draft
+            ? null
+            : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: hostMailCall ? null : fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
       },
       // A send keeps its own reason whatever the annotations say, so no chat-wide answer ever covers it.
@@ -3175,24 +3193,26 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/** A call on the host's own Email sidecar, read or write: only it carries the first-party mark under the Email name. */
+function isHostMailCall(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' && action.mcp_first_party === true && action.mcp_server_name === MAIL_CONNECTOR_NAME
+  );
+}
+
 /** A mail read the host itself vouched for: only the host's own Email sidecar carries the first-party mark. */
 function isHostMailRead(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'mcp' &&
-    action.mcp_first_party === true &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    isMailReadToolName(action.tool_name)
-  );
+  return isHostMailCall(action) && isMailReadToolName(action.tool_name);
 }
 
 /** A mail send through the host's own Email sidecar, the only send whose recipients are checked against the Email list. */
 function isHostMailSend(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'mcp' &&
-    action.mcp_first_party === true &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    isMailSendToolName(action.tool_name)
-  );
+  return isHostMailCall(action) && isMailSendToolName(action.tool_name);
+}
+
+/** A mail draft through the host's own Email sidecar: it sends nothing, but its recipients are checked like a send's. */
+function isHostMailDraft(action: SentinelAction): boolean {
+  return isHostMailCall(action) && isMailDraftToolName(action.tool_name);
 }
 
 /** A calendar read the host itself vouched for. */
@@ -3231,8 +3251,10 @@ function connectorApprovalCard(input: {
           : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
     plain_why: plainWhy(input.agent_intent),
     // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
-    cannot_be_undone:
-      extraction.connector_what !== null
+    // A call that only saves a draft sends nothing, so it carries no send warning either.
+    cannot_be_undone: extraction.staged_draft
+      ? null
+      : extraction.connector_what !== null
         ? "Once this is sent, it can't be unsent."
         : hostMailRead || hostCalendarRead
           ? null
@@ -3243,7 +3265,7 @@ function connectorApprovalCard(input: {
     amount: fields.amount,
     parsed_command: null,
     outbound_text: fields.outbound_text,
-    destination_host: fields.destination_host,
+    destination_host: isHostMailCall(action) ? null : fields.destination_host,
     outbound_truncated: fields.outbound_truncated,
   };
 }

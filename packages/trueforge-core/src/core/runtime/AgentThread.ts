@@ -2304,9 +2304,10 @@ export class AgentThread {
   }
 
   /**
-   * An approved mail send first makes the sidecar run the server's Email list. New addresses come only from the
-   * approved card, and the sidecar must load the list before the send, on the first try and on a retry. Any failure
-   * throws before the approval is recorded, so the draft stays pending.
+   * An approved mail send, or an approved draft card carrying new addresses, first makes the sidecar run the
+   * server's Email list. New addresses come only from the approved card, and the sidecar must load the list
+   * before the call goes out, on the first try and on a retry. Any failure throws before the approval is
+   * recorded, so the draft stays pending.
    */
   private async prepareMailRecipientAdds(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2323,12 +2324,13 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      // Only a send the host itself judged to go through its own Email sidecar touches the Email list, however the
-      // card was later reworded.
-      if (call?.tool_info.mail_send !== true) {
+      const added = call?.tool_info.tier3_card?.mail_new_recipients ?? [];
+      // Only a send the host itself judged to go through its own Email sidecar, or a card carrying new
+      // addresses for one, touches the Email list, however the card was later reworded. A send's addresses
+      // still come only from its own card.
+      if (call?.tool_info.mail_send !== true && added.length === 0) {
         continue;
       }
-      const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
       if (added.length > 0) {
         const result = await sentinel.services.mail_add_recipients(ctx, added);
         if (result === 'refused') {
