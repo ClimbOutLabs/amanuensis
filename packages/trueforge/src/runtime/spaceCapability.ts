@@ -69,7 +69,9 @@ import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { dropDuplicateRows, keysOfTableEndingAt, skippedRowsSentence, type SkippedRow } from './spaceDuplicateRows';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
+import { isTableRow } from './spaceTableRows';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
@@ -279,6 +281,20 @@ export class SpaceBodyEmptyError extends Error {
     super('The space body is empty. Send the page content again.');
     this.name = 'SpaceBodyEmptyError';
     this.space_id = input.space_id;
+  }
+}
+
+/**
+ * Thrown when every table row a call adds is already in the table. Nothing is persisted,
+ * and it is not a delta failure: the model's copy of the table is only out of date.
+ */
+export class SpaceDuplicateRowsError extends Error {
+  constructor() {
+    super(
+      'Every row in this call is already in the table, so nothing was saved. ' +
+        'Send only rows that are not there yet, or tell the person the table is complete.',
+    );
+    this.name = 'SpaceDuplicateRowsError';
   }
 }
 
@@ -601,6 +617,8 @@ interface WriteOutcome {
    * a re-read.
    */
   blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
+  /** Table rows the write left out because the table already held them; set only when some were. */
+  skipped_rows?: SkippedRow[];
 }
 
 /**
@@ -620,8 +638,10 @@ function spaceLink(space_id: string): string {
  */
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
   const { name, revision } = result.record;
+  const skipped = outcome.skipped_rows ?? [];
+  const skippedSentence = skipped.length === 0 ? '' : ` ${skippedRowsSentence(skipped)}`;
   return JSON.stringify({
-    summary: `${outcome.action} space "${name}" (revision ${String(revision)}).`,
+    summary: `${outcome.action} space "${name}" (revision ${String(revision)}).${skippedSentence}`,
     space: {
       name,
       link: spaceLink(result.record.id),
@@ -636,6 +656,7 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
     aggregate_revision: result.aggregate_revision,
     ...(outcome.block_results === undefined ? {} : { block_results: outcome.block_results }),
     ...(outcome.blocks === undefined ? {} : { blocks: outcome.blocks }),
+    ...(skipped.length === 0 ? {} : { skipped_rows: skipped }),
   });
 }
 
@@ -1092,6 +1113,28 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
 }
 
 /**
+ * Rows of `content` that continue the table ending at `segment` and are already in it are
+ * dropped. Null when the content does not continue a table. J5's append path calls this
+ * with the last block of the body.
+ */
+function dropRowsAlreadyInTable(input: {
+  body: string;
+  segment: SpaceSegment;
+  content: string;
+}): { content: string; skipped: SkippedRow[] } | null {
+  const { body, segment, content } = input;
+  const lastLine = body.slice(segment.coreStart, segment.coreEnd).trimEnd().split('\n').pop() ?? '';
+  const firstLine = content.split('\n').find(line => line.trim() !== '') ?? '';
+  if (!isTableRow(lastLine) || !isTableRow(firstLine)) {
+    return null;
+  }
+  return dropDuplicateRows({
+    content,
+    existingKeys: keysOfTableEndingAt(body.slice(0, segment.coreEnd).trimEnd()),
+  });
+}
+
+/**
  * Applies one edit_space call's entries, all against the segmentation of the body the
  * call names (the current body at the revision it checked): entries never see each
  * other's results, and one block can be named by only one entry. Unknown or duplicated
@@ -1099,11 +1142,17 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
  * before anything is persisted, and the resulting length is
  * checked arithmetically before the new body is built, mirroring the other edit paths.
  */
-function applyEditEntries(input: { space_id: string; body: string; edits: readonly SpaceEditEntry[] }): {
+function applyEditEntries(input: {
+  space_id: string;
+  body: string;
+  format: z.infer<typeof SpaceFormatSchema>;
+  edits: readonly SpaceEditEntry[];
+}): {
   body: string;
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
+  skipped_rows: SkippedRow[];
 } {
-  const { space_id, body, edits } = input;
+  const { space_id, body, format, edits } = input;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
   const byAnchor = new Map<string, SpaceSegment[]>();
@@ -1117,6 +1166,7 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
   const inserts = new Map<SpaceSegment, string>();
   const namedAt = new Map<string, number>();
   const block_results: { anchor: string; new_length: number; deleted: boolean }[] = [];
+  const skipped_rows: SkippedRow[] = [];
   for (const [index, entry] of edits.entries()) {
     const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
     const firstNamedAt = namedAt.get(anchor);
@@ -1170,9 +1220,19 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
         block_results.push({ anchor, new_length: leadLength + entry.new_content.length, deleted: false });
       }
     } else {
-      inserts.set(target, entry.new_content);
-      block_results.push({ anchor, new_length: entry.new_content.length, deleted: false });
+      const added =
+        format === 'markdown' ? dropRowsAlreadyInTable({ body, segment: target, content: entry.new_content }) : null;
+      const content = added === null ? entry.new_content : added.content;
+      skipped_rows.push(...(added?.skipped ?? []));
+      // An insert whose rows were all saved already adds nothing; the call may still carry other entries.
+      if (content.trim() !== '') {
+        inserts.set(target, content);
+        block_results.push({ anchor, new_length: content.length, deleted: false });
+      }
     }
+  }
+  if (skipped_rows.length > 0 && block_results.length === 0) {
+    throw new SpaceDuplicateRowsError();
   }
 
   // The text an insert entry adds after its block, placed between the block's content
@@ -1255,7 +1315,7 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
     }
     parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
   }
-  return { body: parts.join(''), block_results };
+  return { body: parts.join(''), block_results, skipped_rows };
 }
 
 /**
@@ -1443,11 +1503,17 @@ class SpaceTool extends LocalToolMCP {
       format: input.format,
       web_search: this.options.webSearch,
     });
-    if (input.body.length > SPACE_WRITE_MAX_LENGTH) {
+    // Dropping repeated rows first lets a call that only overshoots because of them still fit.
+    const deduped =
+      input.format === 'markdown'
+        ? dropDuplicateRows({ content: input.body, existingKeys: [] })
+        : { content: input.body, skipped: [] };
+    const body = deduped.content;
+    if (body.length > SPACE_WRITE_MAX_LENGTH) {
       throw new SpaceWriteTooLongError({
         tool: CREATE_SPACE_TOOL_NAME,
         space_id: null,
-        new_length: input.body.length,
+        new_length: body.length,
       });
     }
     const expected_aggregate_revision = await resolveAggregateRevision(
@@ -1462,11 +1528,13 @@ class SpaceTool extends LocalToolMCP {
       name: input.name,
       purpose: input.purpose,
       status: input.status,
-      body: input.body,
+      body,
       format: input.format,
       expected_aggregate_revision,
     });
-    return { mutation, action: 'Created' };
+    return deduped.skipped.length === 0
+      ? { mutation, action: 'Created' }
+      : { mutation, action: 'Created', skipped_rows: deduped.skipped };
   }
 
   /**
@@ -1517,10 +1585,17 @@ class SpaceTool extends LocalToolMCP {
     }
     let body: string;
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
+    let skipped_rows: SkippedRow[];
     try {
-      const applied = applyEditEntries({ space_id: input.space_id, body: current.body, edits: input.edits });
+      const applied = applyEditEntries({
+        space_id: input.space_id,
+        body: current.body,
+        format: input.format ?? current.format,
+        edits: input.edits,
+      });
       body = applied.body;
       block_results = applied.block_results;
+      skipped_rows = applied.skipped_rows;
     } catch (error) {
       if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
         this.recordDeltaFailure(input.space_id);
@@ -1553,6 +1628,9 @@ class SpaceTool extends LocalToolMCP {
     const outcome: WriteOutcome = { mutation, action: 'Updated' };
     if (block_results.length > 0) {
       outcome.block_results = block_results;
+    }
+    if (skipped_rows.length > 0) {
+      outcome.skipped_rows = skipped_rows;
     }
     // The fresh outline of the new body, at the new revision: the next edit chains
     // from these anchors instead of paying a re-read first.
@@ -1886,6 +1964,9 @@ class SpaceTool extends LocalToolMCP {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyTooLongError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceDuplicateRowsError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyEmptyError) {

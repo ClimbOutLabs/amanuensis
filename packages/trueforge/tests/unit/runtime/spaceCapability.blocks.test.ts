@@ -907,3 +907,108 @@ describe('marked bodies keep their named anchors', () => {
     );
   });
 });
+
+describe('duplicate table rows are dropped and reported', () => {
+  const rowsOf = (names: string[]): string[] => names.map(name => `| ${name} | note |`);
+  const tableBody = ['| Breed | Note |', '| --- | --- |', ...rowsOf(['Beagle', 'Papillon', 'Rottweiler'])].join('\n');
+
+  async function insertAfterTable(input: {
+    callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>;
+    name: string;
+    rows: string[];
+  }): Promise<CallToolResponse> {
+    const blocks = (await listBlocks(input.callTool, input.name)).blocks ?? [];
+    const last = blocks[blocks.length - 1];
+    return input.callTool(EDIT_SPACE_TOOL_NAME, {
+      space_name: input.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'insert',
+          after: last?.anchor ?? '',
+          fingerprint: last?.fingerprint ?? '',
+          new_content: input.rows.join('\n'),
+        },
+      ],
+    });
+  }
+
+  it('an insert of 5 rows where 2 exist saves 3 and reports the 2', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: tableBody });
+    const result = await insertAfterTable({
+      callTool,
+      name: 'Dogs',
+      rows: rowsOf(['Papillon', 'Poodle', 'Rottweiler', 'Collie', 'Pug']),
+    });
+    expect(isErrorResponse(result)).toBe(false);
+    const wire: { summary: string; skipped_rows: { key: string; row: number }[] } = JSON.parse(resultText(result));
+    expect(wire.skipped_rows).toEqual([
+      { key: 'papillon', row: 1 },
+      { key: 'rottweiler', row: 3 },
+    ]);
+    expect(wire.summary).toContain(
+      'Skipped 2 rows that were already in the table: "papillon" (row 1), "rottweiler" (row 3).',
+    );
+    expect(await readBody(callTool, 'Dogs')).toBe([tableBody, ...rowsOf(['Poodle', 'Collie', 'Pug'])].join('\n'));
+  });
+
+  it('an insert where every row exists is refused and saves nothing', async () => {
+    const { callTool } = makeHarness();
+    await createSpace(callTool, { name: 'Dogs', body: tableBody });
+    const result = await insertAfterTable({ callTool, name: 'Dogs', rows: rowsOf(['beagle', 'PAPILLON']) });
+    expect(isErrorResponse(result)).toBe(true);
+    expect(resultJson(result).error).toContain('Every row in this call is already in the table, so nothing was saved.');
+    expect(await readBody(callTool, 'Dogs')).toBe(tableBody);
+  });
+
+  it('a create with one breed twice saves it once', async () => {
+    const { callTool } = makeHarness();
+    const body = ['| Breed | Note |', '| --- | --- |', ...rowsOf(['Beagle', 'Pug', '**Beagle**'])].join('\n');
+    const created = await callTool(CREATE_SPACE_TOOL_NAME, {
+      name: 'Twice',
+      purpose: 'Twice purpose.',
+      status: 'active',
+      format: 'markdown',
+      body,
+    });
+    expect(isErrorResponse(created)).toBe(false);
+    expect(resultText(created)).toContain('Skipped 1 row that was already in the table: \\"beagle\\" (row 3).');
+    expect(await readBody(callTool, 'Twice')).toBe(
+      ['| Breed | Note |', '| --- | --- |', ...rowsOf(['Beagle', 'Pug'])].join('\n'),
+    );
+  });
+
+  it('a ranked table keys on the name, and rows sharing a rank number are both kept', async () => {
+    const { callTool } = makeHarness();
+    const body = [
+      '| Rank | Breed |',
+      '| --- | --- |',
+      '| 1 | Beagle |',
+      '| 2 | Pug |',
+      '| 2 | Collie |',
+      '| 3 | beagle |',
+    ].join('\n');
+    await createSpace(callTool, { name: 'Ranked', body });
+    expect(await readBody(callTool, 'Ranked')).toBe(
+      ['| Rank | Breed |', '| --- | --- |', '| 1 | Beagle |', '| 2 | Pug |', '| 2 | Collie |'].join('\n'),
+    );
+  });
+
+  it('the same name in two separate tables is not a duplicate', async () => {
+    const { callTool } = makeHarness();
+    const body = [
+      '| Breed |',
+      '| --- |',
+      '| Beagle |',
+      '',
+      'Other list:',
+      '',
+      '| Breed |',
+      '| --- |',
+      '| Beagle |',
+    ].join('\n');
+    await createSpace(callTool, { name: 'Two tables', body });
+    expect(await readBody(callTool, 'Two tables')).toBe(body);
+  });
+});
