@@ -9,6 +9,7 @@ import {
   removedToolMessage,
   retryIsDue,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   stepBudgetFor,
   toolResultKind,
   ToolResultKindSchema,
@@ -221,5 +222,12 @@ describe('progressRefundFor', () => {
     const child = createTurnToolCallLedger();
     child.progressRefundsByThread.set('main', 5);
     expect(mergeTurnToolCallLedgers([root, child]).progressRefundsByThread.get('main')).toBe(5);
+  });
+});
+
+describe('STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE', () => {
+  it('asks for the changed space and says they can ask you to continue exactly once', () => {
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE).toContain('Say which space you changed');
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE.split('they can ask you to continue')).toHaveLength(2);
   });
 });

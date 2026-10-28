@@ -2289,6 +2289,8 @@ export function runStoreContractSuite<
       const secondMemo = toolCallMemoSnapshot({
         side_effect_attempts: [{ key: '["mcp","write"]', count: 2 }],
         clarification_answered: true,
+        steps_by_thread: [{ thread_id: MAIN_THREAD_ID, steps: 3 }],
+        progress_refunds_by_thread: [{ thread_id: MAIN_THREAD_ID, refunds: 2 }],
         // Keyed by the full call signature, not just the tool name; see
         // ToolCallMemoSnapshot.pending_identical_call_nudges. Two argument variants of the
         // same tool round-trip as distinct pending entries.

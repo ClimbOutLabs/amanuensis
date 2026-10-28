@@ -47,8 +47,9 @@ export const MAX_PROGRESS_STEP_REFUNDS = 12;
 export const STEP_BUDGET_SPENT_MESSAGE =
   'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and that they can ask you to continue.';
 
-/** Added when the budget runs out after space writes landed. */
-export const STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE = `${STEP_BUDGET_SPENT_MESSAGE} Say which space you changed and what is still missing, and that they can ask you to continue.`;
+/** Used when the budget runs out after space writes landed. */
+export const STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE =
+  'The step budget for this reply is spent. Answer with what you have. Say which space you changed and what is still missing, and say plainly that you stopped before finishing and that they can ask you to continue.';
 
 export const REMOVED_TOOL_STREAK_MESSAGE =
   'Tools that were declined or are not available keep being called. Answer with what you have.';

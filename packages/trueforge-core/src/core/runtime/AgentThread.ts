@@ -5080,7 +5080,8 @@ export class AgentThread {
       refundsSoFar,
       results: toolCallResults.flatMap(result => {
         const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
-        return call === undefined
+        // A call held for the owner has not run, so it earns no refund.
+        return call === undefined || call.tool_info.held_for_owner !== undefined
           ? []
           : [{ toolName: call.tool_info.original_tool_name, disposition: result.disposition, failure: result.failure }];
       }),
