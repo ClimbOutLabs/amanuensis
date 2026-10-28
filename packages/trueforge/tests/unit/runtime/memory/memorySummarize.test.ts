@@ -1,4 +1,4 @@
-import type { ILLM } from '@truefoundry/trueforge-core/core';
+import { ModelOutputRepetitionError, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Server } from 'node:http';
 import winston from 'winston';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
@@ -468,6 +468,54 @@ describe('summarizeTurnContent', () => {
       status: 'failed',
       reason: 'The request timed out after 30000 ms',
       fallback: 'model_timeout',
+    });
+    expect(calls).toBe(2);
+  });
+
+  it('retries once after the repetition guard stops the call, through a fresh client, and saves what the retry returns', async () => {
+    const stopped = fakeSummarizerThrowing(new ModelOutputRepetitionError());
+    const stoppedCall = jest.spyOn(stopped, 'createNonStream');
+    const working = fakeSummarizer('{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}');
+    const workingCall = jest.spyOn(working, 'createNonStream');
+    const clients: ILLM[] = [stopped, working];
+    let resolutions = 0;
+    const resolveLlm = async (): Promise<ILLM> => {
+      resolutions += 1;
+      const client = clients.shift();
+      if (client === undefined) {
+        throw new Error('the summarizer was resolved more times than the test set up');
+      }
+      return client;
+    };
+    const result = await summarizeTurnContent({ ...base, resolveLlm });
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
+    });
+    // The stopped client is not called again; the retry resolves a fresh one and asks
+    // for the same output as the first attempt.
+    expect(resolutions).toBe(2);
+    expect(stoppedCall).toHaveBeenCalledTimes(1);
+    expect(workingCall).toHaveBeenCalledTimes(1);
+    expect(workingCall.mock.calls[0]?.[0]?.max_tokens).toBe(800);
+  });
+
+  it('fails with model_failed after exactly one retry when the repetition guard stops the retry too', async () => {
+    let calls = 0;
+    const alwaysStopped: ILLM = {
+      create(): ReturnType<ILLM['create']> {
+        throw new Error('streaming is not used by memory summarization');
+      },
+      createNonStream: async () => {
+        calls += 1;
+        throw new ModelOutputRepetitionError();
+      },
+    };
+    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => alwaysStopped });
+    expect(result).toEqual({
+      status: 'failed',
+      reason: "The model's reasoning stopped making progress.",
+      fallback: 'model_failed',
     });
     expect(calls).toBe(2);
   });

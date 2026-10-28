@@ -325,15 +325,7 @@ export class RunCodeService implements RunCodeBackend {
     const input = parsed.data;
 
     if (this.activeRuns >= this.maxConcurrentRuns) {
-      return this.failedResult({
-        error_code: 'concurrency_exceeded',
-        error: errorTextForCode({ error_code: 'concurrency_exceeded', detail: undefined }),
-        runRoot: '',
-        stdout: '',
-        stderr: '',
-        filesOut: [],
-        harvestWarnings: [],
-      });
+      return this.concurrencyExceededResult();
     }
 
     // Readiness short-circuits BEFORE anything is staged.
@@ -398,6 +390,15 @@ export class RunCodeService implements RunCodeBackend {
     const program = await this.resolveProgram({ input, readScript: options?.readScript });
     if (program.error !== undefined) {
       return program.error;
+    }
+
+    // The cap is checked again here, after the readiness and provisioning
+    // waits: calls that arrived together on a cold instance all passed the
+    // first check while nothing was running yet. This check and the
+    // increment below are one synchronous step, so no call can slip
+    // between them and push the count past the cap.
+    if (this.activeRuns >= this.maxConcurrentRuns) {
+      return this.concurrencyExceededResult();
     }
 
     const runId = randomUUID().replace(/-/g, '');
@@ -954,6 +955,19 @@ export class RunCodeService implements RunCodeBackend {
       harvest_warnings: input.harvestWarnings,
     };
     return this.parseResult(candidate, input.runRoot);
+  }
+
+  /** The refusal every cap hit returns, at the first check and the re-check alike. */
+  private concurrencyExceededResult(): RunCodeResult {
+    return this.failedResult({
+      error_code: 'concurrency_exceeded',
+      error: errorTextForCode({ error_code: 'concurrency_exceeded', detail: undefined }),
+      runRoot: '',
+      stdout: '',
+      stderr: '',
+      filesOut: [],
+      harvestWarnings: [],
+    });
   }
 
   private failedResult(input: {
