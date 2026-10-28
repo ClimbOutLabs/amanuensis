@@ -1,3 +1,4 @@
+import { codeFenceRoles } from './spaceDocumentationMask';
 import { isTableRow, isTableSeparatorRow, rowCells, rowNameCell } from './spaceTableRows';
 
 export interface SkippedRow {
@@ -8,7 +9,6 @@ export interface SkippedRow {
 }
 
 const WHOLE_CELL_EMPHASIS = /^(\*\*|__|\*|_)(.+)\1$/;
-const FENCE = /^\s*(```|~~~)/;
 
 /**
  * The identity of a data row: all its cells, case-sensitive, with whitespace collapsed and
@@ -26,17 +26,6 @@ export function duplicateRowKey(line: string): string | null {
   return cells.every(cell => cell === '') ? null : JSON.stringify(cells);
 }
 
-/** True when `text` ends inside an unclosed code fence. */
-function endsInsideFence(lines: readonly string[]): boolean {
-  let open = false;
-  for (const line of lines) {
-    if (FENCE.test(line)) {
-      open = !open;
-    }
-  }
-  return open;
-}
-
 /**
  * Row keys of the table that ends at the end of `text`, so rows a call adds can be compared
  * with what is already saved. Null when the text ends inside a code fence. A run with no
@@ -44,7 +33,8 @@ function endsInsideFence(lines: readonly string[]): boolean {
  */
 export function keysOfTableEndingAt(text: string): string[] | null {
   const lines = text.split('\n');
-  if (endsInsideFence(lines)) {
+  const last = codeFenceRoles(lines).at(-1);
+  if (last === 'open' || last === 'inside') {
     return null;
   }
   let start = lines.length;
@@ -78,13 +68,10 @@ export function dropDuplicateRows({ content, existingKeys }: { content: string; 
   const skipped: SkippedRow[] = [];
   let seen: Set<string> | null = null;
   let firstTable = true;
-  let inFence = false;
+  const roles = codeFenceRoles(lines);
   let row = 0;
   for (const [index, line] of lines.entries()) {
-    if (FENCE.test(line)) {
-      inFence = !inFence;
-    }
-    if (inFence || !isTableRow(line)) {
+    if (roles[index] !== 'outside' || !isTableRow(line)) {
       seen = null;
       kept.push(line);
       continue;
@@ -110,6 +97,25 @@ export function dropDuplicateRows({ content, existingKeys }: { content: string; 
     kept.push(line);
   }
   return { content: skipped.length === 0 ? content : kept.join('\n'), skipped };
+}
+
+/**
+ * The rows `dropDuplicateRows` skips in `content` before the point where `kept`, a leading
+ * part of its output, ends: a write cut short names only the skips in the part it saved.
+ */
+export function skippedRowsWithin({ content, kept }: { content: string; kept: string }): SkippedRow[] {
+  const lines = content.split('\n');
+  const keptLines = kept.split('\n');
+  // The output keeps lines in order, so the saved part ends at the line that matches its last line.
+  let matched = 0;
+  let end = 0;
+  while (end < lines.length && matched < keptLines.length) {
+    if (lines[end] === keptLines[matched]) {
+      matched += 1;
+    }
+    end += 1;
+  }
+  return dropDuplicateRows({ content: lines.slice(0, end).join('\n'), existingKeys: [] }).skipped;
 }
 
 export function skippedRowsSentence(skipped: readonly SkippedRow[]): string {

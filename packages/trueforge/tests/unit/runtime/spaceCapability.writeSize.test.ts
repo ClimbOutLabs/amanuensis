@@ -198,6 +198,7 @@ interface SpaceWireResult {
   unsaved_lines?: number;
   unsaved_from?: string;
   continue_after?: { anchor: string; fingerprint: string } | null;
+  skipped_rows?: { key: string; row: number }[];
 }
 
 function resultText(response: CallToolResponse): string {
@@ -278,13 +279,16 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing create_space');
-    expect(error).toContain('one write may carry at most 3,600');
+    expect(error).toContain(
+      'one write may carry at most about 3,600 characters: about 25 table rows or 40 short lines.',
+    );
     expect(error).toContain('Nothing was persisted');
     expect(error).toContain('add the rest with edit_space');
     // The refusal text is pinned word for word: it is what the model reads and it must not
     // drift. The stable code beside it is what the chat keys its plain note on.
     expect(error).toBe(
-      'Refusing create_space: this write carries 4,001 characters of new content, and one write may carry at most 3,600. ' +
+      'Refusing create_space: this write carries 4,001 characters of new content, ' +
+        'and one write may carry at most about 3,600 characters: about 25 table rows or 40 short lines. ' +
         'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.',
     );
     expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
@@ -346,7 +350,9 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing edit_space');
-    expect(error).toContain('one write may carry at most 3,600');
+    expect(error).toContain(
+      'one write may carry at most about 3,600 characters: about 25 table rows or 40 short lines.',
+    );
     expect(error).toContain('follow-up edit_space call');
     expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
 
@@ -379,7 +385,9 @@ describe('the space write size cap', () => {
     expect(isErrorResponse(response)).toBe(true);
     const error = resultJson(response).error ?? '';
     expect(error).toContain('Refusing edit_space');
-    expect(error).toContain('one write may carry at most 3,600');
+    expect(error).toContain(
+      'one write may carry at most about 3,600 characters: about 25 table rows or 40 short lines.',
+    );
 
     const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: 'Breeds' });
     expect(resultJson(read).space?.body).toBe(tablePart(1, 5));
@@ -392,6 +400,26 @@ describe('the space write size cap', () => {
       status: 'active',
       body,
       format,
+    });
+
+    it('names only the repeated rows in the saved part when a create is cut short', async () => {
+      const store = new InMemorySpaceStore();
+      const rows = rowRange(1, 60).split('\n');
+      // Breed 01 repeats near the top and is dropped; Breed 50 repeats in the unsaved tail.
+      const body = [
+        '# Dog breeds',
+        '',
+        '| Breed | Group | Note |',
+        '| --- | --- | --- |',
+        ...rows.slice(0, 3),
+        rows[0],
+        ...rows.slice(3),
+        rows[49],
+      ].join('\n');
+      const parsed = resultJson(await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body)));
+      expect(parsed.unsaved_lines).toBeGreaterThan(0);
+      expect(parsed.skipped_rows).toEqual([{ key: 'Breed 01', row: 4 }]);
+      expect(parsed.summary).not.toContain('Breed 50');
     });
 
     it('saves the leading rows of a 60-row create and says where to continue', async () => {

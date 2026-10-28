@@ -70,7 +70,13 @@ import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
-import { dropDuplicateRows, keysOfTableEndingAt, skippedRowsSentence, type SkippedRow } from './spaceDuplicateRows';
+import {
+  dropDuplicateRows,
+  keysOfTableEndingAt,
+  skippedRowsSentence,
+  skippedRowsWithin,
+  type SkippedRow,
+} from './spaceDuplicateRows';
 import { spaceFormatNotes } from './spaceFormatNotes';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
 import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
@@ -362,6 +368,9 @@ export class SpaceDuplicateRowsError extends Error {
   }
 }
 
+/** The one number a write holds, with its shape in rows and lines so a model can count. */
+const SPACE_WRITE_SIZE_TEXT = `about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters: about 25 table rows or 40 short lines`;
+
 /**
  * Thrown when one write call carries more new content than SPACE_WRITE_MAX_LENGTH. A
  * tool-layer policy, not a store error: it never reaches the database. It exists because
@@ -380,7 +389,7 @@ export class SpaceWriteTooLongError extends Error {
         : 'Send the first part now, then send the rest in a follow-up edit_space call.';
     super(
       `Refusing ${subject}: this write carries ${input.new_length.toLocaleString('en-US')} characters of new content, ` +
-        `and one write may carry at most ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')}. Nothing was persisted. ${next}`,
+        `and one write may carry at most ${SPACE_WRITE_SIZE_TEXT}. Nothing was persisted. ${next}`,
     );
     this.name = 'SpaceWriteTooLongError';
     this.tool = input.tool;
@@ -441,8 +450,6 @@ class SpaceNameLookupError extends Error {
 const DELTA_BREAKER_TRIP_AFTER_FAILURES = 3;
 
 const SPACE_INSTRUCTION_SECTION = 'spaces';
-/** The one number a write holds, with its shape in rows and lines so a model can count. */
-const SPACE_WRITE_SIZE_TEXT = `about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters: about 25 table rows or 40 short lines`;
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
@@ -1904,12 +1911,13 @@ class SpaceTool extends LocalToolMCP {
     });
     // The outline lets the next edit chain from real anchors and fingerprints.
     const blocks = blockOutline(mutation.record.body).blocks;
+    const skipped_rows = cut === null ? deduped.skipped : skippedRowsWithin({ content: input.body, kept: cut.kept });
     return {
       mutation,
       action: 'Created',
       blocks,
       ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks), at_end: true } }),
-      ...(deduped.skipped.length === 0 ? {} : { skipped_rows: deduped.skipped }),
+      ...(skipped_rows.length === 0 ? {} : { skipped_rows }),
     };
   }
 

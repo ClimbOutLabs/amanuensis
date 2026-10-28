@@ -1,3 +1,4 @@
+import { codeFenceRoles } from './spaceDocumentationMask';
 import { isTableRow, isTableSeparatorRow } from './spaceTableRows';
 
 const UNSAVED_PREVIEW_LENGTH = 80;
@@ -10,7 +11,6 @@ export interface WritePrefix {
   unsaved_from: string;
 }
 
-const FENCE_LINE = /^\s*(```|~~~)/;
 const HTML_BLOCK_TAG = /<(\/?)(div|table|details|pre|ul|ol|section|blockquote)\b[^>]*>/gi;
 
 /**
@@ -19,16 +19,19 @@ const HTML_BLOCK_TAG = /<(\/?)(div|table|details|pre|ul|ol|section|blockquote)\b
  * the page an unclosed block, so the cut steps back to before it.
  */
 function openBlockStart(lines: readonly string[], count: number): number | null {
+  const roles = codeFenceRoles(lines.slice(0, count));
   let fenceStart: number | null = null;
   let htmlStart: number | null = null;
   let htmlDepth = 0;
   for (let index = 0; index < count; index += 1) {
     const line = lines[index] ?? '';
-    if (FENCE_LINE.test(line)) {
-      fenceStart = fenceStart === null ? index : null;
-      continue;
+    const role = roles[index] ?? 'outside';
+    if (role === 'open') {
+      fenceStart = index;
+    } else if (role === 'close') {
+      fenceStart = null;
     }
-    if (fenceStart !== null) {
+    if (role !== 'outside') {
       continue;
     }
     for (const match of line.matchAll(HTML_BLOCK_TAG)) {

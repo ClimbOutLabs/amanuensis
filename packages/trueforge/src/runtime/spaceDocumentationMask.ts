@@ -14,42 +14,19 @@
  */
 export function maskDocumentationRegions(body: string): string {
   const lines = body.split('\n');
-  let fence: { char: string; minLength: number } | null = null;
+  const roles = codeFenceRoles(lines);
   let tagDepth = 0;
-  const masked = lines.map(line => {
+  const masked = lines.map((line, index) => {
     const lower = line.toLowerCase();
-    let isCode = fence !== null || tagDepth > 0;
-
-    // Fenced code blocks: ``` or ~~~, up to 3 leading spaces (CommonMark). An info string
-    // is allowed on the opening line; the closing line is the fence alone.
-    const fenceOpen = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    let closedFence = false;
-    if (fenceOpen !== null) {
-      const sequence: string = fenceOpen[1] ?? '';
-      const char = sequence.charAt(0);
-      if (fence === null) {
-        fence = { char, minLength: sequence.length };
-        isCode = true;
-      } else if (char === fence.char) {
-        // Closing line: the same fence character, at least as long, and nothing else.
-        const closePattern = new RegExp(`^ {0,3}[${char}]{${String(fence.minLength)},}\\s*$`);
-        if (closePattern.test(line)) {
-          fence = null;
-          closedFence = true;
-        }
-        isCode = true;
-      } else {
-        // A fence-like line of the other style inside a fence is content.
-        isCode = true;
-      }
-    }
+    const role = roles[index] ?? 'outside';
+    let isCode = role !== 'outside' || tagDepth > 0;
 
     // <pre> / <code> elements: crude open/close counting with indexOf (no regex
     // backtracking). Over-matching (e.g. `<preview>`) only masks more, never less.
     // Not counted inside a fenced code block: every line there is masked already, and a
     // literal "<pre>" in the sample text must not leak into the tag depth. A fence-closing
     // line still counts its tags — a <pre> after the closing fence is real.
-    if (fence === null || closedFence) {
+    if (role === 'outside' || role === 'close') {
       const opens = countAny(lower, ['<pre', '<code']);
       const closes = countAny(lower, ['</pre', '</code']);
       if (opens > 0) {
@@ -61,6 +38,37 @@ export function maskDocumentationRegions(body: string): string {
     return isCode ? line.replace(/[\s\S]/g, ' ') : line;
   });
   return masked.join('\n');
+}
+
+/** Where a line sits relative to a fenced code block: its opening line, inside it, its closing line, or outside. */
+type CodeFenceRole = 'outside' | 'open' | 'inside' | 'close';
+
+/**
+ * The role of each line in fenced code blocks: ``` or ~~~, up to 3 leading spaces
+ * (CommonMark). An info string is allowed on the opening line; the closing line is the
+ * same fence character, at least as long, and nothing else. An unclosed fence runs to the
+ * end. The one fence reader for space bodies.
+ */
+export function codeFenceRoles(lines: readonly string[]): CodeFenceRole[] {
+  let fence: { char: string; minLength: number } | null = null;
+  return lines.map(line => {
+    const fenceOpen = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence === null) {
+      if (fenceOpen === null) {
+        return 'outside';
+      }
+      const sequence = fenceOpen[1] ?? '';
+      fence = { char: sequence.charAt(0), minLength: sequence.length };
+      return 'open';
+    }
+    const closePattern = new RegExp(`^ {0,3}[${fence.char}]{${String(fence.minLength)},}\\s*$`);
+    if (closePattern.test(line)) {
+      fence = null;
+      return 'close';
+    }
+    // A fence-like line of the other style, or a shorter one, inside a fence is content.
+    return 'inside';
+  });
 }
 
 function countAny(haystack: string, needles: string[]): number {

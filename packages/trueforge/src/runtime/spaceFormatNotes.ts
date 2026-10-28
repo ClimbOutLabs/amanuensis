@@ -1,3 +1,4 @@
+import { codeFenceRoles } from './spaceDocumentationMask';
 import { duplicateRowKey } from './spaceDuplicateRows';
 import { isTableRow, isTableSeparatorRow, rowCells, rowNameCell } from './spaceTableRows';
 
@@ -23,13 +24,10 @@ function named(items: string[]): string {
 /** Runs of table rows outside fenced code, with their position. */
 function tableGroups(lines: string[]): TableGroup[] {
   const groups: TableGroup[] = [];
-  let fenced = false;
+  const roles = codeFenceRoles(lines);
   let open: TableGroup | undefined;
   lines.forEach((line, index) => {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
-    }
-    if (!fenced && isTableRow(line)) {
+    if (roles[index] === 'outside' && isTableRow(line)) {
       if (open === undefined) {
         open = { start: index, lines: [] };
         groups.push(open);
