@@ -31,7 +31,8 @@ export function ChatNoticeContainer() {
   const wasSubmittingRef = useRef(isSubmitting);
 
   useEffect(() => {
-    if (isSubmitting && !wasSubmittingRef.current) notice?.dismiss();
+    // The skills line stays: the chat keeps running without skills after the send.
+    if (isSubmitting && !wasSubmittingRef.current && notice?.kind !== 'skills_off_without_sandbox') notice?.dismiss();
     wasSubmittingRef.current = isSubmitting;
   }, [isSubmitting, notice]);
 

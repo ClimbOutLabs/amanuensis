@@ -3,6 +3,7 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useEffect } from 'react';
 
+import { useReportChatNotice } from '../../hooks/useChatNotice.js';
 import type { DraftPreferenceKind } from '../../server/draftSpecPreferences.js';
 import { useServerCapabilities } from '../../server/ServerContext.js';
 import { useShellMode } from '../../server/ShellModeContext.js';
@@ -112,15 +113,17 @@ export function reconcileDraftSandbox({
     // The capability flag says the deployment offers a sandbox, not that the user
     // wants one, so it may only disable. Enabling from it would overwrite the
     // composer toggle every time the user turns the sandbox off.
-    if (sandboxEnabled === false && current === true) {
-      return {
-        config: {
-          ...agentSpec.config,
-          sandbox: { ...agentSpec.config?.sandbox, enabled: false },
-        },
+    if (sandboxEnabled !== false) return {};
+    const update: Partial<AgentSpec> = {};
+    if (current === true) {
+      update.config = {
+        ...agentSpec.config,
+        sandbox: { ...agentSpec.config?.sandbox, enabled: false },
       };
     }
-    return {};
+    // Skills run in the sandbox and the server refuses them without one.
+    if (agentSpec.skills !== undefined && agentSpec.skills.length > 0) update.skills = [];
+    return update;
   }
 
   // For 'agent' kind: respect the user's explicit toggle choice. Do not force-disable
@@ -141,6 +144,7 @@ export function DraftSpecPreferenceBridge() {
   const { mode, pendingSessionId, rememberDraftSpec } = useShellMode();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+  const reportChatNotice = useReportChatNotice();
   const capabilities = useServerCapabilities();
   const sandboxEnabled = capabilities?.sandbox.enabled;
   const { models, skills, connectors, connectorsLoaded, loaded, error, ensureLoaded } = useDraftCatalog();
@@ -163,8 +167,9 @@ export function DraftSpecPreferenceBridge() {
     const update = reconcileDraftSandbox({ agentSpec, sandboxEnabled, kind: preferenceKind });
     if (Object.keys(update).length > 0) {
       updateAgentSpec(update);
+      if (update.skills !== undefined) reportChatNotice('skills_off_without_sandbox');
     }
-  }, [agentSpec, isPlainDraft, preferenceKind, sandboxEnabled, updateAgentSpec]);
+  }, [agentSpec, isPlainDraft, preferenceKind, reportChatNotice, sandboxEnabled, updateAgentSpec]);
 
   useEffect(() => {
     // Mounts are reconciled as soon as the connector list alone has been read. The full

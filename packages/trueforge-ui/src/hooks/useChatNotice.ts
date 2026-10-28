@@ -2,7 +2,16 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
-import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import type { SendRefusal } from '../utils/turnRefusal.js';
 
@@ -40,6 +49,12 @@ export function createChatNoticeChannel(): ChatNoticeChannel {
 }
 
 const ChatNoticeContext = createContext<ChatNotice | null>(null);
+const ReportChatNoticeContext = createContext<(kind: SendRefusal) => void>(() => undefined);
+
+/** Lets a part of the chat page tell the chat's notice line something, outside a failed send. */
+export function useReportChatNotice(): (kind: SendRefusal) => void {
+  return useContext(ReportChatNoticeContext);
+}
 
 /** The notice for the chat this component renders in, if any. */
 export function useChatNotice(): ChatNotice | null {
@@ -66,9 +81,22 @@ export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeC
     [channel, reload, sessionId],
   );
 
+  // A notice raised before the first send belongs to the chat that send creates.
+  useEffect(() => {
+    if (notice?.kind === 'skills_off_without_sandbox' && notice.sessionId === undefined && sessionId !== undefined) {
+      setNotice({ ...notice, sessionId });
+    }
+  }, [notice, sessionId]);
+
+  const report = useCallback((kind: SendRefusal) => setNotice({ kind, sessionId }), [sessionId]);
+
   const value = useMemo<ChatNotice | null>(
     () => (notice == null ? null : { ...notice, dismiss: () => setNotice(null) }),
     [notice],
   );
-  return createElement(ChatNoticeContext.Provider, { value }, children);
+  return createElement(
+    ReportChatNoticeContext.Provider,
+    { value: report },
+    createElement(ChatNoticeContext.Provider, { value }, children),
+  );
 }

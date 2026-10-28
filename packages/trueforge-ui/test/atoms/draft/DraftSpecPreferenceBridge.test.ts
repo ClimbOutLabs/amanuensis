@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { reconcileDraftSpecMounts, reconcileDraftSpecPreferences } from '@/atoms/draft/DraftSpecPreferenceBridge.js';
+import {
+  reconcileDraftSandbox,
+  reconcileDraftSpecMounts,
+  reconcileDraftSpecPreferences,
+} from '@/atoms/draft/DraftSpecPreferenceBridge.js';
 import {
   CHAT_DRAFT_SPEC_PREFERENCES_STORAGE_KEY,
   readDraftSpecPreferences,
@@ -128,5 +132,36 @@ describe('a stored chat draft seed naming a deleted connector', () => {
     const newChatSpec: AgentSpec = { ...seed, ...update };
 
     expect(newChatSpec.mcpServers).toEqual([{ name: 'tavily' }]);
+  });
+});
+
+describe('reconcileDraftSandbox for a new chat', () => {
+  const skills = [{ name: 'find-skills' }];
+
+  it('turns the sandbox off and leaves out skills when the sandbox is not available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({
+      config: { sandbox: { enabled: false } },
+      skills: [],
+    });
+  });
+
+  it('leaves out skills when the sandbox is off and not available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({ skills: [] });
+  });
+
+  it('keeps skills when the sandbox is available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({});
+  });
+
+  it('changes nothing when the person turned the sandbox off and has no skills', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({});
   });
 });
