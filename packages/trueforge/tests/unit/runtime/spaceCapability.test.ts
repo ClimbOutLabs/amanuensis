@@ -153,7 +153,7 @@ describe('space capability', () => {
     expect(createSpace?.description).toContain('never by editing files in the sandbox');
   });
 
-  it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {
+  it('tells the model to use only picture links a search or an opened page returned, and never to make one up', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
