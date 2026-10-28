@@ -3,8 +3,15 @@ import { apiErrorCode } from './apiErrorCode.js';
 /** A message or approval answer the server refused (409) before recording anything. */
 export type TurnRefusalCode = 'previous_turn_running' | 'turn_could_not_start';
 
+/** Skills left out of a chat's sends: the sandbox is not ready, or this chat has it turned off. */
+export type SkillsNotice = 'skills_off_without_sandbox' | 'skills_off_sandbox_turned_off';
+
+export function isSkillsNotice(kind: SendRefusal): kind is SkillsNotice {
+  return kind === 'skills_off_without_sandbox' || kind === 'skills_off_sandbox_turned_off';
+}
+
 /** What the chat tells about its last send: refused by the server, stopped by a restart, or sent without skills. */
-export type SendRefusal = TurnRefusalCode | 'stopped_by_restart' | 'skills_off_without_sandbox';
+export type SendRefusal = TurnRefusalCode | 'stopped_by_restart' | SkillsNotice;
 
 export function turnRefusalCode(error: unknown): TurnRefusalCode | undefined {
   const detail = apiErrorCode(error);
@@ -37,6 +44,8 @@ export function sendRefusalText({ refusal, assistantName }: { refusal: SendRefus
       return `This reply stopped when ${assistantName} restarted. Send your message again.`;
     case 'skills_off_without_sandbox':
       return 'Skills are off for this chat because the space they run in is not ready yet.';
+    case 'skills_off_sandbox_turned_off':
+      return 'Skills are off for this chat because the space they run in is turned off for it.';
   }
 }
 

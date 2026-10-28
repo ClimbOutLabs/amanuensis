@@ -1,4 +1,4 @@
-import type { AgentSpec } from './types.js';
+import type { AgentSpec, AgentUIServer } from './types.js';
 
 /** @deprecated Migrated into chat/agent keys on first read. */
 export const DRAFT_SPEC_PREFERENCES_STORAGE_KEY = 'tfy-aui-draft-spec-preferences';
@@ -100,20 +100,47 @@ export function withCapabilitiesSandbox(spec: AgentSpec, sandboxEnabled: boolean
   };
 }
 
-/** Skills run in the sandbox, so a spec with skills cannot be sent while the sandbox is unavailable. */
-export function skillsNeedSandbox(spec: AgentSpec | null | undefined, sandboxEnabled: boolean | null | undefined) {
-  return sandboxEnabled === false && spec?.skills !== undefined && spec.skills.length > 0;
+/** Why a spec's skills cannot be sent: the sandbox is not available, or this spec has it turned off. */
+export function skillsHeldBack(
+  spec: AgentSpec | null | undefined,
+  sandboxEnabled: boolean | null | undefined,
+): 'sandbox_unavailable' | 'sandbox_turned_off' | null {
+  if (spec?.skills === undefined || spec.skills.length === 0) return null;
+  if (sandboxEnabled === false) return 'sandbox_unavailable';
+  return readSandboxEnabled(spec) === true ? null : 'sandbox_turned_off';
 }
 
-/** The spec to send: skills left out while the sandbox is unavailable. The draft and its stored choices keep them. */
-export function withoutSkillsWhenSandboxUnavailable(
-  spec: AgentSpec,
-  sandboxEnabled: boolean | null | undefined,
-): AgentSpec {
-  if (!skillsNeedSandbox(spec, sandboxEnabled)) return spec;
+/** The spec to send: the server refuses skills without a sandbox. The draft and its stored choices keep them. */
+export function withoutSkillsWhenSandboxOff(spec: AgentSpec, sandboxEnabled: boolean | null | undefined): AgentSpec {
+  if (skillsHeldBack(spec, sandboxEnabled) === null) return spec;
   const { skills, ...rest } = spec;
   void skills;
   return rest;
+}
+
+/** A server whose session writes carry no skills the sandbox cannot run. */
+export function withSendableSkills({
+  server,
+  sandboxEnabled,
+}: {
+  server: AgentUIServer;
+  sandboxEnabled: boolean | null | undefined;
+}): AgentUIServer {
+  return {
+    ...server,
+    createSession: request =>
+      server.createSession(
+        request.agentSpec === undefined
+          ? request
+          : { ...request, agentSpec: withoutSkillsWhenSandboxOff(request.agentSpec, sandboxEnabled) },
+      ),
+    updateSession: request =>
+      server.updateSession(
+        request.agentSpec === undefined
+          ? request
+          : { ...request, agentSpec: withoutSkillsWhenSandboxOff(request.agentSpec, sandboxEnabled) },
+      ),
+  };
 }
 
 function readStoredSpec(key: string): AgentSpec | null {

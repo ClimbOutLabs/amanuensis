@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
+import type { AgentSpec } from '@/server/types.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMockAgentUIServer } from './mockServer.js';
 
 import {
   AGENT_DRAFT_SPEC_PREFERENCES_STORAGE_KEY,
@@ -8,9 +10,10 @@ import {
   readDraftSpecPreferences,
   selectAgentDraftSpecPreferences,
   selectChatDraftSpecPreferences,
-  skillsNeedSandbox,
+  skillsHeldBack,
   withCapabilitiesSandbox,
-  withoutSkillsWhenSandboxUnavailable,
+  withoutSkillsWhenSandboxOff,
+  withSendableSkills,
   writeDraftSpecPreferences,
 } from '@/server/draftSpecPreferences.js';
 
@@ -204,32 +207,72 @@ describe('withCapabilitiesSandbox', () => {
   });
 });
 
-describe('withoutSkillsWhenSandboxUnavailable', () => {
-  const spec = { model: { name: 'model' }, skills: [{ name: 'find-skills' }] };
+describe('withoutSkillsWhenSandboxOff', () => {
+  const skills = [{ name: 'find-skills' }];
+  const sandboxOn = { model: { name: 'model' }, skills, config: { sandbox: { enabled: true } } };
+  const sandboxOff = { model: { name: 'model' }, skills, config: { sandbox: { enabled: false } } };
 
   it('sends no skills while the sandbox is unavailable', () => {
-    expect(withoutSkillsWhenSandboxUnavailable(spec, false)).toEqual({ model: { name: 'model' } });
-    expect(skillsNeedSandbox(spec, false)).toBe(true);
+    expect(withoutSkillsWhenSandboxOff(sandboxOn, false)).toEqual({
+      model: { name: 'model' },
+      config: { sandbox: { enabled: true } },
+    });
+    expect(skillsHeldBack(sandboxOn, false)).toBe('sandbox_unavailable');
   });
 
-  it('keeps skills when the sandbox is available or not yet known', () => {
-    expect(withoutSkillsWhenSandboxUnavailable(spec, true)).toBe(spec);
-    expect(withoutSkillsWhenSandboxUnavailable(spec, undefined)).toBe(spec);
+  it('sends no skills when the sandbox is available but off for this spec', () => {
+    expect(withoutSkillsWhenSandboxOff(sandboxOff, true)).toEqual({
+      model: { name: 'model' },
+      config: { sandbox: { enabled: false } },
+    });
+    expect(skillsHeldBack(sandboxOff, true)).toBe('sandbox_turned_off');
+  });
+
+  it('keeps skills when the sandbox is available and on', () => {
+    expect(withoutSkillsWhenSandboxOff(sandboxOn, true)).toBe(sandboxOn);
+    expect(skillsHeldBack(sandboxOn, true)).toBeNull();
   });
 
   it('leaves a spec without skills as it is', () => {
     const plain = { model: { name: 'model' }, config: { sandbox: { enabled: false } } };
 
-    expect(withoutSkillsWhenSandboxUnavailable(plain, false)).toBe(plain);
-    expect(skillsNeedSandbox(plain, false)).toBe(false);
+    expect(withoutSkillsWhenSandboxOff(plain, false)).toBe(plain);
+    expect(skillsHeldBack(plain, false)).toBeNull();
   });
 
   it('keeps the stored choice when the sandbox goes off and on again', () => {
     window.localStorage.clear();
-    writeDraftSpecPreferences('chat', spec);
-    withoutSkillsWhenSandboxUnavailable(spec, false);
-    writeDraftSpecPreferences('chat', spec);
-    expect(readDraftSpecPreferences('chat')?.skills).toEqual([{ name: 'find-skills' }]);
-    expect(withoutSkillsWhenSandboxUnavailable(spec, true).skills).toEqual([{ name: 'find-skills' }]);
+    writeDraftSpecPreferences('chat', sandboxOn);
+    withoutSkillsWhenSandboxOff(sandboxOn, false);
+    writeDraftSpecPreferences('chat', sandboxOn);
+    expect(readDraftSpecPreferences('chat')?.skills).toEqual(skills);
+    expect(withoutSkillsWhenSandboxOff(sandboxOn, true).skills).toEqual(skills);
+  });
+});
+
+describe('withSendableSkills', () => {
+  const spec = { model: { name: 'model' }, skills: [{ name: 'find-skills' }], config: { sandbox: { enabled: true } } };
+
+  it('sends no skills in a new session or an update while the sandbox is unavailable', async () => {
+    const session = { id: 's', isMutable: true, createdAt: 'now', updatedAt: 'now' };
+    const sent: Array<AgentSpec | undefined> = [];
+    const server = withSendableSkills({
+      server: createMockAgentUIServer({
+        createSession: async request => {
+          sent.push(request.agentSpec);
+          return session;
+        },
+        updateSession: async request => {
+          sent.push(request.agentSpec);
+          return session;
+        },
+      }),
+      sandboxEnabled: false,
+    });
+
+    await server.createSession({ agentSpec: spec });
+    await server.updateSession({ sessionId: 's', agentSpec: spec });
+
+    expect(sent.map(sentSpec => sentSpec?.skills)).toEqual([undefined, undefined]);
   });
 });

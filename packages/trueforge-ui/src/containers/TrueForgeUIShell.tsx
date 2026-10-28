@@ -29,7 +29,7 @@ import {
 } from '../server/ChatConnectorChoiceContext.js';
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
-import { withoutSkillsWhenSandboxUnavailable } from '../server/draftSpecPreferences.js';
+import { withSendableSkills } from '../server/draftSpecPreferences.js';
 import { ServerProvider, useServerCapabilities } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
 import {
@@ -41,7 +41,7 @@ import {
 } from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
 import type { TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
-import type { AgentSpec, AgentUIServer } from '../server/types.js';
+import type { AgentUIServer } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
@@ -240,26 +240,21 @@ function ChatProviderFromShell({
 
   const sandboxEnabled = useServerCapabilities()?.sandbox.enabled;
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
-    // A new chat is sent without skills while the sandbox is unavailable; the server refuses them then.
-    const sendable = (spec: AgentSpec) =>
-      isCreateAgent ? spec : withoutSkillsWhenSandboxUnavailable(spec, sandboxEnabled);
+    // A new chat is sent without skills the sandbox cannot run; the server refuses them.
+    const sending = isCreateAgent ? server : withSendableSkills({ server, sandboxEnabled });
     return {
-      ...server,
+      ...sending,
       createSession: request => {
         if (request.agentSpec === undefined) {
-          return server.createSession(request);
+          return sending.createSession(request);
         }
         return createSessionWithConnectorChoice({
-          server,
+          server: sending,
           store: connectorChoice,
           metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
-          request: { ...request, agentSpec: sendable(request.agentSpec) },
+          request,
         });
       },
-      updateSession: request =>
-        server.updateSession(
-          request.agentSpec === undefined ? request : { ...request, agentSpec: sendable(request.agentSpec) },
-        ),
     };
   }, [server, isCreateAgent, connectorChoice, sandboxEnabled]);
 

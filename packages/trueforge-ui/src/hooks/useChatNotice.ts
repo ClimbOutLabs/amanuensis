@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { SendRefusal } from '../utils/turnRefusal.js';
+import { isSkillsNotice, type SendRefusal } from '../utils/turnRefusal.js';
 
 /** Why the chat's last send got no reply, told in one plain line. */
 export type ChatNotice = {
@@ -83,7 +83,7 @@ export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeC
 
   // A notice raised before the first send belongs to the chat that send creates.
   useEffect(() => {
-    if (notice?.kind === 'skills_off_without_sandbox' && notice.sessionId === undefined && sessionId !== undefined) {
+    if (notice != null && isSkillsNotice(notice.kind) && notice.sessionId === undefined && sessionId !== undefined) {
       setNotice({ ...notice, sessionId });
     }
   }, [notice, sessionId]);
