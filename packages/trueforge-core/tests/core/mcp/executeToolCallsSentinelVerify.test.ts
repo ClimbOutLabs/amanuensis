@@ -772,3 +772,95 @@ describe('executeToolCalls sentinel audit for a chat grant', () => {
     expect(records.map(record => record.description)).toEqual(['Look up a note.']);
   });
 });
+
+describe('executeToolCalls sentinel pre-dispatch: the workspace classification judged against', () => {
+  // The session identity carries no workspace (no repository bound). The
+  // classifying tool recorded the workspace it judged the call against: the
+  // provider's default workspace, which classification fell back to.
+  async function dispatchSilentExec(input: {
+    services: SentinelServices;
+    command: string;
+    recordedWorkspace?: string | undefined;
+  }): Promise<{ disposition: string | undefined; message: string | undefined; executed: boolean }> {
+    const { toolSet, callTool } = mockToolSet();
+    const result = await executeToolCalls({
+      assistantMessage: toolCall({
+        id: 'call-1',
+        wireName: 'test_tool',
+        wireArgs: { command: input.command },
+        toolInfo: {
+          original_tool_name: 'exec',
+          tier: 1,
+          is_approval_required: false,
+          approval_token_id: null,
+          ...(input.recordedWorkspace === undefined ? {} : { workspace_cwd: input.recordedWorkspace }),
+        },
+      }),
+      toolMapping: new Map([['test_tool', { toolSet, originalToolName: 'test_tool' }]]),
+      threadId: 'main',
+      approvalDecisions: new Map<string, ApprovalDecision>(),
+      memoState: createToolCallMemoState(),
+      sentinel: {
+        services: input.services,
+        web_search: createWebSearchTurnState(),
+        identity: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: null,
+          workspace_cwd: null,
+          agent_intent: null,
+        },
+      },
+    });
+    const outcome = result.toolCallResults[0];
+    if (outcome === undefined) {
+      throw new Error('expected one tool call result');
+    }
+    return {
+      disposition: outcome.disposition,
+      message: outcome.remediation?.message,
+      executed: callTool.mock.calls.length === 1,
+    };
+  }
+
+  test('a silent verify command runs against the recorded workspace when the session has none', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(workspace, 'repo'));
+      const outcome = await dispatchSilentExec({
+        services,
+        command: 'cd repo && git branch --show-current && ls',
+        recordedWorkspace: workspace,
+      });
+      expect(outcome.disposition).not.toBe('policy_blocked');
+      expect(outcome.executed).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent command escaping the recorded workspace is still refused', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const outcome = await dispatchSilentExec({ services, command: 'ls /etc', recordedWorkspace: workspace });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.message).toBe(
+        'Tier 2 shell operand is outside the workspace at dispatch; request approval again.',
+      );
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent command with no workspace recorded or bound is still refused', async () => {
+    const { services } = servicesWithAudit();
+    const outcome = await dispatchSilentExec({ services, command: 'ls' });
+    expect(outcome.disposition).toBe('policy_blocked');
+    expect(outcome.message).toBe('No workspace is set for this shell command at dispatch; request approval again.');
+    expect(outcome.executed).toBe(false);
+  });
+});
