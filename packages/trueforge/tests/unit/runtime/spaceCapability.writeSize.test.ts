@@ -433,8 +433,9 @@ describe('the space write size cap', () => {
     // The model is told one number, 3,600, which leaves headroom under the real cap;
     // the cap itself is never reported to the model.
     expect(rendered).toContain(
-      'one write carries at most about 3,600 characters: around 25 table rows or 40 short lines of new content',
+      'one write carries at most about 3,600 characters: about 25 table rows or 40 short lines, and a write past the limit',
     );
+    expect(rendered).toContain('The one exception is a call whose only entry is an append entry');
     expect(rendered).toContain(
       'When a result says part of the content was not saved, continue from the line it names, without resending saved lines. ' +
         'To add rows or sections at the end, use an append entry (no anchor or fingerprint needed). ' +
@@ -463,7 +464,7 @@ describe('the space write size cap', () => {
       if (tool === undefined) {
         throw new Error(`expected the ${name} tool to be listed`);
       }
-      expect(tool.description ?? '').toContain('about 3,600 characters: around 25 table rows or 40 short lines');
+      expect(tool.description ?? '').toContain('about 3,600 characters: about 25 table rows or 40 short lines');
       expect(tool.description ?? '').not.toContain('4,000');
     }
   });

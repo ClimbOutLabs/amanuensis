@@ -362,11 +362,11 @@ const DELTA_BREAKER_TRIP_AFTER_FAILURES = 3;
 
 const SPACE_INSTRUCTION_SECTION = 'spaces';
 /** The one number a write holds, with its shape in rows and lines so a model can count. */
-const SPACE_WRITE_SIZE_TEXT = `about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters: around 25 table rows or 40 short lines`;
+const SPACE_WRITE_SIZE_TEXT = `about ${SPACE_WRITE_GUIDANCE_MAX_LENGTH.toLocaleString('en-US')} characters: about 25 table rows or 40 short lines`;
 const SPACE_INSTRUCTION = `
 When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Build a large space in steps, not in one call: one write carries at most ${SPACE_WRITE_SIZE_TEXT} of new content, and a write past the limit is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with append entries in edit_space, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
+Build a large space in steps, not in one call: one write carries at most ${SPACE_WRITE_SIZE_TEXT}, and a write past the limit is refused with nothing saved. For a space with sections, first create a short skeleton: one section per part, each opened by a marker such as <!-- @block:pricing --> with a line of placeholder content under it, starting with the first marker so nothing sits before it. The create result gives the space's name and link, not an id: use that exact name later (space_name). Then fill one block per edit_space call, addressed by the marker's name, with new_content as the block's complete new content. For a long table or list with no sections, create the space with the heading and the first rows, then add the rest a few rows at a time with append entries in edit_space, so the person sees it fill in as it goes. To read a space's current body, call get_space with space_name. After a context compaction, call list_blocks to recover the anchors and the revision. When you mention a space to the person, link its name to its link; never show an id. A space is always addressed by its exact name, and names are unique: create_space refuses a name an existing space already has, so pick a different name or change the existing space instead. If a create_space or edit_space call fails because its arguments did not finish, do not send the same call again: send the content in smaller parts with edit_space.
 
 Pass body as one string with real line breaks: each table row on its own line, and a blank line as an empty line. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
@@ -376,7 +376,7 @@ Pictures: use only picture links that a search or page result in this chat retur
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
-There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, all entries in the call apply to the blocks of that one revision, and a call naming an older revision is refused with the current revision named, so re-read and send the change again. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list in the middle; an append entry {type: 'append', new_content} adds content at the end of the space and needs no anchor or fingerprint, so use it to add rows or sections at the end (at most one per call, and last). When a result says part of the content was not saved, continue from the line it names, without resending saved lines. To add rows or sections at the end, use an append entry (no anchor or fingerprint needed). Send only rows that are not there yet. End every reply that changed a space with one line saying what was saved. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
+There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, all entries in the call apply to the blocks of that one revision, and a call naming an older revision is refused with the current revision named, so re-read and send the change again. The one exception is a call whose only entry is an append entry and that changes no title, purpose, status, or format: it overwrites nothing, so it is applied to the current end whatever revision it names. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list in the middle; an append entry {type: 'append', new_content} goes last in the list, at most one per call. When a result says part of the content was not saved, continue from the line it names, without resending saved lines. To add rows or sections at the end, use an append entry (no anchor or fingerprint needed). Send only rows that are not there yet. End every reply that changed a space with one line saying what was saved. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -489,7 +489,9 @@ const SPACE_INSERT_EDIT_SCHEMA = z
 const SPACE_APPEND_EDIT_SCHEMA = z
   .object({
     type: z.literal('append'),
-    new_content: z.string().min(1),
+    new_content: z
+      .string()
+      .refine(text => text.trim() !== '', 'must have some text. Send the rows or lines to add at the end'),
   })
   .strict();
 /** The one edit list shape: every entry names its own kind, so block, insert and append entries never mix ambiguously. */
@@ -634,6 +636,10 @@ interface WriteOutcome {
   blocks?: { anchor: string; fingerprint: string; preview: string; occurrences: number }[];
   /** Set when an append-only call named an older revision: the revision the space had reached. */
   moved_to_revision?: number;
+  /** Set when appended table rows start a new table with no header row. */
+  starts_new_table?: true;
+  /** Set when an append that named an older revision was already at the end: nothing was written. */
+  already_at_end?: true;
 }
 
 /**
@@ -654,11 +660,15 @@ function spaceLink(space_id: string): string {
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
   const { name, revision } = result.record;
   return JSON.stringify({
-    summary:
-      `${outcome.action} space "${name}" (revision ${String(revision)}).` +
-      (outcome.moved_to_revision === undefined
-        ? ''
-        : ` The space had moved to revision ${String(outcome.moved_to_revision)}; the content was appended to the current end.`),
+    summary: outcome.already_at_end
+      ? `Space "${name}" is at revision ${String(revision)}. That content is already at the end of the space, so nothing was added.`
+      : `${outcome.action} space "${name}" (revision ${String(revision)}).` +
+        (outcome.moved_to_revision === undefined
+          ? ''
+          : ` The space had moved to revision ${String(outcome.moved_to_revision)}; the content was appended to the current end.`) +
+        (outcome.starts_new_table === true
+          ? ' The appended rows start a new table without a header row; add a header if they belong to a new table.'
+          : ''),
     ...(outcome.moved_to_revision === undefined ? {} : { revision_was_stale: true }),
     space: {
       name,
@@ -1129,6 +1139,54 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
   return suffix.includes('\n') ? suffix : '';
 }
 
+function lastLineOf(text: string): string {
+  const lines = text.split('\n');
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if ((lines[index] ?? '').trim() !== '') {
+      return lines[index] ?? '';
+    }
+  }
+  return '';
+}
+
+function firstLineOf(text: string): string {
+  for (const line of text.split('\n')) {
+    if (line.trim() !== '') {
+      return line;
+    }
+  }
+  return '';
+}
+
+function isTableRowLine(line: string): boolean {
+  return line.trim().startsWith('|');
+}
+
+/**
+ * The one join rule for content added after existing text, shared by insert and append.
+ * A table row after a table row continues the table with one line break. Anything else
+ * after a table row needs a blank line, or it would read as one more row. Otherwise the
+ * existing separator is kept, and with none a structural block gets a blank line and a
+ * marked block one line break.
+ */
+function joinGap(input: { before: string; content: string; existing: string; marked: boolean }): string {
+  const tableBefore = isTableRowLine(lastLineOf(input.before));
+  if (tableBefore && isTableRowLine(firstLineOf(input.content))) {
+    return '\n';
+  }
+  const blankLine = '\n\n';
+  if (input.existing !== '') {
+    return tableBefore && input.existing.split('\n').length < 3 ? blankLine : input.existing;
+  }
+  return input.marked && !tableBefore ? '\n' : blankLine;
+}
+
+/** True when the content opens with a table row and a separator row: it brings its own header. */
+function opensWithTableHeader(content: string): boolean {
+  const lines = content.split('\n').filter(line => line.trim() !== '');
+  return isTableRowLine(lines[0] ?? '') && /^\s*\|?[\s|:-]*-{3,}[\s|:-]*$/.test(lines[1] ?? '');
+}
+
 /**
  * Applies one edit_space call's entries, all against the segmentation of the body the
  * call names (the current body at the revision it checked): entries never see each
@@ -1140,6 +1198,8 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
 function applyEditEntries(input: { space_id: string; body: string; edits: readonly SpaceEditEntry[] }): {
   body: string;
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
+  /** An appended table row followed text that is not a table and brought no header row. */
+  starts_new_table: boolean;
 } {
   const { space_id, body, edits } = input;
   let appended: string | undefined;
@@ -1219,41 +1279,14 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
   }
 
   // The text an insert entry adds after its block, placed between the block's content
-  // and its trailing separator, so what follows the block keeps its distance. When the
-  // block's last line and the new content's first line are both table rows, the new
-  // content continues the table, so a single line break joins them and the table stays
-  // one table. Otherwise the block's own separator is the joiner; a block that ends the
-  // body with no separator after it gives the new content one of its own in front: a
-  // blank line after a structural block, one line break after a marked block.
-  const lastLineOf = (text: string): string => {
-    const lines = text.split('\n');
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      if ((lines[index] ?? '').trim() !== '') {
-        return lines[index] ?? '';
-      }
-    }
-    return '';
-  };
-  const firstLineOf = (text: string): string => {
-    for (const line of text.split('\n')) {
-      if (line.trim() !== '') {
-        return line;
-      }
-    }
-    return '';
-  };
-  const insertText = (segment: SpaceSegment, content: string): string => {
-    const core = body.slice(segment.coreStart, segment.coreEnd);
-    const continuesTable = lastLineOf(core).trim().startsWith('|') && firstLineOf(content).trim().startsWith('|');
-    if (continuesTable) {
-      return `\n${content}`;
-    }
-    const separator = segmentTrailingSeparator(body, segment);
-    if (separator !== '') {
-      return separator + content;
-    }
-    return segment.marked ? `\n${content}` : `\n\n${content}`;
-  };
+  // and its trailing separator, so what follows the block keeps its distance.
+  const insertText = (segment: SpaceSegment, content: string): string =>
+    joinGap({
+      before: body.slice(segment.coreStart, segment.coreEnd),
+      content,
+      existing: segmentTrailingSeparator(body, segment),
+      marked: segment.marked,
+    }) + content;
   let new_length = body.length;
   for (const [segment, content] of replacements) {
     const leadLength = segment.marked ? markedLeadSeparator(body, segment).length : 0;
@@ -1299,41 +1332,44 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
     parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
   }
   let result = parts.join('');
+  let starts_new_table = false;
   if (appended !== undefined) {
     const joined = appendAfterBody({ body: result, content: appended, marked: segments[0]?.marked === true });
     result = joined.body;
     if (result.length > SPACE_BODY_MAX_LENGTH) {
       throw new SpaceBodyTooLongError({ space_id, new_length: result.length });
     }
+    starts_new_table =
+      isTableRowLine(firstLineOf(appended)) &&
+      !isTableRowLine(lastLineOf(joined.before)) &&
+      !opensWithTableHeader(appended);
     // The block the new content landed in: the last block that starts at or before it.
     const landed = segmentSpaceBody(result)
       .segments.filter(segment => segment.start <= joined.contentStart)
       .at(-1);
-    block_results.push({ anchor: landed?.anchor ?? 'b1', new_length: appended.length, deleted: false });
+    if (landed !== undefined) {
+      block_results.push({ anchor: landed.anchor, new_length: appended.length, deleted: false });
+    }
   }
-  return { body: result, block_results };
+  return { body: result, block_results, starts_new_table };
 }
 
-/**
- * Adds content after the end of a body. A table row after a table row continues the table
- * with one line break; otherwise a structural body gets a blank line first and a marked
- * body one line break, keeping any longer gap the body already ends with.
- */
+/** Adds content after the end of a body, keeping any longer gap the body already ends with. */
 function appendAfterBody(input: { body: string; content: string; marked: boolean }): {
   body: string;
+  before: string;
   contentStart: number;
 } {
   const { body, content, marked } = input;
-  const base = body.trimEnd();
-  const trailing = body.slice(base.length);
-  const lastLine = base.slice(base.lastIndexOf('\n') + 1).trim();
-  const firstLine = content.split('\n').find(line => line.trim() !== '') ?? '';
-  if (lastLine.startsWith('|') && firstLine.trim().startsWith('|')) {
-    return { body: `${base}\n${content}${trailing}`, contentStart: base.length + 1 };
+  const before = body.trimEnd();
+  const trailing = body.slice(before.length);
+  // A gap too short to separate the new content from the last line is replaced by the rule's own.
+  const existing = trailing.split('\n').length >= (marked ? 2 : 3) ? trailing : '';
+  const gap = joinGap({ before, content, existing, marked });
+  if (gap === '\n') {
+    return { body: `${before}\n${content}${trailing}`, before, contentStart: before.length + 1 };
   }
-  const needed = marked ? '\n' : '\n\n';
-  const gap = trailing.length >= needed.length && trailing.includes('\n') ? trailing : needed;
-  return { body: base + gap + content, contentStart: base.length + gap.length };
+  return { body: before + gap + content, before, contentStart: before.length + gap.length };
 }
 
 /**
@@ -1434,7 +1470,7 @@ class SpaceTool extends LocalToolMCP {
       name: EDIT_SPACE_TOOL_NAME,
       description:
         'Change part of one space by its exact space_name, without resending the body. ' +
-        'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed: every entry addresses a block of that one revision, and a call naming an older revision is refused with the current one. ' +
+        'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed: every entry addresses a block of that one revision, and a call naming an older revision is refused with the current one, except a call that only appends and changes no title, purpose, status, or format: that is applied to the current end. ' +
         'edits is a list of up to 50 entries: a block entry {type: "block", anchor, fingerprint, new_content} replaces the content of the block the anchor names, and empty new_content deletes it; an insert entry {type: "insert", after, fingerprint, new_content} adds new content right after the named block; an append entry {type: "append", new_content} adds content at the end of the space with no anchor or fingerprint: the way to add rows or sections. Send at most one append entry per call, and put it last. One block can be named by only one entry per call. ' +
         "fingerprint is the block's fingerprint as that read showed it: a short code hashed from the block's exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block's anchor. " +
         'Anchors come from list_blocks: the name of a <!-- @block:name --> section, or b1, b2, and so on for the blocks a body without markers is split into. ' +
@@ -1579,7 +1615,13 @@ class SpaceTool extends LocalToolMCP {
     // An append-only call overwrites nothing, so a stale revision does not refuse it: it is
     // applied to the current end and the result says so.
     const revisionWasStale = input.expected_revision !== current.revision;
-    const appendOnly = input.edits.every(edit => edit.type === 'append');
+    // Changing the title, purpose, status or format overwrites something, so it keeps the revision rule.
+    const appendOnly =
+      input.edits.every(edit => edit.type === 'append') &&
+      input.new_title === undefined &&
+      input.purpose === undefined &&
+      input.status === undefined &&
+      input.format === undefined;
     if (revisionWasStale && !appendOnly) {
       this.recordDeltaFailure(input.space_id);
       throw new SpaceRevisionConflictError({
@@ -1587,6 +1629,20 @@ class SpaceTool extends LocalToolMCP {
         expected_revision: input.expected_revision,
         actual_revision: current.revision,
       });
+    }
+    // A resend of an append the space already ends with must not add the rows a second time.
+    const appendedEdit = input.edits.find(edit => edit.type === 'append');
+    if (
+      revisionWasStale &&
+      appendedEdit !== undefined &&
+      current.body.trimEnd().endsWith(appendedEdit.new_content.trim())
+    ) {
+      return {
+        mutation: { record: current, aggregate_revision: expected_aggregate_revision },
+        action: 'Updated',
+        already_at_end: true,
+        blocks: blockOutline(current.body).blocks,
+      };
     }
     // A rename takes a name of its own: refuse a new_title another space already has,
     // so the rename cannot recreate the two-spaces-one-name ambiguity create refuses.
@@ -1599,10 +1655,12 @@ class SpaceTool extends LocalToolMCP {
     }
     let body: string;
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
+    let starts_new_table: boolean;
     try {
       const applied = applyEditEntries({ space_id: input.space_id, body: current.body, edits: input.edits });
       body = applied.body;
       block_results = applied.block_results;
+      starts_new_table = applied.starts_new_table;
     } catch (error) {
       if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
         this.recordDeltaFailure(input.space_id);
@@ -1633,6 +1691,9 @@ class SpaceTool extends LocalToolMCP {
       expected_aggregate_revision,
     });
     const outcome: WriteOutcome = { mutation, action: 'Updated' };
+    if (starts_new_table) {
+      outcome.starts_new_table = true;
+    }
     if (revisionWasStale) {
       outcome.moved_to_revision = current.revision;
     }
