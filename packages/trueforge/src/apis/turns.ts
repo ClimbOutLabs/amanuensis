@@ -861,6 +861,7 @@ function createTurnResolver(deps: {
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
+      searchProviderPresetNames: () => mcpCatalog.searchProviderPresetNames(),
       // The connectors the person turned off for this chat stay off on every turn of it.
       turnedOffConnectorKeys: readTurnedOffConnectorKeys(session.record.metadata),
       // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.

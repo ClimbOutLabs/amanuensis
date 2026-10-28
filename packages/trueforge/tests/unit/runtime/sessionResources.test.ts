@@ -440,6 +440,77 @@ describe('validateAgentSpec', () => {
     } satisfies Partial<HTTPException>);
   });
 
+  /** The state after the search switch: Tavily holds the search provider role, Parallel is deleted. */
+  async function setupWithTavilyDesignated() {
+    const stores = await setup();
+    await stores.mcpServerStore.upsertServer({
+      tenant_id: 'default',
+      name: 'tavily',
+      manifest: {
+        type: 'remote',
+        name: 'tavily',
+        url: 'https://mcp.tavily.com/mcp',
+        description: 'Invented search connector.',
+        search_provider: true,
+      },
+      first_party: false,
+    });
+    return stores;
+  }
+
+  it('accepts a remembered mount of a deleted search provider preset once another provider holds the role', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }],
+        }),
+        tenant_id: 'default',
+        searchProviderPresetNames: ['parallel-web', 'tavily'],
+        ...stores,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still rejects an unknown server that is not a search provider preset when preset names are passed', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }, { name: 'missing-mcp' }],
+        }),
+        tenant_id: 'default',
+        searchProviderPresetNames: ['parallel-web', 'tavily'],
+        ...stores,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('Unknown MCP server "missing-mcp"'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  it('still rejects the deleted preset mount when the caller passes no preset names', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }],
+        }),
+        tenant_id: 'default',
+        ...stores,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('Unknown MCP server "parallel-web"'),
+    } satisfies Partial<HTTPException>);
+  });
+
   it('rejects unknown skill with 422', async () => {
     const stores = await setup();
     await expect(

@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
@@ -27,13 +28,14 @@ import {
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
 import {
+  isMailDraftToolName,
   isMailReadToolName,
   isMailSendToolName,
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { MapsHosts } from '../llm/LLMTypes';
+import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -155,6 +157,7 @@ import {
   extractExecutedFileOperand,
   isInsideWorkspace,
   isNewWriteTarget,
+  isPathUnderDir,
   isUnderRoot,
   lexicalPath,
   sha256FileContent,
@@ -214,6 +217,12 @@ export interface SentinelAction {
    * server-owned maps tool from server config, never from model params.
    */
   maps_hosts?: MapsHosts | undefined;
+  /**
+   * Host-derived folders the document reader may read without asking: the staged uploads
+   * directory and the bound project folder. Set by the documents tool set from the sandbox
+   * and the session binding, never from model params.
+   */
+  document_scope?: DocumentScope | undefined;
   /**
    * The message a Gmail write would send or save, as the host holds it. Set by the Gmail tool set from a live
    * read and the validated call, so the card shows what would really go out.
@@ -2278,10 +2287,10 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
-/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+/** The addresses a mail send or draft would reach that are not on the Email list; empty for any other call. */
 async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
-  if (!isHostMailSend(action)) {
+  if (!isHostMailSend(action) && !isHostMailDraft(action)) {
     return [];
   }
   return mailRecipientsNotListed({
@@ -2778,6 +2787,94 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
 
+/** The paths a document read names, or null when they are not a non-empty list of names. */
+function documentFilePaths(action: SentinelAction): string[] | null {
+  const raw = action.canonical_params['file_paths'];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+  const paths: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry === '') {
+      return null;
+    }
+    paths.push(entry);
+  }
+  return paths;
+}
+
+/** True when a document path reads without asking: a staged upload, or a file inside the project folder. */
+function documentPathReadsWithoutAsking(input: {
+  p: string;
+  scope: DocumentScope | undefined;
+  workspaceRoot: string | null;
+  resolution: PathResolution | undefined;
+}): boolean {
+  const uploadsDir = input.scope?.staged_uploads_dir;
+  if (
+    uploadsDir !== null &&
+    uploadsDir !== undefined &&
+    isPathUnderDir({ p: input.p, dir: uploadsDir, cwd: '/', resolution: input.resolution })
+  ) {
+    return true;
+  }
+  const root = input.workspaceRoot;
+  if (root === null || root === '') {
+    return false;
+  }
+  return isInsideWorkspace({ p: input.p, cwd: root, workspace_root: root, resolution: input.resolution });
+}
+
+/**
+ * Document reads are the host's own, named by server. A staged upload, and a file inside the
+ * project folder, read without asking as today. Any other path asks first, with the approval
+ * bound to the exact paths in this call, so an approval for one set of files never covers
+ * another set. With no project folder bound, a path that is not a staged upload asks too.
+ */
+async function classifyDocumentTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const paths = documentFilePaths(action);
+  if (paths === null) {
+    return failClosedDecision({ reason_detail: 'The document paths could not be checked.' });
+  }
+  const scope = action.document_scope;
+  const resolution = scope?.path_resolution ?? ctx.path_resolution ?? undefined;
+  const workspaceRoot = scope?.workspace_cwd ?? ctx.workspace_cwd;
+  const outside = paths.filter(p => !documentPathReadsWithoutAsking({ p, scope, workspaceRoot, resolution }));
+  if (outside.length === 0) {
+    return tier1Decision({
+      reason: 'document_read',
+      reason_detail: 'Read a document you provided or one in the project folder.',
+      sensitive_read: containsSecretPath(action.canonical_params),
+    });
+  }
+  const named =
+    outside.length === 1 ? `the file ${mapsCardLabel(outside[0])}` : `these files: ${joinedLabels(outside)}`;
+  return tier3Decision({
+    card: {
+      plain_what: `Read ${named} outside the project folder?`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'document_outside_workspace',
+    reason_detail: 'A document outside the project folder asks before it is read.',
+    sensitive_read: containsSecretPath(action.canonical_params),
+    secret_path_read: true,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
+  });
+}
+
 /** Most characters of a name or note the line in the chat shows. */
 const LINE_TEXT_MAX_CHARS = 80;
 
@@ -2847,7 +2944,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
     read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    host_mail_draft: isHostMailDraft(action),
   });
+  // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
+  const hostMailCall = isHostMailCall(action);
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
@@ -2917,33 +3017,44 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  // A draft naming a new address asks with the same card in draft words: approving adds the addresses and
+  // saves the draft, and nothing is sent.
   const newMailRecipients = await mailNewRecipients({ action, ctx });
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
+    const draft = isHostMailDraft(action);
     const sentence = externalServiceWhat({
       tool_name: action.tool_name,
       destination: fields.destination,
       recipient: fields.recipient,
       amount: fields.amount,
     });
+    const newRecipientLine = newMailRecipients
+      .map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`)
+      .join(' ');
     return tier3Decision({
       card: {
-        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_what: draft
+          ? `${newRecipientLine} Approving adds them to your send list and saves this draft. ${extraction.connector_what ?? sentence}`
+          : `${newRecipientLine} Approving adds them to your send list and sends. ${sentence}`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        cannot_be_undone: draft ? null : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: null,
         outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
+        ...(draft ? { mail_draft: true } : {}),
       },
-      mail_send: true,
+      mail_send: !draft,
       reason: MAIL_NEW_RECIPIENT_REASON,
-      reason_detail: 'A mail send to an address that is not on the Email list.',
+      reason_detail: draft
+        ? 'A mail draft to an address that is not on the Email list.'
+        : 'A mail send to an address that is not on the Email list.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -2974,7 +3085,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: null,
         outbound_truncated: fields.outbound_truncated,
       },
       mail_send: true,
@@ -3012,16 +3123,19 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               : 'Run this action, even though it reaches outside this machine?'
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
+        // A call that only saves a draft sends nothing, so it carries no send warning.
         cannot_be_undone: destructiveHint
           ? 'This might change or delete something for good.'
-          : "Once this is sent, it can't be unsent.",
+          : extraction.staged_draft
+            ? null
+            : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: hostMailCall ? null : fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
       },
       // A send keeps its own reason whatever the annotations say, so no chat-wide answer ever covers it.
@@ -3175,24 +3289,26 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/** A call on the host's own Email sidecar, read or write: only it carries the first-party mark under the Email name. */
+function isHostMailCall(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' && action.mcp_first_party === true && action.mcp_server_name === MAIL_CONNECTOR_NAME
+  );
+}
+
 /** A mail read the host itself vouched for: only the host's own Email sidecar carries the first-party mark. */
 function isHostMailRead(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'mcp' &&
-    action.mcp_first_party === true &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    isMailReadToolName(action.tool_name)
-  );
+  return isHostMailCall(action) && isMailReadToolName(action.tool_name);
 }
 
 /** A mail send through the host's own Email sidecar, the only send whose recipients are checked against the Email list. */
 function isHostMailSend(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'mcp' &&
-    action.mcp_first_party === true &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    isMailSendToolName(action.tool_name)
-  );
+  return isHostMailCall(action) && isMailSendToolName(action.tool_name);
+}
+
+/** A mail draft through the host's own Email sidecar: it sends nothing, but its recipients are checked like a send's. */
+function isHostMailDraft(action: SentinelAction): boolean {
+  return isHostMailCall(action) && isMailDraftToolName(action.tool_name);
 }
 
 /** A calendar read the host itself vouched for. */
@@ -3231,8 +3347,10 @@ function connectorApprovalCard(input: {
           : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
     plain_why: plainWhy(input.agent_intent),
     // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
-    cannot_be_undone:
-      extraction.connector_what !== null
+    // A call that only saves a draft sends nothing, so it carries no send warning either.
+    cannot_be_undone: extraction.staged_draft
+      ? null
+      : extraction.connector_what !== null
         ? "Once this is sent, it can't be unsent."
         : hostMailRead || hostCalendarRead
           ? null
@@ -3243,7 +3361,7 @@ function connectorApprovalCard(input: {
     amount: fields.amount,
     parsed_command: null,
     outbound_text: fields.outbound_text,
-    destination_host: fields.destination_host,
+    destination_host: isHostMailCall(action) ? null : fields.destination_host,
     outbound_truncated: fields.outbound_truncated,
   };
 }
@@ -3296,6 +3414,13 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (
+    action.tool_type === 'truefoundry-system' &&
+    action.mcp_server_name === DOCUMENTS_SERVER_ID &&
+    name === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
+  ) {
+    return steeringChecked({ decision: await classifyDocumentTool(action, ctx), ctx, guests: [] });
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool

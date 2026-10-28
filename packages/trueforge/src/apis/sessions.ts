@@ -29,6 +29,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import type { IAgentStore } from '../db/agentStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
@@ -117,6 +118,8 @@ export interface SessionsRouterDeps {
   resolveAgentStore: (c: Context) => IAgentStore;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
   redis?: RedisClientType | undefined;
+  /** When present, remembered mounts of a deleted search provider do not fail validation. */
+  mcpCatalog?: McpCatalog | undefined;
   requestReplyRouter: RequestReplyRouter;
   resolveRequestContext: ResolveRequestContext;
   logger: Logger;
@@ -302,6 +305,7 @@ function isSessionOwner({
 type InternalSessionsRouterDeps = Pick<
   SessionsRouterDeps,
   | 'sessions'
+  | 'mcpCatalog'
   | 'resolveModelProviderStore'
   | 'resolveMcpServerStore'
   | 'resolveSkillStore'
@@ -360,6 +364,7 @@ function createGetOrCreateSessionByExternalIdHandler(
         mcpServerStore: deps.resolveMcpServerStore(c),
         skillStore: deps.resolveSkillStore(c),
         sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+        searchProviderPresetNames: deps.mcpCatalog?.searchProviderPresetNames(),
       });
       agent = { type: 'inline', spec: body.agent.spec };
     }
@@ -432,6 +437,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       mcpServerStore: deps.resolveMcpServerStore(c),
       skillStore: deps.resolveSkillStore(c),
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+      searchProviderPresetNames: deps.mcpCatalog?.searchProviderPresetNames(),
     });
     const session = await deps.sessions.create({
       tenant_id: requestContext.tenant_id,
@@ -527,6 +533,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         mcpServerStore: deps.resolveMcpServerStore(c),
         skillStore: deps.resolveSkillStore(c),
         sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+        searchProviderPresetNames: deps.mcpCatalog?.searchProviderPresetNames(),
       });
     }
     try {

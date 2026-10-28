@@ -267,6 +267,9 @@ describe('Email connector classifier', () => {
       expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
       expect(decision.card?.plain_what).toContain('Approving adds them to your send list and sends.');
       expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
+      expect(decision.card?.mail_draft ?? null).toBeNull();
+      expect(decision.card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
+      expect(decision.card?.destination_host).toBeNull();
       expect(decision.card?.outbound_text).toContain(SUBJECT);
       expect(decision.approval_token_id).not.toBeNull();
     });
@@ -313,13 +316,66 @@ describe('Email connector classifier', () => {
       expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
     });
 
-    it('save_draft is not a send, so it never asks about new recipients', async () => {
+    it('a draft to an address not on the list asks with the new-recipient card, in draft words', async () => {
       const decision = await classifyTier(
-        hostMailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        hostMailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+      expect(decision.card?.plain_what).toContain('Approving adds them to your send list and saves this draft.');
+      expect(decision.card?.plain_what).toContain('Save a message draft');
+      expect(decision.card?.plain_what).not.toContain('and sends.');
+      expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
+      expect(decision.card?.mail_draft).toBe(true);
+      // A draft sends nothing, so it carries no send warning, and its destination is the recipient, not the endpoint.
+      expect(decision.card?.cannot_be_undone).toBeNull();
+      expect(decision.card?.destination_host).toBeNull();
+      expect(decision.card?.recipient).toContain(STRANGER);
+      expect(decision.mail_send).toBe(false);
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('a draft to a listed address keeps the ordinary draft card and adds nobody', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).toBe('connector_send');
       expect(decision.card?.plain_what).not.toContain('New recipient');
+      expect(decision.card?.mail_new_recipients ?? null).toBeNull();
+    });
+
+    it('a draft to a listed address on the host sidecar shows no send warning and no endpoint as its destination', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+      expect(decision.card?.plain_what).toContain('Save a message draft');
+      expect(decision.card?.cannot_be_undone).toBeNull();
+      expect(decision.card?.destination_host).toBeNull();
+      expect(decision.card?.recipient).toContain(LISTED);
+    });
+
+    it('a draft with no recipient is refused before any card', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card).toBeNull();
+      expect(decision.auto_deny).toBe('incomplete_send_card');
+      expect(decision.reason_detail).toContain('a draft must say who it is for');
+      expect(decision.owner_message).toContain('Nothing was saved');
+    });
+
+    it('a draft with no recipient on a connector that only shares the name is not refused for that', async () => {
+      const decision = await classifyTier(
+        mailCall('save_draft', { subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.auto_deny).toBeNull();
+      expect(decision.card).not.toBeNull();
     });
 
     it("a send through the host's own sidecar to a listed address asks under its own reason, and no answer covers it", async () => {
@@ -328,6 +384,7 @@ describe('Email connector classifier', () => {
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.card?.destination_host).toBeNull();
       expect(decision.approval_token_id).not.toBeNull();
     });
 
@@ -340,6 +397,8 @@ describe('Email connector classifier', () => {
       expect(decision.reason).not.toBe('mail_new_recipient');
       expect(decision.reason).not.toBe('mail_send');
       expect(decision.card?.mail_new_recipients ?? null).toBeNull();
+      // Only the host's own sidecar drops the endpoint: a connector that shares the name still shows its host.
+      expect(decision.card?.destination_host).toBe('mail-email');
     });
   });
 

@@ -72,15 +72,23 @@ type CallToolMock = jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<Too
 /** The Email connector's name; the classifier checks new recipients only on a call from this server. */
 const MAIL_SERVER = 'Email';
 
-function makeSource(callTool: CallToolMock, serverName = 'mail', clashingSend = false): ToolSource {
+function makeSource(
+  callTool: CallToolMock,
+  serverName = 'mail',
+  clashingSend = false,
+  includeDraft = false,
+): ToolSource {
   const schema = { type: 'object' as const, properties: {} };
   // A second tool with the same name registers as `send_email1`, the name the model sees after a clash.
   const sendTool = { name: 'send_email', description: 'Send an email', inputSchema: schema, preload: true };
+  const draftTool = { name: 'save_draft', description: 'Save a draft', inputSchema: schema, preload: true };
+  const mailTools = clashingSend ? [sendTool, sendTool] : [sendTool];
+  if (includeDraft) {
+    mailTools.push(draftTool);
+  }
   const tools =
     serverName === MAIL_SERVER
-      ? clashingSend
-        ? [sendTool, sendTool]
-        : [sendTool]
+      ? mailTools
       : [
           { name: 'send_note', description: 'Send a note', inputSchema: schema, preload: true },
           {
@@ -148,7 +156,13 @@ function makeHarness(
     searchProvider?: boolean;
     secrets?: readonly string[];
     /** Sends go through the Email connector; `listed` is the Email list and `add` answers each add. */
-    mail?: { listed: readonly string[]; add: MailAddRecipientsResult; clash?: boolean; hostOwned?: boolean };
+    mail?: {
+      listed: readonly string[];
+      add: MailAddRecipientsResult;
+      clash?: boolean;
+      hostOwned?: boolean;
+      draft?: boolean;
+    };
   } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
@@ -189,7 +203,12 @@ function makeHarness(
       const services = input.unattended ? forUnattendedRun(base) : base;
       const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1', services });
       const toolSet = new ToolSet({
-        source: makeSource(callTool, options.mail === undefined ? 'mail' : MAIL_SERVER, options.mail?.clash === true),
+        source: makeSource(
+          callTool,
+          options.mail === undefined ? 'mail' : MAIL_SERVER,
+          options.mail?.clash === true,
+          options.mail?.draft === true,
+        ),
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
@@ -836,6 +855,94 @@ describe('approving a held mail send to an address not on the Email list', () =>
     await expect(answer(h, context, [approve('call-mail', 'chat')])).rejects.toBeInstanceOf(InvalidAgentSendInputError);
     expect(h.mailAdd).not.toHaveBeenCalled();
     expect(h.callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('approving a held mail draft to an address not on the Email list', () => {
+  const MAIL_DRAFT_ARGS = { recipients: ['dana@example.com', 'Stranger@Example.net'], subject: 'Lunch', body: 'Noon?' };
+  const mailDraftCall: CallSpec = { id: 'call-draft', name: 'save_draft', args: JSON.stringify(MAIL_DRAFT_ARGS) };
+
+  function deny(callId: string) {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: callId,
+      approval: { status: 'deny' as const },
+    };
+  }
+
+  /** The unattended run holds the draft; the harness then answers it. */
+  async function heldDraft(listed: readonly string[], call: CallSpec = mailDraftCall) {
+    const h = makeHarness([() => toolCallsStream([call])], {
+      mail: { listed, add: 'loaded', draft: true },
+    });
+    const { thread } = await runBrief(h);
+    return { h, context: heldContext(thread) };
+  }
+
+  function answer(
+    h: Harness,
+    context: ReturnType<typeof heldContext>,
+    sendBatch: Parameters<typeof runTurn>[0]['sendBatch'],
+  ) {
+    const replay = h.build({ unattended: false, context, stopAfterToolResponse: true });
+    return runTurn({ orchestrator: replay.orchestrator, sendBatch });
+  }
+
+  it('adds exactly the new address the card named, then saves the draft', async () => {
+    const { h, context } = await heldDraft(['dana@example.com']);
+    await answer(h, context, [approve('call-draft')]);
+
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'save_draft', arguments: MAIL_DRAFT_ARGS },
+      expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
+    );
+  });
+
+  it('keeps the draft pending with a plain message when the sidecar has not loaded the list in time', async () => {
+    const { h, context } = await heldDraft(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-draft')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    // The refused answer was not recorded, so the same card can still be approved.
+    await answer(h, context, [approve('call-draft')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the draft with a plain message when the address is refused, and saves nothing', async () => {
+    const { h, context } = await heldDraft(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('refused');
+
+    await expect(answer(h, context, [approve('call-draft')])).rejects.toThrow(NEW_RECIPIENT_REFUSED);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('Cancel adds nothing and saves nothing', async () => {
+    const { h, context } = await heldDraft(['dana@example.com']);
+    await answer(h, context, [deny('call-draft')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('a draft to a listed address saves without touching the Email list', async () => {
+    const listedOnly: CallSpec = {
+      id: 'call-draft',
+      name: 'save_draft',
+      args: JSON.stringify({ ...MAIL_DRAFT_ARGS, recipients: ['dana@example.com'] }),
+    };
+    const { h, context } = await heldDraft(['dana@example.com'], listedOnly);
+    await answer(h, context, [approve('call-draft')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.mailLoaded).not.toHaveBeenCalled();
+    expect(h.callTool).toHaveBeenCalledTimes(1);
   });
 });
 
