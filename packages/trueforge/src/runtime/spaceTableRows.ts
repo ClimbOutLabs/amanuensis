@@ -1,14 +1,14 @@
-const SEPARATOR_CELL = /^\s*:?-{3,}:?\s*$/;
+const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
 const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
 function cellsOf(line: string): string[] {
   const trimmed = line.trim();
-  return trimmed.slice(1, -1).split(/(?<!\\)\|/);
+  const inner = trimmed.endsWith('|') && trimmed.length > 1 ? trimmed.slice(1, -1) : trimmed.slice(1);
+  return inner.split(/(?<!\\)\|/);
 }
 
 export function isTableRow(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed.length >= 2 && trimmed.startsWith('|') && trimmed.endsWith('|');
+  return line.trim().startsWith('|');
 }
 
 export function isTableSeparatorRow(line: string): boolean {
