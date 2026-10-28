@@ -69,7 +69,9 @@ import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { maskDocumentationRegions } from './spaceDocumentationMask';
 import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
+import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
@@ -626,6 +628,73 @@ class SpaceShrinkRefusedError extends Error {
   }
 }
 
+/**
+ * Thrown when a block replacement would drop a table's header or saved rows. Fail-closed policy,
+ * not a delta failure: the model's copy is current, the new content is the problem.
+ */
+class SpaceTableRowsRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpaceTableRowsRefusedError';
+  }
+}
+
+function plural({ count, noun }: { count: number; noun: string }): string {
+  return `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Refuses an edit that leaves table rows with no header above them, which breaks the table.
+ * Judged on the result, so deleting a whole table or rewriting it with its header still applies.
+ */
+function checkNoOrphanedRows({ old_body, new_body }: { old_body: string; new_body: string }): void {
+  if (orphanedRowGroupCount(new_body) <= orphanedRowGroupCount(old_body)) {
+    return;
+  }
+  throw new SpaceTableRowsRefusedError(
+    'This change would leave table rows with no header, so it would break the table. ' +
+      'To add rows, use an append entry. To change these rows, send the whole block with its header.',
+  );
+}
+
+/** Refuses an edit after which fewer rows with some key are saved than before, across the whole body. */
+function checkSavedRowsKept({
+  old_body,
+  new_body,
+  confirm_shrink,
+}: {
+  old_body: string;
+  new_body: string;
+  confirm_shrink: boolean | undefined;
+}): void {
+  if (confirm_shrink === true) {
+    return;
+  }
+  const newCounts = new Map<string, number>();
+  for (const { key } of tableRowEntries(new_body)) {
+    newCounts.set(key, (newCounts.get(key) ?? 0) + 1);
+  }
+  const lost: string[] = [];
+  for (const { key, label } of tableRowEntries(old_body)) {
+    const remaining = newCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      newCounts.set(key, remaining - 1);
+    } else {
+      lost.push(label);
+    }
+  }
+  if (lost.length === 0) {
+    return;
+  }
+  const shown = lost.slice(0, 10).join(', ');
+  const names = lost.length > 10 ? `${shown}, and ${String(lost.length - 10)} more` : shown;
+  throw new SpaceTableRowsRefusedError(
+    `This change would remove ${plural({ count: lost.length, noun: 'row' })} that ${lost.length === 1 ? 'is' : 'are'} saved now: ${names}. ` +
+      'To add rows, use an append entry. To fix a name, send the row with its new name and confirm_shrink: true. ' +
+      'If you really mean to remove these rows, send the call again with confirm_shrink: true.',
+  );
+}
+
 export interface SpaceTurnAuthority {
   tenantId: string;
   userRef: string;
@@ -900,83 +969,6 @@ export interface ListBlocksResult {
 const BLOCK_ANCHOR_PATTERN = /<!--\s*@block:\s*([A-Za-z0-9][A-Za-z0-9_.-]*(?: +[A-Za-z0-9][A-Za-z0-9_.-]*)*)\s*-->/g;
 
 /**
- * Masks regions of a body where a literal `<!-- @block:… -->` is documentation text, not a
- * structural marker: fenced code blocks (``` / ~~~) and <pre>/<code> elements. Masked
- * characters become spaces, so offsets into the masked body match the original body and the
- * marker regex can run on it directly.
- *
- * This is fail-closed by construction: without masking, a fenced sample documenting the
- * marker syntax would parse as a real addressable block, and an edit_space call could
- * silently destroy everything after it — the exact fail-open class the reliability work
- * exists to eliminate. An unclosed fence or tag masks to the end of the body.
- *
- * Single O(n) line pass with indexOf-based tag counting: no nested quantifiers, so this
- * cannot reintroduce the backtracking the anchor pattern was fixed for.
- */
-function maskDocumentationRegions(body: string): string {
-  const lines = body.split('\n');
-  let fence: { char: string; minLength: number } | null = null;
-  let tagDepth = 0;
-  const masked = lines.map(line => {
-    const lower = line.toLowerCase();
-    let isCode = fence !== null || tagDepth > 0;
-
-    // Fenced code blocks: ``` or ~~~, up to 3 leading spaces (CommonMark). An info string
-    // is allowed on the opening line; the closing line is the fence alone.
-    const fenceOpen = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    let closedFence = false;
-    if (fenceOpen !== null) {
-      const sequence: string = fenceOpen[1] ?? '';
-      const char = sequence.charAt(0);
-      if (fence === null) {
-        fence = { char, minLength: sequence.length };
-        isCode = true;
-      } else if (char === fence.char) {
-        // Closing line: the same fence character, at least as long, and nothing else.
-        const closePattern = new RegExp(`^ {0,3}[${char}]{${String(fence.minLength)},}\\s*$`);
-        if (closePattern.test(line)) {
-          fence = null;
-          closedFence = true;
-        }
-        isCode = true;
-      } else {
-        // A fence-like line of the other style inside a fence is content.
-        isCode = true;
-      }
-    }
-
-    // <pre> / <code> elements: crude open/close counting with indexOf (no regex
-    // backtracking). Over-matching (e.g. `<preview>`) only masks more, never less.
-    // Not counted inside a fenced code block: every line there is masked already, and a
-    // literal "<pre>" in the sample text must not leak into the tag depth. A fence-closing
-    // line still counts its tags — a <pre> after the closing fence is real.
-    if (fence === null || closedFence) {
-      const opens = countAny(lower, ['<pre', '<code']);
-      const closes = countAny(lower, ['</pre', '</code']);
-      if (opens > 0) {
-        isCode = true;
-      }
-      tagDepth = Math.max(0, tagDepth + opens - closes);
-    }
-
-    return isCode ? line.replace(/[\s\S]/g, ' ') : line;
-  });
-  return masked.join('\n');
-}
-
-function countAny(haystack: string, needles: string[]): number {
-  let count = 0;
-  for (const needle of needles) {
-    let index = 0;
-    while ((index = haystack.indexOf(needle, index)) !== -1) {
-      count += 1;
-      index += needle.length;
-    }
-  }
-  return count;
-}
-
-/**
  * Splits a body into its preamble (text before the first marker, never addressable by anchor)
  * and its blocks. A fresh RegExp per call: a module-level /g/ regex would carry lastIndex
  * state across calls.
@@ -1091,11 +1083,8 @@ function structuralSegments(body: string): SpaceSegment[] {
   }
   const isBlank = (index: number): boolean => (lines[index] ?? '').trim() === '';
   const isHeading = (index: number): boolean => /^#{1,6}(\s|$)/.test(maskedLines[index] ?? '');
-  const isTableRow = (index: number): boolean => (maskedLines[index] ?? '').trim().startsWith('|');
-  const isSeparatorRow = (index: number): boolean => {
-    const trimmed = (maskedLines[index] ?? '').trim();
-    return trimmed.startsWith('|') && trimmed.includes('-') && /^\|[\s:|-]*$/.test(trimmed);
-  };
+  const isRowAt = (index: number): boolean => isTableRow(maskedLines[index] ?? '');
+  const isSeparatorRow = (index: number): boolean => isTableSeparatorRow(maskedLines[index] ?? '');
 
   // Runs: stretches of non-blank lines. A heading is a run of its own, one line:
   // changing a heading never means resending the section under it, and the content
@@ -1127,9 +1116,9 @@ function structuralSegments(body: string): SpaceSegment[] {
   for (const run of runs) {
     let index = run.first;
     while (index < run.last) {
-      if (!isTableRow(index)) {
+      if (!isRowAt(index)) {
         let end = index;
-        while (end < run.last && !isTableRow(end)) {
+        while (end < run.last && !isRowAt(end)) {
           end += 1;
         }
         pieces.push({ first: index, last: end });
@@ -1137,7 +1126,7 @@ function structuralSegments(body: string): SpaceSegment[] {
         continue;
       }
       let regionEnd = index;
-      while (regionEnd < run.last && isTableRow(regionEnd)) {
+      while (regionEnd < run.last && isRowAt(regionEnd)) {
         regionEnd += 1;
       }
       const pinned = regionEnd - index >= 2 && isSeparatorRow(index + 1) ? 2 : 0;
@@ -1247,10 +1236,6 @@ function firstLineOf(text: string): string {
   return '';
 }
 
-function isTableRowLine(line: string): boolean {
-  return line.trim().startsWith('|');
-}
-
 /**
  * The one join rule for content added after existing text, shared by insert and append.
  * A table row after a table row continues the table with one line break. Anything else
@@ -1259,8 +1244,8 @@ function isTableRowLine(line: string): boolean {
  * marked block one line break.
  */
 function joinGap(input: { before: string; content: string; existing: string; marked: boolean }): string {
-  const tableBefore = isTableRowLine(lastLineOf(input.before));
-  if (tableBefore && isTableRowLine(firstLineOf(input.content))) {
+  const tableBefore = isTableRow(lastLineOf(input.before));
+  if (tableBefore && isTableRow(firstLineOf(input.content))) {
     return '\n';
   }
   const blankLine = '\n\n';
@@ -1273,7 +1258,7 @@ function joinGap(input: { before: string; content: string; existing: string; mar
 /** True when the content opens with a table row and a separator row: it brings its own header. */
 function opensWithTableHeader(content: string): boolean {
   const lines = content.split('\n').filter(line => line.trim() !== '');
-  return isTableRowLine(lines[0] ?? '') && /^\s*\|?[\s|:-]*-{3,}[\s|:-]*$/.test(lines[1] ?? '');
+  return isTableRow(lines[0] ?? '') && /^\s*\|?[\s|:-]*-{3,}[\s|:-]*$/.test(lines[1] ?? '');
 }
 
 /**
@@ -1284,13 +1269,18 @@ function opensWithTableHeader(content: string): boolean {
  * before anything is persisted, and the resulting length is
  * checked arithmetically before the new body is built, mirroring the other edit paths.
  */
-function applyEditEntries(input: { space_id: string; body: string; edits: readonly SpaceEditEntry[] }): {
+function applyEditEntries(input: {
+  space_id: string;
+  body: string;
+  edits: readonly SpaceEditEntry[];
+  confirm_shrink: boolean | undefined;
+}): {
   body: string;
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
   /** An appended table row followed text that is not a table and brought no header row. */
   starts_new_table: boolean;
 } {
-  const { space_id, body, edits } = input;
+  const { space_id, body, edits, confirm_shrink } = input;
   let appended: string | undefined;
   const { preamble, segments } = segmentSpaceBody(body);
   const validAnchors = uniqueBlockAnchors(segments);
@@ -1411,6 +1401,11 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
     parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
   }
   let result = parts.join('');
+  // Judged before any append: rows an append adds after text are reported, not refused.
+  if (replacements.size > 0 || deletions.size > 0) {
+    checkNoOrphanedRows({ old_body: body, new_body: result });
+    checkSavedRowsKept({ old_body: body, new_body: result, confirm_shrink });
+  }
   let starts_new_table = false;
   if (appended !== undefined) {
     const joined = appendAfterBody({ body: result, content: appended, marked: segments[0]?.marked === true });
@@ -1419,9 +1414,7 @@ function applyEditEntries(input: { space_id: string; body: string; edits: readon
       throw new SpaceBodyTooLongError({ space_id, new_length: result.length });
     }
     starts_new_table =
-      isTableRowLine(firstLineOf(appended)) &&
-      !isTableRowLine(lastLineOf(joined.before)) &&
-      !opensWithTableHeader(appended);
+      isTableRow(firstLineOf(appended)) && !isTableRow(lastLineOf(joined.before)) && !opensWithTableHeader(appended);
     // The block the new content landed in: the last block that starts at or before it.
     const landed = segmentSpaceBody(result)
       .segments.filter(segment => segment.start <= joined.contentStart)
@@ -1954,7 +1947,12 @@ class SpaceTool extends LocalToolMCP {
     let block_results: { anchor: string; new_length: number; deleted: boolean }[];
     let starts_new_table: boolean;
     try {
-      const applied = applyEditEntries({ space_id: input.space_id, body: current.body, edits: input.edits });
+      const applied = applyEditEntries({
+        space_id: input.space_id,
+        body: current.body,
+        edits: input.edits,
+        confirm_shrink: input.confirm_shrink,
+      });
       body = applied.body;
       block_results = applied.block_results;
       starts_new_table = applied.starts_new_table;
@@ -1976,6 +1974,7 @@ class SpaceTool extends LocalToolMCP {
         space_id: input.space_id,
         body: current.body,
         edits: [{ ...lone, new_content: cut.kept }],
+        confirm_shrink: input.confirm_shrink,
       });
       body = salvaged.body;
       block_results = salvaged.block_results;
@@ -2359,7 +2358,7 @@ class SpaceTool extends LocalToolMCP {
       if (error instanceof SpaceNameLookupError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
-      if (error instanceof SpaceShrinkRefusedError) {
+      if (error instanceof SpaceShrinkRefusedError || error instanceof SpaceTableRowsRefusedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceBodyTooLongError) {

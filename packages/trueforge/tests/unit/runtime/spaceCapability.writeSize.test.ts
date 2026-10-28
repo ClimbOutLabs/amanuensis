@@ -463,7 +463,7 @@ describe('the space write size cap', () => {
             type: 'block',
             anchor: placeholder?.anchor,
             fingerprint: placeholder?.fingerprint,
-            new_content: rowRange(1, 60),
+            new_content: `| Breed | Group | Note |\n| --- | --- | --- |\n${rowRange(1, 60)}`,
           },
         ],
       });
@@ -536,7 +536,7 @@ describe('the space write size cap', () => {
               type: 'block',
               anchor: placeholder?.anchor,
               fingerprint: placeholder?.fingerprint,
-              new_content: rowRange(1, 60),
+              new_content: `| Breed | Group | Note |\n| --- | --- | --- |\n${rowRange(1, 60)}`,
             },
           ],
         }),
@@ -592,9 +592,7 @@ describe('the space write size cap', () => {
       const fine = await call(EDIT_SPACE_TOOL_NAME, {
         space_name: 'Dog breeds',
         expected_revision: 1,
-        edits: [
-          { type: 'block', anchor: table?.anchor, fingerprint: table?.fingerprint, new_content: tablePart(2, 3) },
-        ],
+        edits: [{ type: 'append', new_content: rowRange(6, 6) }],
       });
       expect(isErrorResponse(fine)).toBe(false);
     });
