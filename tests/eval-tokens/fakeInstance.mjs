@@ -1,5 +1,8 @@
 // Minimal stand-in for the chat API the token eval calls. Invented data only.
 // A prompt containing NEEDS_APPROVAL pauses once for one tool approval; NO_METRICS drops the metrics.
+// MAKES_SPACE:<name> makes a space with two stored revisions when its turn finishes (the second drops one row).
+// OTHER_MAKES_SPACE:<name> makes a space the chat has no record of, as another person would.
+// FAILS_TURN ends the turn with an error. REFORMATS_SPACE adds a revision to the newest space that changes only its look.
 import { Buffer } from 'node:buffer';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -29,6 +32,8 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
   const sessions = new Map();
   const turns = new Map();
   const spaces = new Map();
+  const spaceHistory = new Map();
+  const sessionEvents = new Map();
   let aggregateRevision = 0;
   let counter = 0;
   const nextId = prefix => `${prefix}_fake_${String(++counter)}`;
@@ -41,6 +46,81 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
       state: { status: 'running' },
       created_at: '2026-01-01T00:00:00.000Z',
     };
+  }
+
+  const SPACE_ROWS = ['| Breed | Notes |', '| --- | --- |'];
+
+  function saveRevision(space, body) {
+    space.body = body;
+    space.revision += 1;
+    spaceHistory.set(space.id, [...(spaceHistory.get(space.id) ?? []), { revision: space.revision, body }]);
+    aggregateRevision += 1;
+  }
+
+  function recordCreate({ sessionId, space }) {
+    const callId = nextId('call');
+    const events = sessionEvents.get(sessionId) ?? [];
+    events.unshift(
+      {
+        turn_id: 'turn_fake',
+        event: {
+          type: 'model.message',
+          content: '',
+          tool_calls: [{ id: callId, tool_info: { name: 'create_space' } }],
+        },
+      },
+      {
+        turn_id: 'turn_fake',
+        event: {
+          type: 'tool.response.v2',
+          tool_call_id: callId,
+          disposition: 'executed_ok',
+          content: JSON.stringify({
+            schema_version: 1,
+            result: JSON.stringify({ space: { name: space.name, link: `/spaces/${space.id}` } }),
+          }),
+        },
+      },
+    );
+    sessionEvents.set(sessionId, events);
+  }
+
+  function makeSpace(name) {
+    const space = {
+      id: nextId('space'),
+      name,
+      purpose: 'Made by the fake model.',
+      status: 'active',
+      format: 'markdown',
+      body: '',
+      revision: 0,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, counter)).toISOString(),
+    };
+    spaces.set(space.id, space);
+    saveRevision(space, [...SPACE_ROWS, '| Alpha | one |', '| Beta | two |', '| Gamma | three |'].join('\n'));
+    saveRevision(space, [...SPACE_ROWS, '| Alpha | one |', '| Beta | two |', '| Delta | four |'].join('\n'));
+    return space;
+  }
+
+  function applyPromptEffects(turn) {
+    const make = /(?<!OTHER_)MAKES_SPACE:(\S+)/.exec(turn.prompt);
+    if (make !== null && turn.namedSpace === undefined) {
+      recordCreate({ sessionId: turn.session_id, space: makeSpace(make[1]) });
+      turn.namedSpace = make[1];
+    }
+    const other = /OTHER_MAKES_SPACE:(\S+)/.exec(turn.prompt);
+    if (other !== null && turn.otherMade !== true) {
+      makeSpace(other[1]);
+      turn.otherMade = true;
+    }
+    if (turn.prompt.includes('REFORMATS_SPACE') && turn.reformatted !== true) {
+      const newest = [...spaces.values()].at(-1);
+      if (newest !== undefined) {
+        saveRevision(newest, `## Breeds\n\n${newest.body}`);
+        turn.namedSpace = newest.name;
+      }
+      turn.reformatted = true;
+    }
   }
 
   function finalState(turn) {
@@ -63,6 +143,10 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
         metrics: metrics.paused,
       };
     }
+    applyPromptEffects(turn);
+    if (turn.prompt.includes('FAILS_TURN')) {
+      return { status: 'error', message: 'The fake model failed.', completed_at };
+    }
     const decision = turn.approvalDecision;
     const text = decision === undefined ? 'FAKE REPLY' : `FAKE REPLY (${decision})`;
     const state = {
@@ -71,7 +155,10 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
         type: 'model.message',
         id: nextId('msg'),
         thread_id: 'main',
-        content: `${text}: ${turn.prompt.slice(0, 40)}`,
+        content:
+          turn.namedSpace === undefined
+            ? `${text}: ${turn.prompt.slice(0, 40)}`
+            : `${text}: I saved the space ${turn.namedSpace}.`,
       },
       required_actions: [],
       completed_at,
@@ -117,6 +204,12 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
       const id = nextId('sess');
       sessions.set(id, { id });
       send(res, 201, { data: { id, agent: { type: 'inline', spec: body.agent.spec } } });
+      return;
+    }
+
+    const eventsMatch = /^\/api\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
+    if (req.method === 'GET' && eventsMatch !== null) {
+      send(res, 200, { data: sessionEvents.get(eventsMatch[1]) ?? [], pagination: { next_page_token: null } });
       return;
     }
 
@@ -196,7 +289,29 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
 
     const spaceMatch = /^\/api\/v1\/spaces(?:\/([^/]+))?$/.exec(url.pathname);
     if (spaceMatch !== null && req.method === 'GET' && spaceMatch[1] === undefined) {
-      send(res, 200, { data: { spaces: [...spaces.values()], aggregate_revision: aggregateRevision } });
+      send(res, 200, {
+        data: { spaces: [...spaces.values()], aggregate_revision: aggregateRevision },
+        pagination: { has_more: false, next_offset: null },
+      });
+      return;
+    }
+    if (spaceMatch !== null && req.method === 'GET' && spaceMatch[1] !== undefined) {
+      const space = spaces.get(spaceMatch[1]);
+      if (space === undefined) {
+        send(res, 404, { error: { message: 'Space not found.' } });
+        return;
+      }
+      const wanted = url.searchParams.get('revision');
+      if (wanted === null) {
+        send(res, 200, { data: space });
+        return;
+      }
+      const stored = (spaceHistory.get(space.id) ?? []).find(entry => String(entry.revision) === wanted);
+      if (stored === undefined) {
+        send(res, 404, { error: { message: 'That revision is not kept.' } });
+        return;
+      }
+      send(res, 200, { data: { ...space, revision: stored.revision, body: stored.body } });
       return;
     }
     if (spaceMatch !== null && req.method === 'POST' && spaceMatch[1] === undefined) {
@@ -206,6 +321,7 @@ export async function startFakeInstance({ token, metrics, evalMode = true }) {
       }
       const space = { ...body.space, id: nextId('space'), revision: 1 };
       spaces.set(space.id, space);
+      spaceHistory.set(space.id, [{ revision: 1, body: space.body }]);
       aggregateRevision += 1;
       send(res, 201, { data: { space, aggregate_revision: aggregateRevision } });
       return;
