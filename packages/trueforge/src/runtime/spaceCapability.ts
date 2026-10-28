@@ -1113,9 +1113,9 @@ function segmentTrailingSeparator(body: string, segment: SpaceSegment): string {
 }
 
 /**
- * Rows of `content` that continue the table ending at `segment` and are already in it are
- * dropped. Null when the content does not continue a table. J5's append path calls this
- * with the last block of the body.
+ * Drops the rows of `content` that the table ending at `segment` already holds, so a model
+ * resending saved rows does not duplicate them. Null when the content does not continue a
+ * table, or the table sits in a code fence.
  */
 function dropRowsAlreadyInTable(input: {
   body: string;
@@ -1128,10 +1128,8 @@ function dropRowsAlreadyInTable(input: {
   if (!isTableRow(lastLine) || !isTableRow(firstLine)) {
     return null;
   }
-  return dropDuplicateRows({
-    content,
-    existingKeys: keysOfTableEndingAt(body.slice(0, segment.coreEnd).trimEnd()),
-  });
+  const existingKeys = keysOfTableEndingAt(body.slice(0, segment.coreEnd).trimEnd());
+  return existingKeys === null ? null : dropDuplicateRows({ content, existingKeys });
 }
 
 /**
@@ -1151,6 +1149,8 @@ function applyEditEntries(input: {
   body: string;
   block_results: { anchor: string; new_length: number; deleted: boolean }[];
   skipped_rows: SkippedRow[];
+  /** New content the call writes, counted after duplicate rows are dropped. */
+  new_content_length: number;
 } {
   const { space_id, body, format, edits } = input;
   const { preamble, segments } = segmentSpaceBody(body);
@@ -1167,6 +1167,7 @@ function applyEditEntries(input: {
   const namedAt = new Map<string, number>();
   const block_results: { anchor: string; new_length: number; deleted: boolean }[] = [];
   const skipped_rows: SkippedRow[] = [];
+  let new_content_length = 0;
   for (const [index, entry] of edits.entries()) {
     const anchor = (entry.type === 'block' ? entry.anchor : entry.after).trim();
     const firstNamedAt = namedAt.get(anchor);
@@ -1211,6 +1212,7 @@ function applyEditEntries(input: {
       });
     }
     if (entry.type === 'block') {
+      new_content_length += entry.new_content.length;
       if (entry.new_content === '') {
         deletions.add(target);
         block_results.push({ anchor, new_length: 0, deleted: true });
@@ -1224,6 +1226,7 @@ function applyEditEntries(input: {
         format === 'markdown' ? dropRowsAlreadyInTable({ body, segment: target, content: entry.new_content }) : null;
       const content = added === null ? entry.new_content : added.content;
       skipped_rows.push(...(added?.skipped ?? []));
+      new_content_length += content.length;
       // An insert whose rows were all saved already adds nothing; the call may still carry other entries.
       if (content.trim() !== '') {
         inserts.set(target, content);
@@ -1315,7 +1318,7 @@ function applyEditEntries(input: {
     }
     parts.push(coreEmission + (inserted === undefined ? '' : insertText(segment, inserted)) + tailEmission);
   }
-  return { body: parts.join(''), block_results, skipped_rows };
+  return { body: parts.join(''), block_results, skipped_rows, new_content_length };
 }
 
 /**
@@ -1546,12 +1549,14 @@ class SpaceTool extends LocalToolMCP {
   private async edit(request: z.infer<typeof EDIT_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
     const input = { ...request, space_id: await this.resolveSpaceId(request.space_name) };
     // The write cap counts only new content: every entry's new_content, and nothing else.
-    const new_content_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
-    if (new_content_length > SPACE_WRITE_MAX_LENGTH) {
+    // Insert entries can shrink once saved rows are dropped, so a call with one is measured
+    // after that; any other call is refused here, before the reads.
+    const requested_length = input.edits.reduce((total, edit) => total + edit.new_content.length, 0);
+    if (requested_length > SPACE_WRITE_MAX_LENGTH && input.edits.every(edit => edit.type !== 'insert')) {
       throw new SpaceWriteTooLongError({
         tool: EDIT_SPACE_TOOL_NAME,
         space_id: input.space_id,
-        new_length: new_content_length,
+        new_length: requested_length,
       });
     }
     // Refuse a locked delta before the expensive reads: the burn loop this guards against
@@ -1596,6 +1601,13 @@ class SpaceTool extends LocalToolMCP {
       body = applied.body;
       block_results = applied.block_results;
       skipped_rows = applied.skipped_rows;
+      if (applied.new_content_length > SPACE_WRITE_MAX_LENGTH) {
+        throw new SpaceWriteTooLongError({
+          tool: EDIT_SPACE_TOOL_NAME,
+          space_id: input.space_id,
+          new_length: applied.new_content_length,
+        });
+      }
     } catch (error) {
       if (error instanceof SpaceBlockAnchorError || error instanceof SpaceBodyTooLongError) {
         this.recordDeltaFailure(input.space_id);

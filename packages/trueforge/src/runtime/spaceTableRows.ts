@@ -1,10 +1,16 @@
 const SEPARATOR_CELL = /^\s*:?-+:?\s*$/;
 const RANK_CELL = /^\s*#?\d+\.?\s*$/;
 
-function cellsOf(line: string): string[] {
-  const trimmed = line.trim();
-  const inner = trimmed.endsWith('|') && trimmed.length > 1 ? trimmed.slice(1, -1) : trimmed.slice(1);
-  return inner.split(/(?<!\\)\|/);
+/** The cells of a table row: split on unescaped pipes, empty edge cells dropped, each trimmed. */
+export function rowCells(line: string): string[] {
+  const cells = line.trim().split(/(?<!\\)\|/);
+  if (cells[0] === '') {
+    cells.shift();
+  }
+  if (cells[cells.length - 1] === '') {
+    cells.pop();
+  }
+  return cells.map(cell => cell.trim());
 }
 
 export function isTableRow(line: string): boolean {
@@ -12,7 +18,8 @@ export function isTableRow(line: string): boolean {
 }
 
 export function isTableSeparatorRow(line: string): boolean {
-  return isTableRow(line) && cellsOf(line).every(cell => SEPARATOR_CELL.test(cell));
+  const cells = rowCells(line);
+  return isTableRow(line) && cells.length > 0 && cells.every(cell => SEPARATOR_CELL.test(cell));
 }
 
 /** The comparison key of one data row: its name cell, skipping a leading rank number. */
@@ -20,7 +27,7 @@ export function tableRowKey(line: string): string | null {
   if (!isTableRow(line) || isTableSeparatorRow(line)) {
     return null;
   }
-  const cells = cellsOf(line);
+  const cells = rowCells(line);
   const first = cells[0] ?? '';
   const keyCell = RANK_CELL.test(first) ? (cells[1] ?? '') : first;
   const key = keyCell.replace(/[*_`]/g, '').trim().toLowerCase();
