@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { McpConnectionError, McpRedirectRefusedError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
@@ -98,15 +99,21 @@ function buildThread({
   });
 }
 
-function makeThread({ modelSteps, classifyDown }: { modelSteps: ('send' | 'text')[]; classifyDown: boolean }) {
+function refusedConnection(): McpConnectionError {
+  return new McpConnectionError('connect ECONNREFUSED 192.0.2.1:9557', 502, {
+    cause: Object.assign(new Error('connect ECONNREFUSED 192.0.2.1:9557'), { code: 'ECONNREFUSED' }),
+  });
+}
+
+function makeThread({ modelSteps, classifyDown }: { modelSteps: ('send' | 'text')[]; classifyDown: boolean | Error }) {
   const toolSet = makeMockIMCPServer({
     name: 'Email',
     preload: true,
     tools: [{ name: 'send_email', description: 'Send', inputSchema: { type: 'object' }, preload: true }],
   });
-  const refusal = new McpConnectionError('connect ECONNREFUSED 192.0.2.1:9557', 502);
+  const refusal = classifyDown instanceof Error ? classifyDown : refusedConnection();
   jest.mocked(toolSet.toolCallInfo).mockImplementation((params, resolveUnderlyingTool) => {
-    if (classifyDown && resolveUnderlyingTool) {
+    if (classifyDown !== false && resolveUnderlyingTool) {
       return Promise.reject(refusal);
     }
     return Promise.resolve({
@@ -259,9 +266,7 @@ describe('one down server behind call_tool', () => {
       preload: false,
       tools: [{ name: 'send_email', description: 'Send', inputSchema: { type: 'object' }, preload: false }],
     });
-    jest
-      .mocked(down.toolCallInfo)
-      .mockRejectedValue(new McpConnectionError('connect ECONNREFUSED 192.0.2.1:9557', 502));
+    jest.mocked(down.toolCallInfo).mockRejectedValue(refusedConnection());
     const healthy = makeMockIMCPServer({
       name: 'Calendar',
       preload: false,
@@ -342,5 +347,21 @@ describe('a server failure that is not a lost connection', () => {
       });
     });
     expect(cardIds(await run(thread))).toEqual(['send-1']);
+  });
+});
+
+describe('what counts as unreachable', () => {
+  it('keeps the card when a server that is up answers with an HTTP 500', async () => {
+    const answered = new McpConnectionError('Error POSTing to endpoint (HTTP 500)', 502);
+    const { thread } = makeThread({ modelSteps: ['send'], classifyDown: answered });
+    expect(cardIds(await run(thread))).toEqual(['send-1']);
+  });
+
+  it('raises no card when the transport was closed', async () => {
+    const closed = new McpError(ErrorCode.ConnectionClosed, 'Connection closed');
+    const { thread } = makeThread({ modelSteps: ['send', 'text'], classifyDown: closed });
+    const events = await run(thread);
+    expect(cardIds(events)).toEqual([]);
+    expect(JSON.stringify(results(events)[0]?.content)).toContain('is not reachable right now');
   });
 });

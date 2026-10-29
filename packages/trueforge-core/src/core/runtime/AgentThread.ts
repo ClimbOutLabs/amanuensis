@@ -23,6 +23,7 @@ import {
   AgentHarnessError,
   InvalidAgentSendInputError,
   McpConnectionError,
+  McpRedirectRefusedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
@@ -56,6 +57,7 @@ import {
 import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
+  UNKNOWN_TOOL_NAME,
   type CompletionUsage,
   type ExtendedChatCompletionChunk,
   type FinishReason,
@@ -90,12 +92,7 @@ import {
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
 } from '../mcp/approvalGrant';
-import {
-  convertMCPServersToTools,
-  isServerUnavailableError,
-  type ConvertToolsResult,
-  type MappedMCPTool,
-} from '../mcp/convertMCPServers';
+import { convertMCPServersToTools, type ConvertToolsResult, type MappedMCPTool } from '../mcp/convertMCPServers';
 import {
   cloneToolCallMemoState,
   createToolCallMemoState,
@@ -1340,11 +1337,16 @@ async function resolveToolCallInfo({
         toolInfo.originalToolName === CALL_TOOL_NAME && params.arguments !== undefined
           ? tryParseCallToolWrapper(params.arguments)
           : undefined;
-      const serverName = wrapped?.mcp_server ?? toolInfo.toolSet.name;
+      // The name comes from the resolved server, never from the model's own text.
+      const inner =
+        wrapped !== undefined && toolInfo.toolSet instanceof DeferredTool
+          ? toolInfo.toolSet.resolvedServer(wrapped.mcp_server)
+          : undefined;
+      const serverName = wrapped === undefined ? toolInfo.toolSet.name : inner?.name;
       return {
         type: 'mcp',
-        mcp_server_id: wrapped?.mcp_server ?? toolInfo.toolSet.id,
-        mcp_server_name: serverName,
+        mcp_server_id: wrapped === undefined ? toolInfo.toolSet.id : (inner?.id ?? UNKNOWN_TOOL_NAME),
+        mcp_server_name: serverName ?? UNKNOWN_TOOL_NAME,
         original_tool_name: wrapped?.tool_name ?? toolInfo.originalToolName,
         is_approval_required: false,
         is_client_side: false,
@@ -1444,13 +1446,22 @@ async function enforceRegisteredCommandApprovalIdentity({
   return checked;
 }
 
-/** A real connection failure: the server cannot be reached, as opposed to any other server error. */
+/** A real connection failure, read from the typed cause chain; a server that answered with an error is not one. */
 function isConnectorUnreachable(error: unknown): boolean {
-  return (
-    isServerUnavailableError(error) ||
-    transportFailureDetail(error) !== undefined ||
-    (error instanceof Error && /connection closed/i.test(error.message))
-  );
+  return transportFailureDetail(error) !== undefined && !hasRedirectRefusal(error);
+}
+
+function hasRedirectRefusal(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof McpRedirectRefusedError) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
 }
 
 function findUnavailableMcpCause(error: unknown): McpConnectionError | undefined {

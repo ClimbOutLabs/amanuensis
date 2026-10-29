@@ -23,7 +23,10 @@ const CONNECTION_FAILURE_MESSAGE = 'flaky-mcp is unreachable (ECONNREFUSED)';
  */
 function makeUnreachableDuringClassificationToolSet(): IToolSet {
   const toolSet = makeMockIMCPServer({ name: 'flaky-mcp', preload: true });
-  const connectionFailure = () => new McpConnectionError(CONNECTION_FAILURE_MESSAGE, 502);
+  const connectionFailure = () =>
+    new McpConnectionError(CONNECTION_FAILURE_MESSAGE, 502, {
+      cause: Object.assign(new Error(CONNECTION_FAILURE_MESSAGE), { code: 'ECONNREFUSED' }),
+    });
   jest.mocked(toolSet.toolCallInfo).mockImplementation((_params, resolveUnderlyingTool) => {
     if (resolveUnderlyingTool) {
       return Promise.reject(connectionFailure());

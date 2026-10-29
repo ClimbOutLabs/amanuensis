@@ -99,7 +99,7 @@ export function plainBooleanSchema(schema: Record<string, unknown>): Record<stri
  * so the whole chain is walked before answering: a refusal anywhere in it settles the
  * question, even under an outer error that on its own would read as unavailability.
  */
-export function isServerUnavailableError(error: unknown): boolean {
+function isServerUnavailableError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   let unavailable = false;
