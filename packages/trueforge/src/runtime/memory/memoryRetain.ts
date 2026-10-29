@@ -15,7 +15,7 @@ import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbil
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { localDay } from './localDay';
-import { SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
+import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import {
   labeledNoteText,
@@ -411,6 +411,53 @@ function noteRetainItems({
   }));
 }
 
+/** Newest daily files compared before a retain: the same window recall reads, so the check stays cheap. */
+const DUPLICATE_CHECK_DAILY_FILES = 14;
+
+/**
+ * The items not already in the vault this client writes into. An item that carries the read-content
+ * origin (a finding, a reply note, or a fact from a turn that read a tool result) comes back turn after
+ * turn while the same email or page is in view, so one whose body matches a live entry in the newest
+ * daily files is not stored again. An older copy is not seen, which is the price of a bounded scan.
+ * Items from a turn that read nothing outside the chat, and backends with no listing, store every item.
+ */
+async function withoutStoredCopies({
+  params,
+  items,
+}: {
+  params: SubmitRetainParams;
+  items: readonly RetainItem[];
+}): Promise<RetainItem[]> {
+  const readContent = (item: RetainItem): boolean =>
+    item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
+  if (!items.some(readContent)) {
+    return [...items];
+  }
+  const listRecent = params.client.listRecentWrittenEntries?.bind(params.client);
+  if (listRecent === undefined) {
+    return [...items];
+  }
+  let stored: Set<string>;
+  try {
+    const listed = await listRecent({
+      maxDailyFiles: DUPLICATE_CHECK_DAILY_FILES,
+      timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+    });
+    if (!listed.ok) {
+      return [...items];
+    }
+    stored = new Set(listed.entries.map(entry => normalizedEntryBody(entry.text)));
+  } catch (error) {
+    // A listing that fails must never lose a memory; the copy is stored and the person can delete it.
+    params.logger.debug('Memory listing failed before retain; storing without the duplicate check', {
+      sessionId: params.sessionId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return [...items];
+  }
+  return items.filter(item => !readContent(item) || !stored.has(normalizedEntryBody(item.content)));
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -446,9 +493,18 @@ async function attemptRetainSubmission(
     });
     return 'skipped';
   }
+  const items = await withoutStoredCopies({
+    params,
+    items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
+  });
+  if (items.length === 0) {
+    logTurnMemoryNotSaved(params, { message: 'the same note is already in memory', reason: 'already_stored' });
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
+    return 'skipped';
+  }
   try {
     const outcome = await params.client.retain({
-      items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
+      items,
       operationId: retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }),
       timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
     });

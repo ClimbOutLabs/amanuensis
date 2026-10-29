@@ -361,6 +361,11 @@ export function entryOccurredAt(entry: { id: string; text: string }): string | u
   return headingInstant(entry.text) ?? /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
 }
 
+/** An entry's body with case and spacing flattened and every trailer dropped, so two copies of one note compare equal. */
+export function normalizedEntryBody(text: string): string {
+  return entryRecallText(text).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 /**
  * What recall shows the model for an entry: the text alone. The timestamp heading, the hidden chat id
  * and the read-content marker are left out because recall reports them as the item's date and origin.
@@ -756,11 +761,16 @@ export function vaultEntryTimestamp(entry: Pick<ScannedMemoryEntry, 'file' | 'te
  * Tombstone-resolved vault listing for one filesystem namespace: daily entries,
  * newest file first, with deletes dropped and edits applied with their marker time.
  */
-export async function scanVaultEntries(options: { baseDir: string; namespace: string }): Promise<VaultScannedEntry[]> {
+export async function scanVaultEntries(options: {
+  baseDir: string;
+  namespace: string;
+  /** Newest daily files read; the whole history when left out. */
+  maxDailyFiles?: number;
+}): Promise<VaultScannedEntry[]> {
   const scan = await scanNamespaceEntries({
     baseDir: options.baseDir,
     namespace: options.namespace,
-    maxDailyFiles: Number.POSITIVE_INFINITY,
+    maxDailyFiles: options.maxDailyFiles ?? Number.POSITIVE_INFINITY,
   });
   const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
   const latest = latestTombstonesByEntry(tombstones);

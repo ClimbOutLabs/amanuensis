@@ -526,25 +526,53 @@ export class MarkdownMemoryClient implements MemoryClient {
   }
 
   async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {
+    return this.listVault({
+      filesystemNamespace: vaultFilesystemNamespace(this.namespace, params.namespace),
+      persona: personaForVaultNamespace(params.namespace),
+      maxDailyFiles: Number.POSITIVE_INFINITY,
+      timeoutMs: params.timeoutMs,
+    });
+  }
+
+  async listRecentWrittenEntries(params: {
+    maxDailyFiles: number;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome> {
+    return this.listVault({
+      filesystemNamespace: this.writeNamespace,
+      persona: this.vaultScope?.personaName ?? null,
+      maxDailyFiles: params.maxDailyFiles,
+      timeoutMs: params.timeoutMs,
+    });
+  }
+
+  private async listVault(input: {
+    filesystemNamespace: string;
+    persona: string | null;
+    maxDailyFiles: number;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome> {
     try {
-      const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
       const scanned = await withTimeout(
-        scanVaultEntries({ baseDir: this.baseDir, namespace: filesystemNamespace }),
-        params.timeoutMs,
+        scanVaultEntries({
+          baseDir: this.baseDir,
+          namespace: input.filesystemNamespace,
+          maxDailyFiles: input.maxDailyFiles,
+        }),
+        input.timeoutMs,
         'markdown vault list',
       );
-      const persona = personaForVaultNamespace(params.namespace);
       const entries: MemoryVaultEntry[] = scanned.map(entry => ({
         id: entry.id,
         text: entry.text,
         timestamp: entry.timestamp,
-        persona,
+        persona: input.persona,
         ...(entry.context === undefined ? {} : { context: entry.context }),
       }));
       return { ok: true, entries };
     } catch (error) {
       if (error instanceof PromiseTimeoutError) {
-        return vaultTimeoutFailure(params.timeoutMs);
+        return vaultTimeoutFailure(input.timeoutMs);
       }
       return { ok: false, code: 'request_failed', reason: failureReason('markdown vault list failed', error) };
     }
