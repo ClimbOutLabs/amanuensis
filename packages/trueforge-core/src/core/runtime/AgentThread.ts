@@ -272,13 +272,13 @@ import {
 import {
   clearUnfinished,
   connectorUnreachableText,
-  DEFAULT_REPLY_STEP_BUDGET,
   progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   REMOVED_TOOL_STREAK_STOP_AT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
   settleRetry,
   STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
@@ -5776,7 +5776,10 @@ export class AgentThread {
               stepsSoFar >=
               stepBudgetFor({
                 isSubAgent: this.parent !== undefined,
-                budget: this.definition.stepBudget ?? DEFAULT_REPLY_STEP_BUDGET,
+                budget: replyStepBudgetFor({
+                  definitionBudget: this.definition.stepBudget,
+                  unattended: this.sentinel?.services.unattended === true,
+                }),
               });
             const removedStreak = replyLedger.removedToolRejectionStreaks.get(this.threadId) ?? 0;
             const forcedAnswer: ForcedAnswer | null = budgetSpent

@@ -5,12 +5,19 @@ import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { UNBACKED_CLAIM_NOTES } from '../../../src/core/llm/replyNotices';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
+import {
+  createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  forUnattendedRun,
+} from '../../../src/core/permissions/context';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentParent } from '../../../src/core/runtime/AgentThread.types';
 import {
   MAX_PROGRESS_STEP_REFUNDS,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
+  SCHEDULE_REPLY_STEP_BUDGET,
   STEP_BUDGET_SPENT_MESSAGE,
   unfinishedNotice,
 } from '../../../src/core/runtime/replyBudget';
@@ -20,9 +27,18 @@ import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_S
 
 /**
  * A toolset for the reply budget. `create_event` is refused by the tool policy when `refuse` is set,
- * `run` ran and failed with an error result, and `lookup` always succeeds.
+ * `run` ran and failed with an error result, and `lookup` always succeeds. With `hostReads`, the
+ * tools are the host's own local reads, which an unattended run may call without asking.
  */
-function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: boolean }): IToolSet {
+function makeBudgetToolSet({
+  refuse,
+  runFails,
+  hostReads = false,
+}: {
+  refuse: boolean;
+  runFails: boolean;
+  hostReads?: boolean;
+}): IToolSet {
   const toolSet = makeMockIMCPServer({
     name: 'workspace',
     preload: true,
@@ -40,11 +56,12 @@ function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: bo
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
     Promise.resolve({
-      type: 'mcp',
+      type: hostReads ? 'truefoundry-system' : 'mcp',
       mcp_server_id: toolSet.id,
       mcp_server_name: toolSet.name,
       original_tool_name: params.name,
       is_approval_required: false,
+      ...(hostReads ? { read_only_hint: true, open_world_hint: false } : {}),
     }),
   );
   jest.mocked(toolSet.callTool).mockImplementation(params => {
@@ -96,6 +113,8 @@ interface RunInput {
   threadId?: string;
   parent?: AgentParent | undefined;
   ledger?: TurnToolCallLedger | undefined;
+  /** Set for a scheduled run: nobody watches it. */
+  unattended?: boolean | undefined;
 }
 
 async function runThread({
@@ -104,6 +123,7 @@ async function runThread({
   threadId = 'main',
   parent,
   ledger,
+  unattended = false,
 }: RunInput): Promise<{ events: unknown[]; thread: AgentThread }> {
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
@@ -123,6 +143,14 @@ async function runThread({
       instruction: 'test',
       toolSets: [toolSet],
     },
+    sentinel: unattended
+      ? createSentinelHostContext({
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'c1',
+          services: forUnattendedRun(defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH })),
+        })
+      : undefined,
     context: [{ role: 'user', content: 'Plan my week' }],
   });
   const events: unknown[] = [];
@@ -213,6 +241,24 @@ describe('reply step budget', () => {
     expect(model.requests[8]?.tools).toBeUndefined();
     expect(JSON.stringify(model.requests[8]?.messages)).toContain(STEP_BUDGET_SPENT_MESSAGE);
     expect(toolSet.callTool).toHaveBeenCalledTimes(8);
+    expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
+  });
+
+  it('a scheduled run gets 16 main-thread steps, so a brief with a route per appointment finishes', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false, hostReads: true });
+    const main = SCHEDULE_REPLY_STEP_BUDGET.main;
+    const model = scriptedModel(step => (step <= main ? lookupCall(step) : finalAnswerStream()));
+
+    const { events } = await runThread({ toolSet, create: model.create, unattended: true });
+
+    expect(main).toBe(16);
+    expect(model.requests).toHaveLength(main + 1);
+    for (const request of model.requests.slice(0, main)) {
+      expect(request.tools).toBeDefined();
+    }
+    expect(model.requests[main]?.tools).toBeUndefined();
+    expect(JSON.stringify(model.requests[main]?.messages)).toContain(STEP_BUDGET_SPENT_MESSAGE);
+    expect(toolSet.callTool).toHaveBeenCalledTimes(main);
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
   });
 

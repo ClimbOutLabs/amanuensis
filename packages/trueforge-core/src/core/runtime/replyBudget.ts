@@ -36,6 +36,12 @@ export interface ReplyStepBudget {
 
 export const DEFAULT_REPLY_STEP_BUDGET: ReplyStepBudget = { main: 8, sub: 4 };
 
+/**
+ * Budget for a scheduled run, which nobody is waiting on. A morning brief reads mail, the calendar,
+ * a route for each appointment and a persona or two before it answers, which is past 8 steps.
+ */
+export const SCHEDULE_REPLY_STEP_BUDGET: ReplyStepBudget = { main: 16, sub: 4 };
+
 /** Calls to removed tools in a row before the reply's answer is forced. */
 export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 
@@ -68,6 +74,17 @@ export function connectorUnreachableText(serverName: string | undefined): string
 
 export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; budget: ReplyStepBudget }): number {
   return isSubAgent ? budget.sub : budget.main;
+}
+
+/** The reply's budget: the definition's own when set, else the schedule budget for an unattended run, else the default. */
+export function replyStepBudgetFor({
+  definitionBudget,
+  unattended,
+}: {
+  definitionBudget: ReplyStepBudget | undefined;
+  unattended: boolean;
+}): ReplyStepBudget {
+  return definitionBudget ?? (unattended ? SCHEDULE_REPLY_STEP_BUDGET : DEFAULT_REPLY_STEP_BUDGET);
 }
 
 /**
