@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const PHONE = { width: 390, height: 844 };
@@ -24,8 +26,11 @@ async function screenshotDir(): Promise<string> {
 
 test('both approval cards fit a 390 px phone with every choice in reach', { timeout: 180_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('approval-card-phone');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
@@ -89,5 +94,6 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

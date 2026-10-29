@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const VIEWPORTS = [
@@ -16,7 +18,7 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
-const LIST_NAME = 'Which notes each persona can read';
+const GRID_NAME = 'Which notes each persona can read';
 
 async function screenshotDir(): Promise<string> {
   const configured = process.env.AMAN_SCREENSHOT_DIR;
@@ -32,12 +34,12 @@ async function openSharingTab(page: Page) {
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
   await page.getByRole('tab', { name: 'Memory', exact: true }).click();
   await page.getByRole('tab', { name: 'Sharing' }).click();
-  await page.getByRole('list', { name: LIST_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.getByRole('table', { name: GRID_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
-/** Scrolls the last agent row to the end of its scroll area and returns its box and the footer's top edge. */
+/** Scrolls the last persona row to the end of its scroll area and returns its box and the footer's top edge. */
 async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; footerTop: number; viewport: number }> {
-  const row: Locator = page.getByRole('list', { name: LIST_NAME }).getByRole('listitem').last();
+  const row: Locator = page.getByRole('table', { name: GRID_NAME }).getByRole('row').last();
   await row.evaluate(element => element.scrollIntoView({ block: 'end' }));
   const footer = page.locator('footer').filter({ has: page.getByRole('button', { name: 'Settings', exact: true }) });
   const rowBox = await row.boundingBox();
@@ -52,30 +54,35 @@ async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; foot
 
 type Box = { left: number; right: number; top: number; bottom: number };
 
-/** Measures the settings scroll area around the sharing list, each row's lead line, and each checkbox. */
-async function sharingGeometry(page: Page): Promise<{ panel: Box; names: Box[]; chips: Box[]; chipRows: Box[][] }> {
-  const list = page.getByRole('list', { name: LIST_NAME });
+/** Measures the settings scroll area, the grid's own sideways scroll box, each row's persona name, and each checkbox. */
+async function sharingGeometry(
+  page: Page,
+): Promise<{ panel: Box; grid: Box; names: Box[]; boxes: Box[]; boxRows: Box[][] }> {
+  const table = page.getByRole('table', { name: GRID_NAME });
   // Plain rects only: a named helper here would be rewritten by the test transform and fail in the page.
-  const geometry = await list.evaluate(element => {
+  const geometry = await table.evaluate(element => {
     let panelElement: Element | null = element.parentElement;
     while (panelElement !== null && !['auto', 'scroll'].includes(getComputedStyle(panelElement).overflowY)) {
       panelElement = panelElement.parentElement;
     }
-    if (panelElement === null) throw new Error('No scrolling settings panel around the sharing list');
-    const rows = Array.from(element.querySelectorAll(':scope > li'));
+    if (panelElement === null) throw new Error('No scrolling settings panel around the sharing grid');
+    const gridElement = element.parentElement ?? element;
+    const rows = Array.from(element.querySelectorAll('tbody > tr'));
     return {
       panel: panelElement.getBoundingClientRect().toJSON(),
-      names: rows.map(row => (row.querySelector(':scope > span') ?? row).getBoundingClientRect().toJSON()),
-      chipRows: rows.map(row =>
-        Array.from(row.querySelectorAll('label')).map(chip => chip.getBoundingClientRect().toJSON()),
+      grid: gridElement.getBoundingClientRect().toJSON(),
+      names: rows.map(row => (row.querySelector(':scope > th') ?? row).getBoundingClientRect().toJSON()),
+      boxRows: rows.map(row =>
+        Array.from(row.querySelectorAll('input[type="checkbox"]')).map(box => box.getBoundingClientRect().toJSON()),
       ),
     };
   });
   return {
     panel: geometry.panel,
+    grid: geometry.grid,
     names: geometry.names,
-    chips: geometry.chipRows.flat(),
-    chipRows: geometry.chipRows,
+    boxes: geometry.boxRows.flat(),
+    boxRows: geometry.boxRows,
   };
 }
 
@@ -83,35 +90,39 @@ function overlaps(a: Box, b: Box): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-/** Every checkbox sits inside the settings panel, and none covers a row's lead line or another checkbox. */
-function assertChipsInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
-  assert.ok(geometry.chips.length > 0, `there are chips to check (${label})`);
-  for (const chip of geometry.chips) {
-    assert.ok(
-      chip.left >= geometry.panel.left && chip.right <= geometry.panel.right,
-      `chip ${JSON.stringify(chip)} runs past the panel ${JSON.stringify(geometry.panel)} (${label})`,
-    );
-  }
+/**
+ * The grid sits inside the settings panel and scrolls sideways in its own box when it is wider, so
+ * no checkbox widens the page. No checkbox covers a persona name or another checkbox.
+ */
+function assertGridInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
+  assert.ok(geometry.boxes.length > 0, `there are checkboxes to check (${label})`);
+  assert.ok(
+    geometry.grid.left >= geometry.panel.left && geometry.grid.right <= geometry.panel.right,
+    `the grid ${JSON.stringify(geometry.grid)} runs past the panel ${JSON.stringify(geometry.panel)} (${label})`,
+  );
   geometry.names.forEach((name, rowIndex) => {
-    for (const chip of geometry.chipRows[rowIndex] ?? []) {
-      assert.ok(!overlaps(name, chip), `a chip covers the name in row ${rowIndex} (${label})`);
+    const rowBoxes = geometry.boxRows[rowIndex] ?? [];
+    for (const box of rowBoxes) {
+      assert.ok(!overlaps(name, box), `a checkbox covers the name in row ${rowIndex} (${label})`);
     }
-    const rowChips = geometry.chipRows[rowIndex] ?? [];
-    rowChips.forEach((chip, chipIndex) => {
-      for (const other of rowChips.slice(chipIndex + 1)) {
-        assert.ok(!overlaps(chip, other), `two chips overlap in row ${rowIndex} (${label})`);
+    rowBoxes.forEach((box, boxIndex) => {
+      for (const other of rowBoxes.slice(boxIndex + 1)) {
+        assert.ok(!overlaps(box, other), `two checkboxes overlap in row ${rowIndex} (${label})`);
       }
     });
   });
 }
 
 test(
-  'sharing checkboxes stay inside the panel and clear the lead lines, and the last row clears the footer, at desktop and phone width',
+  'the sharing grid stays inside the panel, its checkboxes clear the persona names, and the last row clears the footer, at desktop and phone width',
   { timeout: 300_000 },
   async () => {
     const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+    const viteCache = privateViteCache('memory-sharing');
     const server = await createServer({
+      cacheDir: viteCache.cacheDir,
       configFile: false,
+      optimizeDeps: DEV_OPTIMIZE_DEPS,
       root: frontendRoot,
       logLevel: 'silent',
       // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -152,7 +163,7 @@ test(
             (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
             `sharing overflows horizontally at ${viewport.name} ${theme}`,
           );
-          assertChipsInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
+          assertGridInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
 
           await page.screenshot({ path: join(outDir, `memory-sharing-${viewport.name}-${theme}.png`) });
           await context.close();
@@ -161,6 +172,7 @@ test(
     } finally {
       await browser?.close();
       await server.close();
+      viteCache.remove();
     }
   },
 );

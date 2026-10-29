@@ -125,6 +125,8 @@ test_token_factory_settings_match_the_server() {
     assert_contains "$config" "getEnv('$key'" "the server reads $key"
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
   done
+  assert_not_contains "$config" "TOKEN_FACTORY_CHEAPER_MODEL" "the server no longer reads a separate helper model"
+  assert_not_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "TOKEN_FACTORY_CHEAPER_MODEL" "the installer does not write a separate helper model"
 }
 
 test_sign_in_settings_match_the_server() {

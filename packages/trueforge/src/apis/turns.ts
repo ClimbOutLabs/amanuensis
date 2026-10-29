@@ -26,6 +26,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -88,7 +89,6 @@ import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
-import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -160,16 +160,6 @@ import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
-
-/** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
-function turnHelperModelFqn(): string | undefined {
-  return envManagedHelperModelFqn({
-    apiKey: configuration.NEBIUS_API_KEY,
-    managedByTrueFoundry: isTrueFoundryModeEnabled(),
-    model: configuration.TOKEN_FACTORY_MODEL,
-    cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
-  });
-}
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
@@ -1218,6 +1208,11 @@ export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void
   return drain;
 }
 
+/** A refused or unrun call returned no content, so it cannot have brought anything in. */
+function toolRanOrMayHave(disposition: string): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
+}
+
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
@@ -1225,20 +1220,30 @@ async function runTurnEventDrain(params: {
   const { input, markArtifactsCaptured } = params;
   const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
     input;
-  // Provenance for the memory the retain below writes. All tool output is untrusted data (the
-  // host says so in the system prompt), and the retained assistant reply is produced after seeing
-  // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
-  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
-  // `user_stated`.
+  // Provenance for the memory the retain below writes. Tool output may hold text from outside the
+  // chat (a web page, mail, a connector, a shell command), and the retained assistant reply is
+  // produced after seeing it, so a turn with any tool result is stamped `tool_ingested` and held to
+  // the recall screen's stricter posture. Only host tools known to return nothing from outside
+  // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
+  // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  const callReturnsOutside = new Map<string, boolean>();
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
+      if (event.type === EventType.MODEL_MESSAGE) {
+        for (const call of event.tool_calls ?? []) {
+          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
+        }
+      }
+      if (
+        (event.type === EventType.TOOL_RESPONSE ||
+          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
+        (callReturnsOutside.get(event.tool_call_id) ?? true)
+      ) {
         ingestedToolOutput = true;
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
@@ -1579,7 +1584,6 @@ async function beginAcceptedTurnExecution(
         personaModelName: deps.personaContext?.model_name,
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
-        helperFqn: turnHelperModelFqn(),
         personName: deps.personalizationProfile?.user_name ?? undefined,
       });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
@@ -1605,7 +1609,6 @@ async function beginAcceptedTurnExecution(
         modelProviderStore: deps.modelProviderStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         modelUsage,
-        helperFqn: turnHelperModelFqn(),
         logger: deps.logger,
       });
       const resolver = createTurnResolver({
@@ -2323,7 +2326,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
-      helperFqn: turnHelperModelFqn(),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -2416,7 +2418,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
           userText: extractUserMessageText(body.input),
-          helperFqn: turnHelperModelFqn(),
           turnModelFqn: await resolveTurnModelFqn({
             tenantId: requestContext.tenant_id,
             personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
@@ -2448,7 +2449,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
-      helperFqn: turnHelperModelFqn(),
       personName: profile?.user_name ?? undefined,
     });
 

@@ -5,7 +5,7 @@
  * person's browser to that host. Links already in the body before a write are left alone, so an
  * unrelated edit never trips over an older picture.
  */
-import { isTrustedLink, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import { isTrustedLink, isTrustedPicture, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
 import type { SpaceFormatSchema } from '../schemas/space';
 import { bodyLinks, type BodyLink } from './spaceBodyLinks';
@@ -77,11 +77,12 @@ function refusalFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnSta
   }
   // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
   const candidate = /^https?:\/\//i.test(value) ? value : url.href;
-  if (!isTrustedLink({ provenance: web_search.provenance, url: candidate })) {
+  const trusted = kind === 'picture' ? isTrustedPicture : isTrustedLink;
+  if (!trusted({ provenance: web_search.provenance, url: candidate })) {
     if (kind === 'picture') {
-      return "Open the picture's page first, then use the image link from that page.";
+      return 'This picture does not come from a page you opened or a search result in this chat. Open the page that shows it and use its picture link, or leave the picture out.';
     }
-    return `This ${noun}'s link did not come from the person or a search in this chat. Search for the ${noun} first, then use a link from the results.`;
+    return 'This link does not come from a search result in this chat, so the page cannot use it. Use a link from a search result, or leave the link out. For a picture, use a picture file from a page you opened or a search result, or leave pictures out.';
   }
   return undefined;
 }

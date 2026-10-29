@@ -106,6 +106,21 @@ const SESSION_ID_CHARACTERS = '[A-Za-z0-9_-]{1,128}';
 /** Hidden (Markdown comment) trailer carrying the chat id; it renders as nothing and holds no fact. */
 const SESSION_MARKER_PATTERN = new RegExp(`^<!-- session_id: (${SESSION_ID_CHARACTERS}) -->$`);
 
+/**
+ * Metadata key naming the document an entry replaces on every later write under the same id; stored
+ * as a hidden trailer, like the chat id. Set only for items that ask to replace (see below).
+ */
+export const DOCUMENT_ID_METADATA_KEY = 'document_id';
+
+/**
+ * Metadata key (value `true`) asking a store that keeps entries as appended text to replace the
+ * item's earlier entries with the same document id, as Hindsight does by itself.
+ */
+export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
+
+/** Hidden trailer carrying the document id. Ids are the host's own (hashes and prefixes), never free text. */
+const DOCUMENT_MARKER_PATTERN = /^<!-- document_id: ([A-Za-z0-9_.-]{1,128}) -->$/;
+
 /** Closing line marking an entry written after the assistant read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
 
@@ -117,7 +132,7 @@ const READ_CONTENT_SOURCE_LINE = '> Source: read content';
  * on every pass.
  *
  * Layout: heading, the text with its optional `> context` line, then optional trailer lines (the
- * hidden chat id, then the read-content marker).
+ * hidden chat id, the hidden document id, then the read-content marker).
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
@@ -127,6 +142,12 @@ export function formatRetainEntry(item: RetainItem): string {
   if (sessionId !== undefined) {
     const marker = `<!-- session_id: ${sessionId} -->`;
     if (SESSION_MARKER_PATTERN.test(marker)) {
+      parts.push(marker);
+    }
+  }
+  if (item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true') {
+    const marker = `<!-- document_id: ${item.document_id} -->`;
+    if (DOCUMENT_MARKER_PATTERN.test(marker)) {
       parts.push(marker);
     }
   }
@@ -147,7 +168,10 @@ function escapeEntryStructure(text: string): string {
     .split('\n')
     .map(line => {
       const trimmed = line.trimEnd();
-      return line.startsWith('## ') || trimmed === READ_CONTENT_SOURCE_LINE || SESSION_MARKER_PATTERN.test(trimmed)
+      return line.startsWith('## ') ||
+        trimmed === READ_CONTENT_SOURCE_LINE ||
+        SESSION_MARKER_PATTERN.test(trimmed) ||
+        DOCUMENT_MARKER_PATTERN.test(trimmed)
         ? `\\${line}`
         : line;
     })
@@ -161,6 +185,7 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
   while (lines.length > 0) {
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
+    const documentId = DOCUMENT_MARKER_PATTERN.exec(line)?.[1];
     if (line === '') {
       lines.pop();
     } else if (line === READ_CONTENT_SOURCE_LINE) {
@@ -169,6 +194,9 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     } else if (sessionId !== undefined) {
       // Every closing marker is dropped; the one nearest the end is the one that counts.
       metadata[SESSION_ID_METADATA_KEY] ??= sessionId;
+      lines.pop();
+    } else if (documentId !== undefined) {
+      metadata[DOCUMENT_ID_METADATA_KEY] ??= documentId;
       lines.pop();
     } else {
       break;
@@ -183,10 +211,10 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
   return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
-/** The entry text the Memories page shows and edits: the hidden chat id line is dropped. */
-export function withoutSessionMarker(text: string): string {
+/** The entry text the Memories page shows and edits: the hidden chat id and document id lines are dropped. */
+export function withoutHiddenMarkers(text: string): string {
   const { body, metadata } = splitEntryTrailers(text);
-  if (metadata[SESSION_ID_METADATA_KEY] === undefined) {
+  if (metadata[SESSION_ID_METADATA_KEY] === undefined && metadata[DOCUMENT_ID_METADATA_KEY] === undefined) {
     return text;
   }
   return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
@@ -201,16 +229,24 @@ function headingInstant(text: string): string | undefined {
 }
 
 /**
- * An edited entry's text with the hidden chat id of the original put back (the Memories page sends the
- * text without it), so editing a note never makes it forget which chat it came from.
+ * An edited entry's text with the hidden chat id and document id of the original put back (the Memories
+ * page sends the text without them), so editing a note never makes it forget where it came from.
  */
-export function withOriginalSessionMarker({ original, edited }: { original: string; edited: string }): string {
-  const sessionId = splitEntryTrailers(original).metadata[SESSION_ID_METADATA_KEY];
+export function withOriginalHiddenMarkers({ original, edited }: { original: string; edited: string }): string {
+  const kept = splitEntryTrailers(original).metadata;
   const { body, metadata } = splitEntryTrailers(edited);
-  if (sessionId === undefined || metadata[SESSION_ID_METADATA_KEY] !== undefined) {
+  const trailers: string[] = [];
+  const sessionId = kept[SESSION_ID_METADATA_KEY];
+  if (sessionId !== undefined && metadata[SESSION_ID_METADATA_KEY] === undefined) {
+    trailers.push(`<!-- session_id: ${sessionId} -->`);
+  }
+  const documentId = kept[DOCUMENT_ID_METADATA_KEY];
+  if (documentId !== undefined && metadata[DOCUMENT_ID_METADATA_KEY] === undefined) {
+    trailers.push(`<!-- document_id: ${documentId} -->`);
+  }
+  if (trailers.length === 0) {
     return edited;
   }
-  const trailers = [`<!-- session_id: ${sessionId} -->`];
   if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
     trailers.push(READ_CONTENT_SOURCE_LINE);
   }
@@ -572,7 +608,7 @@ export function applyVaultTombstones(
     if (tombstone === undefined) {
       resolved.push(entry);
     } else if (tombstone.action === 'updated' && tombstone.text !== undefined) {
-      resolved.push({ ...entry, text: withOriginalSessionMarker({ original: entry.text, edited: tombstone.text }) });
+      resolved.push({ ...entry, text: withOriginalHiddenMarkers({ original: entry.text, edited: tombstone.text }) });
     }
     // Deleted entries (and updates without text) are dropped.
   }
@@ -628,7 +664,7 @@ export async function scanVaultEntries(options: { baseDir: string; namespace: st
     const tombstone = latest.get(entry.id);
     return {
       id: entry.id,
-      text: withoutSessionMarker(entry.text),
+      text: withoutHiddenMarkers(entry.text),
       timestamp: tombstone?.action === 'updated' ? tombstone.timestamp : vaultEntryTimestamp(entry),
     };
   });

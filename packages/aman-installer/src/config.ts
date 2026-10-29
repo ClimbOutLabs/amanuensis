@@ -16,6 +16,10 @@ export interface InstallerConfig {
   // The compose service name of the app in an instance (the shell doctor's
   // AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
+  // The per-user application data folder (LOCALAPPDATA): only Windows
+  // reads it, for the folders the aman command and its shortcuts live
+  // in. Elsewhere it is the folder Windows would name, unused.
+  localAppDataDir: string;
 }
 
 // The one place the installer's environment settings are read. AMANUENSIS_HOME
@@ -30,6 +34,7 @@ export function installerConfig(options: {
   const dockerConfig = options.env['DOCKER_CONFIG'];
   const osRelease = options.env['AMAN_OS_RELEASE'];
   const appService = options.env['AMAN_DOCTOR_APP_SERVICE'];
+  const localAppData = options.env['LOCALAPPDATA'];
   return {
     stateHome: fromEnv !== undefined && fromEnv !== '' ? fromEnv : join(options.homeDir, '.amanuensis'),
     homeDir: options.homeDir,
@@ -37,5 +42,7 @@ export function installerConfig(options: {
     dockerConfigDir:
       dockerConfig !== undefined && dockerConfig !== '' ? dockerConfig : join(options.homeDir, '.docker'),
     appService: appService !== undefined && appService !== '' ? appService : 'app',
+    localAppDataDir:
+      localAppData !== undefined && localAppData !== '' ? localAppData : join(options.homeDir, 'AppData', 'Local'),
   };
 }

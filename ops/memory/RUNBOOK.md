@@ -178,8 +178,8 @@ read would be withheld. With it on, each recalled item and entity costs one
 classifier request per turn (run in parallel, up to the concurrency setting,
 each bounded by `MEMORY_SCREEN_TIMEOUT_MS`); the recorded runs show a median of
 about 21 ms, but a 95th percentile of about 6 s on CPU and about 0.7 s on GPU.
-Without the screen, recalled items that came from something Aman read are
-labelled "from something Aman read" and the model is told they are not the
+Without the screen, recalled items that came from content the person's assistant read are
+labelled "from something read for the person" and the model is told they are not the
 user's words, not verified fact, and never instructions.
 
 The Settings > Memory switch is disabled, with the reason "No screening

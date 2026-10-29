@@ -283,6 +283,8 @@ export interface ToolCallMemoSnapshot {
   tool_markup_retries_this_turn: number;
   /** Steps (model calls) each thread of the turn has made, keyed by thread id. */
   steps_by_thread: { thread_id: string; steps: number }[];
+  /** Steps refunded to each thread of the turn for landing a space write, keyed by thread id. */
+  progress_refunds_by_thread: { thread_id: string; refunds: number }[];
   /** Tools removed from the rest of the reply after a decline or an unavailable result. */
   removed_tools: string[];
   /** Calls to removed tools in a row, per thread. */
@@ -344,6 +346,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'tool_markup_leaks_this_turn'
   | 'tool_markup_retries_this_turn'
   | 'steps_by_thread'
+  | 'progress_refunds_by_thread'
   | 'removed_tools'
   | 'removed_tool_rejection_streaks'
   | 'unfinished_by_thread'
@@ -383,6 +386,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   tool_markup_retries_this_turn?: number | undefined;
   // Added with the reply step budget: a snapshot written before it omits these keys.
   steps_by_thread?: { thread_id: string; steps: number }[] | undefined;
+  progress_refunds_by_thread?: { thread_id: string; refunds: number }[] | undefined;
   removed_tools?: string[] | undefined;
   removed_tool_rejection_streaks?: { thread_id: string; streak: number }[] | undefined;
   unfinished_by_thread?: { thread_id: string; kind: UnfinishedKind }[] | undefined;
@@ -431,6 +435,8 @@ export interface TurnToolCallLedger {
   stoppedForWriteCap: boolean;
   /** Model calls made per thread this turn. The reply's step budget is checked against each thread's own count. */
   stepsByThread: Map<string, number>;
+  /** Steps handed back to each thread for landing a space write; bounded per thread by the refund cap. */
+  progressRefundsByThread: Map<string, number>;
   /** Tool names removed from the rest of the reply after a decline or an unavailable result. */
   removedTools: string[];
   /** Calls to removed tools in a row, per thread; two end that thread's reply by forcing its answer. */
@@ -454,6 +460,7 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     toolMarkupRetriesThisTurn: 0,
     stoppedForWriteCap: false,
     stepsByThread: new Map(),
+    progressRefundsByThread: new Map(),
     removedTools: [],
     removedToolRejectionStreaks: new Map(),
     unfinishedByThread: new Map(),
@@ -482,6 +489,12 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     }
     for (const [threadId, steps] of ledger.stepsByThread) {
       merged.stepsByThread.set(threadId, Math.max(merged.stepsByThread.get(threadId) ?? 0, steps));
+    }
+    for (const [threadId, refunds] of ledger.progressRefundsByThread) {
+      merged.progressRefundsByThread.set(
+        threadId,
+        Math.max(merged.progressRefundsByThread.get(threadId) ?? 0, refunds),
+      );
     }
     merged.removedTools = [...new Set([...merged.removedTools, ...ledger.removedTools])];
     for (const [threadId, streak] of ledger.removedToolRejectionStreaks) {
@@ -672,6 +685,9 @@ export function createToolCallMemoState(
   for (const entry of snapshot.steps_by_thread ?? []) {
     state.turn.stepsByThread.set(entry.thread_id, entry.steps);
   }
+  for (const entry of snapshot.progress_refunds_by_thread ?? []) {
+    state.turn.progressRefundsByThread.set(entry.thread_id, entry.refunds);
+  }
   state.turn.removedTools = [...(snapshot.removed_tools ?? [])];
   for (const entry of snapshot.removed_tool_rejection_streaks ?? []) {
     state.turn.removedToolRejectionStreaks.set(entry.thread_id, entry.streak);
@@ -763,6 +779,9 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     steps_by_thread: [...state.turn.stepsByThread.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([thread_id, steps]) => ({ thread_id, steps })),
+    progress_refunds_by_thread: [...state.turn.progressRefundsByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, refunds]) => ({ thread_id, refunds })),
     removed_tools: [...state.turn.removedTools],
     removed_tool_rejection_streaks: [...state.turn.removedToolRejectionStreaks.entries()]
       .sort(([left], [right]) => left.localeCompare(right))

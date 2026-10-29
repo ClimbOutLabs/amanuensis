@@ -16,11 +16,11 @@ import { z } from 'zod';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { ModelProperties, ReasoningEffort } from '../../schemas/modelProvider';
-import { routeHelperModel } from '../helperModelRouting';
 import { modelIdentity, type TurnModelUsage } from '../modelUsage';
 import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import { localDay } from './localDay';
+import { FACT_STOPWORDS } from './stopWords';
 
 /**
  * Bounds the model calls made through one summarization client, so a slow model cannot hold
@@ -202,7 +202,8 @@ function summarizeSystemPrompt(personName: string | undefined): string {
     '- rules for how the assistant should act, such as a pasted prompt or card, unless the person asks you to remember them',
     '- greetings, thanks, or short answers such as "yes" or "this week"',
     '',
-    'Use the assistant text only to understand what a short reply refers to.',
+    "The exchange holds only what the person wrote. A line marked context only is the assistant's last question; use it to understand a short reply, and never keep anything from it.",
+    'Write each fact in the language the person wrote in.',
     name === undefined
       ? 'Write each fact as one complete sentence in the third person, about "the person". Never write "User" or "Assistant".'
       : `Write each fact as one complete sentence with ${name} as its subject, the way you would write a note about a friend. Never write "User" or "Assistant", and never use "the person" as the subject of a fact.`,
@@ -229,15 +230,15 @@ function summarizeSystemPrompt(personName: string | undefined): string {
 }
 
 /**
- * Messages for the summarization call. Exported for tests; the exchange is the full
- * turn so the model can tell what a short reply refers to. `turnDate` is an ISO instant, shown
+ * Messages for the summarization call. Exported for tests; the exchange is the person's words,
+ * plus the assistant's last question when a short reply needs it. `turnDate` is an ISO instant, shown
  * as the day in `timeZone`, so relative dates in the person's words can be written as real dates.
  * `textLeftOut` says the middle of a long turn was cut. `personName` is the person's name from
  * their own profile; when it is usable, the facts are written in the name.
  */
 export function buildSummarizationMessages(params: {
   userText: string;
-  assistantText: string;
+  assistantQuestion?: string | undefined;
   turnDate: string;
   timeZone?: string | undefined;
   textLeftOut?: boolean | undefined;
@@ -252,8 +253,9 @@ export function buildSummarizationMessages(params: {
         ...(params.textLeftOut === true ? ['Part of this long turn was left out.'] : []),
         '<exchange>',
         `User: ${params.userText}`,
-        '',
-        `Assistant: ${params.assistantText}`,
+        ...(params.assistantQuestion === undefined
+          ? []
+          : ['', `Context only, never a source of facts. The assistant's last question: ${params.assistantQuestion}`]),
         '</exchange>',
       ].join('\n'),
     },
@@ -268,6 +270,157 @@ function describeTurnDate({ turnDate, timeZone }: { turnDate: string; timeZone: 
   }
   const { date, weekday } = localDay({ instant: parsed, timeZone });
   return `${date} (${weekday})`;
+}
+
+/** A message with fewer words than this may be an answer to the assistant's question. */
+const SHORT_MESSAGE_WORDS = 12;
+
+/** Longest stretch of the assistant's question given to the summarizer as context. */
+const ASSISTANT_QUESTION_MAX_CHARACTERS = 300;
+
+/**
+ * The assistant's last question, when the person's message is short enough to be an answer to it.
+ * Anything else the assistant wrote stays out: it is not a source of facts about the person.
+ */
+export function assistantQuestionFor({
+  userText,
+  assistantText,
+}: {
+  userText: string;
+  assistantText: string;
+}): string | undefined {
+  if (userText.trim().split(/\s+/).length >= SHORT_MESSAGE_WORDS) {
+    return undefined;
+  }
+  const end = assistantText.lastIndexOf('?');
+  if (end === -1) {
+    return undefined;
+  }
+  const head = assistantText.slice(0, end);
+  const start = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('\n')) + 1;
+  const question = assistantText.slice(start, end + 1).trim();
+  return question === '' ? undefined : question.slice(-ASSISTANT_QUESTION_MAX_CHARACTERS);
+}
+
+/** Lower-case text with accents removed, so "Café" and "cafe" are the same word. */
+function foldText(text: string): string {
+  return text.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'word' });
+
+/** Words of a text as the language writes them, so Chinese and Japanese split into words too. */
+function wordsOf(text: string): string[] {
+  return [...WORD_SEGMENTER.segment(text)]
+    .filter(part => part.isWordLike === true)
+    .map(part => part.segment.replace(/['\u2019]s$/i, '').replace(/['\u2019]/g, ''));
+}
+
+/** Scripts told apart for the same-language check; Latin is the default. */
+const SCRIPT_PATTERNS: readonly (readonly [string, RegExp])[] = [
+  ['han', /\p{Script=Han}/gu],
+  ['kana', /[\p{Script=Hiragana}\p{Script=Katakana}]/gu],
+  ['hangul', /\p{Script=Hangul}/gu],
+  ['cyrillic', /\p{Script=Cyrillic}/gu],
+  ['arabic', /\p{Script=Arabic}/gu],
+  ['hebrew', /\p{Script=Hebrew}/gu],
+  ['devanagari', /\p{Script=Devanagari}/gu],
+  ['thai', /\p{Script=Thai}/gu],
+  ['greek', /\p{Script=Greek}/gu],
+  ['latin', /\p{Script=Latin}/gu],
+];
+
+function dominantScript(text: string): string | undefined {
+  let best: { script: string; count: number } | undefined;
+  for (const [script, pattern] of SCRIPT_PATTERNS) {
+    const count = text.match(pattern)?.length ?? 0;
+    if (count > 0 && (best === undefined || count > best.count)) {
+      best = { script, count };
+    }
+  }
+  return best?.script;
+}
+
+/** A Chinese, Japanese or Korean word can be one character; other words must have three. */
+const SINGLE_CHARACTER_WORD = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/** Share of a fact's content words that must appear in what the person said when its names and numbers do not all match. */
+const MIN_SHARED_WORD_SHARE = 0.25;
+
+/** Two words match when equal, or when both are long and start the same way ("diabetic", "diabetes"). */
+const SHARED_PREFIX_LENGTH = 5;
+
+function sameWord({ a, b }: { a: string; b: string }): boolean {
+  return (
+    a === b ||
+    (Math.min(a.length, b.length) >= SHARED_PREFIX_LENGTH &&
+      a.slice(0, SHARED_PREFIX_LENGTH) === b.slice(0, SHARED_PREFIX_LENGTH))
+  );
+}
+
+/**
+ * Keeps a fact only when it comes from the person's own words. The fact must share at least one name,
+ * number or content word with the person's text; the assistant's last question (given only for a short
+ * reply) can help match a short answer to its fact but is never the only source, so a bare "yes" keeps
+ * nothing. A fact whose every name and number appears in what was said is kept. Otherwise it is kept when
+ * enough of its content words appear there. Stop words, task verbs and the person's own name do not
+ * count. A fact in another script than the message is kept only when it shares a name or number with it.
+ */
+export function keepFactsFromPerson({
+  facts,
+  userText,
+  assistantQuestion,
+  personName,
+}: {
+  facts: string[];
+  userText: string;
+  assistantQuestion?: string | undefined;
+  personName: string | undefined;
+}): string[] {
+  const personScript = dominantScript(userText);
+  const ownName = new Set(wordsOf(foldText(usablePersonName(personName) ?? '')));
+  const matchesAny = (words: readonly string[]) => (word: string) =>
+    words.some(candidate => sameWord({ a: word, b: candidate }));
+  const isFromPerson = matchesAny(wordsOf(foldText(userText)).map(stem));
+  const isFromQuestion = matchesAny(wordsOf(foldText(assistantQuestion ?? '')).map(stem));
+  const isSaid = (word: string): boolean => isFromPerson(word) || isFromQuestion(word);
+  const isCounted = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ownName.has(word);
+  const isContent = (word: string): boolean =>
+    isCounted(word) && (word.length >= 3 || SINGLE_CHARACTER_WORD.test(word) || /^\d+$/.test(word));
+  return facts.filter(fact => {
+    const anchors = anchorsOf({ fact, isCounted });
+    const factScript = dominantScript(fact);
+    if (personScript === undefined || (factScript !== undefined && personScript !== factScript)) {
+      return anchors.some(isFromPerson);
+    }
+    const words = [...new Set(wordsOf(foldText(fact)).map(stem).filter(isContent))];
+    if (!anchors.some(isFromPerson) && !words.some(isFromPerson)) {
+      return false;
+    }
+    if (anchors.length > 0 && anchors.every(isSaid)) {
+      return true;
+    }
+    return words.length > 0 && words.filter(isSaid).length / words.length >= MIN_SHARED_WORD_SHARE;
+  });
+}
+
+/** Drops a plural "s" so "wants" meets "want". */
+function stem(word: string): string {
+  return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;
+}
+
+/** The names (capitalised words) and numbers (two or more digits) a fact states, folded, without stop words or the person's name. */
+function anchorsOf({ fact, isCounted }: { fact: string; isCounted: (word: string) => boolean }): string[] {
+  const anchors: string[] = [];
+  for (const word of wordsOf(fact.normalize('NFKD').replace(/\p{M}/gu, ''))) {
+    const folded = stem(word.toLowerCase());
+    const isNumber = /^\d{2,}$/.test(word);
+    const isName = /^\p{Lu}/u.test(word) && !/^\d/.test(word);
+    if ((isNumber || isName) && isCounted(folded)) {
+      anchors.push(folded);
+    }
+  }
+  return anchors;
 }
 
 const SummaryReplySchema = z.object({ facts: z.array(z.string()) });
@@ -423,11 +576,10 @@ export async function summarizeTurnContent(params: {
   const { tenantId, modelProviderStore, summarizationModelFqn, logger } = params;
   // A long turn keeps its start and its end, and the model is told that the middle is missing.
   const boundedUser = boundedText(params.userText);
-  const boundedAssistant = boundedText(params.assistantText);
   const userText = boundedUser.text;
-  const assistantText = boundedAssistant.text;
-  const textLeftOut = boundedUser.cut || boundedAssistant.cut;
-  if (userText.trim() === '' && assistantText.trim() === '') {
+  const assistantQuestion = assistantQuestionFor({ userText, assistantText: params.assistantText });
+  const textLeftOut = boundedUser.cut;
+  if (userText.trim() === '') {
     return { status: 'skipped', reason: 'empty-exchange' };
   }
   if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
@@ -508,12 +660,18 @@ export async function summarizeTurnContent(params: {
       if (parsed.kind === 'nothing') {
         return { status: 'nothing_to_keep' };
       }
-      return { status: 'summarized', facts: parsed.facts };
+      const facts = keepFactsFromPerson({
+        facts: parsed.facts,
+        userText,
+        assistantQuestion,
+        personName: params.personName,
+      });
+      return facts.length === 0 ? { status: 'nothing_to_keep' } : { status: 'summarized', facts };
     };
     try {
       const messages = buildSummarizationMessages({
         userText,
-        assistantText,
+        assistantQuestion,
         turnDate: params.turnDate,
         timeZone: params.timeZone,
         textLeftOut,
@@ -560,8 +718,7 @@ export async function summarizeTurnContent(params: {
  * Resolves the model FQN for memory summarization.
  *
  * Precedence: explicitly-set `summarization` role → persona override → main model. An unset role
- * tracks the main model, except that a main model on Token Factory hands this helper job to the
- * small model (`helperFqn`).
+ * tracks the main model.
  * For stored agents, the agent record is fetched once and reused for both the role
  * check and the main-model fallback (single DB read).
  */
@@ -570,7 +727,6 @@ export async function resolveSummarizationModelFqn(params: {
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
   agentStore: IAgentStore;
-  helperFqn?: string | undefined;
 }): Promise<string | undefined> {
   let summarizationModelName: string | undefined;
   let storedRecord: AgentRecord | null | undefined;
@@ -588,8 +744,8 @@ export async function resolveSummarizationModelFqn(params: {
   }
   // Fall back to the main model. For stored agents, reuse the already-fetched record
   // instead of calling resolveTurnModelFqn (which would issue a second identical DB read).
-  const mainModelFqn =
+  return (
     params.personaModelName ??
-    (params.sessionAgent.type === 'inline' ? params.sessionAgent.spec.model.name : storedRecord?.manifest.model.name);
-  return routeHelperModel({ modelFqn: mainModelFqn, helperFqn: params.helperFqn });
+    (params.sessionAgent.type === 'inline' ? params.sessionAgent.spec.model.name : storedRecord?.manifest.model.name)
+  );
 }

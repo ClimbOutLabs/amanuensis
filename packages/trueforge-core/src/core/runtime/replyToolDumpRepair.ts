@@ -35,7 +35,7 @@ export interface TurnToolResultShape {
  * and the tool's own result is the `result` object; a bare result object (older or
  * host-made messages) is its own shape and returns undefined here.
  */
-function envelopedResult(parsed: Record<string, unknown>): Record<string, unknown> | undefined {
+export function envelopedResult(parsed: Record<string, unknown>): Record<string, unknown> | undefined {
   if (parsed['schema_version'] !== EventType.TOOL_RESPONSE_V2) {
     return undefined;
   }
@@ -99,14 +99,8 @@ function canonicalJsonText(value: unknown): string {
   return 'undefined';
 }
 
-/**
- * The tool results this turn handed the model, read from the context tail: everything after
- * the person's latest genuine message. An earlier turn's results are not this turn's, so a
- * dump of one of those is left alone. A result that is not a JSON object has no shape to
- * match and is skipped.
- */
-export function turnToolResultShapes(context: readonly ContextMessage[]): TurnToolResultShape[] {
-  let boundary = -1;
+/** The index of the person's latest genuine message, or -1 when there is none. */
+export function turnBoundaryIndex(context: readonly ContextMessage[]): number {
   for (let i = context.length - 1; i >= 0; i -= 1) {
     const message = context[i];
     if (
@@ -115,10 +109,20 @@ export function turnToolResultShapes(context: readonly ContextMessage[]): TurnTo
       message.role === 'user' &&
       !isInternalSystemMessage(message)
     ) {
-      boundary = i;
-      break;
+      return i;
     }
   }
+  return -1;
+}
+
+/**
+ * The tool results this turn handed the model, read from the context tail: everything after
+ * the person's latest genuine message. An earlier turn's results are not this turn's, so a
+ * dump of one of those is left alone. A result that is not a JSON object has no shape to
+ * match and is skipped.
+ */
+export function turnToolResultShapes(context: readonly ContextMessage[]): TurnToolResultShape[] {
+  const boundary = turnBoundaryIndex(context);
   const nameByCallId = new Map<string, string>();
   for (let i = boundary + 1; i < context.length; i += 1) {
     const message = context[i];

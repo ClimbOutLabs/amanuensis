@@ -66,8 +66,9 @@ describe('the edit tool when an edit entry has the wrong shape', () => {
       'edits[0] must be either an object with type set to "block", anchor (text), fingerprint (text) and new_content (text)',
     );
     expect(message).toContain(
-      'or an object with type set to "insert", after (text), fingerprint (text) and new_content (text)',
+      'an object with type set to "insert", after (text), fingerprint (text) and new_content (text)',
     );
+    expect(message).toContain('or an object with type set to "append" and new_content (text)');
     expect(message).not.toContain('named fields');
   });
 

@@ -2,8 +2,8 @@
 
 /** Current build status. */
 export const SandboxBuildStatus = {
-        Pending: "pending",
-        Ready: "ready",
-        Failed: "failed"
-    } as const;
-export type SandboxBuildStatus = typeof SandboxBuildStatus[keyof typeof SandboxBuildStatus];
+    Pending: "pending",
+    Ready: "ready",
+    Failed: "failed",
+} as const;
+export type SandboxBuildStatus = (typeof SandboxBuildStatus)[keyof typeof SandboxBuildStatus];

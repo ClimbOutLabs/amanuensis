@@ -21,6 +21,12 @@ export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
  */
 export const SPACE_WRITE_TOO_LONG_ERROR_CODE = 'space_write_too_long';
 
+/**
+ * The key a space write result sets to true when the call succeeded but saved nothing new,
+ * such as an append the space already ends with. Such a result is not a change and not progress.
+ */
+export const SPACE_WRITE_NOTHING_SAVED_FIELD = 'nothing_saved';
+
 /** The plain note a size-refused space write shows in the chat: the write is split into parts instead. */
 export const SPACE_WRITE_TOO_LONG_NOTE = 'Too long for one write. Splitting it into parts.';
 

@@ -2,10 +2,10 @@
 
 /** Only entries with this outcome. */
 export const ListAuditLogRequestOutcome = {
-        Logged: "logged",
-        Ran: "ran",
-        Approved: "approved",
-        Denied: "denied",
-        AutoDenied: "auto_denied"
-    } as const;
-export type ListAuditLogRequestOutcome = typeof ListAuditLogRequestOutcome[keyof typeof ListAuditLogRequestOutcome];
+    Logged: "logged",
+    Ran: "ran",
+    Approved: "approved",
+    Denied: "denied",
+    AutoDenied: "auto_denied",
+} as const;
+export type ListAuditLogRequestOutcome = (typeof ListAuditLogRequestOutcome)[keyof typeof ListAuditLogRequestOutcome];

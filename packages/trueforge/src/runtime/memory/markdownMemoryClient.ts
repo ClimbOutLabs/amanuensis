@@ -46,6 +46,8 @@ import {
   type RetryOperationOutcome,
 } from './hindsightClient';
 import {
+  DOCUMENT_ID_METADATA_KEY,
+  REPLACE_DOCUMENT_METADATA_KEY,
   appendVaultTombstone,
   clearSummaryPending,
   entryMetadata,
@@ -68,7 +70,7 @@ import {
   vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
-  withOriginalSessionMarker,
+  withOriginalHiddenMarkers,
   type NamespaceScan,
   type VaultScope,
 } from './markdownMemoryFiles';
@@ -361,6 +363,11 @@ export class MarkdownMemoryClient implements MemoryClient {
         }
       }
       const indexed: { id: string; text: string }[] = [];
+      // Looked up before the append so a retry after a half-finished attempt finds, and hides, the
+      // copy that attempt wrote as well as the original: one entry remains.
+      const replaced = await this.liveDocumentEntryIds(
+        items.flatMap(item => (item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true' ? [item.document_id] : [])),
+      );
       for (const [day, items] of byDay) {
         const filePath = path.join(this.dailyDir(), `${day}.md`);
         // Entry ids are positional; count what is already there before appending.
@@ -372,7 +379,8 @@ export class MarkdownMemoryClient implements MemoryClient {
         }
         const blocks = items.map((item, offset) => {
           const text = formatRetainEntry(item);
-          indexed.push({ id: `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`, text });
+          const id = `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`;
+          indexed.push({ id, text });
           return text;
         });
         // Each block ends with a newline and blocks are blank-line separated,
@@ -383,6 +391,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         });
       }
 
+      await this.hideEntries(replaced);
       await this.recordOperation(params.operationId);
 
       // New memories become searchable by meaning without waiting for a backfill.
@@ -394,6 +403,19 @@ export class MarkdownMemoryClient implements MemoryClient {
       return { ok: true };
     } catch (error) {
       return { ok: false, reason: failureReason('markdown retain failed', error) };
+    }
+  }
+
+  async deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    try {
+      await withTimeout(
+        this.liveDocumentEntryIds([params.documentId]).then(ids => this.hideEntries(ids)),
+        params.timeoutMs,
+        `markdown deleteDocument ${params.documentId}`,
+      );
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: failureReason('markdown document delete failed', error) };
     }
   }
 
@@ -586,7 +608,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       const embeddings = this.embeddings?.(target.filesystemNamespace);
       embeddings?.ensureWarmed();
       embeddings?.indexNewEntries([
-        { id: params.entryId, text: withOriginalSessionMarker({ original: target.text, edited: clean }) },
+        { id: params.entryId, text: withOriginalHiddenMarkers({ original: target.text, edited: clean }) },
       ]);
       return {
         ok: true,
@@ -660,6 +682,34 @@ export class MarkdownMemoryClient implements MemoryClient {
       return new Date().toISOString().slice(0, 10);
     }
     return parsed.toISOString().slice(0, 10);
+  }
+
+  /** Ids of the visible entries in the write vault that carry one of these document ids. */
+  private async liveDocumentEntryIds(documentIds: readonly string[]): Promise<string[]> {
+    if (documentIds.length === 0) {
+      return [];
+    }
+    const scan = await scanNamespaceEntries({
+      baseDir: this.baseDir,
+      namespace: this.writeNamespace,
+      maxDailyFiles: Number.POSITIVE_INFINITY,
+      resolveTombstones: true,
+    });
+    return scan.entries
+      .filter(entry => documentIds.includes(entryMetadata(entry.text)?.[DOCUMENT_ID_METADATA_KEY] ?? ''))
+      .map(entry => entry.id);
+  }
+
+  /** Hides entries with the vault's delete marker. The log stays append-only: recall skips hidden entries. */
+  private async hideEntries(entryIds: readonly string[]): Promise<void> {
+    const timestamp = new Date().toISOString();
+    for (const entryId of entryIds) {
+      await appendVaultTombstone({
+        baseDir: this.baseDir,
+        namespace: this.writeNamespace,
+        tombstone: { entryId, action: 'deleted', text: undefined, timestamp },
+      });
+    }
   }
 
   private async readOperationIds(): Promise<Set<string>> {
