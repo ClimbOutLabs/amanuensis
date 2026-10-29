@@ -1851,6 +1851,37 @@ describe('applyRelevanceGate', () => {
     expect(result.droppedBelowThreshold).toBe(2);
   });
 
+  it('ranks items naming a person from the message ahead of higher-scored items, then caps and filters', () => {
+    const items: RecallItem[] = [
+      recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.', score: 0.9 }),
+      recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.', score: 0.8 }),
+      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy.", score: 0.6 }),
+      recallItem({ id: 'low', text: 'Wendy likes tea.', score: 0.1 }),
+    ];
+    const result = applyRelevanceGate({
+      items,
+      entities: [],
+      minScore: 0.5,
+      maxItems: 12,
+      maxEntities: 8,
+      message: "Hi June, remember Wendy's is coming up in December.",
+    });
+    expect(result.items.map(item => item.id)).toEqual(['wendy', 'lisbon', 'fado']);
+    expect(result.droppedBelowThreshold).toBe(1);
+  });
+
+  it('keeps provider order when the message names nobody or only uses a lowercase common word', () => {
+    const items: RecallItem[] = [
+      recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.' }),
+      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy." }),
+      recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.' }),
+    ];
+    for (const message of ['what did I say about photo gear?', 'I want to attend a fado night with wendy']) {
+      const result = applyRelevanceGate({ items, entities: [], minScore: 0.5, maxItems: 12, maxEntities: 8, message });
+      expect(result.items.map(item => item.id)).toEqual(['lisbon', 'wendy', 'fado']);
+    }
+  });
+
   it('keeps an item scored exactly at the threshold', () => {
     const items: RecallItem[] = [recallItem({ id: '1', score: 0.5 })];
     const result = applyRelevanceGate({ items, entities: [], minScore: 0.5, maxItems: 12, maxEntities: 8 });
