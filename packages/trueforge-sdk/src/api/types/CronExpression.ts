@@ -3,4 +3,4 @@
 /**
  * Standard 5-field cron expression, evaluated in `timezone`.
  */
-export type CronExpression = string;
+export type CronExpression = string | null;

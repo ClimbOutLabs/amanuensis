@@ -4,30 +4,26 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("VoiceClient", () => {
-    
     test("get_status", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "model" : "model" , "stt_available" : true } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { model: "model", stt_available: true } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/voice/status").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/voice/status")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.voice.getStatus();
-                                expect(response).toEqual({
-    data: {
-        model: "model",
-        sttAvailable: true
-    }
-});
-                              
-                    
+        const response = await client.voice.getStatus();
+        expect(response).toEqual({
+            data: {
+                model: "model",
+                sttAvailable: true,
+            },
+        });
     });
-          
 });

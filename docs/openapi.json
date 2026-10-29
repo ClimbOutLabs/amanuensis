@@ -1479,6 +1479,17 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
             "minLength": 1,
@@ -2479,6 +2490,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteSkillNetworkApprovalResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteSkillResponse": {
         "properties": {},
         "type": "object"
@@ -3428,6 +3443,17 @@
         ],
         "type": "object"
       },
+      "GetSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetSkillResponse": {
         "properties": {
           "data": {
@@ -3506,6 +3532,17 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
@@ -10033,6 +10070,44 @@
           }
         ]
       },
+      "SkillNetworkApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "declared_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "send_capable": {
+            "description": "True when a declared site can send mail or change a calendar.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "declared_hosts",
+          "approved_hosts",
+          "send_capable"
+        ],
+        "type": "object"
+      },
       "SkillUsedPersistedEvent": {
         "properties": {
           "created_at": {
@@ -10670,6 +10745,10 @@
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
+          },
+          "mail_draft": {
+            "description": "True when a card carrying mail_new_recipients approves saving a draft rather than sending.",
+            "type": "boolean"
           },
           "mail_new_recipients": {
             "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
@@ -13228,6 +13307,37 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "UpdateSkillNetworkApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
         "type": "object"
       },
       "UpdateSkillRequest": {
@@ -22869,6 +22979,190 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "delete"
+      }
+    },
+    "/api/v1/settings/skills/{name}/network-approval": {
+      "delete": {
+        "description": "Clears the stored approval. The skill keeps no network access from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "Approval removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_approval"
+      },
+      "get": {
+        "description": "The sites the skill declares, the approved list in force, and whether a declared site can send.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The skill network approval state."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          }
+        },
+        "summary": "Get a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "get_network_approval"
+      },
+      "put": {
+        "description": "Stores the approval for exactly the sites the skill declares. A list that differs from the declaration is refused.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The list sent is not the list the skill declares."
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Approve a skill network site list",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_approval"
       }
     },
     "/api/v1/settings/token-factory-usage": {
