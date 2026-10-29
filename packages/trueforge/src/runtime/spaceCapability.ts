@@ -79,7 +79,7 @@ import {
   type SkippedRow,
 } from './spaceDuplicateRows';
 import { spaceFormatNotes } from './spaceFormatNotes';
-import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
+import { dropUnseenSpaceLinks, SpaceLinkRefusedError, type DroppedLinks } from './spaceLinks';
 import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
@@ -806,6 +806,16 @@ interface WriteOutcome {
   already_at_end?: true;
   /** Table rows the write left out because the table already held them; set only when some were. */
   skipped_rows?: SkippedRow[];
+  /** Links and pictures taken out because this chat never saw their address; set only when some were. */
+  left_out?: Pick<DroppedLinks, 'links' | 'pictures'>;
+}
+
+function leftOutSentence({ links, pictures }: Pick<DroppedLinks, 'links' | 'pictures'>): string {
+  const parts = [
+    ...(links > 0 ? [plural({ count: links, noun: 'link' })] : []),
+    ...(pictures > 0 ? [plural({ count: pictures, noun: 'picture' })] : []),
+  ];
+  return `Left out ${parts.join(' and ')} that did not come from this chat's searches or opened pages. Tell the person.`;
 }
 
 /**
@@ -855,7 +865,8 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
       (outcome.starts_new_table === true
         ? ' The appended rows start a new table without a header row; add a header if they belong to a new table.'
         : '') +
-      (outcome.skipped_rows === undefined ? '' : ` ${skippedRowsSentence(outcome.skipped_rows)}`);
+      (outcome.skipped_rows === undefined ? '' : ` ${skippedRowsSentence(outcome.skipped_rows)}`) +
+      (outcome.left_out === undefined ? '' : ` ${leftOutSentence(outcome.left_out)}`);
   return JSON.stringify({
     summary,
     ...(outcome.stale === undefined ? {} : { revision_was_stale: true }),
@@ -1868,9 +1879,9 @@ class SpaceTool extends LocalToolMCP {
       except_space_id: undefined,
       next_step: 'Pick a different name for the new space, or change the existing one with edit_space.',
     });
-    // The link refusal is a safety check on the content, so it runs before the size policy:
-    // a write that breaks both rules gets the safety refusal.
-    refuseNewSpaceLinks({
+    // The link check is a safety check on the content, so it runs before the size policy:
+    // a write that breaks both rules gets the safety refusal. Unseen links are cut out here.
+    const checked = dropUnseenSpaceLinks({
       body: input.body,
       previousBody: '',
       format: input.format,
@@ -1879,8 +1890,8 @@ class SpaceTool extends LocalToolMCP {
     // Dropping repeated rows first lets a call that only overshoots because of them still fit.
     const deduped =
       input.format === 'markdown'
-        ? dropDuplicateRows({ content: input.body, existingKeys: [] })
-        : { content: input.body, skipped: [] };
+        ? dropDuplicateRows({ content: checked.body, existingKeys: [] })
+        : { content: checked.body, skipped: [] };
     let body = deduped.content;
     let cut: WritePrefix | null = null;
     if (body.length > SPACE_WRITE_MAX_LENGTH) {
@@ -1914,13 +1925,16 @@ class SpaceTool extends LocalToolMCP {
     });
     // The outline lets the next edit chain from real anchors and fingerprints.
     const blocks = blockOutline(mutation.record.body).blocks;
-    const skipped_rows = cut === null ? deduped.skipped : skippedRowsWithin({ content: input.body, kept: cut.kept });
+    const skipped_rows = cut === null ? deduped.skipped : skippedRowsWithin({ content: checked.body, kept: cut.kept });
     return {
       mutation,
       action: 'Created',
       blocks,
       ...(cut === null ? {} : { partial: { ...cut, continue_after: lastBlockRef(blocks), at_end: true } }),
       ...(skipped_rows.length === 0 ? {} : { skipped_rows }),
+      ...(checked.links + checked.pictures === 0
+        ? {}
+        : { left_out: { links: checked.links, pictures: checked.pictures } }),
     };
   }
 
@@ -2068,14 +2082,16 @@ class SpaceTool extends LocalToolMCP {
     } else if (cut === null) {
       throw tooLong(applied.new_content_length);
     }
-    refuseNewSpaceLinks({
-      body: applied.body,
-      previousBody: current.body,
-      format,
-      web_search: this.options.webSearch,
-    });
+    const checkLinks = (candidate: string): DroppedLinks =>
+      dropUnseenSpaceLinks({
+        body: candidate,
+        previousBody: current.body,
+        format,
+        web_search: this.options.webSearch,
+      });
+    // Refusals for the full content come before the size cut; the saved part is checked again below.
+    let checked = checkLinks(applied.body);
     if (cut !== null && lone !== undefined) {
-      // The links were checked on the full content above; now save only the part that fits.
       applied = applyEditEntries({
         space_id: input.space_id,
         body: current.body,
@@ -2083,8 +2099,10 @@ class SpaceTool extends LocalToolMCP {
         edits: [{ ...lone, new_content: cut.kept }],
         confirm_shrink: input.confirm_shrink,
       });
+      checked = checkLinks(applied.body);
     }
-    const { body, block_results, starts_new_table, skipped_rows } = applied;
+    const { block_results, starts_new_table, skipped_rows } = applied;
+    const { body } = checked;
     // Judged on the final body, after any append and on the stale-but-proven path too. Not a
     // delta failure: the model's copy is fine, the call just does nothing.
     if (
@@ -2140,6 +2158,9 @@ class SpaceTool extends LocalToolMCP {
     }
     if (skipped_rows.length > 0) {
       outcome.skipped_rows = skipped_rows;
+    }
+    if (checked.links + checked.pictures > 0) {
+      outcome.left_out = { links: checked.links, pictures: checked.pictures };
     }
     // The fresh outline of the new body, at the new revision: the next edit chains
     // from these anchors instead of paying a re-read first.
