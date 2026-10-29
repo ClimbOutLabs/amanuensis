@@ -30,9 +30,9 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof AccountConnec
 }
 
 describe('AccountConnectorCard', () => {
-  it('shows Not connected with the description and a Connect button that opens the panel', () => {
+  it('shows Available with the description and a Connect button that opens the panel', () => {
     const { onOpen } = renderCard();
-    expect(screen.getByText('Not connected')).toBeTruthy();
+    expect(screen.getByText('Available')).toBeTruthy();
     expect(screen.getByText('Look at your calendar.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(onOpen).toHaveBeenCalledTimes(1);

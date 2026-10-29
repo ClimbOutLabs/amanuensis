@@ -25,6 +25,50 @@ demo_env_on() {
   [ "$(env_get "$(instance_dir "$1")/.env" DEMO_MODE)" = true ]
 }
 
+# The Tavily key of a demo install: read from stdin, kept in shell memory, and written only to the instance .env.
+
+# The length is counted here, not in the pattern: macOS regex refuses repeat counts above 255.
+valid_tavily_key() { [ "${#1}" -ge 16 ] && [ "${#1}" -le 512 ] && matches_whole "$1" '^[A-Za-z0-9._~+/=-]+$'; }
+
+# The key is never echoed in a message, only its problem.
+tavily_key_problem() {
+  valid_tavily_key "$1" || echo "The Tavily key has a length or characters a key never has."
+}
+
+# The --tavily-key-stdin line, from stdin_answers_read.
+tavily_key_take() {
+  [ -n "$1" ] || usage_die "The Tavily key line of the input was empty. Put the key on its own line, in the order install.sh --help gives."
+  [ -z "$(tavily_key_problem "$1")" ] || usage_die "$(tavily_key_problem "$1")"
+  AMAN_TAVILY_KEY=$1
+}
+
+demo_tavily_on() {
+  local env
+  env="$(instance_dir "$1")/.env"
+  [ "$(env_get "$env" SEARCH_PROVIDER)" = tavily ] && [ "$(env_get "$env" TAVILY_API_KEY)" = "$AMAN_TAVILY_KEY" ]
+}
+
+# Sets SEARCH_PROVIDER=tavily and TAVILY_API_KEY in the managed block from the --tavily-key-stdin key, and restarts
+# the app when that changed the settings. Without a key it does nothing. The key only passes through shell builtins.
+demo_tavily_apply() {
+  local name=$1 env
+  [ -n "$AMAN_TAVILY_KEY" ] || return 0
+  if demo_tavily_on "$name"; then
+    AMAN_TAVILY_KEY=
+    return 0
+  fi
+  env="$(instance_dir "$name")/.env"
+  env_managed_set "$env" SEARCH_PROVIDER tavily
+  env_managed_set "$env" TAVILY_API_KEY "$AMAN_TAVILY_KEY"
+  AMAN_TAVILY_KEY=
+  log_event "demo instance $name searches the web with Tavily"
+  say "Instance $name now searches the web with Tavily. Restarting the app."
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app || {
+    warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
+    return 1
+  }
+}
+
 demo_plan_text() {
   printf 'Turn demo mode on for instance %s and fill it with example data for %s' "$1" "$2"
 }
@@ -74,10 +118,11 @@ demo_seed_command() {
   printf '%s instance demo-seed --instance %s' "$INSTALLER_DIR/install.sh" "$1"
 }
 
-# After the instance is healthy: turn demo mode on and seed. A failure is reported and fails the run at its end.
+# After the instance is healthy: give it the Tavily key when one was supplied, turn demo mode on and seed.
+# A failure is reported and fails the run at its end.
 demo_install_apply() {
   local name=$1
-  { demo_enable "$name" && demo_seed_run "$name" "$(reg_get "$name" owner_email)" 0; } || DEMO_FAILED=1
+  { demo_tavily_apply "$name" && demo_enable "$name" && demo_seed_run "$name" "$(reg_get "$name" owner_email)" 0; } || DEMO_FAILED=1
 }
 
 # The demo world is always the owner's.

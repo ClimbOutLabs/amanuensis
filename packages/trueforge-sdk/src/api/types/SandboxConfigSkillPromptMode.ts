@@ -2,7 +2,8 @@
 
 /** How mounted skills are presented in the <skills> prompt section: 'advertise' lists name/description/path and the agent reads SKILL.md itself; 'inline' embeds preloaded SKILL.md content so the agent skips that read. Default: 'advertise'. */
 export const SandboxConfigSkillPromptMode = {
-        Advertise: "advertise",
-        Inline: "inline"
-    } as const;
-export type SandboxConfigSkillPromptMode = typeof SandboxConfigSkillPromptMode[keyof typeof SandboxConfigSkillPromptMode];
+    Advertise: "advertise",
+    Inline: "inline",
+} as const;
+export type SandboxConfigSkillPromptMode =
+    (typeof SandboxConfigSkillPromptMode)[keyof typeof SandboxConfigSkillPromptMode];

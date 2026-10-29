@@ -7,13 +7,14 @@ import {
   type TurnCreatedEvent,
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { newEventId } from '@truefoundry/trueforge-core/core';
+import { newEventId, type AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import {
   LATEST_REMINDER_AT_METADATA_KEY,
   LATEST_REMINDER_METADATA_KEY,
   REMINDERS_CHAT_TITLE,
   REMINDERS_METADATA_KEY,
+  SET_REMINDER_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { ulid } from 'ulid';
 import type { IAgentStore } from '../db/agentStore';
@@ -56,6 +57,8 @@ export async function deliverReminder(params: {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   agentStore: Pick<IAgentStore, 'getAgent'>;
   now: Date;
+  /** The activity log the delivery is also written to; absent, the delivery is unchanged and unrecorded. */
+  audit?: AuditLogWriter | null | undefined;
 }): Promise<string> {
   const { item, sessions, sessionStore, agentStore, now } = params;
   const { schedule, run } = item;
@@ -173,5 +176,24 @@ export async function deliverReminder(params: {
       [LATEST_REMINDER_AT_METADATA_KEY]: createdAt,
     },
   });
+
+  // The delivery also leaves one row in the activity log, so a reminder that arrived is visible
+  // beside the actions that ran. A failed write never changes the delivery.
+  if (params.audit !== undefined && params.audit !== null) {
+    try {
+      await params.audit.record({
+        tenant_id: schedule.tenant_id,
+        created_by: schedule.created_by_subject.subject_id,
+        conversation_id: sessionId,
+        tier: 1,
+        tool_name: SET_REMINDER_TOOL_NAME,
+        description: `Delivered the reminder: ${what}`,
+        outcome: 'logged',
+        auto_deny_reason: null,
+      });
+    } catch {
+      // The activity log being unavailable never changes a delivery.
+    }
+  }
   return sessionId;
 }

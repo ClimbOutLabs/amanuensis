@@ -6,6 +6,6 @@ export interface GithubRepositoryDetails {
     defaultBranch: string | null;
     fullName: string;
     name: string;
-    "private": boolean;
+    private: boolean;
     sizeKb: number;
 }

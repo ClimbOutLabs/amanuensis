@@ -188,13 +188,16 @@ describe('guardModelReply', () => {
     expect(noCreate.invalidCalls.size).toBe(0);
   });
 
-  it('steers a truncated create_space to smaller parts with edit_space, never to resending the whole call', () => {
+  it('steers a truncated create_space to a small create first, never to resending the whole call', () => {
     const outcome = guard([call('a', 'create_space', '{"name":"Dog breeds","body":"# Dog breeds\\n| Breed |')]);
     const message = outcome.invalidCalls.get('a');
-    expect(message).toContain('The create_space call was not sent because its arguments were not complete');
-    expect(message).toContain('nothing was written');
+    expect(message).toContain('The create_space call was stopped while it was still being written');
+    expect(message).toContain('the rest of the content never arrived');
+    expect(message).toContain('nothing was created');
     expect(message).toContain('Do not send the same call again');
-    expect(message).toContain('Send the content in smaller parts with edit_space');
+    expect(message).toContain('Create the space with its name and only the first small part of the content');
+    expect(message).toContain('then add the rest with edit_space in follow-up calls');
+    expect(message).not.toContain('Send the content in smaller parts with edit_space');
     expect(message).not.toContain('Send the whole call again');
   });
 
@@ -203,9 +206,24 @@ describe('guardModelReply', () => {
       call('a', 'edit_space', '{"space_name":"Dog breeds","edits":[{"type":"search","search":"a","replace":"'),
     ]);
     const message = outcome.invalidCalls.get('a');
-    expect(message).toContain('The edit_space call was not sent because its arguments were not complete');
+    expect(message).toContain('The edit_space call was stopped while it was still being written');
+    expect(message).toContain('the rest of the content never arrived');
+    expect(message).toContain('nothing was written');
+    expect(message).toContain('Do not send the same call again');
     expect(message).toContain('Send the content in smaller parts with edit_space');
     expect(message).not.toContain('Send the whole call again');
+  });
+
+  it('gives a truncated create_space and a truncated edit_space different recovery text', () => {
+    const created = guard([call('a', 'create_space', '{"name":"Dog breeds","body":"# Dog breeds\\n| Breed |')]);
+    const edited = guard([
+      call('a', 'edit_space', '{"space_name":"Dog breeds","edits":[{"type":"search","search":"a","replace":"'),
+    ]);
+    // The tool names alone always differ; the recovery text itself has to differ too, so
+    // compare with both names blanked out.
+    const blankToolNames = (text: string | undefined): string =>
+      (text ?? '').replaceAll('create_space', 'TOOL').replaceAll('edit_space', 'TOOL');
+    expect(blankToolNames(created.invalidCalls.get('a'))).not.toBe(blankToolNames(edited.invalidCalls.get('a')));
   });
 
   it('keeps the resend-whole message for a truncated call to any other tool', () => {

@@ -43,8 +43,6 @@ type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilityS
  * Why skills are unavailable, keyed off the sandbox build status.
  * `pending` is transient (retry); everything else (no provider / failed / unknown) reads as not configured.
  */
-const SLOT_SKILLS_REASON = 'Skills need network access, which the offline sandbox does not have yet.';
-
 function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
   if (status === 'pending') {
     return 'Skills run in a sandbox whose image is still being prepared — retry shortly.';
@@ -293,11 +291,9 @@ async function capabilitiesFromSandboxStatus({
   const sandboxEnabled = sandboxEnabledFromBuildStatus(status);
   return {
     sandbox: { enabled: sandboxEnabled },
-    // Skills download from the network, which the slots do not have.
-    skill:
-      sandboxEnabled && !slotsBackendEnabled()
-        ? { enabled: true }
-        : { enabled: false, reason: slotsBackendEnabled() ? SLOT_SKILLS_REASON : skillDisabledReason(status) },
+    // Skills run wherever the sandbox runs: on the slots backend the host copies the skill
+    // files in and approved sites go through the skill network gateway.
+    skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({

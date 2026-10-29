@@ -2,9 +2,10 @@
 
 /** applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead. */
 export const ContextCompactionEventOutcome = {
-        Applied: "applied",
-        SkippedInvalid: "skipped_invalid",
-        SkippedBlocked: "skipped_blocked",
-        TruncatedFallback: "truncated_fallback"
-    } as const;
-export type ContextCompactionEventOutcome = typeof ContextCompactionEventOutcome[keyof typeof ContextCompactionEventOutcome];
+    Applied: "applied",
+    SkippedInvalid: "skipped_invalid",
+    SkippedBlocked: "skipped_blocked",
+    TruncatedFallback: "truncated_fallback",
+} as const;
+export type ContextCompactionEventOutcome =
+    (typeof ContextCompactionEventOutcome)[keyof typeof ContextCompactionEventOutcome];

@@ -5,15 +5,24 @@ import {
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
 import { ulid } from 'ulid';
+import type { Logger } from 'winston';
+import type { McpCatalog } from '../../catalog/McpCatalog';
+import type { SkillCatalog } from '../../catalog/SkillCatalog';
 import type { IAgentStore } from '../../db/agentStore';
+import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
+import type { IMcpServerStore } from '../../db/mcpServerStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../../db/personaStore';
 import type { IScheduleStore } from '../../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
+import type { ISkillStore } from '../../db/skillStore';
 import type { ISpaceStore } from '../../db/spaceStore';
 import type { WithTransaction } from '../../db/transaction';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
+import { seedDefaultSearchProvider, type DefaultSearchProviderOutcome } from '../../runtime/defaultSearchProvider';
+import { registerMailConnector } from '../../runtime/mailConnector';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
+import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
@@ -41,8 +50,22 @@ export interface DemoSeedStores<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   /** Chat deletion leaves saved files behind, so `--fresh` removes them through this store. */
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Where connector registrations live; the seed ensures the demo's two connectors here. */
+  mcpServerStore: IMcpServerStore<TTransaction>;
+  globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Where a person's skills live; the seed enables the demo's catalog skill here. */
+  skillStore: ISkillStore<TTransaction>;
   knowledge: DemoKnowledgeLibrary;
   memory: MemoryClient;
+}
+
+/** What the seed needs from the instance configuration to ensure the demo's connectors and skill. */
+export interface DemoSeedConnectors {
+  /** The mail sidecar's MCP endpoint the instance is configured with; undefined leaves email unregistered. */
+  mailUrl: string | undefined;
+  catalog: McpCatalog;
+  skillCatalog: SkillCatalog;
+  logger: Logger;
 }
 
 export interface DemoSeedScope {
@@ -63,6 +86,10 @@ export interface SeedReport {
   /** `still_indexing` counts documents not ready when the wait ended; the server finishes them on its next start. */
   knowledge: { created: number; unchanged: number; removed: number; still_indexing: number };
   memory: { created: number; updated: number; unchanged: number; removed: number };
+  /** The demo's connectors, ensured as part of the seed: email registered from the configured endpoint, the default search connector offered. `failed` is reported, never fatal. */
+  connectors: { email: 'registered' | 'unconfigured' | 'failed'; search: DefaultSearchProviderOutcome | 'failed' };
+  /** The demo's catalog skill, enabled as part of the seed. `failed` is reported, never fatal. */
+  skills: { tenX: 'enabled' | 'already_enabled' | 'failed' };
 }
 
 type EarlierReport = Pick<ResetReport, 'personas' | 'agent' | 'schedule' | 'sessions' | 'spaces'>;
@@ -611,17 +638,103 @@ function isSameSpaceContent({
   );
 }
 
+/**
+ * Ensures the two connectors the brief needs, through the same steps the server runs at boot, so a seeded
+ * demo can read mail and search even when boot never registered them. The mail account itself is the
+ * installer's: it holds the app password in its own file, and the seed only registers the endpoint the
+ * instance is already configured with. A failure is reported in the seed report, never fatal, as at boot.
+ */
+async function seedConnectors<TTransaction>({
+  stores,
+  scope,
+  connectors,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+  connectors: DemoSeedConnectors;
+}): Promise<SeedReport['connectors']> {
+  let email: SeedReport['connectors']['email'];
+  try {
+    email = await registerMailConnector({
+      url: connectors.mailUrl,
+      mcpServerStore: stores.mcpServerStore,
+      tenant_id: scope.tenantId,
+    });
+  } catch {
+    email = 'failed';
+  }
+  let search: SeedReport['connectors']['search'];
+  try {
+    search = await seedDefaultSearchProvider({
+      globalSettingsStore: stores.globalSettingsStore,
+      mcpServerStore: stores.mcpServerStore,
+      catalog: connectors.catalog,
+      tenant_id: scope.tenantId,
+      logger: connectors.logger,
+    });
+  } catch {
+    search = 'failed';
+  }
+  return { email, search };
+}
+
+/** The catalog skill the demo ships enabled, named as the catalog names it. */
+const DEMO_SKILL_NAME = 'ten-x';
+
+/**
+ * Enables the demo's catalog skill through the same store the Settings screen writes when a person
+ * adds it, copying the catalog entry into a skill record exactly as that screen does. A skill the
+ * person already has is left as it is, edits and all. Network approval is the person's own act and
+ * is never part of the seed. A failure is reported in the seed report, never fatal.
+ */
+async function seedDemoSkills<TTransaction>({
+  stores,
+  scope,
+  connectors,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+  connectors: DemoSeedConnectors;
+}): Promise<SeedReport['skills']> {
+  try {
+    const entry = connectors.skillCatalog.list().find(skill => skill.name === DEMO_SKILL_NAME);
+    if (entry === undefined) {
+      return { tenX: 'failed' };
+    }
+    const existing = await stores.skillStore.listSkills({ tenant_id: scope.tenantId, names: [DEMO_SKILL_NAME] });
+    if (existing.length > 0) {
+      return { tenX: 'already_enabled' };
+    }
+    const manifest: SkillManifest = {
+      type: 'git',
+      name: entry.name,
+      url: entry.url,
+      ...(entry.path !== undefined ? { path: entry.path } : {}),
+      ref: entry.ref,
+      description: entry.description,
+      ...(entry.requires !== undefined ? { requires: entry.requires } : {}),
+      ...(entry.network_hosts !== undefined ? { network_hosts: entry.network_hosts } : {}),
+    };
+    await stores.skillStore.createSkill({ tenant_id: scope.tenantId, name: DEMO_SKILL_NAME, manifest });
+    return { tenX: 'enabled' };
+  } catch {
+    return { tenX: 'failed' };
+  }
+}
+
 /** Writes (or refreshes) one demo world. Safe to run again: unchanged records are left alone. */
 export async function seedDemoWorld<TTransaction>({
   stores,
   scope,
   world,
   now,
+  connectors,
 }: {
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
   world: DemoWorld;
   now: Date;
+  connectors: DemoSeedConnectors;
 }): Promise<SeedReport> {
   await removeEarlierSeeds({ stores, scope });
   const memory = await seedMemory({ memory: stores.memory, notes: world.notes, now });
@@ -630,6 +743,8 @@ export async function seedDemoWorld<TTransaction>({
   const agent = await seedAgent({ stores, scope, world });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
   const spaces = await seedSpaces({ stores, scope, world });
+  const connectorReport = await seedConnectors({ stores, scope, connectors });
+  const skillReport = await seedDemoSkills({ stores, scope, connectors });
   return {
     personas,
     profile,
@@ -638,6 +753,8 @@ export async function seedDemoWorld<TTransaction>({
     spaces,
     knowledge,
     memory,
+    connectors: connectorReport,
+    skills: skillReport,
   };
 }
 

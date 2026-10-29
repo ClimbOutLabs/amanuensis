@@ -83,8 +83,8 @@ password_problem() {
 
 # The answers given on stdin, one line each, in this fixed order: sign-in password (--password-stdin), Token Factory key
 # (--token-factory-key-stdin), calendar app password (--calendar-password-stdin), email app password
-# (--email-password-stdin). A line is there only when its option is given. main reads every line here, once, before any
-# question, so an answer can never be taken for another one. A dry run reads none of them.
+# (--email-password-stdin), Tavily key (--tavily-key-stdin). A line is there only when its option is given. main reads
+# every line here, once, before any question, so an answer can never be taken for another one. A dry run reads none of them.
 STDIN_SIGNIN_PASSWORD=
 STDIN_CAL_PASSWORD=
 STDIN_EMAIL_PASSWORD=
@@ -100,6 +100,11 @@ stdin_answers_read() {
   fi
   if [ "$OPT_CAL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_CAL_PASSWORD || true; fi
   if [ "$OPT_EMAIL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_EMAIL_PASSWORD || true; fi
+  if [ "$OPT_TAVILY_KEY_STDIN" = 1 ]; then
+    line=
+    IFS= read -r line || true
+    tavily_key_take "$line"
+  fi
 }
 
 # Reads a password twice without echo into the variable named by $1. The value stays in shell

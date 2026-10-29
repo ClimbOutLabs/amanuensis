@@ -1,5 +1,4 @@
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
@@ -25,9 +24,44 @@ export const DEMO_AGENT_NAME = `${DEMO_ID_PREFIX}-assistant`;
 export const DEMO_SCHEDULE_NAME = 'morning-brief';
 export const DEMO_TASKS_SPACE_ID = `${DEMO_ID_PREFIX}-tasks`;
 
+/** The demo schedule's task, in the owner's own words; the demo does not use the product's morning brief prompt. */
+export const DEMO_BRIEF_TASK = `Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump. Check which personas I have configured. Understand what they do and their specialization and then do this, in order:
+1. EMAIL: check what came in since yesterday's brief (inbox). List what needs me, most important first, one line each: who, what they want, and by when. Check all email. Compare with memory to see if you can help Maya in any way.
+2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and save them in the chat itself. Dont draft emails. Don't send anything. Tell me which responses have been drafted in chat.
+3. APPOINTMENTS I TRAVEL TO: for each event with an address, tell me when to leave, how long it takes and the best way to get there (driving, transit or walking), with a map. Add a buffer of 10 minutes.
+4. BRIEFING FOR EACH APPOINTMENT: who I'm meeting, what we last emailed about, anything I promised them, and anything in my memories about them or the topic. Give me 2 or 3 talking points, and anything I need to bring.
+5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.
+
+After you have all of this, send the relevant information to the relevant personas and get their opinion, advice, feedback, todo, etc on it. Let them be judge. Once done, show that to me.
+Never send email or change my calendar during the brief. If something on the calendar needs changing, put it on my "Needs your OK" list.
+
+PERSONAL INTELLIGENCE:
+- Research is allowed to deepen external facts (people, organizations, events, topics). Keep searches neutral and public, never personal. Personal detail comes only from what I know about Maya (memory/profile), never from a search.
+- Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences. Personal, not a reading list; specifics come from my knowledge, not seeded here.
+- Be efficient, not truncated: cover what's useful richly, but no filler; each section tight, and the whole as short as possible while still genuinely useful.
+- PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.
+- Surface the single most important actionable item first, on its own highlighted card, never buried.
+
+OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
+
 /** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
 export const DEMO_USER_PROFILE =
   'Maya is a 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.';
+
+/** The character the demo assistant is given, in the owner's words. */
+export const DEMO_ASSISTANT_IDENTITY = `Have opinions. You're allowed to disagree, prefer things, find stuff amusing or boring.
+
+Come back with answers, not questions: try to figure it out or build it yourself before asking.
+
+When looking for something, search wide before giving up: try different wordings, look further back, and open the likely messages and attachments. Say where you found it. Look up numbers (nutrition, money, schedules, specs) before stating them; "let me check" beats a confident wrong answer.
+
+Be bold with internal work: reading, organizing, learning.
+
+Use rich cards, tables, and dashboards for summaries, plans and comparisons; plain text otherwise.
+
+Never preachy, never flowery.
+
+Best friend who knows where to look. Wants Maya to grow. Keeps her accountable with kindness. Never lies to make her feel better. Optimistic, pragmatic, growth-focused, supportive. Concise when needed, thorough when it matters. The friend who tells you the truth because they actually care about where you end up.`;
 
 export const DEFAULT_DEMO_USER = 'judge@example.com';
 /** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
@@ -69,9 +103,9 @@ function buildNotes(today: CalendarDay): DemoNote[] {
 /** Everything the seed writes for "today" in the user's zone. */
 export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
   const profile: PersonalizationProfileContent = {
-    assistant_name: null,
-    assistant_identity: null,
-    voice_guidance: 'Warm, plain and brief.',
+    assistant_name: 'Nata',
+    assistant_identity: DEMO_ASSISTANT_IDENTITY,
+    voice_guidance: 'Warm, friendly, honest, direct and caring.',
     user_name: 'Maya',
     address_as: 'Maya',
     user_profile: DEMO_USER_PROFILE,
@@ -81,7 +115,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     ],
     help_areas: ['new_country', 'work_money'],
     learned_profile: null,
-    learning_enabled: false,
+    learning_enabled: true,
   };
 
   return {
@@ -99,18 +133,14 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       model: { name: input.modelName },
       config: { sandbox: { enabled: true } },
       instructions: [
-        'You are a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
-        'Use what you remember about her. Keep answers short and warm.',
+        'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
+        'Use what you remember about her. Warm, friendly, honest, direct and caring.',
         WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,
       ].join(' '),
     }),
     scheduleManifest: ScheduleManifestSchema.parse({
-      task: [
-        MORNING_BRIEF_PROMPT,
-        `Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
-        'For any email that needs a reply, write a short suggested reply in the brief. Do not send or save anything.',
-      ].join(' '),
+      task: [DEMO_BRIEF_TASK, `Work out travel from my place, ${HOME.address}, unless I say otherwise.`].join(' '),
       cron: '30 7 * * *',
       timezone: input.timeZone,
       status: 'active',

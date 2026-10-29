@@ -2,11 +2,11 @@
 
 /** Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check. */
 export const ModelUsageRole = {
-        Chat: "chat",
-        Delegation: "delegation",
-        Compaction: "compaction",
-        Summarization: "summarization",
-        ProfileLearning: "profile_learning",
-        RelevanceJudge: "relevance_judge"
-    } as const;
-export type ModelUsageRole = typeof ModelUsageRole[keyof typeof ModelUsageRole];
+    Chat: "chat",
+    Delegation: "delegation",
+    Compaction: "compaction",
+    Summarization: "summarization",
+    ProfileLearning: "profile_learning",
+    RelevanceJudge: "relevance_judge",
+} as const;
+export type ModelUsageRole = (typeof ModelUsageRole)[keyof typeof ModelUsageRole];
