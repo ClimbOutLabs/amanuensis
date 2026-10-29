@@ -7,3 +7,6 @@ powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject W
 powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Check Aman.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\Users\Friend\AppData\Local\Programs\Amanuensis\aman.exe'; $shortcut.Arguments = 'doctor'; $shortcut.Save()"
 powershell -NoProfile -NonInteractive -Command "Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe'"
 powershell -NoProfile -NonInteractive -Command "Start-Process 'http://127.0.0.1:8791'"
+whoami
+icacls C:\Users\Friend\AppData\Local\Amanuensis /inheritance:r /grant:r FRIEND-PC\Friend:(OI)(CI)F
+icacls C:\Users\Friend\AppData\Local\Amanuensis

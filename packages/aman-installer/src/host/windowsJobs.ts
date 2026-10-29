@@ -53,7 +53,58 @@ export interface ShortcutFacts {
   args: string;
 }
 
+// One line of a folder's access list, read back as facts: who the line
+// names, and whether it lets them read what is in the folder.
+export interface AclEntry {
+  principal: string;
+  canRead: boolean;
+}
+
+// What reading a folder's access list found: the entries and the
+// person's own account name as the list prints it, or why there is no
+// answer. A folder that is not there is its own answer, because a check
+// before anything is installed has nothing to judge.
+export type AclRead =
+  | { status: 'read'; owner: string; entries: readonly AclEntry[] }
+  | { status: 'missing' }
+  | { status: 'unreadable' };
+
 export class WindowsJobError extends Error {}
+
+// The rights words that let a principal read what is in a folder: full
+// control, modify and read-and-run all include reading, and so do the
+// plain read, the generic read and the read parts of a detailed list.
+const ACL_READ_TOKENS: ReadonlySet<string> = new Set(['F', 'M', 'RX', 'R', 'RD', 'REA', 'GR']);
+
+// The lines icacls prints for a folder, read into entries. The first
+// line starts with the folder itself, the rest are indented under it,
+// and the summary lines below the entries are not entries. A deny line
+// grants nothing, whatever else it says.
+export function parseAclListing(options: { path: string; text: string }): AclEntry[] {
+  const entries: AclEntry[] = [];
+  for (const rawLine of options.text.split('\n')) {
+    let line = rawLine.replace(/\r$/, '');
+    if (line.startsWith(options.path)) {
+      line = line.slice(options.path.length);
+    }
+    line = line.trim();
+    const colon = line.lastIndexOf(':(');
+    if (colon <= 0) {
+      continue;
+    }
+    const principal = line.slice(0, colon).trim();
+    if (principal === '') {
+      continue;
+    }
+    const groups: string[] = [];
+    for (const match of line.slice(colon + 1).matchAll(/\(([^)]*)\)/g)) {
+      groups.push(match[1] ?? '');
+    }
+    const canRead = !groups.includes('DENY') && groups.some(group => ACL_READ_TOKENS.has(group));
+    entries.push({ principal, canRead });
+  }
+  return entries;
+}
 
 // True when the user PATH value already names the folder, in any letter
 // case, with or without a trailing backslash.
@@ -72,6 +123,9 @@ export function userPathHasFolder(options: { pathValue: string; folder: string }
 export interface WindowsJobs {
   readonly programsExePath: string;
   readonly setupCmdCopyPath: string;
+  // The folder under the per-user application data folder where Aman
+  // keeps its own files on this PC: the Aman-Setup copy lives there.
+  readonly dataDir: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
@@ -93,6 +147,12 @@ export interface WindowsJobs {
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
+  // Makes a folder private to the person: inherited access is removed
+  // and only their own account keeps full control, which the folders
+  // and files later made inside it inherit.
+  makeFolderPrivate: (path: string) => Promise<void>;
+  // Reads a folder's access list back, for the doctor to judge.
+  readFolderAcl: (path: string) => Promise<AclRead>;
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
@@ -136,9 +196,26 @@ export function systemWindowsJobs(options: {
     return result.stdout;
   };
 
+  // The person's own account name, the way the access list prints it,
+  // asked for once: the folder access jobs need it to grant access and
+  // to say whose access is expected.
+  let userName: Promise<string> | null = null;
+  const currentUserName = (): Promise<string> => {
+    userName ??= (async () => {
+      const result = await runner.run('whoami', []);
+      const name = result.stdout.trim();
+      if (!result.started || result.exitCode !== 0 || name === '') {
+        throw new WindowsJobError("this computer's account name could not be read");
+      }
+      return name;
+    })();
+    return userName;
+  };
+
   return {
     programsExePath: paths.programsExePath,
     setupCmdCopyPath: paths.setupCmdCopyPath,
+    dataDir: paths.dataDir,
 
     async copySelfToPrograms() {
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
@@ -239,6 +316,27 @@ export function systemWindowsJobs(options: {
 
     async openBrowser(url: string) {
       await runPowerShell(`Start-Process ${psQuote(url)}`);
+    },
+
+    async makeFolderPrivate(path: string) {
+      const user = await currentUserName();
+      const result = await runner.run('icacls', [path, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError(`the folder could not be made private: ${path}`);
+      }
+    },
+
+    async readFolderAcl(path: string) {
+      const owner = await currentUserName();
+      const result = await runner.run('icacls', [path]);
+      if (!result.started) {
+        return { status: 'unreadable' };
+      }
+      if (result.exitCode !== 0) {
+        const said = `${result.stdout}\n${result.stderr}`.toLowerCase();
+        return said.includes('cannot find') ? { status: 'missing' } : { status: 'unreadable' };
+      }
+      return { status: 'read', owner, entries: parseAclListing({ path, text: result.stdout }) };
     },
 
     async portIsFree(port: number) {

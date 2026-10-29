@@ -7,6 +7,7 @@ import {
   WindowsJobError,
   userPathHasFolder,
   windowsPaths,
+  type AclRead,
   type ShortcutFacts,
   type WindowsJobs,
 } from './windowsJobs.ts';
@@ -20,7 +21,9 @@ export type FakeWindowsJobStep =
   | 'update'
   | 'forwarder'
   | 'docker'
-  | 'browser';
+  | 'browser'
+  | 'aclPrivate'
+  | 'aclRead';
 
 // A Windows host for tests: the user PATH, the shortcuts and the held
 // ports are held in memory, every job writes down that it ran, and
@@ -28,11 +31,14 @@ export type FakeWindowsJobStep =
 export class FakeWindowsJobs implements WindowsJobs {
   readonly programsExePath: string;
   readonly setupCmdCopyPath: string;
+  readonly dataDir: string;
   private readonly selfExePath: string;
   private readonly programsDir: string;
   private readonly startMenuProgramsDir: string;
   private readonly heldPorts: ReadonlySet<number>;
   private readonly failSteps: ReadonlySet<FakeWindowsJobStep>;
+  private readonly aclOwner: string;
+  private readonly acls: Map<string, AclRead>;
   userPath: string;
   shortcuts: ShortcutFacts[];
   forwarderContents: string | null = null;
@@ -48,10 +54,16 @@ export class FakeWindowsJobs implements WindowsJobs {
     shortcuts?: readonly ShortcutFacts[];
     heldPorts?: ReadonlySet<number>;
     failSteps?: ReadonlySet<FakeWindowsJobStep>;
+    // The person's own account name, as an access list prints it, and
+    // the access lists tests start folders with. A folder with no list
+    // scripted is not there.
+    aclOwner?: string;
+    acls?: ReadonlyMap<string, AclRead>;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
     this.setupCmdCopyPath = paths.setupCmdCopyPath;
+    this.dataDir = paths.dataDir;
     this.programsDir = paths.programsDir;
     this.selfExePath = options.selfExePath;
     this.startMenuProgramsDir = options.startMenuProgramsDir;
@@ -59,6 +71,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.shortcuts = [...(options.shortcuts ?? [])];
     this.heldPorts = options.heldPorts ?? new Set();
     this.failSteps = options.failSteps ?? new Set();
+    this.aclOwner = options.aclOwner ?? 'FRIEND-PC\\Friend';
+    this.acls = new Map(options.acls ?? []);
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -141,6 +155,23 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.step('browser');
     this.browserUrls.push(url);
     return Promise.resolve();
+  }
+
+  // Making a folder private leaves it with one entry, the person's
+  // own, as the real command leaves it.
+  makeFolderPrivate(path: string): Promise<void> {
+    this.step('aclPrivate');
+    this.acls.set(path, {
+      status: 'read',
+      owner: this.aclOwner,
+      entries: [{ principal: this.aclOwner, canRead: true }],
+    });
+    return Promise.resolve();
+  }
+
+  readFolderAcl(path: string): Promise<AclRead> {
+    this.step('aclRead');
+    return Promise.resolve(this.acls.get(path) ?? { status: 'missing' });
   }
 
   portIsFree(port: number): Promise<boolean> {
