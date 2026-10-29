@@ -454,6 +454,12 @@ export interface RawAssistantMessageWithUsage {
    * parts. Absent when no call was cut.
    */
   size_cut_tool_calls?: string[];
+  /**
+   * Set when the stream stopped reading because the reply started more tool calls than one
+   * reply may make. The calls it holds are the ones before the cut; the reply guard stops the
+   * turn rather than running part of the reply. Absent when the reply stayed under the cap.
+   */
+  tool_call_count_cut?: true;
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

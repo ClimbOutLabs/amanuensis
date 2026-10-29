@@ -4095,6 +4095,7 @@ export class AgentThread {
               after: uniqueToolCalls,
               ids: new Set(result.value.size_cut_tool_calls ?? []),
             }),
+      callCountCut: result.value.tool_call_count_cut === true,
     });
     // Keys and reason only: argument values can hold the person's content.
     for (const flagged of replyGuard.flaggedCalls) {
@@ -4106,7 +4107,20 @@ export class AgentThread {
         reason: flagged.reason,
       });
     }
-    if (replyGuard.tooManyCalls && !unattended) {
+    if (replyGuard.tooManyCalls) {
+      // Names only, and only the first few: argument values can hold the person's content.
+      const names = (replyGuard.message.tool_calls ?? []).map(call => call.function.name);
+      this.logger.warn('Reply asked for too many tool calls at once', {
+        threadId: this.threadId,
+        toolCallCount: names.length,
+        cap: MAX_TOOL_CALLS_PER_REPLY,
+        firstToolNames: names.slice(0, 5),
+        streamCut: result.value.tool_call_count_cut === true,
+      });
+    }
+    // An unattended run recounts below, once held calls are known; a reply the stream cut at
+    // the cap is incomplete and stops either way.
+    if (replyGuard.tooManyCalls && (!unattended || result.value.tool_call_count_cut === true)) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };

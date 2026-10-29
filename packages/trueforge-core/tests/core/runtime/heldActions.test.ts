@@ -1213,8 +1213,8 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
   });
 
-  it('runs 20 distinct reads at once, one under the cap', async () => {
-    const calls = Array.from({ length: 20 }, (_, index) => ({
+  it('runs 12 distinct reads at once, the whole cap', async () => {
+    const calls = Array.from({ length: 12 }, (_, index) => ({
       id: `call-read-${String(index)}`,
       name: 'read_note',
       args: JSON.stringify({ note: `n${String(index)}` }),
@@ -1228,13 +1228,13 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     });
     const { brief } = await runBrief(h);
 
-    expect(h.callTool).toHaveBeenCalledTimes(20);
+    expect(h.callTool).toHaveBeenCalledTimes(12);
     expect(brief.result.root_agent_error).toBeUndefined();
     expect(brief.result.output).toMatchObject({ content: 'All done.' });
   });
 
-  it('still stops the run when more than 20 calls would run at once', async () => {
-    const calls = Array.from({ length: 21 }, (_, index) => ({
+  it('still stops the run when more than 12 calls would run at once', async () => {
+    const calls = Array.from({ length: 13 }, (_, index) => ({
       id: `call-read-${String(index)}`,
       name: 'read_note',
       args: JSON.stringify({ note: `n${String(index)}` }),
@@ -1253,9 +1253,9 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
   });
 
   it.each([true, false])(
-    'writes one not-done audit row per call a 21-call reply drops (unattended: %s)',
+    'writes one not-done audit row per call a 13-call reply drops (unattended: %s)',
     async unattended => {
-      const calls = Array.from({ length: 21 }, (_, index) => ({
+      const calls = Array.from({ length: 13 }, (_, index) => ({
         id: `call-read-${String(index)}`,
         name: 'read_note',
         args: JSON.stringify({ note: `n${String(index)}` }),
@@ -1274,7 +1274,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       });
 
       const dropped = h.audit.filter(record => record.auto_deny_reason === 'tool_not_prepared');
-      expect(dropped).toHaveLength(21);
+      expect(dropped).toHaveLength(13);
       expect(dropped.every(record => record.outcome === 'auto_denied' && record.tool_name === 'read_note')).toBe(true);
       expect(h.callTool).not.toHaveBeenCalled();
       expect(turn.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);

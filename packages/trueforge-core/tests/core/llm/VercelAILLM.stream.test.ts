@@ -27,6 +27,7 @@ import {
   toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
+import { MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
 
 // ─────────── Helpers ───────────
 
@@ -783,6 +784,40 @@ describe('mapStreamToChunks', () => {
       { id: 'call-1', type: 'function', function: { name: 'search', arguments: '{"q":"hi"}' } },
     ]);
     expect(final.finish_reason).toBe('tool_calls');
+  });
+
+  it('stops reading at one call over the cap and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALLS_PER_REPLY + 1 }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    // Nothing after the cut is read: a finish step that never arrives is not waited for.
+    const neverRead = jest.fn();
+    async function* floodStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) yield part;
+      neverRead();
+      yield makeFinishStep('tool-calls');
+    }
+    const { final } = await drainStream(mapStreamToChunks({ stream: floodStream(), chunkMeta: CHUNK_META }));
+
+    expect(final.tool_call_count_cut).toBe(true);
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALLS_PER_REPLY);
+    expect(neverRead).not.toHaveBeenCalled();
+  });
+
+  it('leaves a reply with exactly the cap of calls unmarked', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALLS_PER_REPLY }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    const { final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream([...parts, makeFinishStep('tool-calls')]), chunkMeta: CHUNK_META }),
+    );
+
+    expect(final.tool_call_count_cut).toBeUndefined();
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALLS_PER_REPLY);
   });
 
   it('captures google thoughtSignature from tool-input-start providerMetadata into provider_specific_fields', async () => {
