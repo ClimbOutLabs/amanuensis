@@ -2,6 +2,7 @@ import { win32 } from 'node:path';
 
 import {
   CHECK_AMAN_SHORTCUT_NAME,
+  PHONE_SHORTCUT_NAME,
   SETUP_CMD_FORWARDER,
   UPDATE_AMAN_SHORTCUT_NAME,
   WindowsJobError,
@@ -18,6 +19,9 @@ export type FakeWindowsJobStep =
   | 'point'
   | 'check'
   | 'update'
+  | 'phone'
+  | 'firewall-open'
+  | 'firewall-close'
   | 'forwarder'
   | 'ca-write'
   | 'ca-store'
@@ -41,6 +45,8 @@ export class FakeWindowsJobs implements WindowsJobs {
   caCertContents: string | null = null;
   browserUrls: string[] = [];
   dockerDesktopStarts = 0;
+  firewallOpen = false;
+  firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
 
   constructor(options: {
@@ -125,6 +131,32 @@ export class FakeWindowsJobs implements WindowsJobs {
     } else {
       this.shortcuts[existing] = entry;
     }
+    return Promise.resolve();
+  }
+
+  ensurePhoneShortcut(): Promise<void> {
+    this.step('phone');
+    const path = win32.join(this.startMenuProgramsDir, `${PHONE_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'network open' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
+    return Promise.resolve();
+  }
+
+  openFirewallToHome(ports: readonly number[]): Promise<void> {
+    this.step('firewall-open');
+    this.firewallOpen = true;
+    this.firewallPorts = [...ports];
+    return Promise.resolve();
+  }
+
+  closeFirewallToHome(): Promise<void> {
+    this.step('firewall-close');
+    this.firewallOpen = false;
     return Promise.resolve();
   }
 

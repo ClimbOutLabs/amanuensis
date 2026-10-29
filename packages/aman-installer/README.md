@@ -29,6 +29,13 @@ What it can do today:
   to trust the authority that made its certificate.
 - `aman verify` checks a downloaded file against its signed release
   record.
+- `aman network open`, on Windows, opens Aman to the devices on the
+  home network: it hands the installer this computer's private
+  addresses (the setup container cannot see its adapters), lets those
+  devices through the Windows firewall on Aman's ports, and prints
+  the address and the scan code a phone uses. The Start menu entry
+  "Use Aman on my phone" prints them again. `aman network close`
+  closes Aman to the network again.
 - `aman upgrade`, on Windows, updates Aman to the newest release whose
   signed record checks out: it gates on the local doctor, asks once
   before anything downloads, swaps the program in with the old one kept
