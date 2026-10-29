@@ -1,8 +1,8 @@
 /**
  * Shipped model catalog (model-catalog.yaml): the discovery list of provider
  * and model presets offered by GET /catalogs/model-providers for the UI to copy
- * into PUT /settings/model-providers bodies. Never consulted on writes and never
- * read by the runtime.
+ * into PUT /settings/model-providers bodies. Never consulted on writes; read at
+ * boot only to list the Token Factory models of the env-managed provider.
  *
  * Default: YAML inlined into `modelCatalog.gen.ts` at build time. Optional
  * override: `MODEL_CATALOG_PATH` (file on disk).

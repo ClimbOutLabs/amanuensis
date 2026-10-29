@@ -217,7 +217,7 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and makes it the chat default. The provider is managed by the environment. The model appears in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after the variable changes, so roles, personas and agents that still point at it keep working.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and makes it the chat default. It also lists the other Token Factory models in the model catalog, so a chat can switch between them. The daily token cap counts all of them. The provider is managed by the environment. The models appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after the variable changes, so roles, personas and agents that still point at it keep working.
 
 **Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, and that includes the helper jobs below.
 

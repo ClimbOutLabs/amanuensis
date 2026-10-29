@@ -635,6 +635,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     serviceFoundryClient,
   } = persistence;
 
+  const modelCatalog = ModelCatalog.load();
   // The env-managed Token Factory provider and default model are written before the first request,
   // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
   if (!isTrueFoundryModeEnabled(configuration)) {
@@ -646,6 +647,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
         model: configuration.TOKEN_FACTORY_MODEL,
       },
+      catalogModels: modelCatalog.list().find(entry => entry.type === 'tokenfactory')?.models ?? [],
       logger,
     });
     if (outcome !== 'skipped') {
@@ -831,7 +833,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
-    modelCatalog: ModelCatalog.load(),
+    modelCatalog,
     mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
