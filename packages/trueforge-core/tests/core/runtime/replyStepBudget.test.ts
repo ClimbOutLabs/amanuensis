@@ -8,11 +8,13 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentParent } from '../../../src/core/runtime/AgentThread.types';
 import {
+  MAX_PROGRESS_STEP_REFUNDS,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   STEP_BUDGET_SPENT_MESSAGE,
   unfinishedNotice,
 } from '../../../src/core/runtime/replyBudget';
+import { EDIT_SPACE_TOOL_NAME } from '../../../src/core/spaces/toolContract';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
@@ -28,6 +30,12 @@ function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: bo
       { name: 'create_event', description: 'Create a calendar event', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
       { name: 'lookup', description: 'Look something up', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
       { name: 'run', description: 'Run a command', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
+      {
+        name: EDIT_SPACE_TOOL_NAME,
+        description: 'Change a space',
+        inputSchema: OBJECT_INPUT_SCHEMA,
+        preload: true,
+      },
     ],
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
@@ -42,6 +50,9 @@ function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: bo
   jest.mocked(toolSet.callTool).mockImplementation(params => {
     if (params.name === 'create_event' && refuse) {
       return Promise.reject(new ToolPolicyBlockedError(`Tool '${params.name}' is not allowed on MCP server workspace`));
+    }
+    if (params.name === EDIT_SPACE_TOOL_NAME && params.arguments?.['refused'] === true) {
+      return Promise.resolve(toolResultResponse({ text: 'Not saved.', isError: true }));
     }
     if (params.name === 'run' && runFails) {
       return Promise.resolve(toolResultResponse({ text: 'Traceback: boom', isError: true }));
@@ -203,6 +214,53 @@ describe('reply step budget', () => {
     expect(JSON.stringify(model.requests[8]?.messages)).toContain(STEP_BUDGET_SPENT_MESSAGE);
     expect(toolSet.callTool).toHaveBeenCalledTimes(8);
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
+  });
+
+  describe('space writes', () => {
+    const editCall = ({ step, refused }: { step: number; refused: boolean }) =>
+      toolCallStream({ id: `edit-${String(step)}`, name: EDIT_SPACE_TOOL_NAME, args: { n: step, refused } });
+
+    it('a landed space write does not spend the step, so a build in parts runs past 8 steps', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => (step <= 10 ? editCall({ step, refused: false }) : finalAnswerStream()));
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(model.requests).toHaveLength(11);
+      expect(model.requests[9]?.tools).toBeDefined();
+      expect(thread.turnToolCallLedger.stepsByThread.get('main')).toBe(1);
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(10);
+    });
+
+    it('stops refunding at the cap, so the reply is bounded at 8 plus the cap', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => editCall({ step, refused: false }));
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(MAX_PROGRESS_STEP_REFUNDS);
+      expect(model.requests).toHaveLength(8 + MAX_PROGRESS_STEP_REFUNDS + 1);
+      expect(model.requests.at(-1)?.tools).toBeUndefined();
+      expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('Say which space you changed');
+    });
+
+    it('a refused space write refunds nothing', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => {
+        if (step > 8) {
+          return finalAnswerStream();
+        }
+        // A lookup between refusals keeps the failed-batch stop from ending the reply first.
+        return step % 2 === 0 ? lookupCall(step) : editCall({ step, refused: true });
+      });
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(model.requests).toHaveLength(9);
+      expect(model.requests[8]?.tools).toBeUndefined();
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBeUndefined();
+      expect(JSON.stringify(model.requests[8]?.messages)).not.toContain('Say which space you changed');
+    });
   });
 
   it('a call written on the forced answer is dropped, not run, and is not streamed either', async () => {

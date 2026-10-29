@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "prompts": [
+    {
+      "id": "table-then-format",
+      "prompt": "MAKES_SPACE:Breeds make a space.",
+      "follow_up": "REFORMATS_SPACE tidy it.",
+      "expect": { "rows": 3, "duplicate_rows": 0, "table_valid": true, "formatting_changed": true }
+    },
+    {
+      "id": "plain-chat",
+      "prompt": "Say hello.",
+      "expect": { "completed": true }
+    }
+  ]
+}

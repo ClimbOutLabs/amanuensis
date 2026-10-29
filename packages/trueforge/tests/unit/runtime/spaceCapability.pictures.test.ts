@@ -43,7 +43,8 @@ const AUTHORITY = { tenantId: 'default', userRef: 'user-a' };
 const COLLIE_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Border_Collie_working.jpg';
 const POODLE_URL = 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Standard_Poodle.jpg';
 
-const NOT_SEEN_PICTURE = "Open the picture's page first, then use the image link from that page.";
+const NOT_SEEN_PICTURE =
+  'This picture does not come from a page you opened or a search result in this chat. Open the page that shows it and use its picture link, or leave the picture out.';
 
 function textOf(response: CallToolResponse): string {
   if (!('result' in response)) {
@@ -182,7 +183,7 @@ describe('space pictures and links come only from this chat', () => {
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs(`![Collie](https://images.wikimedia.org/invented/border-collie.jpg)`),
     });
-    expect(await errorOf(response)).toBe("Open the picture's page first, then use the image link from that page.");
+    expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
   });
 
   it('refuses a placeholder domain even when a search result returned it', async () => {
@@ -402,7 +403,7 @@ describe('page reads, scripts, and empty bodies', () => {
     for (const body of [`<a href="${COLLIE_URL}">Collie</a>`, `[Collie](${COLLIE_URL})`]) {
       const response = await setup(webSearch)(CREATE_SPACE_TOOL_NAME, createArgs(body));
       expect(isErrorResponse(response)).toBe(true);
-      expect(await errorOf(response)).toContain('link did not come from the person or a search');
+      expect(await errorOf(response)).toContain('does not come from a search result in this chat');
     }
   });
 

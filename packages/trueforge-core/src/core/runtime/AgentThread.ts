@@ -147,6 +147,7 @@ import {
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { assistantDisplayName } from '../personas/assistantName';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
+import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { resolveLocalTime } from '../util/clientTimezone';
@@ -259,6 +260,7 @@ import {
 import {
   clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
@@ -266,6 +268,7 @@ import {
   removedToolMessage,
   retryIsDue,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   STEP_BUDGET_SPENT_MESSAGE,
   stepBudgetFor,
   toolResultKind,
@@ -1735,6 +1738,8 @@ export class AgentThread {
   // for every turn and latches true the first time the grounding nudge fires,
   // so a turn gets at most one.
   private groundingNudgeSentThisTurn = false;
+  // The closing line goes on the turn's first final message only, so a nudged second answer does not repeat it.
+  private spaceClosingLineWritten = false;
   // When a loop guard fires, the turn gets one bounded recovery pass: a host
   // note telling the model to write its final answer from gathered results
   // instead of ending with no answer. This latches true so a second guard
@@ -4146,6 +4151,31 @@ export class AgentThread {
       const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
       assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
     }
+    // A reply that wrote spaces without naming them gets the host's own closing line, saved with the
+    // reply like the held-actions note above, so the person always learns which page changed.
+    if (
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !emptyTerminalFailure &&
+      !shouldNudgeForEmptyReasoning &&
+      this.parent === undefined &&
+      !this.spaceClosingLineWritten &&
+      (typeof assistantMessage.content === 'string' || assistantMessage.content === null)
+    ) {
+      const writes = spaceWritesThisTurn(this.context);
+      const prior = assistantMessage.content?.trim() ?? '';
+      const lowerPrior = prior.toLowerCase();
+      if (writes.length > 0 && !writes.some(write => lowerPrior.includes(write.name.toLowerCase()))) {
+        const unfinished = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
+        const closing = spaceClosingLine({
+          writes,
+          unfinished,
+          noticeShown: (['budget', 'failed'] as const).some(kind => prior.includes(unfinishedNotice(kind))),
+        });
+        this.spaceClosingLineWritten = true;
+        assistantMessage.content = [prior, closing].filter(part => part !== '').join('\n\n');
+      }
+    }
     const agentAssistantMessage = buildModelMessageEvent({
       // The terminal model event is authoritative. By this point the complete tool
       // arguments are available, so publish the same resolved, server-classified
@@ -5076,6 +5106,32 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
+    // A step that landed a space write is progress, not spent budget; a build in parts needs many such steps.
+    const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
+    const refund = progressRefundFor({
+      refundsSoFar,
+      results: toolCallResults.flatMap(result => {
+        const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
+        // A call held for the owner has not run, so it earns no refund.
+        return call === undefined || call.tool_info.held_for_owner !== undefined
+          ? []
+          : [
+              {
+                toolName: call.tool_info.original_tool_name,
+                disposition: result.disposition,
+                failure: result.failure,
+                savedNothing: spaceWriteSavedNothing(result.message.content),
+              },
+            ];
+      }),
+    });
+    if (refund > 0) {
+      replyTurn.progressRefundsByThread.set(this.threadId, refundsSoFar + refund);
+      replyTurn.stepsByThread.set(
+        this.threadId,
+        Math.max(0, (replyTurn.stepsByThread.get(this.threadId) ?? 0) - refund),
+      );
+    }
     for (const notice of removalNotices) {
       replyTurn.removedTools.push(notice.toolName);
       this.noteUnfinished(notice.reason);
@@ -5628,7 +5684,11 @@ export class AgentThread {
               yield* this.appendToContext({
                 context: [
                   internalSystemMessage(
-                    forcedAnswer === 'budget' ? STEP_BUDGET_SPENT_MESSAGE : REMOVED_TOOL_STREAK_MESSAGE,
+                    forcedAnswer === 'budget'
+                      ? (replyLedger.progressRefundsByThread.get(this.threadId) ?? 0) > 0
+                        ? STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE
+                        : STEP_BUDGET_SPENT_MESSAGE
+                      : REMOVED_TOOL_STREAK_MESSAGE,
                   ),
                 ],
                 output: [],
