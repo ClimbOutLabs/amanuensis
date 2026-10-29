@@ -161,7 +161,8 @@ describe('buildDemoWorld content', () => {
       'Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences.',
       'PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.',
       'Surface the single most important actionable item first, on its own highlighted card, never buried.',
-      'OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
+      'OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once.',
+      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
     ]) {
       expect(task).toContain(fragment);
     }
@@ -237,6 +238,7 @@ describe('buildDemoWorld content', () => {
     expect(profile.assistant_identity).toContain('Never preachy, never flowery.');
     expect(profile.voice_guidance).toBe('Warm, friendly, honest, direct and caring.');
     expect(profile.learning_enabled).toBe(true);
+    expect(profile.assistant_identity).toContain('Vibe\nBest friend who knows where to look.');
     expect(agentSpec.instructions).toContain('You are Nata');
     expect(agentSpec.instructions).toContain('Warm, friendly, honest, direct and caring.');
   });
@@ -251,12 +253,24 @@ describe('buildDemoWorld content', () => {
     const world = worldOn(MONDAY);
 
     expect(world.agentSpec.config?.sandbox?.enabled).toBe(true);
+    expect(world.agentSpec.config?.context_management?.large_tool_response?.enabled).toBe(false);
     for (const text of [world.agentSpec.instructions, ...world.personas.map(persona => persona.content.instructions)]) {
       expect(text).toContain('run_code');
       expect(text).toContain('If run_code is not available');
-      expect(text).toContain('connected Google account');
+      expect(text).toContain('read them with the email and calendar tools');
+      expect(text).toContain(
+        'fetch it with the attachment tool; if it was not fetched, say that only the email text was read',
+      );
+      expect(text).toContain('list the recent messages and look through them instead of repeating the same words');
+      expect(text).not.toContain('Google');
       expect(text).toContain('leave every send for her OK');
+      expect(text).toContain(
+        'If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.',
+      );
     }
+    expect(world.agentSpec.instructions).toContain(
+      'Your reply holds only the answer for the person. If a tool fails or a service is not connected',
+    );
   });
 
   it('books the GP in the tasks and starts trips from the rental', () => {

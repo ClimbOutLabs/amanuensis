@@ -17,8 +17,7 @@ import { HindsightClient, type RetainOutcome } from '../../../src/runtime/memory
 import {
   buildDistillationMessages,
   isLearningRateCapped,
-  LEARNED_PROFILE_CLEARED_CONTENT,
-  learnedProfileClearedOperationId,
+  LEARNED_PROFILE_CONTEXT,
   learnedProfileDocumentId,
   learnedProfileOperationId,
   mirrorLearnedProfile,
@@ -81,6 +80,7 @@ function llmAnswering(text: string, onCall?: () => Promise<void>): { llm: ILLM; 
   return { llm, createNonStream };
 }
 
+type DeleteDocumentSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['deleteDocument']>>;
 type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
 
 /**
@@ -88,7 +88,11 @@ type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightCl
  * are the client's own, so a change to either fails these tests at compile time. Its fetch is
  * wired to reject, which keeps an unscripted call from ever reaching the network.
  */
-function retainingClient(outcome: RetainOutcome = { ok: true }): { client: HindsightClient; retain: RetainSpy } {
+function retainingClient(outcome: RetainOutcome = { ok: true }): {
+  client: HindsightClient;
+  retain: RetainSpy;
+  deleteDocument: DeleteDocumentSpy;
+} {
   const client = new HindsightClient({
     apiBase: 'https://hindsight.test.example',
     bank: 'aman',
@@ -96,7 +100,8 @@ function retainingClient(outcome: RetainOutcome = { ok: true }): { client: Hinds
     fetchImpl: () => Promise.reject(new Error('the mirror must not reach the network in tests')),
   });
   const retain = jest.spyOn(client, 'retain').mockResolvedValue(outcome);
-  return { client, retain };
+  const deleteDocument = jest.spyOn(client, 'deleteDocument').mockResolvedValue({ ok: true });
+  return { client, retain, deleteDocument };
 }
 
 /**
@@ -257,18 +262,6 @@ describe('learned profile mirror identity', () => {
     ];
     expect(new Set(ids).size).toBe(3);
   });
-
-  it('derives the tombstone operation id from the user and the revision it cleared at', () => {
-    const cleared = { userRef: 'user-a', profileRevision: 4 };
-    expect(learnedProfileClearedOperationId(cleared)).toBe(learnedProfileClearedOperationId({ ...cleared }));
-    expect(learnedProfileClearedOperationId(cleared)).not.toBe(
-      learnedProfileClearedOperationId({ ...cleared, profileRevision: 5 }),
-    );
-    expect(learnedProfileClearedOperationId(cleared)).not.toBe(
-      learnedProfileClearedOperationId({ ...cleared, userRef: 'user-b' }),
-    );
-    expect(learnedProfileClearedOperationId(cleared)).toMatch(UUID_V5_PATTERN);
-  });
 });
 
 describe('mirrorLearnedProfile', () => {
@@ -306,24 +299,22 @@ describe('mirrorLearnedProfile', () => {
         timestamp: '2026-09-01T12:00:00.000Z',
         document_id: learnedProfileDocumentId('user-a'),
         context: 'Learned user profile',
-        metadata: { source: 'aman-profile-learning' },
+        metadata: { source: 'aman-profile-learning', replace_document: 'true' },
       },
     ]);
   });
 
-  it('mirrors a tombstone over the same document id when the profile is cleared', async () => {
-    const { client, retain } = retainingClient();
+  it('deletes the mirrored document and stores no memory when the profile is cleared', async () => {
+    const { client, retain, deleteDocument } = retainingClient();
 
     await mirrorLearnedProfile({ client, ...mirrorParams({ document: null }) });
     await mirrorLearnedProfile({ client, ...mirrorParams({ document: '   ' }) });
 
-    expect(retain).toHaveBeenCalledTimes(2);
-    for (const [call] of retain.mock.calls) {
-      expect(call?.items[0]?.content).toBe(LEARNED_PROFILE_CLEARED_CONTENT);
-      // Same document id as the live mirror, so the tombstone replaces it rather than adding to it.
-      expect(call?.items[0]?.document_id).toBe(learnedProfileDocumentId('user-a'));
-      // Repeated clears at one revision carry one operation id: the provider dedupes them.
-      expect(call?.operationId).toBe(learnedProfileClearedOperationId({ userRef: 'user-a', profileRevision: 3 }));
+    expect(retain).not.toHaveBeenCalled();
+    expect(deleteDocument).toHaveBeenCalledTimes(2);
+    for (const [call] of deleteDocument.mock.calls) {
+      expect(call.documentId).toBe(learnedProfileDocumentId('user-a'));
+      expect(call.context).toBe(LEARNED_PROFILE_CONTEXT);
     }
   });
 
@@ -353,7 +344,7 @@ describe('submitProfileLearning', () => {
       await options?.onModelCall?.(personalizationStore);
     });
     const resolveLlm = jest.fn().mockResolvedValue(llm);
-    const { client: memoryClient, retain } = retainingClient();
+    const { client: memoryClient, retain, deleteDocument } = retainingClient();
     const member: ProfileLearningDrainMember = {
       config: passConfig(),
       personalizationStore,
@@ -368,7 +359,7 @@ describe('submitProfileLearning', () => {
       turnModelFqn: 'test-provider/test-model',
       resolveLlm,
     };
-    return { db, personalizationStore, eventStore, createNonStream, resolveLlm, retain, member };
+    return { db, personalizationStore, eventStore, createNonStream, resolveLlm, retain, deleteDocument, member };
   }
 
   function turnFields() {
@@ -432,10 +423,9 @@ describe('submitProfileLearning', () => {
     await submitProfileLearning({ ...harness.member, ...turnFields() });
 
     expect(harness.eventStore.appends).toHaveLength(0);
-    expect(harness.retain).toHaveBeenCalledTimes(1);
-    const call = harness.retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe(LEARNED_PROFILE_CLEARED_CONTENT);
-    expect(call?.operationId).toBe(learnedProfileClearedOperationId({ userRef: 'user-a', profileRevision: 3 }));
+    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
+    expect(harness.deleteDocument.mock.calls[0]?.[0].documentId).toBe(learnedProfileDocumentId('user-a'));
     await harness.db.destroy();
   });
 
@@ -590,8 +580,8 @@ describe('submitProfileLearning', () => {
             apiKey: 'sk-nebius',
             baseUrl: stub.baseUrl,
             model: 'nvidia/nemotron-3-super-120b-a12b',
-            cheaperModel: undefined,
           },
+          catalogModels: [],
           logger: makeLogger(),
         });
       } else {
@@ -669,28 +659,14 @@ describe('submitProfileLearning', () => {
     await harness.db.destroy();
   });
 
-  it('hands the pass to the small model when the turn runs on Token Factory', async () => {
+  it('uses the turn model when the turn runs on Token Factory and no pass model is set', async () => {
     const harness = await makeHarness();
     await submitProfileLearning({
       ...harness.member,
       turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
-      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
       ...turnFields(),
     });
-    expect(harness.resolveLlm).toHaveBeenCalledWith('tokenfactory/nvidia-nemotron-3-nano-30b-a3b');
-    await harness.db.destroy();
-  });
-
-  it('keeps a configured pass model over the small model', async () => {
-    const harness = await makeHarness();
-    await submitProfileLearning({
-      ...harness.member,
-      config: passConfig({ modelFqn: 'small-provider/small-model' }),
-      turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
-      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
-      ...turnFields(),
-    });
-    expect(harness.resolveLlm).toHaveBeenCalledWith('small-provider/small-model');
+    expect(harness.resolveLlm).toHaveBeenCalledWith('tokenfactory/nemotron-3-super-120b-a12b');
     await harness.db.destroy();
   });
 

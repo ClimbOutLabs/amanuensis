@@ -41,7 +41,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 - 🧠 **Your choice of model** — configurable providers, including OpenAI-compatible endpoints and fully local Ollama; model roles assign separate models to conversation and auxiliary work.
 - 🔌 **MCP connectors** — header or OAuth authentication, tool approvals, and per-chat capability selection.
 - 📦 **Reusable skills and subagents** — `SKILL.md` instruction packs, dynamic subagents, and generative UI that renders interactive results instead of plain text.
-- 💻 **Sandboxed execution** — on-demand code and file execution through the Daytona adapter; standalone mode also supports a built-in local adapter on macOS and Linux hosts.
+- 💻 **Sandboxed execution** — on-demand code and file execution in a sandbox, with two backends: `docker` (the default; the server starts a container per run) and `slots` (four locked-down containers the installer sets up). See [docs/sandbox.mdx](docs/sandbox.mdx).
 - 👤 **Personalization** — personas and an inspectable personalization profile.
 - 🗄️ **Long-term memory** — on by default as local Markdown files: the model retains what matters from each chat and recalls it in later ones, with bounded recall and auditable recall events. Self-hosted Hindsight banks remain available as an experimental opt-in.
 
@@ -56,7 +56,7 @@ flowchart TB
     Runtime["Agent runtime<br/>tool orchestration · approvals · sessions<br/>(packages/trueforge-core)"]
     Models["Model providers<br/>OpenAI-compatible · Ollama"]
     MCP["MCP connectors<br/>header / OAuth auth"]
-    Sandbox["Sandbox<br/>Daytona · local adapter"]
+    Sandbox["Sandbox<br/>docker · slots backends"]
     Memory["Memory<br/>Markdown files (local)"]
     Storage[("Storage<br/>SQLite in standalone<br/>Postgres + Redis hosted")]
 
@@ -74,35 +74,49 @@ flowchart TB
 
 ## Repository layout
 
-| Path                      | Purpose                                                               |
-| ------------------------- | --------------------------------------------------------------------- |
-| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features |
-| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts              |
-| `packages/frontend`       | Browser application                                                   |
-| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                 |
-| `packages/trueforge-sdk`  | Generated TypeScript SDK                                              |
-| `docs`                    | Product, setup, architecture, and API documentation                   |
-| `ops`                     | Aman-specific design records, evaluations, and runbooks               |
+| Path                      | Purpose                                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features                                                        |
+| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts                                                                     |
+| `packages/frontend`       | Browser application                                                                                                          |
+| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                                                                        |
+| `packages/trueforge-sdk`  | Generated TypeScript SDK                                                                                                     |
+| `packages/amanuensis`     | The `npx amanuensis` package: server and chat UI started with one command                                                    |
+| `packages/aman-installer` | A separate single-file installer program for Windows, Mac and Linux; its upgrade command is Windows-only                     |
+| `installer`               | The one-command installer (`install.sh`), its helper scripts and the `aman` shim it leaves behind (doctor, checks, upgrades) |
+| `charts`                  | Helm chart for Kubernetes                                                                                                    |
+| `demo`                    | Example data, scripts and the runbook for the demo                                                                           |
+| `mcp`                     | A frozen copy of the Gmail MCP connector                                                                                     |
+| `scripts`                 | Repository build, check and smoke-test scripts                                                                               |
+| `docs`                    | Product, setup, architecture, and API documentation                                                                          |
+| `ops`                     | Aman-specific design records, evaluations, and runbooks                                                                      |
 
 ## Install on your own computer
 
-The installer sets everything up in one command. You need Docker (on Linux the installer can install it for you). Check out the release tag you were given, then run the installer.
+The installer sets everything up in one command. It checks these things first and stops with a plain message if one is missing:
+
+- Linux or macOS, on an x86_64 or arm64 computer. On Windows, run it inside WSL2. Native Windows is not supported.
+- Docker. On Linux this means Docker Engine 23 or newer with Compose v2, and Engine 28 or newer when Docker runs on the Linux kernel itself rather than under WSL2 or Docker Desktop; on macOS, Docker Desktop. Rootless Docker and Podman are not supported. If Docker is missing, the installer can install it for you only on Debian or Ubuntu with `apt`, and only when you answer yes at its prompt or pass `--install-docker`. `--yes` alone never installs Docker.
+- Docker set to at least 6 GB of memory for the first build. 8 GB or more is recommended.
+- `git`.
+- 10 GB of free disk space. On Linux the sandbox also needs about 20 GB more under `/var/lib` for its slot disks; they use real space only as code runs.
+- Admin rights on Linux: the installer asks before each `sudo` step (installing Docker if you chose that, adding you to the `docker` group, the sandbox security rule and disks, and Docker at boot).
+- Nothing else. No Node.js is needed: the installer downloads a pinned copy (about 35 MB, checked against a hash in the repository) and uses it only to set up the sandbox. `--use-host-node` uses your own Node.js 22.14 or newer instead.
+
+Releases are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The newest one, `v0.1.0`, is from before the installer existed, so for now run the installer from `main`. Once a newer release includes it, check out that tag first with `git checkout <tag>`.
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-git checkout vX.Y.Z
 ./installer/install.sh
 ```
 
-Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
+The installer shows its plan and asks before it changes anything. At the end it prints the address to open. By default the app is served over https on port 8443 (or the next free port near it) with a certificate the installer makes on this computer; the plain port near 8791 only sends your browser to the https address. See [docs/install.mdx](docs/install.mdx) for the details and [docs/try-aman.md](docs/try-aman.md) for your first steps.
 
 ## Development quick start
 
 > **`main` is active development and may be unstable.** To build a tagged release instead, add `--branch <tag>` to the `git clone` below; tags are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
->
-> A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these inside [WSL2](https://learn.microsoft.com/windows/wsl/install); native Windows (PowerShell, cmd or Git Bash) is not supported:
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -116,7 +130,7 @@ pnpm standalone:dev
 
 Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings, Models** before starting a chat.
 
-The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
+The server runs without a file watcher, so restart `pnpm standalone:dev` to pick up backend changes. The UI itself still hot-reloads.
 
 [docs/quickstart.mdx](docs/quickstart.mdx) walks through this path in full: prerequisites, connecting your first model (a hosted API key or a fully local Ollama model), confirming a chat works, and troubleshooting the failures a fresh install actually hits.
 
@@ -129,8 +143,13 @@ The app is single-user and, as shipped, this stack has no login screen: every po
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 cp packages/trueforge/.env.example packages/trueforge/.env
+export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
 docker compose up --build
 ```
+
+The `export` line makes a random secret that the app and the calendar container share. Compose stops with a message if it is missing, because `.env.example` does not set it. Set it again in each new terminal, and use the same value for `docker compose down` and `up`.
+
+**Fewer than 20 CPU cores.** `docker-compose.yml` pins the `server` service to cores `0-15` and the `aman-stt` speech service to `16-19`. On a computer with fewer cores Docker refuses to start them. Edit both `cpuset` lines so they fit your cores and do not overlap (for example `0-7` and `8-11` on 12 cores), or delete both lines; [docs/voice-input.mdx](docs/voice-input.mdx) explains the split.
 
 The first build takes several minutes. `docker compose up` keeps streaming container logs in the foreground; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790` appears. Open `http://localhost:8791`.
 
@@ -139,6 +158,7 @@ The first build takes several minutes. `docker compose up` keeps streaming conta
 ```bash
 openssl rand -hex 32
 docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: -f2
+export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)   # skip if it is still set in this terminal
 docker compose --profile login up --build
 ```
 
@@ -217,21 +237,21 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after either variable changes, so roles, personas and agents that still point at it keep working.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and makes it the chat default. It also lists the other Token Factory models in the model catalog, so a chat can switch between them. The daily token cap counts all of them. The provider is managed by the environment. The models appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after the variable changes, so roles, personas and agents that still point at it keep working.
 
-**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, except the helper jobs below: while a turn runs on Token Factory, they use the small model unless you pick one for that role.
+**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, and that includes the helper jobs below.
 
-| Role                | What it does                                            | Where the model comes from                                      |
-| ------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
-| Main chat           | Answers you, including requests for a briefing          | Main chat model                                                 |
-| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model               |
-| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                      |
-| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the small model on Token Factory      |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the small model on Token Factory |
-| Knowledge relevance | Checks which library passages help answer a question    | The small model on Token Factory, else the persona's model      |
-| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas**     |
+| Role                | What it does                                            | Where the model comes from                                  |
+| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing          | Main chat model                                             |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model           |
+| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                  |
+| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model               |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the main chat model          |
+| Knowledge relevance | Checks which library passages help answer a question    | The persona's model                                         |
+| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas** |
 
-**Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up, and a small model such as Nemotron 3 Nano does them at a fraction of the cost of Nemotron 3 Super (see the price table below). Chat answers and briefings are open-ended reasoning over memory and tools, so they stay on Nemotron 3 Super. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
+**Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up. A small model is cheaper, but it can write poor memories, so pick one under **Settings, Roles and Personas** only if you trust it. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
 
 **What it costs.** Prices are USD per million tokens, read on 2026-10-15 from the Token Factory model catalog (`https://tokenfactory.nebius.com/model-catalog.md`) and confirmed against its models endpoint (`https://api.tokenfactory.nebius.com/v1/models?verbose=true`).
 
@@ -248,7 +268,7 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 
 **Where cost shows.**
 
-- With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
+- With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super`. Helper calls are included in the total.
 - In the same details, each role that ran appears with its model, calls, tokens and cost.
 - **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
 - **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.

@@ -15,6 +15,14 @@ export function isMorningBriefPrompt(text: string): boolean {
   return text.startsWith(MORNING_BRIEF_OPENING);
 }
 
+/** The name the seeded brief schedule goes by; resource names are lowercase and hyphenated. */
+export const MORNING_BRIEF_SCHEDULE_NAME = 'morning-brief';
+
+/** Whether a schedule is the owner's daily brief: it carries the brief name, or its task is a brief request. */
+export function isMorningBriefSchedule({ name, task }: { name: string; task: string }): boolean {
+  return name === MORNING_BRIEF_SCHEDULE_NAME || isMorningBriefPrompt(task);
+}
+
 /**
  * What the home's morning brief card sends: the contract's asks in the plain words a person would say,
  * with no output format in it. It shares the contract's opening, so the chat still treats it as a brief;

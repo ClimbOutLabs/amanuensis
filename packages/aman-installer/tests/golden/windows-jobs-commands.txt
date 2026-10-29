@@ -8,3 +8,6 @@ powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject W
 certutil -addstore -user Root C:\Users\Friend\AppData\Local\Amanuensis\ca.crt
 powershell -NoProfile -NonInteractive -Command "Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe'"
 powershell -NoProfile -NonInteractive -Command "Start-Process 'http://127.0.0.1:8791'"
+whoami
+icacls C:\Users\Friend\AppData\Local\Amanuensis /inheritance:r /grant:r FRIEND-PC\Friend:(OI)(CI)F
+icacls C:\Users\Friend\AppData\Local\Amanuensis

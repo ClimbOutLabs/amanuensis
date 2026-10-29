@@ -475,6 +475,27 @@ export function upgradeDoneLine(release: string): string {
   return `Aman is updated to ${printable(release)}.`;
 }
 
+// The doctor's files check on Windows: the folders Aman keeps on the
+// PC itself must be readable by the person's own account only.
+export const FILES_PRIVATE_LINE = 'The files Aman keeps on this computer are private to you.';
+
+export const FILES_MADE_PRIVATE_LINE = 'The files Aman keeps on this computer are now private to you.';
+
+export const FILES_NOT_PRIVATE: Problem = {
+  happened: 'Files Aman keeps on this computer can be read by other accounts on this computer.',
+  fix: 'Run Check Aman again with Fix; it makes these files private to you.',
+};
+
+export const FILES_COULD_NOT_FIX: Problem = {
+  happened: 'Aman could not make these files private to you.',
+  fix: 'Run Check Aman again with Fix.',
+};
+
+export const FILES_COULD_NOT_CHECK: Problem = {
+  happened: 'Whether the files Aman keeps on this computer are private could not be checked.',
+  fix: 'Run aman doctor again.',
+};
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -557,5 +578,10 @@ export function allMessageLines(): string[] {
   lines.push(UPGRADE_UP_TO_DATE_LINE);
   lines.push(UPGRADE_EXE_IN_PLACE_LINE);
   lines.push(upgradeDoneLine('v0.0.0'));
+  lines.push(FILES_PRIVATE_LINE);
+  lines.push(FILES_MADE_PRIVATE_LINE);
+  lines.push(problemText(FILES_NOT_PRIVATE));
+  lines.push(problemText(FILES_COULD_NOT_FIX));
+  lines.push(problemText(FILES_COULD_NOT_CHECK));
   return lines;
 }

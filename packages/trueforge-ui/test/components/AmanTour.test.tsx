@@ -3,7 +3,7 @@ import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/sche
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
-import { CARDS, HOME_TOPICS } from '@/components/tourPrompts.js';
+import { CARDS, HOME_TOPICS, RUN_BRIEF_CARD } from '@/components/tourPrompts.js';
 
 const noCapabilities = { email: false, calendar: false, sandbox: false, maps: true };
 const connected = { email: true, calendar: true, sandbox: false, maps: true };
@@ -152,6 +152,23 @@ describe('AmanTour home', () => {
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
     expect(props.onSend).toHaveBeenCalledTimes(1);
     expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_CARD_PROMPT);
+  });
+
+  it('leaves the run my daily brief card out when there is no brief schedule to run', () => {
+    renderTour({ capabilities: connected });
+
+    expect(screen.queryByRole('button', { name: new RegExp(RUN_BRIEF_CARD.title) })).not.toBeInTheDocument();
+  });
+
+  it('runs the brief schedule from its card next to the morning brief card, and sends no prompt', () => {
+    const onRunBrief = vi.fn();
+    const { props } = renderTour({ capabilities: connected, onRunBrief });
+
+    expect(cardTitles().slice(0, 2)).toEqual([CARDS.brief.title, RUN_BRIEF_CARD.title]);
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(RUN_BRIEF_CARD.title) }));
+    expect(onRunBrief).toHaveBeenCalledTimes(1);
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.onFill).not.toHaveBeenCalled();
   });
 
   it('puts the same card under two pills, sent the same way', () => {

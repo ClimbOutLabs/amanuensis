@@ -1,6 +1,7 @@
 import { createWebSearchTurnState, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
-import { recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
-import { refuseNewSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
+import { recordPageImageUrls, recordSearchResults } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { bodyLinks } from '../../../src/runtime/spaceBodyLinks';
+import { dropUnseenSpaceLinks, SpaceLinkRefusedError } from '../../../src/runtime/spaceLinks';
 
 const SEEN = 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Red_Fox.jpg';
 const UNSEEN = 'https://upload.wikimedia.org/wikipedia/commons/4/4d/Invented_Fox.jpg';
@@ -14,7 +15,7 @@ function webSearchWith(urls: string[]): WebSearchTurnState {
   return state;
 }
 
-/** The refusal for a write, or undefined when the write may stay. */
+/** The refusal for a write, or undefined when the write may be saved (with unseen links cut out). */
 function refusalOf({
   body,
   format,
@@ -25,7 +26,7 @@ function refusalOf({
   previousBody?: string;
 }) {
   try {
-    refuseNewSpaceLinks({ body, previousBody, format, web_search: webSearchWith([SEEN]) });
+    dropUnseenSpaceLinks({ body, previousBody, format, web_search: webSearchWith([SEEN]) });
     return undefined;
   } catch (error) {
     if (error instanceof SpaceLinkRefusedError) {
@@ -33,6 +34,18 @@ function refusalOf({
     }
     throw error;
   }
+}
+
+function dropOf({
+  body,
+  format,
+  previousBody = '',
+}: {
+  body: string;
+  format: 'html' | 'markdown';
+  previousBody?: string;
+}) {
+  return dropUnseenSpaceLinks({ body, previousBody, format, web_search: webSearchWith([SEEN]) });
 }
 
 /** Every character as a numeric character reference, so the parser must decode it back. */
@@ -142,14 +155,42 @@ const MARKDOWN_SPELLINGS: Spelling[] = [
   },
 ];
 
+describe('unseen link words', () => {
+  it('cuts out a plain link and keeps its text', () => {
+    const result = dropOf({ body: `<p><a href="${UNSEEN}">Fox</a></p>`, format: 'html' });
+    expect(result.body).toBe('<p><a >Fox</a></p>');
+    expect(result).toMatchObject({ links: 1, pictures: 0 });
+  });
+
+  it('cuts out a picture and keeps its alt text', () => {
+    const result = dropOf({ body: `<p><img src="${UNSEEN}" alt="A red fox"></p>`, format: 'html' });
+    expect(result.body).toBe('<p>A red fox</p>');
+    expect(result).toMatchObject({ links: 0, pictures: 1 });
+  });
+
+  it("still lets a picture from a page the chat opened stay, and cuts out that page's other links", () => {
+    const state = createWebSearchTurnState();
+    recordPageImageUrls({ provenance: state.provenance, urls: [SEEN] });
+    const attempt = (body: string) =>
+      dropUnseenSpaceLinks({ body, previousBody: '', format: 'html', web_search: state });
+    expect(attempt(`<img src="${SEEN}" alt="Fox">`)).toMatchObject({ links: 0, pictures: 0 });
+    expect(attempt(`<a href="${UNSEEN}">Fox</a>`)).toMatchObject({ links: 1 });
+  });
+});
+
 describe('space links are checked from a real parse of the body', () => {
   describe.each([...HTML_SPELLINGS, ...MARKDOWN_SPELLINGS])('$name', ({ format, body }) => {
-    it('refuses a link the chat never returned', () => {
-      expect(refusalOf({ body: body(UNSEEN), format })).toBeDefined();
+    it('cuts out a link the chat never returned, whatever its spelling', () => {
+      const result = dropOf({ body: body(UNSEEN), format });
+      expect(result.links + result.pictures).toBeGreaterThan(0);
+      expect(result.body.toLowerCase()).not.toContain('invented_fox');
+      const remaining = bodyLinks({ body: result.body, format }) ?? [];
+      expect(remaining.filter(link => link.value.toLowerCase().includes('invented_fox'))).toEqual([]);
     });
 
     it('keeps a link that a search result returned', () => {
-      expect(refusalOf({ body: body(SEEN), format })).toBeUndefined();
+      const result = dropOf({ body: body(SEEN), format });
+      expect(result).toEqual({ body: body(SEEN), links: 0, pictures: 0 });
     });
   });
 

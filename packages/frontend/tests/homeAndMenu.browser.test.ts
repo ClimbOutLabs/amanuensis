@@ -9,6 +9,7 @@ import { MODEL_FQN, startApprovalTestServer } from '../../trueforge/tests/fixtur
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 /** The first page waits for the dev server's cold compile, which is slow while other suites run. */
@@ -76,7 +77,9 @@ test(
   { timeout: 600_000 },
   async () => {
     const api = await startApprovalTestServer();
+    const viteCache = privateViteCache('home-and-menu');
     const vite = await createServer({
+      cacheDir: viteCache.cacheDir,
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'error',
       plugins: [inProcessApi(api)],
@@ -225,6 +228,7 @@ test(
     } finally {
       await browser?.close();
       await vite.close();
+      viteCache.remove();
       await api.close();
     }
   },

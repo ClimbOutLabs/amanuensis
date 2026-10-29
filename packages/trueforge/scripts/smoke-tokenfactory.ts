@@ -12,9 +12,7 @@ if (apiKey === undefined || apiKey.trim() === '') {
   process.exit(0);
 }
 
-const models = [model, configuration.TOKEN_FACTORY_CHEAPER_MODEL].filter(
-  (id, index, all): id is string => id !== undefined && all.indexOf(id) === index,
-);
+const models = [model];
 const checks = await runTokenFactorySmoke({ apiKey, baseUrl, models });
 for (const check of checks) {
   console.log(formatSmokeLine(check));

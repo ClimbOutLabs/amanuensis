@@ -308,7 +308,7 @@ describe('space contract: one string body, one edit shape, guided errors, name a
     expect(isErrorResponse(conflict)).toBe(true);
     const conflictError = await errorOf(conflict);
     expect(conflictError).toContain(
-      'Call get_space to read the current revision, then send the call again with expected_revision set to the revision in this result.',
+      'The space is at revision 1, not 5. The anchors and fingerprints below are current: send the edit again with expected_revision 1 and these fingerprints.',
     );
     expect(textOf(conflict)).toContain('revision');
 

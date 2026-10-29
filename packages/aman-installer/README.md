@@ -12,10 +12,14 @@ What it can do today:
   store, the images, free disk, memory, the clock, backups, the sandbox
   slots, the folder Aman was installed from, and https) and then each
   instance, by running the instance's own doctor inside its app container.
-  `aman doctor --json` prints the same checks as data. With
-  `aman doctor --local` the instances' own checks skip the ones that reach
-  the network, as the health gate before an upgrade needs. It changes
-  nothing.
+  On Windows it also checks that the folders Aman keeps on the PC itself
+  can be read by the person's own account only. `aman doctor --json`
+  prints the same checks as data. With `aman doctor --local` the
+  instances' own checks skip the ones that reach the network, as the
+  health gate before an upgrade needs. `aman doctor --fix` makes the
+  Windows folders private when they are not; that is the one fix the
+  doctor applies itself, and it belongs to that check only. Apart from
+  it, the doctor changes nothing.
 - `aman doctor docker` checks that Docker is installed, running, has its
   Compose tool, has at least 6 GB of memory to work with, and that its
   Engine is new enough for Aman's https on this computer, and reports its

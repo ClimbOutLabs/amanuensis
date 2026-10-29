@@ -58,8 +58,12 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
     if (rest.length === 1 && rest[0] === 'docker') {
       return checkDocker(deps);
     }
-    if (rest.every(arg => arg === '--json' || arg === '--local')) {
-      return runDoctor(deps, { json: rest.includes('--json'), local: rest.includes('--local') });
+    if (rest.every(arg => arg === '--json' || arg === '--local' || arg === '--fix')) {
+      return runDoctor(deps, {
+        json: rest.includes('--json'),
+        local: rest.includes('--local'),
+        fix: rest.includes('--fix'),
+      });
     }
     deps.print(problemText(UNKNOWN_DOCTOR_CHECK));
     return 1;

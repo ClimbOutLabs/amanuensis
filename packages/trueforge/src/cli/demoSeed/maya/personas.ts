@@ -6,7 +6,7 @@ export const PDF_GUIDANCE =
 
 /** Where Maya's records live; every persona and the default assistant read them the same way. */
 export const WORKSPACE_GUIDANCE =
-  'Her calendar and email are her connected Google account: read them there. Her task list is the Tasks space (list_spaces, get_space); keep it current. When drafting is offered, draft replies and leave every send for her OK; never send on your own.';
+  'Her email and calendar are her connected accounts: read them with the email and calendar tools. Before saying what an attachment contains, fetch it with the attachment tool; if it was not fetched, say that only the email text was read. When a mail search finds nothing, list the recent messages and look through them instead of repeating the same words; subjects may be in another language. Her task list is the Tasks space (list_spaces, get_space); keep it current. When drafting is offered, draft replies and leave every send for her OK; never send on your own. If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.';
 
 export const JUNE_NAME = 'June';
 export const THEO_NAME = 'Theo';

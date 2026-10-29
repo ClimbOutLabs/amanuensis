@@ -29,7 +29,8 @@ import {
 } from '../server/ChatConnectorChoiceContext.js';
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
-import { ServerProvider } from '../server/ServerContext.js';
+import { withSendableSkills } from '../server/draftSpecPreferences.js';
+import { ServerProvider, useServerCapabilities } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
 import {
   DEFAULT_AGENT_CONFIG,
@@ -237,22 +238,25 @@ function ChatProviderFromShell({
   // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
   useEffect(() => connectorChoice?.clearPending(), [connectorChoice, runtimeKey]);
 
+  const sandboxEnabled = useServerCapabilities()?.sandbox.enabled;
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
+    // A new chat is sent without skills the sandbox cannot run; the server refuses them.
+    const sending = isCreateAgent ? server : withSendableSkills({ server, sandboxEnabled });
     return {
-      ...server,
+      ...sending,
       createSession: request => {
         if (request.agentSpec === undefined) {
-          return server.createSession(request);
+          return sending.createSession(request);
         }
         return createSessionWithConnectorChoice({
-          server,
+          server: sending,
           store: connectorChoice,
           metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
           request,
         });
       },
     };
-  }, [server, isCreateAgent, connectorChoice]);
+  }, [server, isCreateAgent, connectorChoice, sandboxEnabled]);
 
   const cachedRuntimeServer = useMemo(
     () => withSessionListCache({ server: serverWithCreateIntent, cache: sessionListCache }),

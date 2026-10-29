@@ -96,3 +96,8 @@ Nothing was updated.
 Aman is already up to date.
 The new Aman program is in place; it runs the next time Aman starts.
 Aman is updated to v0.0.0.
+The files Aman keeps on this computer are private to you.
+The files Aman keeps on this computer are now private to you.
+Files Aman keeps on this computer can be read by other accounts on this computer. Run Check Aman again with Fix; it makes these files private to you.
+Aman could not make these files private to you. Run Check Aman again with Fix.
+Whether the files Aman keeps on this computer are private could not be checked. Run aman doctor again.

@@ -1,8 +1,10 @@
 import {
   briefItemKey,
   isMorningBriefPrompt,
+  isMorningBriefSchedule,
   MORNING_BRIEF_CARD_PROMPT,
   MORNING_BRIEF_PROMPT,
+  MORNING_BRIEF_SCHEDULE_NAME,
   parseMorningBrief,
 } from '../../../src/core/schedules/morningBrief';
 
@@ -202,5 +204,21 @@ describe('briefItemKey', () => {
     expect(briefItemKey({ section: 'decision', title: 'Reply' })).not.toBe(
       briefItemKey({ section: 'deadline', title: 'Reply' }),
     );
+  });
+});
+
+describe('isMorningBriefSchedule', () => {
+  it('knows the brief by its name, whatever task the owner wrote', () => {
+    expect(isMorningBriefSchedule({ name: MORNING_BRIEF_SCHEDULE_NAME, task: 'My own brief, from my home.' })).toBe(
+      true,
+    );
+  });
+
+  it('knows the brief by its task under any name', () => {
+    expect(isMorningBriefSchedule({ name: 'weekday-digest', task: MORNING_BRIEF_PROMPT })).toBe(true);
+  });
+
+  it('leaves other schedules out', () => {
+    expect(isMorningBriefSchedule({ name: 'water-plants', task: 'Remind me to water the plants.' })).toBe(false);
   });
 });
