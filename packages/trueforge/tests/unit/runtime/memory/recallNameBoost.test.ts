@@ -16,6 +16,15 @@ describe('namedPeopleInMessage', () => {
     expect(namedPeopleInMessage("we met at McDonald's")).toEqual([]);
   });
 
+  it('skips short months and weekdays', () => {
+    expect(namedPeopleInMessage('Remind me on Oct 5, Sept 9 and Tues about Wendy')).toEqual(['Wendy']);
+  });
+
+  it('keeps at most 15 names', () => {
+    const letters = 'abcdefghijklmnopqrst'.split('').map(c => `X${c.repeat(2)}`);
+    expect(namedPeopleInMessage(`Ask ${letters.join(' ')}`)).toEqual(letters.slice(0, 15));
+  });
+
   it('finds nothing in a lowercase message', () => {
     expect(namedPeopleInMessage('remind me about the wendy trip in december')).toEqual([]);
   });
@@ -55,5 +64,15 @@ describe('rankNamedPeopleFirst', () => {
   it('matches the name as a whole word, not inside another word', () => {
     const items = [{ text: 'The Wendys burger chain opened downtown.' }, { text: 'Wendy called back.' }];
     expect(rankNamedPeopleFirst({ candidates: items, message: 'Did Wendy call?' })).toEqual([items[1], items[0]]);
+  });
+
+  it('does not boost a note only because it mentions a short month', () => {
+    const items = [{ text: 'Fado night was great.' }, { text: 'The deadline moves to Oct 5.' }];
+    expect(rankNamedPeopleFirst({ candidates: items, message: 'Is it due on Oct 5' })).toEqual(items);
+  });
+
+  it('still boosts a note that names one of the capped people', () => {
+    const items = [{ text: 'Nothing here.' }, { text: 'Xaa called.' }];
+    expect(rankNamedPeopleFirst({ candidates: items, message: 'Ask Xaa Xbb' })).toEqual([items[1], items[0]]);
   });
 });

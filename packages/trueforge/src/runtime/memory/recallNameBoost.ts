@@ -1,6 +1,9 @@
 import { FACT_STOPWORDS } from './stopWords';
 
-/** Capitalized words that are not people: the pronoun, calendar words, and common sentence openers. */
+/**
+ * Capitalized words that are not people: the pronoun, calendar words, and common sentence openers.
+ * The assistant's own display name is not known at the recall call sites, so it is not excluded here.
+ */
 const CAPITALIZED_COMMON_WORDS: ReadonlySet<string> = new Set([
   'i',
   'ok',
@@ -20,6 +23,18 @@ const CAPITALIZED_COMMON_WORDS: ReadonlySet<string> = new Set([
   'october',
   'november',
   'december',
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'sept',
+  'oct',
+  'nov',
+  'dec',
   'monday',
   'tuesday',
   'wednesday',
@@ -27,10 +42,23 @@ const CAPITALIZED_COMMON_WORDS: ReadonlySet<string> = new Set([
   'friday',
   'saturday',
   'sunday',
+  'mon',
+  'tue',
+  'tues',
+  'wed',
+  'thu',
+  'thur',
+  'thurs',
+  'fri',
+  'sat',
+  'sun',
   'today',
   'tomorrow',
   'yesterday',
 ]);
+
+/** Names past this many are ignored, so one long message cannot make every candidate expensive to check. */
+const MAX_NAMED_PEOPLE = 15;
 
 /**
  * Names of people the message mentions: capitalized words that do not open a sentence and are not
@@ -55,13 +83,17 @@ export function namedPeopleInMessage(message: string): string[] {
     }
     if (!names.includes(word)) {
       names.push(word);
+      if (names.length === MAX_NAMED_PEOPLE) {
+        break;
+      }
     }
   }
   return names;
 }
 
-function mentionsAnyName({ text, names }: { text: string; names: readonly string[] }): boolean {
-  return names.some(name => new RegExp(`(^|[^A-Za-z])${name}(?=[^a-z]|$)`).test(text));
+/** One pattern for all names; they are letters only, so none needs escaping. */
+function namesPattern(names: readonly string[]): RegExp {
+  return new RegExp(`(^|[^A-Za-z])(?:${names.join('|')})(?=[^a-z]|$)`);
 }
 
 /**
@@ -80,10 +112,11 @@ export function rankNamedPeopleFirst<T extends { text: string }>({
   if (names.length === 0) {
     return [...candidates];
   }
+  const pattern = namesPattern(names);
   const named: T[] = [];
   const rest: T[] = [];
   for (const candidate of candidates) {
-    (mentionsAnyName({ text: candidate.text, names }) ? named : rest).push(candidate);
+    (pattern.test(candidate.text) ? named : rest).push(candidate);
   }
   return [...named, ...rest];
 }
