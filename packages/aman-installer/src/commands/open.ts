@@ -49,7 +49,7 @@ async function dockerAnswers(runner: ProcessRunner): Promise<boolean> {
 // The instance's recorded app port: the registry's app_port, with the
 // port of the recorded public address behind it. Reading the record is
 // the rule (the starter spec's review): the port is never assumed.
-function recordedPort(entries: readonly RegistryEntry[]): number | null {
+export function recordedPort(entries: readonly RegistryEntry[]): number | null {
   const appPort = registryValue(entries, 'app_port');
   if (appPort !== null && /^\d+$/.test(appPort)) {
     const port = Number.parseInt(appPort, 10);

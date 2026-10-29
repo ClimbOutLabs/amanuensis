@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { homedir, hostname, networkInterfaces } from 'node:os';
 import { basename } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -90,6 +90,8 @@ runCli(args, {
   fetchBytes: fetchBytesFromNetwork,
   programsDir,
   arch: process.arch,
+  interfaces: networkInterfaces(),
+  hostName: hostname(),
 }).then(
   exitCode => {
     process.exitCode = exitCode;

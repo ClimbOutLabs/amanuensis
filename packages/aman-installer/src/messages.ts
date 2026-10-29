@@ -26,6 +26,8 @@ export const HELP_LINES: readonly string[] = [
   'Run aman status to see what is installed and whether it is running.',
   'Run aman adopt to move a PC set up with Aman Setup onto the aman command.',
   'Run aman open to open Aman in your browser.',
+  'Run aman network open to open Aman to phones and other devices on your home network.',
+  'Run aman network close to close Aman to your home network again.',
   'Run aman upgrade to update Aman on Windows to the newest version.',
   'Run aman backup to make a backup of Aman now, in the Backups folder on this computer.',
   'Run aman backups to list the backups kept on this computer.',
@@ -484,6 +486,79 @@ export function upgradeDoneLine(release: string): string {
   return `Aman is updated to ${printable(release)}.`;
 }
 
+export const NETWORK_USAGE: Problem = {
+  happened: 'aman network needs the word open or the word close after it.',
+  fix: 'Run aman network open to open Aman to your home network, or aman network close to close it.',
+};
+
+export const NETWORK_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so aman network has nothing to change.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const NETWORK_NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman with the Aman Setup download first, then run aman network open again.',
+};
+
+export const NETWORK_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then run the command again.',
+};
+
+export const NETWORK_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run aman doctor to find what is wrong, then run the command again.',
+};
+
+export const NETWORK_ADDRESS_MISSING: Problem = {
+  happened: 'The record of what is installed does not say where Aman answers on this computer.',
+  fix: 'Run aman doctor to find what is wrong, then run the command again.',
+};
+
+export const NETWORK_NO_ADDRESS: Problem = {
+  happened: 'This computer has no address on a private network that a phone could use.',
+  fix: 'Connect this computer to your home Wi-Fi, then run aman network open again.',
+};
+
+export const NETWORK_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so the change cannot be made.',
+  fix: 'Open Docker Desktop from the Start menu, then run the command again.',
+};
+
+export const NETWORK_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run the command again.`,
+};
+
+export const NETWORK_OPEN_FAILED: Problem = {
+  happened: 'Aman could not be opened to the devices on your home network.',
+  fix: 'Run aman doctor to find what is wrong, then run aman network open again.',
+};
+
+export const NETWORK_CLOSE_FAILED: Problem = {
+  happened: 'Aman could not be closed to the devices on your home network.',
+  fix: 'Run aman doctor to find what is wrong, then run aman network close again.',
+};
+
+export const NETWORK_FIREWALL_OPEN_FAILED: Problem = {
+  happened: 'Windows did not change the firewall rule, so devices on your home network cannot reach Aman yet.',
+  fix: 'Run aman network open again, and choose Yes when Windows asks for permission.',
+};
+
+export const NETWORK_FIREWALL_CLOSE_FAILED: Problem = {
+  happened: 'Windows did not change the firewall rule, so devices on your home network can still reach Aman.',
+  fix: 'Run aman network close again, and choose Yes when Windows asks for permission.',
+};
+
+export const NETWORK_OPEN_LINE = 'Aman is open to the devices on your home network.';
+
+export const NETWORK_CLOSED_LINE = 'Aman is closed to your home network, and only this computer can open it now.';
+
+export function networkPhoneLine(address: string): string {
+  return `On your phone, open ${printable(address)}.`;
+}
+
 export const BACKUP_NOT_WINDOWS: Problem = {
   happened: 'This computer was not set up with the Aman Setup download, so aman backup has nothing to back up.',
   fix: 'Run aman status to see what is installed on this computer.',
@@ -647,6 +722,22 @@ export function allMessageLines(): string[] {
   lines.push(UPGRADE_UP_TO_DATE_LINE);
   lines.push(UPGRADE_EXE_IN_PLACE_LINE);
   lines.push(upgradeDoneLine('v0.0.0'));
+  lines.push(problemText(NETWORK_USAGE));
+  lines.push(problemText(NETWORK_NOT_WINDOWS));
+  lines.push(problemText(NETWORK_NOT_INSTALLED));
+  lines.push(problemText(NETWORK_IMAGE_UNAVAILABLE));
+  lines.push(problemText(NETWORK_STATE_UNREADABLE));
+  lines.push(problemText(NETWORK_ADDRESS_MISSING));
+  lines.push(problemText(NETWORK_NO_ADDRESS));
+  lines.push(problemText(NETWORK_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(NETWORK_BUSY));
+  lines.push(problemText(NETWORK_OPEN_FAILED));
+  lines.push(problemText(NETWORK_CLOSE_FAILED));
+  lines.push(problemText(NETWORK_FIREWALL_OPEN_FAILED));
+  lines.push(problemText(NETWORK_FIREWALL_CLOSE_FAILED));
+  lines.push(NETWORK_OPEN_LINE);
+  lines.push(NETWORK_CLOSED_LINE);
+  lines.push(networkPhoneLine('http://192.168.1.20:8791'));
   lines.push(problemText(BACKUP_NOT_WINDOWS));
   lines.push(problemText(BACKUP_NOT_INSTALLED));
   lines.push(problemText(BACKUP_DOCKER_NOT_ANSWERING));

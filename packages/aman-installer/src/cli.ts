@@ -1,4 +1,7 @@
+import type { NetworkInterfaceInfo } from 'node:os';
+
 import { runAdopt } from './commands/adopt.ts';
+import { runNetwork } from './commands/network.ts';
 import { runBackup } from './commands/backup.ts';
 import { runBackups } from './commands/backups.ts';
 import { runOpen } from './commands/open.ts';
@@ -38,6 +41,11 @@ export interface CliDeps extends DoctorDeps {
   fetchBytes?: FetchBytes;
   programsDir?: string | null;
   arch?: string;
+  // The network command's wiring, set by main: this computer's network
+  // adapters and its name. The defaults keep an unwired network
+  // command safe: no adapters and no name, so it finds no address.
+  interfaces?: Readonly<Record<string, readonly NetworkInterfaceInfo[] | undefined>>;
+  hostName?: string;
 }
 
 export async function runCli(args: readonly string[], deps: CliDeps): Promise<number> {
@@ -78,6 +86,17 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
   }
   if (first === 'open') {
     return runOpen({ ...deps, jobs: deps.windowsJobs });
+  }
+  if (first === 'network') {
+    return runNetwork(
+      {
+        ...deps,
+        jobs: deps.windowsJobs,
+        interfaces: deps.interfaces ?? {},
+        hostName: deps.hostName ?? '',
+      },
+      { mode: second },
+    );
   }
   if (first === 'upgrade') {
     return runUpgrade({
