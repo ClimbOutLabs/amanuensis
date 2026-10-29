@@ -92,8 +92,19 @@ stop_server() {
     ) &
     watchdog=$!
     wait "$child" 2>/dev/null || true
-    # KILL, not TERM: the watchdog inherits this shell's TERM trap and would only run it after its sleep
-    # ended, so a plain kill made every restart wait out the whole grace period.
+    # The leader can exit on TERM while a worker in its group ignores it and keeps the port. Wait for
+    # the whole group to go, and force it down when the grace runs out, before the watchdog is ended.
+    waited=0
+    while kill -0 "-$child" 2>/dev/null; do
+      if [ "$waited" -ge $((stop_grace * 5)) ]; then
+        echo "the mail server did not stop within $stop_grace seconds; forcing it down"
+        signal_server KILL
+        break
+      fi
+      sleep 0.2
+      waited=$((waited + 1))
+    done
+    # KILL, not TERM, so the watchdog ends at once; its own sleep is detached from our output.
     kill -KILL "$watchdog" 2>/dev/null || true
     wait "$watchdog" 2>/dev/null || true
     child=
