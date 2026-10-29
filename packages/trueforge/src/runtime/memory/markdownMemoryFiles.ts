@@ -211,6 +211,16 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
   return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
+/**
+ * The `> context` line an entry was retained with, when it has one. An older copy of a replaced
+ * document (written before entries recorded a document id) is recognised by this line alone.
+ */
+export function entryContext(text: string): string | undefined {
+  const { body } = splitEntryTrailers(text);
+  const lastLine = body.trimEnd().split('\n').pop() ?? '';
+  return lastLine.startsWith('> ') && lastLine !== READ_CONTENT_SOURCE_LINE ? lastLine.slice(2).trim() : undefined;
+}
+
 /** The entry text the Memories page shows and edits: the hidden chat id and document id lines are dropped. */
 export function withoutHiddenMarkers(text: string): string {
   const { body, metadata } = splitEntryTrailers(text);

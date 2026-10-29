@@ -138,6 +138,8 @@ export interface ResolveTurnSummarizeContextParams {
    * context with no name, and the summarizer writes about "the person".
    */
   personName?: string | undefined;
+  /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
+  profileLines?: readonly string[] | undefined;
 }
 
 /**
@@ -214,10 +216,19 @@ export async function resolveTurnSummarizeContext(
         tokenFactoryBudget,
         modelUsage,
         personName,
+        profileLines: params.profileLines,
       };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage, personName };
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+      profileLines: params.profileLines,
+    };
   } catch (error) {
     logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
       sessionId,
@@ -230,6 +241,7 @@ export async function resolveTurnSummarizeContext(
       tokenFactoryBudget,
       modelUsage,
       personName,
+      profileLines: params.profileLines,
     };
   }
 }

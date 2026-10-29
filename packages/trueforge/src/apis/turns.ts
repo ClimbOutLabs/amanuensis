@@ -32,6 +32,7 @@ import {
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
+  isHostWrappedText,
   McpConnectionError,
   newEventId,
   rawSandboxId,
@@ -73,7 +74,7 @@ import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
-import type { PersonalizationProfile } from '../personalization/profile';
+import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
   createAndExecuteTurnRoute,
@@ -962,6 +963,7 @@ export function extractUserMessageText(input: TurnInputItem[] | undefined): stri
         : message.content
             .filter(part => !isFileContentPart(part))
             .map(part => part.text)
+            .filter(text => !isHostWrappedText(text))
             .join(' '),
     )
     .join('\n\n');
@@ -1585,6 +1587,7 @@ async function beginAcceptedTurnExecution(
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
         personName: deps.personalizationProfile?.user_name ?? undefined,
+        profileLines: deps.personalizationProfile ? personalizationFactLines(deps.personalizationProfile) : undefined,
       });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -2450,6 +2453,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
       personName: profile?.user_name ?? undefined,
+      profileLines: profile ? personalizationFactLines(profile) : undefined,
     });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
