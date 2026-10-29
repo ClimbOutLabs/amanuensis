@@ -139,6 +139,7 @@ describe('buildDemoWorld content', () => {
     expect(
       task.endsWith('Work out travel from my place, Travessa das Gaivotas 4, 1200-147 Lisboa, unless I say otherwise.'),
     ).toBe(true);
+    expect(task).toContain('Do not create or change spaces during the brief; the reply is the dashboard.');
     // One fragment per section, so a dropped or reworded section fails here.
     for (const fragment of [
       'Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump.',
