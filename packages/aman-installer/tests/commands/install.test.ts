@@ -7,7 +7,7 @@ import { test } from 'node:test';
 
 import { runInstall, type InstallDeps } from '../../src/commands/install.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
-import { FakeWindowsJobs } from '../../src/host/fakeWindowsJobs.ts';
+import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
 import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
 import {
   ADOPTED_LINE,
@@ -22,10 +22,12 @@ import {
   INSTALL_NO_ANSWER,
   INSTALL_PASSWORD_MISMATCH_LINE,
   INSTALL_RESTART_NEEDED,
+  INSTALL_RESUME_FAILED,
   LOW_MEMORY,
   NETWORK_OPEN_LINE,
   UPGRADE_UP_TO_DATE_LINE,
   VERIFY_SIGNATURE_BAD,
+  installPasswordProblem,
   openReadyLine,
   problemText,
 } from '../../src/messages.ts';
@@ -148,6 +150,8 @@ interface WorldOptions {
   lowMemory?: boolean;
   installerSigner?: string | null;
   runOncePending?: boolean;
+  runOnceValueName?: string;
+  failRunOnceSet?: boolean;
   storeInstalled?: boolean;
   askAnswers?: readonly (string | null)[];
   secretAnswers?: readonly (string | null)[];
@@ -259,6 +263,8 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     startMenuProgramsDir: START_MENU_DIR,
     ...(options.installerSigner === undefined ? {} : { installerSigner: options.installerSigner }),
     ...(options.runOncePending === undefined ? {} : { runOncePending: options.runOncePending }),
+    ...(options.runOnceValueName === undefined ? {} : { runOnceValueName: options.runOnceValueName }),
+    ...(options.failRunOnceSet === true ? { failSteps: new Set<FakeWindowsJobStep>(['runOnceSet']) } : {}),
   });
   const store = new WorldStore();
   store.installed = options.storeInstalled ?? false;
@@ -459,6 +465,29 @@ test('a Docker Desktop download that cannot be checked is refused the same way',
   assert.deepEqual(world.runner.installerRuns, []);
 });
 
+test('a signer whose names only contain Docker Inc is refused before it runs', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    installerSigner: 'CN=Docker Inc Ltd, O=Docker Inc Ltd, C=US',
+  });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.deepEqual(world.printed, [problemText(INSTALL_DOCKER_UNTRUSTED)]);
+  assert.deepEqual(world.runner.installerRuns, []);
+});
+
+test('a signer whose organisation is exactly Docker Inc is let through', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    installerSigner: 'CN=Docker Desktop, O=Docker Inc, L=San Francisco, S=California, C=US',
+  });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.deepEqual(world.runner.installerRuns, [['install', '--quiet', '--accept-license']]);
+});
+
 test('when Docker Desktop is installed by the flow, the resume entry is set and later taken down', async () => {
   const world = await makeWorld({ dockerInstalled: false, dockerRunning: false });
   const code = await runInstall(world.deps, { dryRun: false });
@@ -483,11 +512,52 @@ test('when Docker never answers after its install, the flow asks for a restart a
 
 test('a run the restart reopened says it is continuing, and takes the resume entry down', async () => {
   const world = await makeWorld({ runOncePending: true });
+  // Windows opens the program the entry names at the sign-in: the
+  // entry's name starts with "!", so the entry is still there for the
+  // reopened run to find, as it is on a real computer.
+  world.jobs.launchFromRunOnce();
+  assert.equal(world.jobs.runOncePending, true);
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
   assert.equal(world.printed[0], INSTALL_CONTINUING_LINE);
+  // The run that completes takes the entry down: nothing is left to
+  // reopen the setup at the next sign-in.
   assert.equal(world.jobs.runOncePending, false);
   assert.ok(world.jobs.ops.includes('runOnceClear'));
+});
+
+test('a resume entry without the mark is taken down before the reopened run starts', async () => {
+  // An entry written without the "!" (by an older setup, say) is one
+  // Windows deletes before the program it names runs: the reopened
+  // run finds nothing, and does not claim to be continuing.
+  const world = await makeWorld({ runOnceValueName: 'Amanuensis Setup' });
+  world.jobs.launchFromRunOnce();
+  assert.equal(world.jobs.runOncePending, false);
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.ok(!world.printed.includes(INSTALL_CONTINUING_LINE));
+});
+
+test('when the resume entry cannot be set and a restart is needed, the flow does not promise the reopen', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    dockerNeverRuns: true,
+    failRunOnceSet: true,
+  });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.deepEqual(world.printed, [problemText(INSTALL_RESUME_FAILED)]);
+  assert.equal(world.jobs.runOncePending, false);
+  assert.deepEqual(world.asked, []);
+});
+
+test('when the resume entry cannot be set but Docker answers, the install carries on with no restart words', async () => {
+  const world = await makeWorld({ dockerInstalled: false, dockerRunning: false, failRunOnceSet: true });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.ok(!world.printed.includes(problemText(INSTALL_RESUME_FAILED)));
+  assert.ok(!world.printed.includes(problemText(INSTALL_RESTART_NEEDED)));
 });
 
 test('an empty key is allowed: the install asks for no key on the input and says what that means', async () => {
@@ -515,6 +585,24 @@ test('two different passwords are asked again at the question', async () => {
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
   assert.ok(world.printed.includes(INSTALL_PASSWORD_MISMATCH_LINE));
+});
+
+test('the password rule counts accented letters in bytes, as the shell counts them', () => {
+  // Each accented letter here is two bytes: the first password is six
+  // letters but nine bytes, past the shell's eight; the second is
+  // seven bytes, short of it, though both have a number and a symbol.
+  assert.equal(installPasswordProblem('ééé1!a'), null);
+  assert.equal(installPasswordProblem('éé1!a'), 'That password still needs at least 8 characters.');
+});
+
+test('an accented password at the byte boundary is accepted at the question', async () => {
+  const accented = 'ééé1!a';
+  const world = await makeWorld({ secretAnswers: [accented, accented, KEY] });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  const run = world.runner.installRuns[0];
+  assert.ok(run !== undefined);
+  assert.equal(new TextDecoder().decode(run.stdin), `${accented}\n${KEY}\n`);
 });
 
 test('a no to the phone question leaves the home network closed and still opens the page', async () => {

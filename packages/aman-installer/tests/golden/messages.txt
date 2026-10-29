@@ -143,6 +143,7 @@ The Docker Desktop download did not come from Docker Inc, so it was not run. Dow
 Docker Desktop could not be installed. Install Docker Desktop from its website, then open Aman Setup again.
 Docker Desktop did not start. Open Docker Desktop from the Start menu, wait until it says it is running, then open Aman Setup again.
 Docker Desktop needs your computer to restart before it can run. Restart your computer, and Aman Setup will open again by itself and carry on.
+Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself. Restart your computer, then open Aman Setup from the Start menu.
 Docker is not answering, so the setup cannot go ahead. Open Docker Desktop from the Start menu, then open Aman Setup again.
 No answer was given, so nothing was installed. Open Aman Setup again when you are ready to answer its questions.
 Every place Aman could answer on this computer is taken by another program. Stop a program you do not need, then open Aman Setup again.

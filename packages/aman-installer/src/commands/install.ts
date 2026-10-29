@@ -35,6 +35,7 @@ import {
   INSTALL_PHONE_QUESTION,
   INSTALL_RELEASE_DOWNLOAD_FAILED,
   INSTALL_RESTART_NEEDED,
+  INSTALL_RESUME_FAILED,
   INSTALL_SOURCE_FAILED,
   INSTALL_SOURCE_MISSING,
   INSTALL_YES_OR_NO_LINE,
@@ -102,40 +103,77 @@ async function dockerAnswers(runner: ProcessRunner): Promise<boolean> {
   return result.started && result.exitCode === 0;
 }
 
+// Whether the signer's subject names Docker Inc, read strictly: the
+// subject is a list of named parts, and the company name (CN) or the
+// organisation (O) must be Docker Inc exactly, not a longer name that
+// only contains it. An uncheckable or nameless signature is not from
+// Docker Inc, and fails closed like any other wrong name.
+function signerIsDockerInc(signer: string | null): boolean {
+  if (signer === null) {
+    return false;
+  }
+  for (const part of signer.split(',')) {
+    const equals = part.indexOf('=');
+    if (equals === -1) {
+      continue;
+    }
+    const key = part.slice(0, equals).trim().toUpperCase();
+    const value = part.slice(equals + 1).trim();
+    if ((key === 'CN' || key === 'O') && value === 'Docker Inc') {
+      return true;
+    }
+  }
+  return false;
+}
+
+// What installing Docker Desktop here came to: whether it ran at all,
+// and whether the resume entry was set. When the entry could not be
+// set, a restart will not reopen the setup by itself, and the flow
+// says so at the restart instead of promising the automatic reopen.
+interface DockerInstallOutcome {
+  ok: boolean;
+  resumeFailed: boolean;
+}
+
 // Downloads Docker Desktop, proves it came from Docker Inc before it
 // runs, and sets the resume entry before the quiet install: if the
 // install restarts the computer, the setup opens again by itself and
 // carries on. The installer's own ending is not judged here; whether
 // Docker answers afterwards is the test, as everywhere else.
-async function installDockerDesktop(deps: InstallDeps): Promise<boolean> {
+async function installDockerDesktop(deps: InstallDeps): Promise<DockerInstallOutcome> {
   const { jobs, print } = deps;
   const bytes = await deps.fetchBytes(DOCKER_DESKTOP_DOWNLOAD_URL);
   if (bytes === null) {
     print(problemText(INSTALL_DOWNLOAD_FAILED));
-    return false;
+    return { ok: false, resumeFailed: false };
   }
   try {
     await jobs.writeDockerDesktopInstaller(bytes);
   } catch (error) {
     if (error instanceof WindowsJobError) {
       print(problemText(INSTALL_DOCKER_FAILED));
-      return false;
+      return { ok: false, resumeFailed: false };
     }
     throw error;
   }
   const signer = await jobs.dockerDesktopInstallerSigner().catch(() => null);
-  if (signer?.includes('Docker Inc') !== true) {
+  if (!signerIsDockerInc(signer)) {
     print(problemText(INSTALL_DOCKER_UNTRUSTED));
-    return false;
+    return { ok: false, resumeFailed: false };
   }
-  await jobs.ensureRunOnceResume().catch(() => undefined);
+  let resumeFailed = false;
+  try {
+    await jobs.ensureRunOnceResume();
+  } catch {
+    resumeFailed = true;
+  }
   await jobs.keepComputerAwake().catch(() => undefined);
   const run = await deps.runner.run(jobs.dockerDesktopInstallerPath, ['install', '--quiet', '--accept-license']);
   if (!run.started) {
     print(problemText(INSTALL_DOCKER_FAILED));
-    return false;
+    return { ok: false, resumeFailed };
   }
-  return true;
+  return { ok: true, resumeFailed };
 }
 
 // Docker ready to work: installed (installing it first when it is
@@ -145,19 +183,25 @@ async function installDockerDesktop(deps: InstallDeps): Promise<boolean> {
 async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean }): Promise<boolean> {
   const { jobs, runner, print } = deps;
   let installedByUs = false;
+  let resumeFailed = false;
   const version = await runner.run('docker', ['--version']);
   if (!version.started || version.exitCode !== 0) {
-    if (!(await installDockerDesktop(deps))) {
+    const outcome = await installDockerDesktop(deps);
+    if (!outcome.ok) {
       return false;
     }
     installedByUs = true;
+    resumeFailed = outcome.resumeFailed;
   }
+  // The restart the install asks for, in honest words: the automatic
+  // reopen exists only when the resume entry was set.
+  const restartProblem = resumeFailed ? INSTALL_RESUME_FAILED : INSTALL_RESTART_NEEDED;
   if (!(await dockerAnswers(runner))) {
     try {
       await jobs.startDockerDesktop();
     } catch (error) {
       if (error instanceof WindowsJobError) {
-        print(problemText(installedByUs ? INSTALL_RESTART_NEEDED : INSTALL_DOCKER_DID_NOT_START));
+        print(problemText(installedByUs ? restartProblem : INSTALL_DOCKER_DID_NOT_START));
         return false;
       }
       throw error;
@@ -175,7 +219,7 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
       await deps.sleep(POLL_MS);
     }
     if (!answered) {
-      print(problemText(installedByUs ? INSTALL_RESTART_NEEDED : INSTALL_DOCKER_DID_NOT_START));
+      print(problemText(installedByUs ? restartProblem : INSTALL_DOCKER_DID_NOT_START));
       return false;
     }
   }

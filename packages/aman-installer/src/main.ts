@@ -50,16 +50,31 @@ async function askLine(question: string): Promise<string | null> {
 
 // The install command's secret questions: what is typed is not shown.
 // On a real terminal the input is read a key at a time with echo off;
-// anywhere else a plain line is read, as the visible question reads.
+// anywhere else a plain line is read. Both paths follow the one rule
+// for secrets, applied here and nowhere else: a secret is taken
+// exactly as typed, never trimmed, because a password can begin or
+// end with a space. (The visible questions above do trim; the install
+// command trims the pasted key itself, at its question, where a paste
+// can carry stray spaces with it.)
 async function askSecretLine(question: string): Promise<string | null> {
   const input = process.stdin;
   if (!input.isTTY) {
-    return askLine(question);
+    const terminal = createInterface({ input, output: process.stdout });
+    try {
+      return await terminal.question(`${question} `);
+    } catch {
+      return null;
+    } finally {
+      terminal.close();
+    }
   }
   process.stdout.write(`${question} `);
   return new Promise<string | null>(resolve => {
     // One entry per character typed, so a backspace takes back
-    // exactly one character, never half of one.
+    // exactly one character, never half of one. The bytes are decoded
+    // as a stream, so a letter whose bytes arrive in two chunks is
+    // still the one letter, not two broken halves.
+    const decoder = new TextDecoder();
     const chars: string[] = [];
     const wasRaw = input.isRaw;
     const cleanup = (): void => {
@@ -73,7 +88,7 @@ async function askSecretLine(question: string): Promise<string | null> {
       resolve(null);
     };
     const onData = (chunk: Buffer): void => {
-      for (const ch of chunk.toString('utf8')) {
+      for (const ch of decoder.decode(chunk, { stream: true })) {
         if (ch === '\r' || ch === '\n') {
           cleanup();
           process.stdout.write('\n');

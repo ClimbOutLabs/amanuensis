@@ -678,6 +678,14 @@ export const INSTALL_RESTART_NEEDED: Problem = {
   fix: 'Restart your computer, and Aman Setup will open again by itself and carry on.',
 };
 
+// The same restart, when the entry that would open the setup again
+// could not be set: the setup will not open by itself, so the person
+// is told to open it instead of being promised the automatic reopen.
+export const INSTALL_RESUME_FAILED: Problem = {
+  happened: 'Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself.',
+  fix: 'Restart your computer, then open Aman Setup from the Start menu.',
+};
+
 export const INSTALL_DOCKER_NOT_ANSWERING: Problem = {
   happened: 'Docker is not answering, so the setup cannot go ahead.',
   fix: 'Open Docker Desktop from the Start menu, then open Aman Setup again.',
@@ -759,12 +767,15 @@ export const INSTALL_PASSWORD_TOO_LONG_LINE =
 // installer/lib/common.sh): the setup judges a password by the same
 // words here, at the question, instead of letting the build fail on it
 // later. The sentence is the shell's, built from what is missing.
+// Both lengths are counted in bytes, as the shell counts them under
+// LC_ALL=C: an accented letter is two of them, on both checks.
 export function installPasswordProblem(password: string): string | null {
-  if (new TextEncoder().encode(password).length > 72) {
+  const byteLength = new TextEncoder().encode(password).length;
+  if (byteLength > 72) {
     return INSTALL_PASSWORD_TOO_LONG_LINE;
   }
   const missing: string[] = [];
-  if (password.length < 8) {
+  if (byteLength < 8) {
     missing.push('at least 8 characters');
   }
   if (!/\d/.test(password)) {
@@ -940,6 +951,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(INSTALL_DOCKER_FAILED));
   lines.push(problemText(INSTALL_DOCKER_DID_NOT_START));
   lines.push(problemText(INSTALL_RESTART_NEEDED));
+  lines.push(problemText(INSTALL_RESUME_FAILED));
   lines.push(problemText(INSTALL_DOCKER_NOT_ANSWERING));
   lines.push(problemText(INSTALL_NO_ANSWER));
   lines.push(problemText(INSTALL_NO_FREE_PORT));

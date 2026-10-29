@@ -4,11 +4,12 @@
 // the PC's ports; this module is that rule, moved, not changed (plan
 // section 3).
 
-// The candidates, in the plan's order: the app, the sign-in service and
-// the https port.
+// The candidates, in the plan's order: the app and the sign-in
+// service. The https port is not picked here: the shell picks its own
+// inside the install, and a host pick would be a handover that never
+// happens.
 export const DEFAULT_APP_PORT = 8791;
 export const DEFAULT_LOGIN_PORT = 5556;
-export const DEFAULT_TLS_PORT = 8443;
 
 // Ports the installer itself keeps inside the instance (installer/lib/
 // ports.sh): a host pick must never land on one, since install.sh would
@@ -42,15 +43,10 @@ async function firstFreePort(options: {
 // its candidate, and an earlier pick is reserved against the later ones.
 export async function pickInstallPorts(options: {
   isFree: (port: number) => Promise<boolean>;
-}): Promise<{ appPort: number; loginPort: number; tlsPort: number }> {
+}): Promise<{ appPort: number; loginPort: number }> {
   const appPort = await firstFreePort({ isFree: options.isFree, start: DEFAULT_APP_PORT, reserved: [] });
   const loginPort = await firstFreePort({ isFree: options.isFree, start: DEFAULT_LOGIN_PORT, reserved: [appPort] });
-  const tlsPort = await firstFreePort({
-    isFree: options.isFree,
-    start: DEFAULT_TLS_PORT,
-    reserved: [appPort, loginPort],
-  });
-  return { appPort, loginPort, tlsPort };
+  return { appPort, loginPort };
 }
 
 // The starter's whole contract with the installer (the starter spec):

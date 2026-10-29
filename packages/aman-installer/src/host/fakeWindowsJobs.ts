@@ -4,6 +4,7 @@ import {
   BACKUPS_SHORTCUT_NAME,
   CHECK_AMAN_SHORTCUT_NAME,
   PHONE_SHORTCUT_NAME,
+  RUN_ONCE_VALUE_NAME,
   SETUP_CMD_FORWARDER,
   UPDATE_AMAN_SHORTCUT_NAME,
   WindowsJobError,
@@ -65,6 +66,11 @@ export class FakeWindowsJobs implements WindowsJobs {
   installerBytes: Uint8Array | null = null;
   gettingStartedText: string | null = null;
   runOncePending: boolean;
+  // The resume entry's value name, as the registry would hold it;
+  // null when there is no entry. The fake models what Windows does
+  // with the entry at the launch (launchFromRunOnce), so a test can
+  // present the resumed run with the state a real computer presents.
+  private runOnceValueName: string | null;
   awakeRequests = 0;
   shortcuts: ShortcutFacts[];
   forwarderContents: string | null = null;
@@ -98,8 +104,11 @@ export class FakeWindowsJobs implements WindowsJobs {
     // test scripts it; the default is Docker Inc.
     installerSigner?: string | null;
     // Whether the resume entry is set when the run starts, as a test
-    // scripts it (a run the computer's restart reopened).
+    // scripts it (a run the computer's restart reopened). The entry
+    // is set under the name the jobs use, unless a test names another
+    // one (an entry written without the leading "!", say).
     runOncePending?: boolean;
+    runOnceValueName?: string;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -112,7 +121,8 @@ export class FakeWindowsJobs implements WindowsJobs {
       options.installerSigner === undefined
         ? 'CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US'
         : options.installerSigner;
-    this.runOncePending = options.runOncePending ?? false;
+    this.runOnceValueName = options.runOnceValueName ?? (options.runOncePending === true ? RUN_ONCE_VALUE_NAME : null);
+    this.runOncePending = this.runOnceValueName !== null;
     this.programsDir = paths.programsDir;
     this.selfExePath = options.selfExePath;
     this.startMenuProgramsDir = options.startMenuProgramsDir;
@@ -287,19 +297,35 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   ensureRunOnceResume(): Promise<void> {
     this.step('runOnceSet');
+    this.runOnceValueName = RUN_ONCE_VALUE_NAME;
     this.runOncePending = true;
     return Promise.resolve();
   }
 
   runOnceResumePending(): Promise<boolean> {
     this.step('runOnceQuery');
-    return Promise.resolve(this.runOncePending);
+    return Promise.resolve(this.runOnceValueName !== null);
   }
 
   clearRunOnceResume(): Promise<void> {
     this.step('runOnceClear');
+    this.runOnceValueName = null;
     this.runOncePending = false;
     return Promise.resolve();
+  }
+
+  // What Windows does when it opens the program the resume entry
+  // names at a sign-in: the entry is taken down before the program
+  // runs, so a resumed run finds no entry at all, unless the value
+  // name starts with "!", which holds the taking-down off and the
+  // entry stays there for the run to see and, in time, to clear.
+  // A test calls this between scripting the entry and starting the
+  // resumed run, so the run meets the state a real computer presents.
+  launchFromRunOnce(): void {
+    if (this.runOnceValueName !== null && !this.runOnceValueName.startsWith('!')) {
+      this.runOnceValueName = null;
+      this.runOncePending = false;
+    }
   }
 
   keepComputerAwake(): Promise<void> {

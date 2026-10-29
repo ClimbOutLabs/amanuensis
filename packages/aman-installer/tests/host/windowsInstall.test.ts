@@ -13,24 +13,24 @@ function held(...ports: number[]): (port: number) => Promise<boolean> {
   return (port: number) => Promise.resolve(!set.has(port));
 }
 
-test('with nothing held, the first pair and the https port are picked', async () => {
+test('with nothing held, the first pair is picked', async () => {
   const picks = await pickInstallPorts({ isFree: held() });
-  assert.deepEqual(picks, { appPort: 8791, loginPort: 5556, tlsPort: 8443 });
+  assert.deepEqual(picks, { appPort: 8791, loginPort: 5556 });
 });
 
 test('a held app port moves the app pick to the next free one', async () => {
   const picks = await pickInstallPorts({ isFree: held(8791) });
-  assert.deepEqual(picks, { appPort: 8792, loginPort: 5556, tlsPort: 8443 });
+  assert.deepEqual(picks, { appPort: 8792, loginPort: 5556 });
 });
 
 test('a held sign-in port moves the sign-in pick to the next free one', async () => {
   const picks = await pickInstallPorts({ isFree: held(5556) });
-  assert.deepEqual(picks, { appPort: 8791, loginPort: 5557, tlsPort: 8443 });
+  assert.deepEqual(picks, { appPort: 8791, loginPort: 5557 });
 });
 
 test('both first ports held moves the pair together', async () => {
   const picks = await pickInstallPorts({ isFree: held(8791, 5556) });
-  assert.deepEqual(picks, { appPort: 8792, loginPort: 5557, tlsPort: 8443 });
+  assert.deepEqual(picks, { appPort: 8792, loginPort: 5557 });
 });
 
 test("the installer's own kept ports are never picked, even when free", async () => {
@@ -38,11 +38,6 @@ test("the installer's own kept ports are never picked, even when free", async ()
   // the sign-in pick steps over it.
   const picks = await pickInstallPorts({ isFree: held(5556, 5557) });
   assert.equal(picks.loginPort, 5559);
-});
-
-test('a held https port moves its pick up', async () => {
-  const picks = await pickInstallPorts({ isFree: held(8443, 8444) });
-  assert.equal(picks.tlsPort, 8445);
 });
 
 test('when no port is free the pick fails instead of guessing', async () => {

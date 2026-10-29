@@ -48,9 +48,14 @@ export const GETTING_STARTED_FILE_NAME = 'Getting started.html';
 // The resume entry the first install sets before Docker Desktop is
 // installed: if the install restarts the computer, Windows runs this
 // once at the next sign-in, and the setup carries on. Its key and
-// value name are fixed here, as the other Windows names are.
+// value name are fixed here, as the other Windows names are. The name
+// starts with "!": Windows takes a RunOnce value down before the
+// program it names runs, unless the name starts with "!", which holds
+// the taking-down off until the run itself clears it. Without the
+// mark, the run Windows reopens could never see its own entry, and
+// could not tell it was resumed.
 export const RUN_ONCE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce';
-export const RUN_ONCE_VALUE_NAME = 'Amanuensis Setup';
+export const RUN_ONCE_VALUE_NAME = '!Amanuensis Setup';
 
 // What replaces the starter's copy of Aman-Setup.cmd: three lines that
 // hand every argument to the aman command, so a shortcut or a habit that
