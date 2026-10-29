@@ -117,6 +117,8 @@ import {
   POLICY_BLOCKED_NUDGE_AT,
   POLICY_BLOCKED_STOP_AT,
   prepareSideEffectToolCalls,
+  REPEAT_LIMIT_OTHER_TOOLS,
+  REPEAT_LIMIT_READ_TOOLS,
   selectRepeatedActionStopMessage,
   shouldStopAfterMemoizedReplay,
   toolCallSignature,
@@ -4605,10 +4607,15 @@ export class AgentThread {
         (lastRun !== undefined &&
           !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
           lastRun.writesAtLastRun >= turn.writeCallsThisTurn);
+      const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
-        repeatStop = repeatStop || consecutive;
+        // A read gets a few identical calls in a row; a duplicate in one step is skipped and never counts.
+        const readOnly = isReadOnlyCall(call.tool_info);
+        const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
+        const overLimit = duplicateInStep ? !readOnly : (lastRun?.count ?? 0) >= limit;
+        repeatStop = repeatStop || (consecutive && overLimit);
         return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
       }
       // Every tier 3 call counts except a read the host itself vouches for: a search or page read
@@ -5371,6 +5378,7 @@ export class AgentThread {
     // independently.
     const callsToNudge: { call: InternalEnrichedToolCall; signature: string }[] = [];
     const nudgedSignaturesThisBatch = new Set<string>();
+    const readsCountedThisBatch = new Set<string>();
     for (const callId of countedCallIds) {
       const call = openCalls.find(candidate => candidate.id === callId);
       // A call held for the owner has not run or been refused; its approved replay must not count as a repeat.
@@ -5378,6 +5386,13 @@ export class AgentThread {
         continue;
       }
       const signature = toolCallSignature(call);
+      // A read repeated inside one step is one call to the guard, however many times it is written.
+      if (isReadOnlyCall(call.tool_info)) {
+        if (readsCountedThisBatch.has(signature)) {
+          continue;
+        }
+        readsCountedThisBatch.add(signature);
+      }
       // Durable count: kept for the persistence contract and any other consumer of the
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);

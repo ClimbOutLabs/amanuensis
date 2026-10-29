@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { ToolOutputScreenDecision } from '../../schemas/toolOutputScreen';
+import { isRecipientPolicyDenial } from '../email/mailConnector/recipientRefusal';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
-import { isRecipientPolicyDenial } from '../email/mailConnector/recipientRefusal';
 import type { RegisteredPassthroughEvent } from '../events/PassthroughEvents';
 import type {
   ApprovalDecision,
@@ -43,7 +43,6 @@ import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
-import { parseToolCallArguments } from './toolArgumentCheck';
 import {
   isSearchAskReason,
   isSilentSearchReason,
@@ -65,6 +64,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
+import { parseToolCallArguments } from './toolArgumentCheck';
 import { deniedToolCallRemediation, deniedToolCallResponse, REPEATED_DENIAL_REMEDIATION } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
@@ -841,7 +841,10 @@ async function verifySentinelPreDispatch(input: {
   const info = toolCall.tool_info;
   // A silent Tier 1 call only needs the dispatch re-check when it is a shell command or a sandbox file write.
   const mintToolName = info.mint_tool_name ?? info.original_tool_name;
-  if (info.tier === undefined || (info.tier === 1 && mintToolName !== 'exec' && !SANDBOX_FILE_WRITE_TOOLS.has(mintToolName))) {
+  if (
+    info.tier === undefined ||
+    (info.tier === 1 && mintToolName !== 'exec' && !SANDBOX_FILE_WRITE_TOOLS.has(mintToolName))
+  ) {
     return undefined;
   }
   const needsApproval = info.tier === 3 || (info.approval_token_id ?? null) !== null;
@@ -961,6 +964,13 @@ export const POLICY_BLOCKED_NUDGE_AT = 2;
 export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
 export const IDENTICAL_CALL_STOP_AT = 4;
+/**
+ * Identical calls in a row a reply may make before the next one ends it. A read leaves things as
+ * they were, so a brief may list or search the same thing a few times.
+ */
+export const REPEAT_LIMIT_READ_TOOLS = 3;
+/** The same limit for a tool that writes or sends, or that is not known to be a read. */
+export const REPEAT_LIMIT_OTHER_TOOLS = 1;
 /**
  * Occurrence at which the host nudges instead of stopping: the second time a signature repeats,
  * one internal system message is appended telling the model the result is already above and it
@@ -1277,9 +1287,7 @@ function isReadOnlyDispatch(toolCall: InternalEnrichedToolCall): boolean {
  * retry; each carries its own next step.
  */
 function isFailedReadOutcome(outcome: ToolCallExecutionOutcome): boolean {
-  return (
-    outcome.failure || (isCallToolResponseResult(outcome.response) && outcome.response.result.isError === true)
-  );
+  return outcome.failure || (isCallToolResponseResult(outcome.response) && outcome.response.result.isError === true);
 }
 
 /**
@@ -1559,13 +1567,13 @@ export async function executeToolCalls({
           : preparationFailure.kind === 'connector_unreachable'
             ? { reason_code: 'connector_unreachable', message: preparationFailure.message, suggested_action: 'retry' }
             : {
-              reason_code: 'tool_pre_dispatch_failed',
-              // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
-              message:
-                preparationFailure.owner_message ??
-                'The tool could not be prepared and was not executed. Retry once or choose another tool.',
-              suggested_action: preparationFailure.owner_message === undefined ? 'retry' : 'contact_user',
-            },
+                reason_code: 'tool_pre_dispatch_failed',
+                // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
+                message:
+                  preparationFailure.owner_message ??
+                  'The tool could not be prepared and was not executed. Retry once or choose another tool.',
+                suggested_action: preparationFailure.owner_message === undefined ? 'retry' : 'contact_user',
+              },
         admissionProvenance: admission,
       };
     }
@@ -1780,8 +1788,7 @@ export async function executeToolCalls({
       // describe a world that no longer exists, so only an entry stamped
       // with the current mutation epoch may be replayed. A stale entry
       // falls through to a fresh dispatch, whose result replaces it below.
-      const previous =
-        completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
+      const previous = completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -2340,7 +2347,8 @@ export async function executeToolCalls({
             conversation_id: sentinel.identity.conversation_id,
             tier: info.tier,
             tool_name: info.original_tool_name,
-            description: 'The mail service refused the recipient after this send was approved, so the message was not sent.',
+            description:
+              'The mail service refused the recipient after this send was approved, so the message was not sent.',
             outcome: 'denied',
             auto_deny_reason: null,
           });
