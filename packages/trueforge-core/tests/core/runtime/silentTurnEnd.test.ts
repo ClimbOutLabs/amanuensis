@@ -183,6 +183,23 @@ describe('silentTurnEndLine', () => {
     ).toBe('Saved the draft to wendy@example.com. Nothing was sent.');
   });
 
+  it('names at most three recipients, skips entries with no readable address, and counts the rest', () => {
+    const args = JSON.stringify({
+      recipients: [
+        'a@example.com',
+        { email: 'b@example.com' },
+        { name: 'Nobody' },
+        7,
+        { address: 'c@example.com' },
+        'd@example.com',
+        'e@example.com',
+      ],
+    });
+    const line = silentTurnEndLine([{ toolName: 'save_draft', args, disposition: 'executed_ok' }]);
+    expect(line).toBe('Saved the draft to a@example.com, b@example.com, c@example.com and 2 more. Nothing was sent.');
+    expect(line).not.toContain('Nobody');
+  });
+
   it('says in plain words when a step did not happen', () => {
     expect(
       silentTurnEndLine([

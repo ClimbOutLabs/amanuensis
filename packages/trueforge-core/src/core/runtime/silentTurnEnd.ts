@@ -64,6 +64,14 @@ function draftRecipients(args: string): string[] {
   }
 }
 
+const MAX_NAMED_RECIPIENTS = 3;
+
+function recipientsPhrase(recipients: readonly string[]): string {
+  const shown = recipients.slice(0, MAX_NAMED_RECIPIENTS).join(', ');
+  const more = recipients.length - MAX_NAMED_RECIPIENTS;
+  return more > 0 ? `${shown} and ${more} more` : shown;
+}
+
 function runSentence(run: TurnToolRun): string {
   const action = toolActionName(run.toolName);
   switch (run.disposition) {
@@ -72,7 +80,7 @@ function runSentence(run: TurnToolRun): string {
         const recipients = draftRecipients(run.args);
         return recipients.length === 0
           ? 'Saved the draft. Nothing was sent.'
-          : `Saved the draft to ${recipients.join(', ')}. Nothing was sent.`;
+          : `Saved the draft to ${recipientsPhrase(recipients)}. Nothing was sent.`;
       }
       return `Finished this step: ${action}.`;
     }

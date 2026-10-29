@@ -10,7 +10,7 @@ export function normalizeMailAddress(address: string): string {
 }
 
 /** The address an argument names: a bare string, or an object's `email` or `address` field. */
-function addressOf(item: unknown): string {
+function addressOf(item: unknown): string | undefined {
   if (typeof item === 'string') {
     return item;
   }
@@ -22,8 +22,7 @@ function addressOf(item: unknown): string {
       return item.address;
     }
   }
-  // An entry with no readable address matches nothing on the list, so it is shown rather than passed over.
-  return JSON.stringify(item);
+  return undefined;
 }
 
 /**
@@ -43,7 +42,8 @@ export function mailRecipientsNotListed({
     const value = params[field];
     const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
     for (const item of items) {
-      const address = normalizeMailAddress(addressOf(item));
+      // An entry with no readable address matches nothing on the list, so it counts as not listed.
+      const address = normalizeMailAddress(addressOf(item) ?? JSON.stringify(item));
       if (!allowed.has(address)) {
         notListed.add(address);
       }
@@ -52,9 +52,12 @@ export function mailRecipientsNotListed({
   return [...notListed];
 }
 
-/** The addresses a mail call names in its `recipients` field, as written, for a plain line to the person. */
+/** The addresses a mail call names in its `recipients` field, as written, for a plain line to the person. Entries with no readable address are left out. */
 export function namedMailRecipients(params: Record<string, unknown>): string[] {
   const value = params['recipients'];
   const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
-  return items.map(addressOf);
+  return items.flatMap(item => {
+    const address = addressOf(item);
+    return address === undefined ? [] : [address];
+  });
 }
