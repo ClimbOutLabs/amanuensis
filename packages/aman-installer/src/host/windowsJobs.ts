@@ -12,6 +12,9 @@ export const WINDOWS_FOLDER_NAME = 'Amanuensis';
 export const PROGRAMS_PARENT_NAME = 'Programs';
 export const EXE_FILE_NAME = 'aman.exe';
 export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
+// The name the authority's certificate is downloaded under on the trust
+// page, and the name it is kept under in the Amanuensis folder here.
+export const CA_CERT_FILE_NAME = 'ca.crt';
 // The Start menu entry the plan names, running aman doctor.
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
@@ -34,6 +37,7 @@ export interface WindowsPaths {
   programsExePath: string;
   dataDir: string;
   setupCmdCopyPath: string;
+  caCertPath: string;
 }
 
 export function windowsPaths(localAppDataDir: string): WindowsPaths {
@@ -44,6 +48,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
+    caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
   };
 }
 
@@ -91,6 +96,12 @@ export interface WindowsJobs {
   ensureUpdateAmanShortcut: () => Promise<void>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
+  // Writes the local authority's certificate, public part only, into
+  // the Amanuensis folder, the file the trust step below names.
+  writeCaCertificate: (certText: string) => Promise<void>;
+  // Adds that certificate to the person's own Root store: Windows asks
+  // once with a Yes/No dialog, and no administrator rights are needed.
+  addCaCertificateToUserStore: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
   // True when the port can be bound on loopback and on any-address: the
@@ -230,6 +241,21 @@ export function systemWindowsJobs(options: {
         await writeFile(paths.setupCmdCopyPath, SETUP_CMD_FORWARDER, 'utf8');
       } catch (error) {
         throw new WindowsJobError('the forwarder could not be written over the Aman Setup copy', { cause: error });
+      }
+    },
+
+    async writeCaCertificate(certText: string) {
+      try {
+        await writeFile(paths.caCertPath, certText, 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the certificate file could not be written', { cause: error });
+      }
+    },
+
+    async addCaCertificateToUserStore() {
+      const result = await runner.run('certutil', ['-addstore', '-user', 'Root', paths.caCertPath]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the certificate could not be added to the store of this computer');
       }
     },
 
