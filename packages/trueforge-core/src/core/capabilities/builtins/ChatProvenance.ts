@@ -2,7 +2,12 @@ import type { LLMUserMessage, RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
-import { recordToolResultProvenance, type WebSearchTurnState } from '../../permissions/webSearch';
+import {
+  recordToolResultProvenance,
+  toolReturnsOutsideContent,
+  type WebSearchTurnState,
+} from '../../permissions/webSearch';
+import type { ContextMessage } from '../../runtime/AgentThread.types';
 import { isHostWrappedText, isLLMContextMessage, isUntrustedDocumentText } from '../../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
 import type { AgentCapability } from '../AgentCapability';
@@ -23,6 +28,33 @@ function calledTool(call: RawToolCall): { tool_name: string; argument_values: st
     tool_name: wrapped?.tool_name ?? call.function.name,
     argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
   };
+}
+
+/**
+ * Whether the result of a tool call may hold text from outside the chat, whether the call was made directly or
+ * through the call_tool wrapper. A result with no known call counts as outside content.
+ */
+export function callReturnsOutsideContent(call: RawToolCall | undefined): boolean {
+  return call === undefined || toolReturnsOutsideContent(calledTool(call).tool_name);
+}
+
+/**
+ * Whether any tool result in these messages may hold text from outside the chat. A result whose call is not
+ * among the messages counts as outside content.
+ */
+export function contextHasOutsideToolResult(messages: readonly ContextMessage[]): boolean {
+  const outside = new Map<string, boolean>();
+  return messages.some(message => {
+    if (!isLLMContextMessage(message)) {
+      return false;
+    }
+    if (message.role === 'assistant') {
+      for (const call of message.tool_calls ?? []) {
+        outside.set(call.id, callReturnsOutsideContent(call));
+      }
+    }
+    return message.role === 'tool' && (outside.get(message.tool_call_id) ?? true);
+  });
 }
 
 /** Each text of a user message, so the person's own words are told apart from file text and host notes. */

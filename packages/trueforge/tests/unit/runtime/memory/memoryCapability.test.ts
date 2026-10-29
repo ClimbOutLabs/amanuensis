@@ -30,6 +30,7 @@ import {
   WRAPPER_OVERHEAD_TOKENS,
 } from '../../../../src/runtime/memory/memoryCapability';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
+import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
 
 const DEFAULT_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -475,6 +476,34 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     const messages = [{ role: 'user' as const, content: 'hi' }];
     const result = ephemeral.processPreLLMEphemeral(messages);
     expect(result?.[0]?.content).toBe(event['injected_block']);
+  });
+
+  it('never injects the text an earlier version stored for a cleared profile', async () => {
+    const recall = jest.fn().mockResolvedValue({
+      ok: true,
+      results: [
+        { id: '1', text: `${LEARNED_PROFILE_CLEARED_CONTENT}\n\n> Learned user profile` },
+        { id: '2', text: 'Priya prefers tea.' },
+      ],
+      entities: [],
+    });
+    const capability = hindsightMemoryCapability({
+      client: makeClient({ recall }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+
+    const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+
+    const block = passthroughEvent(events)['injected_block'];
+    expect(block).toContain('Priya prefers tea.');
+    expect(block).not.toContain(LEARNED_PROFILE_CLEARED_CONTENT);
   });
 
   it('shows a recalled memory day in the time zone of the person', async () => {
@@ -2351,5 +2380,46 @@ describe('recall query with an attached document', () => {
         { role: 'user', content: 'current question' },
       ])?.userText,
     ).toBe('first question');
+  });
+});
+
+describe('extractPreviousExchange origin', () => {
+  function exchangeWithTool(name: string): ContextMessage[] {
+    return [
+      { role: 'user', content: 'first question' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name, arguments: '{}' },
+            tool_info: {
+              type: 'truefoundry-system',
+              mcp_server_id: '',
+              mcp_server_name: '',
+              original_tool_name: name,
+            },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'result' },
+      { role: 'assistant', content: 'answer' },
+      { role: 'user', content: 'current question' },
+    ];
+  }
+
+  it('marks the exchange as read content for a tool that is not a known host tool', () => {
+    expect(extractPreviousExchange(exchangeWithTool('Notion__search_pages'))?.origin).toBe('tool_ingested');
+    expect(extractPreviousExchange(exchangeWithTool('exec'))?.origin).toBe('tool_ingested');
+  });
+
+  it('marks the exchange for a space tool, whose result holds a stored body', () => {
+    expect(extractPreviousExchange(exchangeWithTool('edit_space'))?.origin).toBe('tool_ingested');
+  });
+
+  it('leaves the exchange as the person own when only a task tool ran', () => {
+    expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
   });
 });

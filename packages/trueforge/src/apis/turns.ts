@@ -26,6 +26,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -1207,6 +1208,11 @@ export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void
   return drain;
 }
 
+/** A refused or unrun call returned no content, so it cannot have brought anything in. */
+function toolRanOrMayHave(disposition: string): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
+}
+
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
@@ -1214,20 +1220,30 @@ async function runTurnEventDrain(params: {
   const { input, markArtifactsCaptured } = params;
   const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
     input;
-  // Provenance for the memory the retain below writes. All tool output is untrusted data (the
-  // host says so in the system prompt), and the retained assistant reply is produced after seeing
-  // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
-  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
-  // `user_stated`.
+  // Provenance for the memory the retain below writes. Tool output may hold text from outside the
+  // chat (a web page, mail, a connector, a shell command), and the retained assistant reply is
+  // produced after seeing it, so a turn with any tool result is stamped `tool_ingested` and held to
+  // the recall screen's stricter posture. Only host tools known to return nothing from outside
+  // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
+  // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  const callReturnsOutside = new Map<string, boolean>();
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
+      if (event.type === EventType.MODEL_MESSAGE) {
+        for (const call of event.tool_calls ?? []) {
+          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
+        }
+      }
+      if (
+        (event.type === EventType.TOOL_RESPONSE ||
+          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
+        (callReturnsOutside.get(event.tool_call_id) ?? true)
+      ) {
         ingestedToolOutput = true;
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
