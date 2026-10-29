@@ -10,6 +10,7 @@ import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approval
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { screenshotDir } from './support/screenshotDir.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 /**
  * Layout proof for a waiting approval card, against the real app and server.
@@ -58,7 +59,9 @@ test(
   async () => {
     const api = await startApprovalTestServer();
     const { sessionId } = await pausedSession(api, { earlierMessages: EARLIER_MESSAGES });
+    const viteCache = privateViteCache('approval-card-layout');
     const vite = await createServer({
+      cacheDir: viteCache.cacheDir,
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'error',
       plugins: [inProcessApi(api)],
@@ -123,6 +126,7 @@ test(
     } finally {
       await browser?.close();
       await vite.close();
+      viteCache.remove();
       await api.close();
     }
   },

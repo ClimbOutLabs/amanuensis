@@ -2,9 +2,18 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
-import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 
-import type { SendRefusal } from '../utils/turnRefusal.js';
+import { isSkillsNotice, type SendRefusal, type SkillsNotice } from '../utils/turnRefusal.js';
 
 /** Why the chat's last send got no reply, told in one plain line. */
 export type ChatNotice = {
@@ -40,6 +49,12 @@ export function createChatNoticeChannel(): ChatNoticeChannel {
 }
 
 const ChatNoticeContext = createContext<ChatNotice | null>(null);
+const SkillsNoticeContext = createContext<(kind: SkillsNotice | null) => void>(() => undefined);
+
+/** Raises the line about skills left out of this chat, or takes it down again with `null`. */
+export function useSkillsNoticeReporter(): (kind: SkillsNotice | null) => void {
+  return useContext(SkillsNoticeContext);
+}
 
 /** The notice for the chat this component renders in, if any. */
 export function useChatNotice(): ChatNotice | null {
@@ -66,9 +81,30 @@ export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeC
     [channel, reload, sessionId],
   );
 
+  // A notice raised before the first send belongs to the chat that send creates.
+  useEffect(() => {
+    if (notice != null && isSkillsNotice(notice.kind) && notice.sessionId === undefined && sessionId !== undefined) {
+      setNotice({ ...notice, sessionId });
+    }
+  }, [notice, sessionId]);
+
+  const reportSkills = useCallback(
+    (kind: SkillsNotice | null) =>
+      setNotice(prev => {
+        // A refused send's line outranks the skills line and stays until the next send.
+        if (prev !== null && !isSkillsNotice(prev.kind)) return prev;
+        return kind === null ? null : { kind, sessionId };
+      }),
+    [sessionId],
+  );
+
   const value = useMemo<ChatNotice | null>(
     () => (notice == null ? null : { ...notice, dismiss: () => setNotice(null) }),
     [notice],
   );
-  return createElement(ChatNoticeContext.Provider, { value }, children);
+  return createElement(
+    SkillsNoticeContext.Provider,
+    { value: reportSkills },
+    createElement(ChatNoticeContext.Provider, { value }, children),
+  );
 }

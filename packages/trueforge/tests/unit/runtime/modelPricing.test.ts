@@ -10,7 +10,7 @@ const SUPER = 'nvidia/nemotron-3-super-120b-a12b';
 const NANO = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
 
 describe('default Token Factory prices', () => {
-  it('prices the Nemotron family and the default cheaper model', () => {
+  it('prices the Nemotron family and the Nano model', () => {
     expect(TOKEN_FACTORY_DEFAULT_PRICES[SUPER]).toEqual({
       input_per_million: 0.3,
       output_per_million: 0.9,

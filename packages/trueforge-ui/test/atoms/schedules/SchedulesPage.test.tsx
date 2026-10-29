@@ -6,14 +6,23 @@ import { SchedulesPage } from '@/atoms/schedules/SchedulesPage.js';
 import { ToasterProvider } from '@/containers/ToasterContainer.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type {
+  AgentSessionsServer,
   AgentUIServer,
   ListPermissionsResponse,
   PermissionsServer,
   Schedule,
   ScheduleRun,
   ScheduleServer,
+  SessionListEntry,
 } from '@/server/types.js';
-import { createMockAgentUIServer } from '../../server/mockServer.js';
+import { createMockAgentSessionsServer, createMockAgentUIServer } from '../../server/mockServer.js';
+
+const shell = { openHistorySession: vi.fn() };
+
+vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
+  useOptionalShellMode: () => shell,
+}));
 
 const sampleSchedules: Schedule[] = [
   {
@@ -33,6 +42,7 @@ const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prot
 const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 
 beforeEach(() => {
+  shell.openHistorySession.mockClear();
   window.history.replaceState(null, '', '/schedules');
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -68,7 +78,7 @@ function renderPage(
   overrides: Partial<ScheduleServer> = {},
   listImpl?: ScheduleServer['listSchedules'],
   searchAgents?: AgentUIServer['searchAgents'],
-  options: { agentId?: string; permissions?: PermissionsServer } = {},
+  options: { agentId?: string; permissions?: PermissionsServer; sessions?: AgentSessionsServer } = {},
 ) {
   const scheduleServer: ScheduleServer = {
     listSchedules: vi.fn(
@@ -89,6 +99,7 @@ function renderPage(
     searchAgents: searchAgents ?? vi.fn(async () => [{ name: 'demo-agent', agentId: 'demo-agent' }]),
     schedules: scheduleServer,
     ...(options.permissions == null ? {} : { permissions: options.permissions }),
+    ...(options.sessions == null ? {} : { sessions: options.sessions }),
   });
   render(
     <ServerProvider server={server}>
@@ -430,6 +441,66 @@ describe('SchedulesPage', () => {
       expect(listScheduleRuns).toHaveBeenCalledTimes(2);
     });
     expect(scheduleServer.createScheduleRun).toHaveBeenCalledWith({ scheduleId: 's1' });
+  });
+
+  describe('Run now opens the run chat', () => {
+    const startedRun: ScheduleRun = {
+      id: 'run-manual',
+      scheduleId: 's1',
+      name: 'manual-abc',
+      scheduledFor: '2024-06-02T10:00:00.000Z',
+      status: 'triggered',
+      triggeredAt: '2024-06-02T10:00:01.000Z',
+      triggeredBy: 'alice',
+    };
+
+    function sessionsWithLookup(
+      found: SessionListEntry | null,
+    ): AgentSessionsServer & { findScheduleRunSession: ReturnType<typeof vi.fn> } {
+      return {
+        ...createMockAgentSessionsServer(),
+        findScheduleRunSession: vi.fn(async () => found),
+      };
+    }
+
+    it('starts one run and opens its chat when the lookup finds it', async () => {
+      const createScheduleRun = vi.fn(async () => startedRun);
+      const sessions = sessionsWithLookup({
+        id: 'session-run-1',
+        createdAt: '2024-06-02T10:00:01.000Z',
+        updatedAt: '2024-06-02T10:00:01.000Z',
+        lastActivityAt: '2024-06-02T10:00:01.000Z',
+        metrics: { totalTurns: 0, totalCostInUsd: 0, totalDurationMs: 0 },
+        agentName: 'demo-agent',
+      });
+      renderPage(sampleSchedules, { createScheduleRun }, undefined, undefined, { sessions });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Run now daily-digest' }));
+
+      await waitFor(() => {
+        expect(shell.openHistorySession).toHaveBeenCalledWith({ sessionId: 'session-run-1', agentName: 'demo-agent' });
+      });
+      expect(createScheduleRun).toHaveBeenCalledTimes(1);
+      expect(sessions.findScheduleRunSession).toHaveBeenCalledWith({ scheduleId: 's1', runId: 'run-manual' });
+      expect(await screen.findByText('Run started')).toBeInTheDocument();
+    });
+
+    it('still shows the toast and stays put when the lookup finds nothing', async () => {
+      const createScheduleRun = vi.fn(async () => startedRun);
+      const listScheduleRuns = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([startedRun]);
+      const sessions = sessionsWithLookup(null);
+      renderPage(sampleSchedules, { createScheduleRun, listScheduleRuns }, undefined, undefined, { sessions });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Run now daily-digest' }));
+
+      expect(await screen.findByText('Run started')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(listScheduleRuns).toHaveBeenCalledTimes(2);
+      });
+      expect(sessions.findScheduleRunSession).toHaveBeenCalledTimes(1);
+      expect(shell.openHistorySession).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Run now daily-digest' })).toBeEnabled();
+    });
   });
 
   it('deletes only after the confirmation dialog is accepted', async () => {

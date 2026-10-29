@@ -390,6 +390,13 @@ function imageSource(tag: string): string | null {
           const end = tag.indexOf(quote, cursor + 1);
           return end === -1 ? null : tag.slice(cursor + 1, end);
         }
+        // HTML carried inside a JSON string keeps its quotes escaped: `src=\"...\"`.
+        const escaped = tag[cursor + 1];
+        if (quote === '\\' && (escaped === '"' || escaped === "'")) {
+          const closing = `\\${escaped}`;
+          const end = tag.indexOf(closing, cursor + 2);
+          return end === -1 ? null : tag.slice(cursor + 2, end);
+        }
         let end = cursor;
         while (end < tag.length && !/[\s>]/.test(tag.charAt(end))) {
           end += 1;

@@ -317,3 +317,57 @@ describe('scripted run: top ten dog breeds', () => {
     }
   });
 });
+
+describe('scripted run: a 40-row table built by create plus appends', () => {
+  it('completes with no reads, no fingerprints, and no refused call', async () => {
+    const capability = spaceCapability({
+      store: makeStore(),
+      authority: AUTHORITY,
+      tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const calls: string[] = [];
+    const call = (name: string, args: Record<string, unknown>) => {
+      calls.push(name);
+      return toolSet.callTool({ name, arguments: args });
+    };
+    const rowFor = (number: number) => `| Breed ${String(number).padStart(2, '0')} | Calm | Moderate | Good |`;
+    const rows = Array.from({ length: 40 }, (_unused, index) => rowFor(index + 1));
+    const header = ['# Smart dogs', '', '| Breed | Temperament | Exercise | Apartment |', '| --- | --- | --- | --- |'];
+
+    const created = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Smart dogs',
+      purpose: 'Forty smart dog breeds.',
+      status: 'active',
+      format: 'markdown',
+      body: [...header, ...rows.slice(0, 10)].join('\n'),
+    });
+    expect(isErrorResponse(created)).toBe(false);
+
+    // Each append names only the revision the last result showed and the new rows.
+    let revision = numberField(fieldObject(parsedObject(textOf(created)), 'space'), 'revision');
+    for (let start = 10; start < 40; start += 10) {
+      const appended = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Smart dogs',
+        expected_revision: revision,
+        edits: [{ type: 'append', new_content: rows.slice(start, start + 10).join('\n') }],
+      });
+      expect(isErrorResponse(appended)).toBe(false);
+      revision = numberField(fieldObject(parsedObject(textOf(appended)), 'space'), 'revision');
+    }
+
+    expect(calls).toEqual([CREATE_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME]);
+    // The check read goes around `call` so it is not counted as part of the model's run.
+    const read = fieldObject(
+      parsedObject(
+        textOf(await toolSet.callTool({ name: GET_SPACE_TOOL_NAME, arguments: { space_name: 'Smart dogs' } })),
+      ),
+      'space',
+    );
+    expect(stringField(read, 'body')).toBe([...header, ...rows].join('\n'));
+  });
+});

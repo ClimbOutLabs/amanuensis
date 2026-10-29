@@ -34,6 +34,13 @@ export interface MemoryClient {
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 
+  /**
+   * Removes every memory stored under one document id. A document that does not exist is a success.
+   * `context` is the line the document was retained with, so a store that kept copies before document
+   * ids existed can remove those too.
+   */
+  deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome>;
+
   getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome>;
 
   retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome>;

@@ -4,8 +4,9 @@
  * Self-hosted models regularly send arguments a strict tool cannot take: a boolean as the text
  * "true", an argument the tool does not have, a nested block with one wrong field. Sent on, those
  * calls fail inside the provider or the tool with raw validation text, or worse, run half-formed.
- * This check repairs what is safe to repair (boolean text to a real boolean, an argument the
- * schema does not name is dropped, an explicit null for an optional argument is dropped) and
+ * This check repairs what is safe to repair (boolean text to a real boolean, a list sent as its JSON
+ * text to the list, an argument the schema does not name is dropped, an explicit null for an optional
+ * argument is dropped) and
  * reports the rest as plain problems the model can act on. For a read-only tool, an optional
  * true-or-false argument whose value cannot be repaired is dropped too, so the call runs. It
  * never sees, and never repeats, a provider's own validation wording.
@@ -236,6 +237,16 @@ function valueMatchesType(type: string, value: unknown): boolean {
   }
 }
 
+/** The list a text holds when it is exactly a JSON list; undefined for any other text. */
+function parseJsonArray(text: string): unknown[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface CheckOutcome {
   value: unknown;
   problems: ArgumentProblem[];
@@ -372,6 +383,13 @@ function checkValue(input: CheckInput): CheckOutcome {
       const text = value.trim().toLowerCase();
       if (text === 'true' || text === 'false') {
         return { value: text === 'true', problems: [] };
+      }
+    }
+    if (type === 'array' && typeof value === 'string') {
+      // A list sent as its JSON text is the list itself, written one level too deep.
+      const list = parseJsonArray(value);
+      if (list !== undefined) {
+        return checkValue({ schema, value: list, path, dropUnusableBooleans });
       }
     }
     return {

@@ -67,6 +67,7 @@ function makeMemoryClient(recalledText: string[]): MemoryClient {
     listEntries: jest.fn().mockResolvedValue({ ok: true, entries: [] }),
     updateEntry: jest.fn(),
     deleteEntry: jest.fn(),
+    deleteDocument: jest.fn(),
   };
 }
 

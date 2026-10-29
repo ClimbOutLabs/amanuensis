@@ -369,6 +369,17 @@ describe('turns', () => {
       expect(extractUserMessageText([toolResponseItem])).toBe('');
     });
 
+    it("drops text the host wrote into the message, keeping only the person's words", () => {
+      const input = [
+        userMessage([
+          { type: 'text', text: '<tfy-internal>Personalization: likes tea.</tfy-internal>' },
+          { type: 'text', text: 'I moved to Porto.' },
+          { type: 'text', text: '<untrusted-document>extracted file text</untrusted-document>' },
+        ]),
+      ];
+      expect(extractUserMessageText(input)).toBe('I moved to Porto.');
+    });
+
     it('excludes a name carried in a tool result, feeding the profile learner only the user turn', () => {
       const toolResponseWithName: TurnInputItem = {
         type: EventType.USER_TOOL_RESPONSE,

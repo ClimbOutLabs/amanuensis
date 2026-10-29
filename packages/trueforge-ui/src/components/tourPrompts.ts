@@ -13,13 +13,17 @@ export type TourCapabilities = {
   maps: boolean;
 };
 
-/** One example card on the home: pressing it puts its text in the composer, and nothing sends until the person does. */
-export type TourCard = {
+/** What a home card shows: an icon, a title, and one short line under it. */
+export type TourCardFace = {
   title: string;
   /** One short line under the title, naming the assistant by its display name. */
   detail: (assistant: string) => string;
-  prompt: string;
   icon: string;
+};
+
+/** One example card on the home: pressing it puts its text in the composer, and nothing sends until the person does. */
+export type TourCard = TourCardFace & {
+  prompt: string;
   /** Capabilities that unlock the example; it shows when any one of them is present. Absent when it works on any instance. */
   needs?: readonly (keyof TourCapabilities)[];
 };
@@ -368,6 +372,16 @@ export const DEFAULT_CARD_KEYS: readonly CardKey[] = [
   'dinner',
 ];
 
+/** Runs the person's own daily brief schedule now, so the run uses the task they wrote, home address and all. */
+export const RUN_BRIEF_CARD: TourCardFace = {
+  title: 'Run my daily brief',
+  detail: () => 'Runs your scheduled brief now',
+  icon: 'play',
+};
+
+/** One place on the home grid: an example that fills the composer, or the card that runs the brief schedule. */
+export type HomeSlot = { kind: 'prompt'; card: TourCard } | { kind: 'run_brief'; card: TourCardFace };
+
 /** The pills, in the order the home shows them. */
 export const HOME_TOPIC_IDS = [
   'behind',
@@ -420,6 +434,26 @@ export function homeCardsFor({
     keys.map(key => CARDS[key]),
     capabilities,
   ).slice(0, HOME_CARD_COUNT);
+}
+
+/**
+ * The home's cards. With no pill chosen and a brief schedule to run, the run card sits just after the
+ * morning brief card, or first when that card is hidden, and the count stays the same.
+ */
+export function homeSlotsFor({
+  topic,
+  capabilities,
+  briefRun,
+}: {
+  topic: HomeTopicId | null;
+  capabilities: TourCapabilities;
+  briefRun: boolean;
+}): HomeSlot[] {
+  const prompts = homeCardsFor({ topic, capabilities }).map((card): HomeSlot => ({ kind: 'prompt', card }));
+  if (!briefRun || topic !== null) return prompts;
+  const at = prompts.findIndex(slot => slot.card === CARDS.brief) + 1;
+  const runBrief: HomeSlot = { kind: 'run_brief', card: RUN_BRIEF_CARD };
+  return [...prompts.slice(0, at), runBrief, ...prompts.slice(at)].slice(0, HOME_CARD_COUNT);
 }
 
 /** The pill each help area chosen in setup leads to; the one table that ties profile choices to the home. */

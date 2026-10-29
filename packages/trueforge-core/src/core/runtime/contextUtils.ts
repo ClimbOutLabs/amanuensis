@@ -1,5 +1,6 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
@@ -435,6 +436,31 @@ export function hasSentHostNoteThisTurn(
   return false;
 }
 
+function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+  if (typeof content === 'string') {
+    return isHostWrappedText(content);
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+}
+
+/**
+ * Index of the latest user message the person wrote, or -1 when there is none. Skips user-role
+ * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
+ * which follows the person's message. The one owner of "where is the person's message".
+ */
+export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function internalSystemMessage(m: string): LLMUserMessage {
   return { role: 'user' as const, content: internalSystemTag(m) };
 }
@@ -612,6 +638,14 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
     is_approval_required: false,
     is_client_side: false,
   };
+}
+
+/**
+ * What a reply removes when a call is declined or unavailable. A deferred call names its inner
+ * server and tool, so one down server never removes the same tool name on a healthy one.
+ */
+export function removedToolKey(info: InternalToolCallInfo): string {
+  return info.is_deferred === true ? `${info.mcp_server_name}/${info.original_tool_name}` : info.original_tool_name;
 }
 
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {

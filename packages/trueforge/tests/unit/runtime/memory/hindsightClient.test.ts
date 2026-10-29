@@ -1001,4 +1001,40 @@ describe('HindsightClient', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('deleteDocument', () => {
+    function clientWith(fetchImpl: jest.Mock): HindsightClient {
+      return new HindsightClient({ apiBase: 'https://hindsight.example', bank: 'aman', headers: {}, fetchImpl });
+    }
+
+    it('sends a DELETE for the encoded document id', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({
+        documentId: 'aman-learned/profile',
+        timeoutMs: 1000,
+      });
+
+      expect(outcome).toEqual({ ok: true });
+      const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://hindsight.example/v1/default/banks/aman/documents/aman-learned%2Fprofile');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('reads a 404 as done and says the document was already gone', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ detail: 'missing' }, { status: 404 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({ documentId: 'gone', timeoutMs: 1000 });
+
+      expect(outcome).toEqual({ ok: true, reason: 'document not found' });
+    });
+
+    it('reports a server error as a failure', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ detail: 'broken' }, { status: 500 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({ documentId: 'doc', timeoutMs: 1000 });
+
+      expect(outcome.ok).toBe(false);
+    });
+  });
 });
